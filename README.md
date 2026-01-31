@@ -51,6 +51,12 @@ pip install -e .
 
 # Make sure Ollama is running with a model
 ollama pull qwen3-coder
+
+# optimize ollama for qwen3-coder
+export OLLAMA_CONTEXT_LENGTH=65536
+export OLLAMA_FLASH_ATTENTION=true
+export OLLAMA_MAX_LOADED_MODELS=1
+
 ollama serve
 ```
 
