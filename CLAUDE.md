@@ -39,8 +39,5 @@ Entry point: `ayder_cli.client:run_chat` (registered as the `ayder` CLI script i
 
 - **Dual tool calling**: Supports both standard OpenAI function calling (`msg.tool_calls`) and a custom XML-like fallback parsed by `parse_custom_tool_calls()` using `<function=name><parameter=key>value</parameter></function>` syntax. Standard calls feed results back as `tool` role messages; custom calls feed results back as `user` role messages.
 
-- **Hardcoded config**: Model (`qwen3-coder:latest`) and API endpoint (`http://localhost:11434/v1`) are hardcoded at module level in `client.py`. Ollama must be running locally.
-
 - **Shell command timeout**: `run_shell_command` has a 60-second timeout.
 
-- **Terminal UI**: ANSI box-drawing with color-coded message types (cyan=user, green=assistant, yellow=tool call, magenta=tool result, red=error).
