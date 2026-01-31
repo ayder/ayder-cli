@@ -30,10 +30,10 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
-**WARNING**: No sandboxing provided in this early technology previev version.
-This cli do not have a --yolo-its-too-dangerous method as well. **it allows all shell commands to be executed**
-Every tool call requires your confirmation before it runs -- you must always stay in control.
-Also you may prefer to run ayder-cli agent in a container for additional security.
+  - **WARNING**: No sandboxing provided in this early technology previev version.
+  - This cli do not have a --yolo-its-too-dangerous method as well. **it allows all shell commands to be executed**
+  - Every tool call requires your confirmation before it runs -- you must always stay in control.
+  - Also you may prefer to run ayder-cli agent in a container for additional security.
 
 Of course I am greateful to GEMINI to come up with this idea, KIMI2 for reasoning tasks and CLAUDE and COPILOT to do coding and testing for me. 
 
@@ -112,6 +112,34 @@ python -m ayder_cli
 ╰──────────────────┴────────────────────────────────────────╯
  ? Tip: Use /help for available commands
 
+❯ create a pyhon script to calculate prime numbers > 10000
+
+Running...
+File prime_calculator.py will be written. Proceed? (Y/n) Y
+╭──────────────────────────────── Tool Result ─────────────────────────────────╮
+│ Successfully wrote to prime_calculator.py                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Command `python prime_calculator.py` will be executed. Proceed? (Y/n) Y
+╭──────────────────────────────── Tool Result ─────────────────────────────────╮
+│ Exit Code: 0                                                                 │
+│ STDOUT:                                                                      │
+│ Prime Number Calculator                                                      │
+│ ==============================                                               │
+│                                                                              │
+│ First 10 prime numbers greater than 10000:                                   │
+│  1. 10007                                                                    │
+│  2. 10009                                                                    │
+│  3. 10037                                                                    │
+│  4. 10039                                                                    │
+│  5. 10061                                                                    │
+│  6. 10067                                                                    │
+│  7. 10069                                                                    │
+│  8. 10079                                                                    │
+│  9. 10091                                                                    │
+│ 10. 10093                                                                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
 ❯ List the python files in this project
 
 ╭───────────────────────── Tool Call ──────────────────────────────╮
@@ -120,6 +148,7 @@ python -m ayder_cli
 Proceed? [Y/n] y
 
 ╭──────────────────────── Tool Result ─────────────────────────────╮
+│ ./prime_calculator.py                                            │
 │ ./src/ayder_cli/client.py                                        │
 │ ./src/ayder_cli/fs_tools.py                                      │
 │ ...                                                              │
