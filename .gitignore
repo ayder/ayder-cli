@@ -13,3 +13,4 @@ wheels/
 .ayder
 .claude
 .github
+.coverage

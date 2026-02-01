@@ -216,3 +216,106 @@ def create_default_registry() -> ToolRegistry:
     registry.register("implement_all_tasks", implement_all_tasks)
 
     return registry
+
+
+# Global default registry instance (lazy initialization)
+_default_registry = None
+
+
+class _MockableToolRegistry(ToolRegistry):
+    """
+    Special registry that looks up task functions dynamically from fs_tools module.
+    This allows tests to mock functions in fs_tools and have the mocks take effect.
+    """
+    
+    def execute(self, name: str, arguments) -> str:
+        """Execute with dynamic function lookup for task tools."""
+        # Handle arguments being passed as a string (JSON) or a dict
+        if isinstance(arguments, str):
+            try:
+                args = json.loads(arguments)
+            except json.JSONDecodeError:
+                return f"Error: Invalid JSON arguments for {name}"
+        else:
+            args = arguments
+
+        # Normalize parameters (apply aliases, resolve paths, coerce types)
+        args = normalize_tool_arguments(name, args)
+
+        # Validate before execution
+        is_valid, error_msg = validate_tool_call(name, args)
+        if not is_valid:
+            return f"Validation Error: {error_msg}"
+
+        # For task tools, look them up dynamically from fs_tools for mockability
+        if name in ("create_task", "show_task", "implement_task", "implement_all_tasks"):
+            # Import at call time to allow mocking
+            from ayder_cli import fs_tools as fs
+            
+            func_map = {
+                "create_task": fs.create_task,
+                "show_task": fs.show_task,
+                "implement_task": fs.implement_task,
+                "implement_all_tasks": fs.implement_all_tasks,
+            }
+            tool_func = func_map.get(name)
+            if tool_func is None:
+                return f"Error: Unknown tool '{name}'"
+            return tool_func(**args)
+        
+        # For other tools, use standard registry lookup
+        if name not in self._registry:
+            return f"Error: Unknown tool '{name}'"
+        
+        tool_func = self._registry[name]
+        return tool_func(**args)
+
+
+def _get_default_registry() -> ToolRegistry:
+    """Get or create the default tool registry with mockable task functions."""
+    global _default_registry
+    if _default_registry is None:
+        from ayder_cli.tools.impl import (
+            list_files,
+            read_file,
+            write_file,
+            replace_string,
+            run_shell_command,
+            get_project_structure,
+            search_codebase,
+        )
+        
+        # Create mockable registry
+        registry = _MockableToolRegistry()
+        
+        # Register file system tools
+        registry.register("list_files", list_files)
+        registry.register("read_file", read_file)
+        registry.register("write_file", write_file)
+        registry.register("replace_string", replace_string)
+        registry.register("run_shell_command", run_shell_command)
+        registry.register("get_project_structure", get_project_structure)
+        registry.register("search_codebase", search_codebase)
+        
+        # Task tools are handled dynamically in _MockableToolRegistry.execute()
+        
+        _default_registry = registry
+    return _default_registry
+
+
+def execute_tool_call(tool_name: str, arguments):
+    """
+    Execute a tool call using the default registry.
+    
+    This is a convenience function that uses a singleton registry instance.
+    For testing or custom registries, use ToolRegistry.execute() directly.
+    
+    Args:
+        tool_name: Name of the tool to execute
+        arguments: Tool arguments (dict or JSON string)
+        
+    Returns:
+        Result of the tool execution as a string
+    """
+    registry = _get_default_registry()
+    return registry.execute(tool_name, arguments)
