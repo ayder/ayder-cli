@@ -41,3 +41,5 @@ Entry point: `ayder_cli.client:run_chat` (registered as the `ayder` CLI script i
 
 - **Shell command timeout**: `run_shell_command` has a 60-second timeout.
 
+## Testing
+-- **Virtualenv**: ".venv/bin/activate" and "uv pip install -e ."

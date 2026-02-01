@@ -3,7 +3,7 @@ import json
 from openai import OpenAI
 from ayder_cli import fs_tools
 from ayder_cli.config import load_config
-from ayder_cli.ui import draw_box, print_running, print_assistant_message, print_tool_result, confirm_tool_call, describe_tool_action, print_file_content, confirm_with_diff
+from ayder_cli.ui import draw_box, print_running, print_assistant_message, print_tool_result, confirm_tool_call, describe_tool_action, print_file_content, confirm_with_diff, print_tool_skipped
 from ayder_cli.banner import print_welcome_banner
 from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.commands import handle_command
@@ -191,7 +191,7 @@ This is the current project structure. Use `search_codebase` to locate specific 
                             confirmed = confirm_tool_call(description)
 
                         if not confirmed:
-                            print(draw_box("Tool call skipped by user.", title="Skipped", width=80, color_code="33"))
+                            print_tool_skipped()
                             declined = True
                             break
 
@@ -230,7 +230,7 @@ This is the current project structure. Use `search_codebase` to locate specific 
                             confirmed = confirm_tool_call(description)
 
                         if not confirmed:
-                            print(draw_box("Tool call skipped by user.", title="Skipped", width=80, color_code="33"))
+                            print_tool_skipped()
                             declined = True
                             break
 

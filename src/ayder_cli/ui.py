@@ -6,45 +6,37 @@ import os
 
 def draw_box(text, title="", width=80, color_code="36"):
     """
-    Draw an ANSI box around text with optional title.
+    Draw horizontal separators around text with optional embedded title.
     color_code: 36=cyan, 32=green, 33=yellow, 35=magenta, 31=red
     """
-    # Box drawing characters
-    top_left = "╭"
-    top_right = "╮"
-    bottom_left = "╰"
-    bottom_right = "╯"
     horizontal = "─"
-    vertical = "│"
 
-    # Wrap text to fit within box
+    # Wrap text to fit within available width
     wrapped_lines = []
     for line in text.split('\n'):
         if line:
-            wrapped_lines.extend(textwrap.wrap(line, width=width-4))
+            wrapped_lines.extend(textwrap.wrap(line, width=width))
         else:
             wrapped_lines.append("")
 
-    # Build the box
+    # Build the output
     lines = []
 
-    # Top border with optional title
+    # Top separator with optional embedded title
     if title:
         title_text = f" {title} "
-        remaining = width - len(title_text) - 2
+        remaining = width - len(title_text)
         left_pad = remaining // 2
         right_pad = remaining - left_pad
-        lines.append(f"\033[{color_code}m{top_left}{horizontal * left_pad}{title_text}{horizontal * right_pad}{top_right}\033[0m")
+        lines.append(f"\033[{color_code}m{horizontal * left_pad}{title_text}{horizontal * right_pad}\033[0m")
     else:
-        lines.append(f"\033[{color_code}m{top_left}{horizontal * (width-2)}{top_right}\033[0m")
+        lines.append(f"\033[{color_code}m{horizontal * width}\033[0m")
 
-    # Content lines
-    for line in wrapped_lines:
-        padding = width - len(line) - 4
-        lines.append(f"\033[{color_code}m{vertical}\033[0m {line}{' ' * padding} \033[{color_code}m{vertical}\033[0m")
+    # Content lines (no borders, just text)
+    lines.extend(wrapped_lines)
 
-    # Bottom border
-    lines.append(f"\033[{color_code}m{bottom_left}{horizontal * (width-2)}{bottom_right}\033[0m")
+    # Bottom separator
+    lines.append(f"\033[{color_code}m{horizontal * width}\033[0m")
 
     return "\n".join(lines)
 
@@ -66,16 +58,21 @@ def print_tool_call(func_name, args):
 
 
 def print_tool_result(result):
-    """Print tool result in a magenta box."""
+    """Print tool result with a checkmark prefix."""
     result_str = str(result)
     if len(result_str) > 300:
         result_str = result_str[:300] + "..."
-    print(draw_box(result_str, title="Tool Result", width=80, color_code="35"))
+    print(f"\033[32m✓\033[0m {result_str}")
 
 
 def print_running():
     """Print a simple running indicator instead of echoing the user prompt."""
     print("\n\033[33mRunning...\033[0m")
+
+
+def print_tool_skipped():
+    """Print a simple tool skipped indicator with icon prefix."""
+    print("\n\033[33m✗  Tool call skipped by user.\033[0m")
 
 
 def describe_tool_action(fname, args):

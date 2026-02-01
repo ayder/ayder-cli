@@ -14,27 +14,26 @@ class TestDrawBox:
     def test_basic_box_drawing(self):
         """Test basic box drawing without title."""
         result = ui.draw_box("Hello", width=20)
-        assert "╭" in result
-        assert "╮" in result
-        assert "╰" in result
-        assert "╯" in result
+        assert "─" in result
         assert "Hello" in result
-        assert "│" in result
+        lines = result.split("\n")
+        # Should have top separator, content, and bottom separator
+        assert len(lines) >= 3
 
     def test_box_with_title(self):
         """Test box drawing with title."""
         result = ui.draw_box("Content", title="My Title", width=40)
         assert "My Title" in result
         assert "Content" in result
-        assert "╭" in result
+        assert "─" in result
 
     def test_empty_text(self):
         """Test box with empty text."""
         result = ui.draw_box("", width=20)
-        assert "╭" in result
-        assert "╮" in result
-        assert "╰" in result
-        assert "╯" in result
+        assert "─" in result
+        lines = result.split("\n")
+        # Should have top and bottom separators
+        assert len(lines) >= 2
 
     def test_text_wrapping(self):
         """Test text wrapping within box."""
@@ -69,10 +68,9 @@ class TestDrawBox:
         text = "First\n\nThird"
         result = ui.draw_box(text, width=20)
         lines = result.split("\n")
-        # Should have content lines plus borders
-        content_lines = [l for l in lines if "│" in l and "│" != l.strip()]
-        # At least 3 content rows (First, empty, Third)
-        assert len(content_lines) >= 3
+        # Should have top separator, 3 content lines, and bottom separator
+        # Total of 5 lines (top + First + empty + Third + bottom)
+        assert len(lines) >= 5
 
 
 class TestPrintUserMessage:
@@ -124,7 +122,7 @@ class TestPrintToolResult:
         ui.print_tool_result("Success result")
         mock_print.assert_called_once()
         call_args = mock_print.call_args[0][0]
-        assert "Tool Result" in call_args
+        assert "✓" in call_args
         assert "Success result" in call_args
 
     @patch("builtins.print")
@@ -134,8 +132,9 @@ class TestPrintToolResult:
         ui.print_tool_result(long_result)
         mock_print.assert_called_once()
         call_args = mock_print.call_args[0][0]
+        assert "✓" in call_args
         assert "..." in call_args
-        # Should be truncated to 303 chars (300 + "...")
+        # Should be truncated to 300 chars (300 + "...")
         assert len([c for c in call_args if c == "A"]) <= 300
 
 
