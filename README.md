@@ -23,6 +23,8 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 | `write_file` | Write content to a file |
 | `replace_string` | Find and replace a specific string in a file |
 | `run_shell_command` | Execute a shell command (60s timeout) |
+| `search_codebase` | Search for patterns across the codebase using ripgrep/grep |
+| `get_project_structure` | Generate a tree-style project structure summary |
 | `create_task` | Save a task as a markdown file in `.ayder/tasks/` (current directory) |
 | `show_task` | Show the details of a task by its ID number |
 | `implement_task` | Mark a specific task as done and return its details |
@@ -30,12 +32,12 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
-  - **WARNING**: No sandboxing provided in this early technology previev version.
+  - **WARNING**: No sandboxing provided in this early technology preview version.
   - This cli do not have a --yolo-its-too-dangerous method as well. **it allows all shell commands to be executed**
   - Every tool call requires your confirmation before it runs -- you must always stay in control.
   - Also you may prefer to run ayder-cli agent in a container for additional security.
 
-Of course I am greateful to GEMINI to come up with this idea, KIMI2 for reasoning tasks and CLAUDE and COPILOT to do coding and testing for me. 
+Of course I am grateful to GEMINI to come up with this idea, KIMI2 for reasoning tasks and CLAUDE and COPILOT to do coding and testing for me. 
 
 ## Installation
 
@@ -110,7 +112,7 @@ python -m ayder_cli
 ```
 ╭──────────────────┬────────────────────────────────────────╮
 │                  │                                        │
-│  ░▒▓▓▓▒░        │ ayder-cli v0.1.0                       │
+│  ░▒▓▓▓▒░        │ ayder-cli v0.2.0                       │
 │       ▓▓        │ qwen3-coder:latest · Ollama            │
 │  ▒▓▓▓▓▓▓        │ ~/projects/my-app                      │
 │  ▓▓  ▓▓▓        │                                        │
@@ -203,6 +205,64 @@ Proceed? [Y/n] y
 
 Tasks are stored as markdown files in `.ayder/tasks/` within the current working directory.
 
+### Code Search
+
+ayder-cli provides powerful code search capabilities:
+
+```
+❯ Search for all function definitions in Python files
+
+╭───────────────────────── Tool Call ──────────────────────────────╮
+│ search_codebase({"pattern": "^def ", "file_pattern": "*.py"})     │
+╰──────────────────────────────────────────────────────────────────╯
+Proceed? [Y/n] y
+
+╭──────────────────────── Tool Result ─────────────────────────────╮
+│ === SEARCH RESULTS ===                                           │
+│ Pattern: "^def "                                                 │
+│ Matches found: 42                                                │
+│                                                                  │
+│ ──────────────────────────────────────────────────────────────── │
+│ FILE: src/ayder_cli/client.py                                    │
+│ ──────────────────────────────────────────────────────────────── │
+│ Line 45: def run_chat(openai_client=None, config=None):          │
+│ Line 123: def handle_tool_call(tool_call, config):               │
+│ ...                                                              │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+### Project Structure
+
+Quickly get an overview of your project:
+
+```
+❯ Show me the project structure
+
+╭───────────────────────── Tool Call ──────────────────────────────╮
+│ get_project_structure({"max_depth": 3})                          │
+╰──────────────────────────────────────────────────────────────────╯
+Proceed? [Y/n] y
+
+╭──────────────────────── Tool Result ─────────────────────────────╮
+│ ayder-cli                                                        │
+│ ├── src/                                                         │
+│ │   └── ayder_cli/                                               │
+│ │       ├── client.py                                            │
+│ │       ├── commands.py                                          │
+│ │       ├── config.py                                            │
+│ │       ├── fs_tools.py                                          │
+│ │       ├── parser.py                                            │
+│ │       ├── tasks.py                                             │
+│ │       ├── ui.py                                                │
+│ │       └── tools/                                               │
+│ │           ├── impl.py                                          │
+│ │           ├── schemas.py                                       │
+│ │           └── registry.py                                      │
+│ ├── tests/                                                       │
+│ └── README.md                                                    │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
 ### Editing files
 
 You can open any file in your configured editor directly from the chat:
@@ -239,15 +299,42 @@ ayder-cli uses emacs-style keybindings via prompt-toolkit:
 
 ```
 src/ayder_cli/
-  client.py     -- Main chat loop and agentic execution loop
-  fs_tools.py   -- Tool implementations, JSON schemas, and dispatcher
-  ui.py         -- Terminal UI (ANSI box drawing, message formatting, confirmation prompts)
-  parser.py     -- Custom XML-like tool call parser (fallback for models without function calling)
-  commands.py   -- Slash command handler (/help, /tools, /clear, /undo, /tasks, /task-edit, /edit, /verbose)
-  config.py     -- Config loading from ~/.ayder/config.toml
-  tasks.py      -- Task creation, listing, and implementation (markdown files in .ayder/tasks/)
-  banner.py     -- Welcome banner with gothic art and random tips
+  client.py       -- Main chat loop and agentic execution loop
+  commands.py     -- Slash command handler with decorator-based registry
+  config.py       -- Configuration loading with Pydantic validation
+  fs_tools.py     -- Backwards compatibility layer (re-exports from tools/)
+  ui.py           -- Terminal UI (ANSI box drawing, message formatting, confirmation prompts)
+  parser.py       -- Custom XML-like tool call parser (fallback for models without function calling)
+  prompts.py      -- System prompts and prompt templates
+  tasks.py        -- Task creation, listing, and implementation (markdown files in .ayder/tasks/)
+  banner.py       -- Welcome banner with gothic art and random tips
+  tools/          -- Modular tools package
+    impl.py       -- Tool implementations (file ops, shell, search)
+    schemas.py    -- OpenAI-format JSON schemas for all tools
+    registry.py   -- ToolRegistry class for tool dispatch and management
 ```
+
+## Recent Changes (v0.2.0)
+
+### Major Refactoring & Architectural Improvements
+
+This release focuses on improving the maintainability, testability, and extensibility of the codebase.
+
+#### Modularized Tool Management
+- **Split `fs_tools.py`**: The monolithic `fs_tools.py` has been decomposed into a dedicated `tools` package:
+  - `tools/impl.py`: Contains the actual tool implementations including new `search_codebase` and `get_project_structure` tools
+  - `tools/schemas.py`: Defines JSON schemas for all 11 tools in OpenAI function calling format
+  - `tools/registry.py`: Implements a `ToolRegistry` class for better tool dispatch and management
+- **Backwards Compatibility**: `fs_tools.py` is maintained as a re-export module to ensure existing imports continue to work
+
+#### Decomposed Main Chat Loop
+- **Dependency Injection**: The `run_chat()` function now accepts optional `openai_client` and `config` parameters for improved testability
+- **Pydantic Configuration**: Config validation using Pydantic models with field validators for `num_ctx` (positive integer) and `base_url` (valid URL)
+- **Better Separation**: `SYSTEM_PROMPT` moved to `prompts.py` for better organization
+
+#### Refactored Command Handling
+- **Command Registry**: Replaced the long `if/elif` chain in `commands.py` with a decorator-based registry (`@register_command`)
+- **Extensibility**: New commands can now be added easily by defining a function and decorating it
 
 ## License
 
