@@ -1,7 +1,7 @@
-import os
 import json
 import subprocess
 import shutil
+from pathlib import Path
 from ayder_cli.tasks import create_task, show_task, implement_task, implement_all_tasks
 
 # --- 1. Tool Implementations ---
@@ -16,11 +16,11 @@ def list_files(directory="."):
 
 def read_file(file_path, start_line=None, end_line=None):
     """
-    Reads the content of a file. 
+    Reads the content of a file.
     Can optionally read a specific range of lines (1-based indices).
     """
     try:
-        if not os.path.exists(file_path):
+        if not Path(file_path).exists():
             return f"Error: File '{file_path}' does not exist."
 
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -129,25 +129,25 @@ def _generate_manual_tree(max_depth=3, directory="."):
     def should_ignore(name):
         return name in IGNORE_DIRS or any(name.endswith(p) for p in IGNORE_PATTERNS)
 
-    lines = [os.path.basename(os.path.abspath(directory)) or "."]
+    lines = [Path(directory).resolve().name or "."]
 
     def walk_dir(path, prefix="", depth=0):
         if depth >= max_depth:
             return
         try:
-            entries = sorted(os.listdir(path))
-        except PermissionError:
+            entries = sorted(Path(path).iterdir())
+        except (PermissionError, FileNotFoundError):
             return
 
-        dirs = [e for e in entries if os.path.isdir(os.path.join(path, e)) and not should_ignore(e)]
-        files = [e for e in entries if os.path.isfile(os.path.join(path, e)) and not should_ignore(e)]
+        dirs = [e.name for e in entries if e.is_dir() and not should_ignore(e.name)]
+        files = [e.name for e in entries if e.is_file() and not should_ignore(e.name)]
 
         for i, d in enumerate(dirs):
             is_last_dir = (i == len(dirs) - 1) and len(files) == 0
             connector = "`-- " if is_last_dir else "|-- "
             lines.append(f"{prefix}{connector}{d}/")
             new_prefix = prefix + ("    " if is_last_dir else "|   ")
-            walk_dir(os.path.join(path, d), new_prefix, depth + 1)
+            walk_dir(Path(path) / d, new_prefix, depth + 1)
 
         for i, f in enumerate(files):
             is_last = i == len(files) - 1
@@ -481,6 +481,96 @@ tools_schema = [
     }
 ]
 
+# --- 2.5. Parameter Normalization & Validation ---
+
+# Parameter aliases: common variations → canonical names
+PARAMETER_ALIASES = {
+    "read_file": {"path": "file_path", "absolute_path": "file_path", "filepath": "file_path"},
+    "write_file": {"path": "file_path", "absolute_path": "file_path", "filepath": "file_path"},
+    "replace_string": {"path": "file_path", "absolute_path": "file_path", "filepath": "file_path"},
+    "list_files": {"dir": "directory", "path": "directory", "folder": "directory"},
+}
+
+# Parameters that should be resolved to absolute paths
+PATH_PARAMETERS = {
+    "read_file": ["file_path"],
+    "write_file": ["file_path"],
+    "replace_string": ["file_path"],
+    "list_files": ["directory"],
+    "search_codebase": ["directory"],
+}
+
+def normalize_tool_arguments(tool_name: str, arguments: dict) -> dict:
+    """
+    Normalize arguments by:
+    1. Applying parameter aliases (path → file_path)
+    2. Resolving path parameters to absolute paths via Path.resolve()
+    3. Type coercion (string "10" → int 10 for line numbers)
+    """
+    normalized = dict(arguments)  # Copy to avoid mutation
+
+    # Step 1: Apply aliases
+    if tool_name in PARAMETER_ALIASES:
+        for alias, canonical in PARAMETER_ALIASES[tool_name].items():
+            if alias in normalized and canonical not in normalized:
+                normalized[canonical] = normalized.pop(alias)
+
+    # Step 2: Resolve paths to absolute
+    if tool_name in PATH_PARAMETERS:
+        for param_name in PATH_PARAMETERS[tool_name]:
+            if param_name in normalized and normalized[param_name]:
+                normalized[param_name] = str(Path(normalized[param_name]).resolve())
+
+    # Step 3: Type coercion for line numbers
+    if tool_name == "read_file":
+        for key in ["start_line", "end_line"]:
+            if key in normalized and isinstance(normalized[key], str):
+                try:
+                    normalized[key] = int(normalized[key])
+                except ValueError:
+                    pass  # Keep as string, validation will catch it
+
+    return normalized
+
+
+def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
+    """
+    Validate tool call against schema.
+    Returns: (is_valid, error_message)
+    """
+    # Find tool schema
+    tool_schema = None
+    for tool in tools_schema:
+        if tool.get("function", {}).get("name") == tool_name:
+            tool_schema = tool["function"]
+            break
+
+    if not tool_schema:
+        return False, f"Unknown tool: {tool_name}"
+
+    # Check required parameters
+    params = tool_schema.get("parameters", {})
+    required = params.get("required", [])
+    missing = [p for p in required if p not in arguments or arguments[p] is None]
+
+    if missing:
+        return False, f"Missing required parameter(s): {', '.join(missing)}"
+
+    # Type validation
+    properties = params.get("properties", {})
+    for param_name, value in arguments.items():
+        if param_name not in properties:
+            continue
+
+        expected_type = properties[param_name].get("type")
+        if expected_type == "integer" and not isinstance(value, int):
+            return False, f"Parameter '{param_name}' must be an integer, got {type(value).__name__}"
+        if expected_type == "string" and not isinstance(value, str):
+            return False, f"Parameter '{param_name}' must be a string, got {type(value).__name__}"
+
+    return True, ""
+
+
 # --- 3. Helper to Execute Tools ---
 
 def execute_tool_call(tool_name, arguments):
@@ -493,7 +583,15 @@ def execute_tool_call(tool_name, arguments):
             return f"Error: Invalid JSON arguments for {tool_name}"
     else:
         args = arguments
-    
+
+    # Normalize parameters (apply aliases, resolve paths, coerce types)
+    args = normalize_tool_arguments(tool_name, args)
+
+    # Validate before execution
+    is_valid, error_msg = validate_tool_call(tool_name, args)
+    if not is_valid:
+        return f"Validation Error: {error_msg}"
+
     if tool_name == "list_files":
         return list_files(**args)
     elif tool_name == "read_file":

@@ -1,5 +1,5 @@
-import os
 import json
+from pathlib import Path
 from openai import OpenAI
 from ayder_cli import fs_tools
 from ayder_cli.config import load_config
@@ -30,7 +30,7 @@ Format:
 </tool_call>
 
 ### CAPABILITIES:
-- **File System**: `read_file`, `write_file`, `replace_string`. (Note: use `absolute_path` for file paths).
+- **File System**: `read_file`, `write_file`, `replace_string`. (Note: use `file_path` parameter for file paths).
 - **Search**: `search_codebase` (regex supported). Use this to locate code before reading.
 - **Shell**: `run_shell_command`. Use for tests and status checks.
 - **Tasks**: `create_task`, `show_task`, `implement_task`.
@@ -46,22 +46,21 @@ Format:
 TERMINAL_TOOLS = {"create_task", "list_tasks", "show_task", "implement_task", "implement_all_tasks"}
 
 
-def prepare_new_content(fname, fargs):
+def prepare_new_content(fname, args):
     """
     Prepare the content that will be written to a file.
     For write_file: return the content directly.
     For replace_string: read the file and apply the replacement in memory.
+    Args is expected to be a dict (already parsed and normalized).
     """
     try:
-        parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
-
         if fname == "write_file":
-            return parsed.get("content", "")
+            return args.get("content", "")
 
         elif fname == "replace_string":
-            file_path = parsed.get("file_path", "")
-            old_string = parsed.get("old_string", "")
-            new_string = parsed.get("new_string", "")
+            file_path = args.get("file_path", "")
+            old_string = args.get("old_string", "")
+            new_string = args.get("new_string", "")
 
             if not file_path:
                 return ""
@@ -107,7 +106,7 @@ This is the current project structure. Use `search_codebase` to locate specific 
     ]
 
     # Create history file in home directory
-    history_file = os.path.expanduser("~/.ayder_chat_history")
+    history_file = str(Path("~/.ayder_chat_history").expanduser())
 
     # Create prompt session with emacs keybindings and history
     session = PromptSession(
@@ -121,7 +120,7 @@ This is the current project structure. Use `search_codebase` to locate specific 
     state = {"verbose": cfg.get("verbose", False)}
 
     # Print welcome banner
-    print_welcome_banner(MODEL, os.getcwd())
+    print_welcome_banner(MODEL, str(Path.cwd()))
 
     while True:
         try:
@@ -162,6 +161,16 @@ This is the current project structure. Use `search_codebase` to locate specific 
                 if not tool_calls:
                     custom_calls = parse_custom_tool_calls(content)
 
+                    # Check for parser errors
+                    for call in custom_calls:
+                        if "error" in call:
+                            messages.append({
+                                "role": "user",
+                                "content": f"Tool parsing error: {call['error']}"
+                            })
+                            custom_calls = []
+                            break
+
                 if not tool_calls and not custom_calls:
                     # No tools used, just conversation
                     if content:
@@ -179,13 +188,29 @@ This is the current project structure. Use `search_codebase` to locate specific 
                     for tc in tool_calls:
                         fname = tc.function.name
                         fargs = tc.function.arguments
-                        description = describe_tool_action(fname, fargs)
+
+                        # Parse and normalize arguments
+                        parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
+                        normalized = fs_tools.normalize_tool_arguments(fname, parsed)
+
+                        # Validate before confirmation
+                        is_valid, error_msg = fs_tools.validate_tool_call(fname, normalized)
+                        if not is_valid:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "name": fname,
+                                "content": f"Validation Error: {error_msg}"
+                            })
+                            declined = True
+                            break
+
+                        description = describe_tool_action(fname, normalized)
 
                         # Use diff preview for file-modifying tools
                         if fname in ("write_file", "replace_string"):
-                            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
-                            file_path = parsed.get("file_path", "")
-                            new_content = prepare_new_content(fname, fargs)
+                            file_path = normalized.get("file_path", "")
+                            new_content = prepare_new_content(fname, normalized)
                             confirmed = confirm_with_diff(file_path, new_content, description)
                         else:
                             confirmed = confirm_tool_call(description)
@@ -195,12 +220,11 @@ This is the current project structure. Use `search_codebase` to locate specific 
                             declined = True
                             break
 
-                        result = fs_tools.execute_tool_call(fname, fargs)
+                        result = fs_tools.execute_tool_call(fname, normalized)
                         print_tool_result(result)
 
                         if state["verbose"] and fname == "write_file" and str(result).startswith("Successfully"):
-                            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
-                            print_file_content(parsed.get("file_path", ""))
+                            print_file_content(normalized.get("file_path", ""))
 
                         messages.append({
                             "role": "tool",
@@ -218,13 +242,24 @@ This is the current project structure. Use `search_codebase` to locate specific 
                     for call in custom_calls:
                         fname = call['name']
                         fargs = call['arguments']
-                        description = describe_tool_action(fname, fargs)
+
+                        # Normalize and validate custom calls
+                        normalized = fs_tools.normalize_tool_arguments(fname, fargs)
+                        is_valid, error_msg = fs_tools.validate_tool_call(fname, normalized)
+                        if not is_valid:
+                            messages.append({
+                                "role": "user",
+                                "content": f"Validation Error for tool '{fname}': {error_msg}"
+                            })
+                            declined = True
+                            break
+
+                        description = describe_tool_action(fname, normalized)
 
                         # Use diff preview for file-modifying tools
                         if fname in ("write_file", "replace_string"):
-                            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
-                            file_path = parsed.get("file_path", "")
-                            new_content = prepare_new_content(fname, fargs)
+                            file_path = normalized.get("file_path", "")
+                            new_content = prepare_new_content(fname, normalized)
                             confirmed = confirm_with_diff(file_path, new_content, description)
                         else:
                             confirmed = confirm_tool_call(description)
@@ -234,12 +269,11 @@ This is the current project structure. Use `search_codebase` to locate specific 
                             declined = True
                             break
 
-                        result = fs_tools.execute_tool_call(fname, fargs)
+                        result = fs_tools.execute_tool_call(fname, normalized)
                         print_tool_result(result)
 
                         if state["verbose"] and fname == "write_file" and str(result).startswith("Successfully"):
-                            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
-                            print_file_content(parsed.get("file_path", ""))
+                            print_file_content(normalized.get("file_path", ""))
 
                         # Feed back as user message since it's a custom parsing loop
                         messages.append({

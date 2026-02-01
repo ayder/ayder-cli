@@ -1,5 +1,5 @@
-import os
 import random
+from pathlib import Path
 
 
 TIPS = [
@@ -33,7 +33,7 @@ def print_welcome_banner(model, cwd):
     R = "\033[0m"         # reset
 
     # Shorten home directory
-    home = os.path.expanduser("~")
+    home = str(Path.home())
     display_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
 
     # Column widths (inner content, excluding padding)

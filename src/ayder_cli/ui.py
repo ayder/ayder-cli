@@ -1,7 +1,7 @@
 import json
 import re
 import textwrap
-import os
+from pathlib import Path
 
 
 def draw_box(text, title="", width=80, color_code="36"):
@@ -181,7 +181,7 @@ def generate_diff_preview(file_path, new_content):
 
     try:
         # Check if file exists
-        if not os.path.exists(file_path):
+        if not Path(file_path).exists():
             # New file - show all as additions
             new_lines = new_content.splitlines(keepends=True)
             diff_lines = list(difflib.unified_diff(

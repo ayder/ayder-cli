@@ -1,8 +1,8 @@
-import os
 import tomllib
+from pathlib import Path
 
-CONFIG_DIR = os.path.expanduser("~/.ayder")
-CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
+CONFIG_DIR = Path("~/.ayder").expanduser()
+CONFIG_PATH = CONFIG_DIR / "config.toml"
 
 DEFAULTS = {
     "base_url": "http://localhost:11434/v1",
@@ -34,8 +34,8 @@ def load_config() -> dict:
     """Load config from ~/.ayder/config.toml, creating it with defaults if missing."""
     config = dict(DEFAULTS)
 
-    if not os.path.exists(CONFIG_PATH):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         fmt = {**DEFAULTS, "verbose_str": str(DEFAULTS["verbose"]).lower()}
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             f.write(_DEFAULT_TOML.format(**fmt))

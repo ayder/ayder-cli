@@ -1,5 +1,5 @@
-import os
 import subprocess
+from pathlib import Path
 from ayder_cli import fs_tools
 from ayder_cli.tasks import list_tasks, TASKS_DIR
 from ayder_cli.ui import draw_box
@@ -55,9 +55,9 @@ Available Commands:
         except ValueError:
             print(draw_box(f"Invalid task ID: {cmd_args.strip()}\nTask ID must be a number.", title="Error", width=80, color_code="31"))
             return True
-        
-        task_path = os.path.join(TASKS_DIR, f"TASK-{task_id:03d}.md")
-        if not os.path.exists(task_path):
+
+        task_path = Path(TASKS_DIR) / f"TASK-{task_id:03d}.md"
+        if not task_path.exists():
             print(draw_box(f"Task TASK-{task_id:03d} not found.", title="Error", width=80, color_code="31"))
             return True
         
@@ -67,7 +67,7 @@ Available Commands:
         
         # Open editor
         try:
-            subprocess.run([editor, task_path], check=True)
+            subprocess.run([editor, str(task_path)], check=True)
             print(draw_box(f"Task TASK-{task_id:03d} edited successfully.", title="Success", width=80, color_code="32"))
         except subprocess.CalledProcessError:
             print(draw_box(f"Error opening editor: {editor}", title="Error", width=80, color_code="31"))
@@ -81,8 +81,8 @@ Available Commands:
             print(draw_box("Usage: /edit <file_path>\nExample: /edit src/main.py", title="Error", width=80, color_code="31"))
             return True
 
-        file_path = cmd_args.strip()
-        if not os.path.exists(file_path):
+        file_path = Path(cmd_args.strip())
+        if not file_path.exists():
             print(draw_box(f"File not found: {file_path}", title="Error", width=80, color_code="31"))
             return True
 
@@ -90,7 +90,7 @@ Available Commands:
         editor = cfg.get("editor", "vim")
 
         try:
-            subprocess.run([editor, file_path], check=True)
+            subprocess.run([editor, str(file_path)], check=True)
             print(draw_box(f"Finished editing {file_path}", title="Success", width=80, color_code="32"))
         except subprocess.CalledProcessError:
             print(draw_box(f"Error opening editor: {editor}", title="Error", width=80, color_code="31"))
