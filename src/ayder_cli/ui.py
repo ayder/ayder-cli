@@ -1,6 +1,7 @@
 import json
 import re
 import textwrap
+import os
 
 
 def draw_box(text, title="", width=80, color_code="36"):
@@ -103,6 +104,13 @@ def describe_tool_action(fname, args):
         return f"Command `{args.get('command', 'unknown')}` will be executed"
     elif fname == "list_tasks":
         return "Tasks will be listed"
+    elif fname == "search_codebase":
+        pattern = args.get('pattern', 'unknown')
+        file_pattern = args.get('file_pattern')
+        desc = f"Codebase will be searched for pattern '{pattern}'"
+        if file_pattern:
+            desc += f" in files matching '{file_pattern}'"
+        return desc
     else:
         return f"{fname} will be called"
 
@@ -126,5 +134,112 @@ def confirm_tool_call(description=""):
     except (EOFError, KeyboardInterrupt):
         print()
         return False
+
+
+def colorize_diff(diff_lines):
+    """
+    Apply ANSI color codes to diff lines.
+    Red (31) for deletions (lines starting with - but not ---)
+    Green (32) for additions (lines starting with + but not +++)
+    Cyan (36) for hunk headers (lines starting with @@)
+    Default color for context lines
+    """
+    colorized = []
+    for line in diff_lines:
+        if line.startswith('@@'):
+            colorized.append(f"\033[36m{line}\033[0m")
+        elif line.startswith('-') and not line.startswith('---'):
+            colorized.append(f"\033[31m{line}\033[0m")
+        elif line.startswith('+') and not line.startswith('+++'):
+            colorized.append(f"\033[32m{line}\033[0m")
+        else:
+            colorized.append(line)
+    return colorized
+
+
+def truncate_diff(diff_lines, max_lines=100):
+    """
+    If diff <= max_lines, return unchanged.
+    If diff > max_lines, return first 80 lines + separator + last 20 lines.
+    """
+    if len(diff_lines) <= max_lines:
+        return diff_lines
+
+    first_80 = diff_lines[:80]
+    last_20 = diff_lines[-20:]
+    omitted = len(diff_lines) - 80 - 20
+    separator = f"\n... [{omitted} more lines omitted] ...\n"
+
+    return first_80 + [separator] + last_20
+
+
+def generate_diff_preview(file_path, new_content):
+    """
+    Generate a unified diff preview of file changes.
+    - If file doesn't exist: create "new file" diff (all lines as additions)
+    - If file exists: read current and generate diff
+    - Returns formatted diff string or None on error/binary file
+    """
+    import difflib
+
+    try:
+        # Check if file exists
+        if not os.path.exists(file_path):
+            # New file - show all as additions
+            new_lines = new_content.splitlines(keepends=True)
+            diff_lines = list(difflib.unified_diff(
+                [],
+                new_lines,
+                fromfile=f"a/{file_path}",
+                tofile=f"b/{file_path}",
+                lineterm=''
+            ))
+        else:
+            # File exists - read current content
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                current_content = f.read()
+
+            # Check for binary content (null bytes in first 8KB)
+            if b'\x00' in current_content[:8192].encode('utf-8', errors='ignore'):
+                return None
+
+            current_lines = current_content.splitlines(keepends=True)
+            new_lines = new_content.splitlines(keepends=True)
+
+            diff_lines = list(difflib.unified_diff(
+                current_lines,
+                new_lines,
+                fromfile=f"a/{file_path}",
+                tofile=f"b/{file_path}",
+                lineterm=''
+            ))
+
+        if not diff_lines:
+            return None
+
+        # Colorize and truncate
+        colorized = colorize_diff(diff_lines)
+        truncated = truncate_diff(colorized)
+
+        return "\n".join(truncated)
+
+    except Exception:
+        return None
+
+
+def confirm_with_diff(file_path, new_content, description=""):
+    """
+    Show a diff preview of file changes, then prompt for confirmation.
+    If diff is available, display it in a magenta box.
+    Otherwise show a warning.
+    """
+    diff = generate_diff_preview(file_path, new_content)
+
+    if diff:
+        print("\n" + draw_box(diff, title="Preview", color_code="35"))
+    else:
+        print("\n\033[33mWarning: Unable to generate preview (binary file or error)\033[0m")
+
+    return confirm_tool_call(description)
 
 

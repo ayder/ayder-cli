@@ -3,7 +3,7 @@ import json
 from openai import OpenAI
 from ayder_cli import fs_tools
 from ayder_cli.config import load_config
-from ayder_cli.ui import draw_box, print_running, print_assistant_message, print_tool_result, confirm_tool_call, describe_tool_action, print_file_content
+from ayder_cli.ui import draw_box, print_running, print_assistant_message, print_tool_result, confirm_tool_call, describe_tool_action, print_file_content, confirm_with_diff
 from ayder_cli.banner import print_welcome_banner
 from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.commands import handle_command
@@ -11,36 +11,99 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.formatted_text import ANSI
 
-SYSTEM_PROMPT = """You are an expert Autonomous Software Engineer.
-You have access to a set of powerful tools to interact with the file system and shell.
+SYSTEM_PROMPT = """You are an expert Autonomous Software Engineer. You work with surgical precision and extreme efficiency.
 
-Your Capabilities:
-1.  **File System:** You can list, read, and write files.
-    -   Use `read_file` with `start_line` and `end_line` ("line mode") to read specific sections of large files to save context.
-    -   Use `replace_string` to edit code precisely without overwriting the whole file.
-2.  **Command Window:** You can execute shell commands using `run_shell_command`.
-    -   Use this to run tests, list directories (`ls -R`), check git status, or install dependencies.
+### OPERATIONAL PRINCIPLES:
+1. **STRICT NECESSITY**: Call a tool ONLY if it is the direct and primary requirement of the user's request. 
+   - If asked to read a file, ONLY use `read_file`. 
+   - Prohibited: Do not follow up with `ls`, `list_files`, or exploratory shell commands unless specifically requested.
+2. **ONE TASK AT A TIME**: When using `create_task`, your turn ends immediately after the tool result. Do not plan, implement, or explore further.
+3. **PRECISION OVER VOLUME**: Prefer `search_codebase` to find definitions over `list_files`. Use "line mode" in `read_file` for files over 100 lines.
 
-Guidelines:
--   **Explore First:** When asked to work on a project, list files and read relevant code first.
--   **Verify:** After editing code, try to run a syntax check if possible.
--   **Be Precise:** When replacing text, ensure `old_string` matches exactly.
--   **Context:** If a file is huge, don't read the whole thing. Use `list_files` to find it, then `read_file` with line numbers.
--   **Tasks:** When the user asks you to create, add, or plan a task, use the `create_task` tool. This saves the task as a markdown file in .ayder/tasks/ (current working directory) with the naming format TASK-XXX.md. After creating a task, STOP. Do not proceed to implement, write code, or run any commands for that task. Just confirm the task was saved. To show a specific task, use the `show_task` tool with the task ID number.
+### TOOL PROTOCOL:
+You MUST use the specialized XML format for all tool calls. Failure to use this format will result in a parsing error.
+Format:
+<tool_call>
+<function=tool_name>
+<parameter=key1>value1</parameter>
+</function>
+</tool_call>
 
-You MUST use the provided tools to perform actions.
+### CAPABILITIES:
+- **File System**: `read_file`, `write_file`, `replace_string`. (Note: use `absolute_path` for file paths).
+- **Search**: `search_codebase` (regex supported). Use this to locate code before reading.
+- **Shell**: `run_shell_command`. Use for tests and status checks.
+- **Tasks**: `create_task`, `show_task`, `implement_task`.
+
+### EXECUTION FLOW:
+1. Receive request.
+2. Determine the MINIMUM required tool call.
+3. Execute and wait for result.
+4. Stop immediately if the task (like creating a task) is complete.
 """
 
 # Tools that end the agentic loop after execution
 TERMINAL_TOOLS = {"create_task", "list_tasks", "show_task", "implement_task", "implement_all_tasks"}
+
+
+def prepare_new_content(fname, fargs):
+    """
+    Prepare the content that will be written to a file.
+    For write_file: return the content directly.
+    For replace_string: read the file and apply the replacement in memory.
+    """
+    try:
+        parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
+
+        if fname == "write_file":
+            return parsed.get("content", "")
+
+        elif fname == "replace_string":
+            file_path = parsed.get("file_path", "")
+            old_string = parsed.get("old_string", "")
+            new_string = parsed.get("new_string", "")
+
+            if not file_path:
+                return ""
+
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                return content.replace(old_string, new_string)
+            except Exception:
+                return ""
+        else:
+            return ""
+
+    except Exception:
+        return ""
+
 
 def run_chat():
     cfg = load_config()
     client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
     MODEL = cfg["model"]
 
+    # Generate project structure for macro-context
+    try:
+        project_structure = fs_tools.get_project_structure(max_depth=3)
+        macro_context = f"""
+
+### PROJECT STRUCTURE:
+```
+{project_structure}
+```
+
+This is the current project structure. Use `search_codebase` to locate specific code before reading files.
+"""
+    except Exception:
+        macro_context = ""
+
+    # Inject into system prompt
+    enhanced_system_prompt = SYSTEM_PROMPT + macro_context
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT}
+        {"role": "system", "content": enhanced_system_prompt}
     ]
 
     # Create history file in home directory
@@ -118,7 +181,16 @@ def run_chat():
                         fargs = tc.function.arguments
                         description = describe_tool_action(fname, fargs)
 
-                        if not confirm_tool_call(description):
+                        # Use diff preview for file-modifying tools
+                        if fname in ("write_file", "replace_string"):
+                            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
+                            file_path = parsed.get("file_path", "")
+                            new_content = prepare_new_content(fname, fargs)
+                            confirmed = confirm_with_diff(file_path, new_content, description)
+                        else:
+                            confirmed = confirm_tool_call(description)
+
+                        if not confirmed:
                             print(draw_box("Tool call skipped by user.", title="Skipped", width=80, color_code="33"))
                             declined = True
                             break
@@ -148,7 +220,16 @@ def run_chat():
                         fargs = call['arguments']
                         description = describe_tool_action(fname, fargs)
 
-                        if not confirm_tool_call(description):
+                        # Use diff preview for file-modifying tools
+                        if fname in ("write_file", "replace_string"):
+                            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
+                            file_path = parsed.get("file_path", "")
+                            new_content = prepare_new_content(fname, fargs)
+                            confirmed = confirm_with_diff(file_path, new_content, description)
+                        else:
+                            confirmed = confirm_tool_call(description)
+
+                        if not confirmed:
                             print(draw_box("Tool call skipped by user.", title="Skipped", width=80, color_code="33"))
                             declined = True
                             break
