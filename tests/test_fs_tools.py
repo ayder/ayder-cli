@@ -1,8 +1,9 @@
 """Tests for fs_tools.py module."""
 
 import json
-import os
+import sys
 import pytest
+from pathlib import Path
 from unittest.mock import Mock, patch, mock_open
 from ayder_cli import fs_tools
 
@@ -50,14 +51,14 @@ class TestListFiles:
         restricted_dir.mkdir()
         
         # Skip on Windows as permission model is different
-        if os.name != 'nt':
-            os.chmod(str(restricted_dir), 0o000)
+        if sys.platform != 'win32':
+            restricted_dir.chmod(0o000)
             try:
                 result = fs_tools.list_files(str(restricted_dir))
                 assert "Error listing files" in result
             finally:
                 # Restore permissions for cleanup
-                os.chmod(str(restricted_dir), 0o755)
+                restricted_dir.chmod(0o755)
 
 
 class TestReadFile:

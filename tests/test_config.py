@@ -1,6 +1,6 @@
 """Tests for config.py module."""
 
-import os
+from pathlib import Path
 import pytest
 from unittest import mock
 
@@ -45,9 +45,11 @@ class TestDefaultValues:
 
     def test_config_paths_defined(self):
         """Test that CONFIG_DIR and CONFIG_PATH are defined."""
-        assert CONFIG_DIR.endswith(".ayder")
-        assert CONFIG_PATH.endswith("config.toml")
-        assert CONFIG_DIR in CONFIG_PATH
+        assert isinstance(CONFIG_DIR, Path)
+        assert isinstance(CONFIG_PATH, Path)
+        assert CONFIG_DIR.name == ".ayder"
+        assert CONFIG_PATH.name == "config.toml"
+        assert CONFIG_DIR in CONFIG_PATH.parents or CONFIG_PATH.parent == CONFIG_DIR
 
 
 class TestLoadConfigFirstRun:
@@ -59,8 +61,8 @@ class TestLoadConfigFirstRun:
         mock_config_dir = tmp_path / ".ayder"
         mock_config_path = mock_config_dir / "config.toml"
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         # Ensure file doesn't exist
         assert not mock_config_path.exists()
@@ -82,8 +84,8 @@ class TestLoadConfigFirstRun:
         mock_config_dir = tmp_path / ".ayder"
         mock_config_path = mock_config_dir / "config.toml"
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -95,8 +97,8 @@ class TestLoadConfigFirstRun:
         mock_config_dir = tmp_path / ".ayder" / "nested" / "path"
         mock_config_path = mock_config_dir / "config.toml"
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         # Ensure directory doesn't exist
         assert not mock_config_dir.exists()
@@ -112,8 +114,8 @@ class TestLoadConfigFirstRun:
         mock_config_dir = tmp_path / ".ayder"
         mock_config_path = mock_config_dir / "config.toml"
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         load_config()
         
@@ -153,8 +155,8 @@ verbose = true
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -179,8 +181,8 @@ model = "custom-model"
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -205,8 +207,8 @@ editor = "emacs"
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -231,8 +233,8 @@ verbose = true
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -257,8 +259,8 @@ model = "only-model-defined"
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -279,8 +281,8 @@ verbose = true
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -299,8 +301,8 @@ verbose = false
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -316,8 +318,8 @@ verbose = false
         # Create empty config
         mock_config_path.write_text("")
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         
@@ -336,8 +338,8 @@ num_ctx = 32768
 """
         mock_config_path.write_text(config_content)
         
-        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", str(mock_config_dir))
-        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", str(mock_config_path))
+        monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
         

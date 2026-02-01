@@ -51,9 +51,13 @@ def prepare_new_content(fname, args):
     Prepare the content that will be written to a file.
     For write_file: return the content directly.
     For replace_string: read the file and apply the replacement in memory.
-    Args is expected to be a dict (already parsed and normalized).
+    Args can be either a dict or a JSON string.
     """
     try:
+        # Handle JSON string arguments
+        if isinstance(args, str):
+            args = json.loads(args)
+
         if fname == "write_file":
             return args.get("content", "")
 

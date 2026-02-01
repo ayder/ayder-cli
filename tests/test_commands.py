@@ -2,12 +2,12 @@
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-import os
+from pathlib import Path
 import sys
 import subprocess
 
 # Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ayder_cli.commands import handle_command
 
@@ -84,7 +84,7 @@ class TestTaskEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_task_edit_with_valid_task_id(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):
@@ -135,7 +135,7 @@ class TestTaskEditCommand:
 
     @patch("ayder_cli.commands.print")
     @patch("ayder_cli.commands.draw_box")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_task_edit_with_nonexistent_task_id(self, mock_exists, mock_draw_box, mock_print):
         """Test with non-existent task ID."""
         mock_exists.return_value = False
@@ -154,7 +154,7 @@ class TestTaskEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_task_edit_editor_not_found(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):
@@ -176,7 +176,7 @@ class TestTaskEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_task_edit_editor_error(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):
@@ -197,7 +197,7 @@ class TestTaskEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_task_edit_with_custom_editor(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):
@@ -222,7 +222,7 @@ class TestEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_edit_with_valid_file_path(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):
@@ -256,7 +256,7 @@ class TestEditCommand:
 
     @patch("ayder_cli.commands.print")
     @patch("ayder_cli.commands.draw_box")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_edit_with_nonexistent_file(self, mock_exists, mock_draw_box, mock_print):
         """Test with non-existent file."""
         mock_exists.return_value = False
@@ -273,7 +273,7 @@ class TestEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_edit_editor_not_found(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):
@@ -294,7 +294,7 @@ class TestEditCommand:
     @patch("ayder_cli.commands.draw_box")
     @patch("ayder_cli.commands.load_config")
     @patch("ayder_cli.commands.subprocess.run")
-    @patch("ayder_cli.commands.os.path.exists")
+    @patch("ayder_cli.commands.Path.exists")
     def test_edit_editor_error(
         self, mock_exists, mock_subprocess, mock_load_config, mock_draw_box, mock_print
     ):

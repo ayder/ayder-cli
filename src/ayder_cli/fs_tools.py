@@ -9,7 +9,7 @@ from ayder_cli.tasks import create_task, show_task, implement_task, implement_al
 def list_files(directory="."):
     """Lists files in the specified directory."""
     try:
-        files = os.listdir(directory)
+        files = [item.name for item in Path(directory).iterdir()]
         return json.dumps(files)
     except Exception as e:
         return f"Error listing files: {str(e)}"

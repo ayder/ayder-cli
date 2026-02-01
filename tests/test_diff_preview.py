@@ -4,8 +4,7 @@ Tests for diff preview functionality in ayder_cli.ui
 Tests colorize_diff, truncate_diff, generate_diff_preview, and confirm_with_diff.
 """
 import unittest
-import tempfile
-import os
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from ayder_cli.ui import (
     colorize_diff,
@@ -105,7 +104,8 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def setUp(self):
         """Create temporary directory for test files"""
-        self.temp_dir = tempfile.mkdtemp()
+        import tempfile
+        self.temp_dir = Path(tempfile.mkdtemp())
 
     def tearDown(self):
         """Clean up temporary files"""
@@ -114,7 +114,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def test_new_file_shows_all_additions(self):
         """Verify new file diff shows all content as additions"""
-        file_path = os.path.join(self.temp_dir, "new_file.txt")
+        file_path = self.temp_dir / "new_file.txt"
         new_content = "line 1\nline 2\nline 3"
         result = generate_diff_preview(file_path, new_content)
 
@@ -125,7 +125,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def test_modified_file_shows_changes(self):
         """Verify modified file shows correct +/- lines"""
-        file_path = os.path.join(self.temp_dir, "existing.txt")
+        file_path = self.temp_dir / "existing.txt"
         original_content = "original line\nkeep this\nremove this"
         new_content = "modified line\nkeep this\nadd this"
 
@@ -143,7 +143,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def test_binary_file_returns_none(self):
         """Verify binary file detection returns None"""
-        file_path = os.path.join(self.temp_dir, "binary.bin")
+        file_path = self.temp_dir / "binary.bin"
         # Create a file with null bytes
         with open(file_path, 'wb') as f:
             f.write(b'\x00\x01\x02\x03')
@@ -153,7 +153,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def test_no_changes_returns_none(self):
         """Verify identical content returns None (no diff)"""
-        file_path = os.path.join(self.temp_dir, "same.txt")
+        file_path = self.temp_dir / "same.txt"
         content = "same content"
 
         with open(file_path, 'w') as f:
@@ -172,7 +172,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def test_colorization_applied(self):
         """Verify diff output is colorized"""
-        file_path = os.path.join(self.temp_dir, "color_test.txt")
+        file_path = self.temp_dir / "color_test.txt"
         original = "old"
         new = "new"
 
@@ -186,7 +186,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
     def test_large_diff_truncated(self):
         """Verify large diffs are truncated in preview"""
-        file_path = os.path.join(self.temp_dir, "large.txt")
+        file_path = self.temp_dir / "large.txt"
         original = "\n".join([f"line {i}" for i in range(10)])
         new = "\n".join([f"line {i}" for i in range(200)])
 
@@ -204,7 +204,8 @@ class TestConfirmWithDiff(unittest.TestCase):
 
     def setUp(self):
         """Create temporary directory for test files"""
-        self.temp_dir = tempfile.mkdtemp()
+        import tempfile
+        self.temp_dir = Path(tempfile.mkdtemp())
 
     def tearDown(self):
         """Clean up temporary files"""
@@ -215,7 +216,7 @@ class TestConfirmWithDiff(unittest.TestCase):
     @patch('builtins.print')
     def test_diff_printed_before_confirmation(self, mock_print, mock_input):
         """Verify diff is printed before confirmation prompt"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
         new_content = "new content"
 
         result = confirm_with_diff(file_path, new_content, "Test file")
@@ -228,7 +229,7 @@ class TestConfirmWithDiff(unittest.TestCase):
     @patch('builtins.print')
     def test_confirmation_returns_true_on_yes(self, mock_print, mock_input):
         """Verify function returns True when user confirms"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
         result = confirm_with_diff(file_path, "content", "Test")
 
         self.assertTrue(result)
@@ -237,7 +238,7 @@ class TestConfirmWithDiff(unittest.TestCase):
     @patch('builtins.print')
     def test_confirmation_returns_false_on_no(self, mock_print, mock_input):
         """Verify function returns False when user declines"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
         result = confirm_with_diff(file_path, "content", "Test")
 
         self.assertFalse(result)
@@ -246,7 +247,7 @@ class TestConfirmWithDiff(unittest.TestCase):
     @patch('builtins.print')
     def test_confirmation_returns_true_on_empty(self, mock_print, mock_input):
         """Verify function returns True when user presses enter"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
         result = confirm_with_diff(file_path, "content", "Test")
 
         self.assertTrue(result)
@@ -255,7 +256,7 @@ class TestConfirmWithDiff(unittest.TestCase):
     @patch('builtins.print')
     def test_keyboard_interrupt_returns_false(self, mock_print, mock_input):
         """Verify function handles keyboard interrupt gracefully"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
         result = confirm_with_diff(file_path, "content", "Test")
 
         self.assertFalse(result)
@@ -266,7 +267,8 @@ class TestPrepareNewContent(unittest.TestCase):
 
     def setUp(self):
         """Create temporary directory for test files"""
-        self.temp_dir = tempfile.mkdtemp()
+        import tempfile
+        self.temp_dir = Path(tempfile.mkdtemp())
 
     def tearDown(self):
         """Clean up temporary files"""
@@ -287,7 +289,7 @@ class TestPrepareNewContent(unittest.TestCase):
 
     def test_replace_string_content_preparation(self):
         """Verify replace_string reads file and applies replacement"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
         original = "hello world"
 
         with open(file_path, 'w') as f:
@@ -303,7 +305,7 @@ class TestPrepareNewContent(unittest.TestCase):
 
     def test_replace_string_json_argument(self):
         """Verify replace_string works with JSON string argument"""
-        file_path = os.path.join(self.temp_dir, "test.txt")
+        file_path = self.temp_dir / "test.txt"
 
         with open(file_path, 'w') as f:
             f.write("foo bar")
