@@ -84,8 +84,8 @@ def prepare_new_content(fname, args):
 
 def run_chat():
     cfg = load_config()
-    client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
-    MODEL = cfg["model"]
+    client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+    MODEL = cfg.model
 
     # Generate project structure for macro-context
     try:
@@ -121,7 +121,7 @@ This is the current project structure. Use `search_codebase` to locate specific 
     )
 
     # Runtime state (mutable dict so commands can toggle flags)
-    state = {"verbose": cfg.get("verbose", False)}
+    state = {"verbose": cfg.verbose}
 
     # Print welcome banner
     print_welcome_banner(MODEL, str(Path.cwd()))
@@ -154,7 +154,7 @@ This is the current project structure. Use `search_codebase` to locate specific 
                     messages=messages,
                     tools=fs_tools.tools_schema,
                     tool_choice="auto",
-                    extra_body={"options": {"num_ctx": cfg["num_ctx"]}}
+                    extra_body={"options": {"num_ctx": cfg.num_ctx}}
                 )
 
                 msg = response.choices[0].message

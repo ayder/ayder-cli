@@ -9,6 +9,7 @@ from ayder_cli.config import (
     _DEFAULT_TOML,
     CONFIG_DIR,
     CONFIG_PATH,
+    Config,
     load_config,
 )
 
@@ -83,14 +84,20 @@ class TestLoadConfigFirstRun:
         """Test that default values are returned when creating new config."""
         mock_config_dir = tmp_path / ".ayder"
         mock_config_path = mock_config_dir / "config.toml"
-        
+
         monkeypatch.setattr("ayder_cli.config.CONFIG_DIR", mock_config_dir)
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
-        
+
         config = load_config()
-        
+
         # Verify defaults are returned
-        assert config == DEFAULTS
+        assert isinstance(config, Config)
+        assert config.base_url == DEFAULTS["base_url"]
+        assert config.api_key == DEFAULTS["api_key"]
+        assert config.model == DEFAULTS["model"]
+        assert config.num_ctx == DEFAULTS["num_ctx"]
+        assert config.editor == DEFAULTS["editor"]
+        assert config.verbose == DEFAULTS["verbose"]
 
     def test_config_directory_creation(self, tmp_path, monkeypatch):
         """Test that config directory is created if it doesn't exist."""
@@ -159,14 +166,14 @@ verbose = true
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
+
         # Verify custom values are loaded
-        assert config["base_url"] == "https://api.example.com/v1"
-        assert config["api_key"] == "my-secret-key"
-        assert config["model"] == "gpt-4"
-        assert config["num_ctx"] == 128000
-        assert config["editor"] == "nano"
-        assert config["verbose"] is True
+        assert config.base_url == "https://api.example.com/v1"
+        assert config.api_key == "my-secret-key"
+        assert config.model == "gpt-4"
+        assert config.num_ctx == 128000
+        assert config.editor == "nano"
+        assert config.verbose is True
 
     def test_partial_config_llm_only(self, tmp_path, monkeypatch):
         """Test loading config with only llm section defined."""
@@ -185,15 +192,15 @@ model = "custom-model"
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
+
         # Verify llm values loaded
-        assert config["base_url"] == "https://custom.api.com"
-        assert config["model"] == "custom-model"
+        assert config.base_url == "https://custom.api.com"
+        assert config.model == "custom-model"
         # Verify defaults for missing sections
-        assert config["api_key"] == DEFAULTS["api_key"]
-        assert config["num_ctx"] == DEFAULTS["num_ctx"]
-        assert config["editor"] == DEFAULTS["editor"]
-        assert config["verbose"] == DEFAULTS["verbose"]
+        assert config.api_key == DEFAULTS["api_key"]
+        assert config.num_ctx == DEFAULTS["num_ctx"]
+        assert config.editor == DEFAULTS["editor"]
+        assert config.verbose == DEFAULTS["verbose"]
 
     def test_partial_config_editor_only(self, tmp_path, monkeypatch):
         """Test loading config with only editor section defined."""
@@ -211,15 +218,15 @@ editor = "emacs"
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
+
         # Verify editor value loaded
-        assert config["editor"] == "emacs"
+        assert config.editor == "emacs"
         # Verify defaults for llm
-        assert config["base_url"] == DEFAULTS["base_url"]
-        assert config["api_key"] == DEFAULTS["api_key"]
-        assert config["model"] == DEFAULTS["model"]
-        assert config["num_ctx"] == DEFAULTS["num_ctx"]
-        assert config["verbose"] == DEFAULTS["verbose"]
+        assert config.base_url == DEFAULTS["base_url"]
+        assert config.api_key == DEFAULTS["api_key"]
+        assert config.model == DEFAULTS["model"]
+        assert config.num_ctx == DEFAULTS["num_ctx"]
+        assert config.verbose == DEFAULTS["verbose"]
 
     def test_partial_config_ui_only(self, tmp_path, monkeypatch):
         """Test loading config with only ui section defined."""
@@ -237,15 +244,15 @@ verbose = true
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
+
         # Verify ui value loaded
-        assert config["verbose"] is True
+        assert config.verbose is True
         # Verify defaults for other sections
-        assert config["base_url"] == DEFAULTS["base_url"]
-        assert config["api_key"] == DEFAULTS["api_key"]
-        assert config["model"] == DEFAULTS["model"]
-        assert config["num_ctx"] == DEFAULTS["num_ctx"]
-        assert config["editor"] == DEFAULTS["editor"]
+        assert config.base_url == DEFAULTS["base_url"]
+        assert config.api_key == DEFAULTS["api_key"]
+        assert config.model == DEFAULTS["model"]
+        assert config.num_ctx == DEFAULTS["num_ctx"]
+        assert config.editor == DEFAULTS["editor"]
 
     def test_partial_config_missing_keys_in_llm(self, tmp_path, monkeypatch):
         """Test that missing keys in llm section fall back to defaults."""
@@ -263,11 +270,11 @@ model = "only-model-defined"
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
-        assert config["model"] == "only-model-defined"
-        assert config["base_url"] == DEFAULTS["base_url"]
-        assert config["api_key"] == DEFAULTS["api_key"]
-        assert config["num_ctx"] == DEFAULTS["num_ctx"]
+
+        assert config.model == "only-model-defined"
+        assert config.base_url == DEFAULTS["base_url"]
+        assert config.api_key == DEFAULTS["api_key"]
+        assert config.num_ctx == DEFAULTS["num_ctx"]
 
     def test_verbose_boolean_conversion_true(self, tmp_path, monkeypatch):
         """Test that verbose value is properly converted to boolean (true)."""
@@ -285,9 +292,9 @@ verbose = true
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
-        assert config["verbose"] is True
-        assert isinstance(config["verbose"], bool)
+
+        assert config.verbose is True
+        assert isinstance(config.verbose, bool)
 
     def test_verbose_boolean_conversion_false(self, tmp_path, monkeypatch):
         """Test that verbose value is properly converted to boolean (false)."""
@@ -305,9 +312,9 @@ verbose = false
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
-        assert config["verbose"] is False
-        assert isinstance(config["verbose"], bool)
+
+        assert config.verbose is False
+        assert isinstance(config.verbose, bool)
 
     def test_empty_config_file_uses_all_defaults(self, tmp_path, monkeypatch):
         """Test that empty config file uses all default values."""
@@ -322,9 +329,15 @@ verbose = false
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
+
         # All values should be defaults
-        assert config == DEFAULTS
+        assert isinstance(config, Config)
+        assert config.base_url == DEFAULTS["base_url"]
+        assert config.api_key == DEFAULTS["api_key"]
+        assert config.model == DEFAULTS["model"]
+        assert config.num_ctx == DEFAULTS["num_ctx"]
+        assert config.editor == DEFAULTS["editor"]
+        assert config.verbose == DEFAULTS["verbose"]
 
     def test_num_ctx_integer_type(self, tmp_path, monkeypatch):
         """Test that num_ctx is loaded as integer."""
@@ -342,6 +355,6 @@ num_ctx = 32768
         monkeypatch.setattr("ayder_cli.config.CONFIG_PATH", mock_config_path)
         
         config = load_config()
-        
-        assert config["num_ctx"] == 32768
-        assert isinstance(config["num_ctx"], int)
+
+        assert config.num_ctx == 32768
+        assert isinstance(config.num_ctx, int)

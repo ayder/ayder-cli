@@ -10,6 +10,7 @@ import subprocess
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ayder_cli.commands import handle_command
+from ayder_cli.config import Config
 
 
 class TestHelpCommand:
@@ -90,7 +91,7 @@ class TestTaskEditCommand:
     ):
         """Test with valid task ID."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "vim"}
+        mock_load_config.return_value = Config(editor="vim")
         mock_subprocess.return_value = Mock()
         mock_draw_box.return_value = "success output"
         messages = []
@@ -160,7 +161,7 @@ class TestTaskEditCommand:
     ):
         """Test editor not found error (FileNotFoundError)."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "nonexistent_editor"}
+        mock_load_config.return_value = Config(editor="nonexistent_editor")
         mock_subprocess.side_effect = FileNotFoundError()
         mock_draw_box.return_value = "error output"
         messages = []
@@ -182,7 +183,7 @@ class TestTaskEditCommand:
     ):
         """Test editor error (CalledProcessError)."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "vim"}
+        mock_load_config.return_value = Config(editor="vim")
         mock_subprocess.side_effect = subprocess.CalledProcessError(1, "vim")
         mock_draw_box.return_value = "error output"
         messages = []
@@ -203,7 +204,7 @@ class TestTaskEditCommand:
     ):
         """Test with custom editor from config."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "code"}
+        mock_load_config.return_value = Config(editor="code")
         mock_subprocess.return_value = Mock()
         mock_draw_box.return_value = "success output"
         messages = []
@@ -228,7 +229,7 @@ class TestEditCommand:
     ):
         """Test with valid file path."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "vim"}
+        mock_load_config.return_value = Config(editor="vim")
         mock_subprocess.return_value = Mock()
         mock_draw_box.return_value = "success output"
         messages = []
@@ -279,7 +280,7 @@ class TestEditCommand:
     ):
         """Test editor not found error."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "nonexistent"}
+        mock_load_config.return_value = Config(editor="nonexistent")
         mock_subprocess.side_effect = FileNotFoundError()
         mock_draw_box.return_value = "error output"
         messages = []
@@ -300,7 +301,7 @@ class TestEditCommand:
     ):
         """Test editor error (CalledProcessError) for /edit command."""
         mock_exists.return_value = True
-        mock_load_config.return_value = {"editor": "vim"}
+        mock_load_config.return_value = Config(editor="vim")
         mock_subprocess.side_effect = subprocess.CalledProcessError(1, "vim")
         mock_draw_box.return_value = "error output"
         messages = []

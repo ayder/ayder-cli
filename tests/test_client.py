@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch, MagicMock, call
 import json
 
 from ayder_cli import client
+from ayder_cli.config import Config
 
 
 class TestRunChatExitHandling:
@@ -17,13 +18,13 @@ class TestRunChatExitHandling:
     @patch("builtins.print")
     def test_exit_command_quits(self, mock_print, mock_banner, mock_session, mock_openai, mock_config):
         """Test that 'exit' command quits the chat loop."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = ["exit"]
         mock_session.return_value = mock_instance
@@ -40,13 +41,13 @@ class TestRunChatExitHandling:
     @patch("builtins.print")
     def test_quit_command_quits(self, mock_print, mock_banner, mock_session, mock_openai, mock_config):
         """Test that 'quit' command quits the chat loop."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = ["quit"]
         mock_session.return_value = mock_instance
@@ -63,13 +64,13 @@ class TestRunChatExitHandling:
     @patch("builtins.print")
     def test_exit_case_insensitive(self, mock_print, mock_banner, mock_session, mock_openai, mock_config):
         """Test that 'EXIT' and 'Exit' also quit."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = ["EXIT"]
         mock_session.return_value = mock_instance
@@ -84,13 +85,13 @@ class TestRunChatExitHandling:
     @patch("ayder_cli.client.print_welcome_banner")
     def test_empty_input_continues(self, mock_banner, mock_session, mock_openai, mock_config):
         """Test that empty input continues to next iteration."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = ["", "", "exit"]
         mock_session.return_value = mock_instance
@@ -112,13 +113,13 @@ class TestRunChatExceptionHandling:
     @patch("builtins.print")
     def test_keyboard_interrupt(self, mock_print, mock_draw_box, mock_banner, mock_session, mock_openai, mock_config):
         """Test KeyboardInterrupt handling shows message and continues."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = [KeyboardInterrupt(), "exit"]
         mock_session.return_value = mock_instance
@@ -136,13 +137,13 @@ class TestRunChatExceptionHandling:
     @patch("builtins.print")
     def test_eof_error(self, mock_print, mock_draw_box, mock_banner, mock_session, mock_openai, mock_config):
         """Test EOFError handling (Ctrl+D) quits gracefully."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = [EOFError()]
         mock_session.return_value = mock_instance
@@ -159,13 +160,13 @@ class TestRunChatExceptionHandling:
     @patch("builtins.print")
     def test_general_exception(self, mock_print, mock_draw_box, mock_banner, mock_session, mock_openai, mock_config):
         """Test general exception handling shows error box."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = [Exception("Test error"), "exit"]
         mock_session.return_value = mock_instance
@@ -189,13 +190,13 @@ class TestRunChatSlashCommands:
     @patch("ayder_cli.client.handle_command")
     def test_slash_command_handled(self, mock_handle, mock_banner, mock_session, mock_openai, mock_config):
         """Test that slash commands call handle_command."""
-        mock_config.return_value = {
-            "base_url": "http://test.com",
-            "api_key": "test-key",
-            "model": "test-model",
-            "num_ctx": 4096,
-            "verbose": False
-        }
+        mock_config.return_value = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
         mock_instance = Mock()
         mock_instance.prompt.side_effect = ["/help", "exit"]
         mock_session.return_value = mock_instance
