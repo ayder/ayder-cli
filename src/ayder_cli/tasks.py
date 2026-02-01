@@ -1,15 +1,21 @@
-import os
 import re
 from datetime import datetime
+from pathlib import Path
 
-TASKS_DIR = os.path.join(os.getcwd(), ".ayder", "tasks")
+# Module-level variable for backwards compatibility with tests
+TASKS_DIR = Path.cwd() / ".ayder" / "tasks"
+
+
+def _get_tasks_dir():
+    """Return the tasks directory path for the current working directory."""
+    return Path(TASKS_DIR) if isinstance(TASKS_DIR, str) else TASKS_DIR
 
 
 
 
 
 def _ensure_tasks_dir():
-    os.makedirs(TASKS_DIR, exist_ok=True)
+    _get_tasks_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _extract_id(filename):
@@ -24,11 +30,10 @@ def _next_id():
     """Return the next available task ID by scanning existing files."""
     _ensure_tasks_dir()
     max_id = 0
-    for fname in os.listdir(TASKS_DIR):
-        if fname.endswith(".md"):
-            task_id = _extract_id(fname)
-            if task_id is not None and task_id > max_id:
-                max_id = task_id
+    for path in _get_tasks_dir().glob("*.md"):
+        task_id = _extract_id(path.name)
+        if task_id is not None and task_id > max_id:
+            max_id = task_id
     return max_id + 1
 
 
@@ -37,7 +42,7 @@ def create_task(title, description=""):
     _ensure_tasks_dir()
 
     task_id = _next_id()
-    path = os.path.join(TASKS_DIR, f"TASK-{task_id:03d}.md")
+    path = _get_tasks_dir() / f"TASK-{task_id:03d}.md"
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     content = f"""# {title}
@@ -51,8 +56,7 @@ def create_task(title, description=""):
 {description if description else 'No description provided.'}
 """
 
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+    path.write_text(content, encoding="utf-8")
 
     return f"Task TASK-{task_id:03d} created."
 
@@ -60,11 +64,11 @@ def create_task(title, description=""):
 def _parse_status(filepath):
     """Extract the status field from a task markdown file."""
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                match = re.match(r"-\s+\*\*Status:\*\*\s+(.+)", line)
-                if match:
-                    return match.group(1).strip()
+        content = Path(filepath).read_text(encoding="utf-8")
+        for line in content.splitlines():
+            match = re.match(r"-\s+\*\*Status:\*\*\s+(.+)", line)
+            if match:
+                return match.group(1).strip()
     except Exception:
         pass
     return "unknown"
@@ -73,28 +77,27 @@ def _parse_status(filepath):
 def _parse_title(filepath):
     """Extract the title (first # heading) from a task markdown file."""
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("# "):
-                    return line[2:].strip()
+        content = Path(filepath).read_text(encoding="utf-8")
+        for line in content.splitlines():
+            if line.startswith("# "):
+                return line[2:].strip()
     except Exception:
         pass
-    return os.path.basename(filepath)
+    return Path(filepath).name
 
 
 def list_tasks():
     """List all tasks in .ayder/tasks/ (current directory) in a table format."""
     _ensure_tasks_dir()
 
-    files = sorted(f for f in os.listdir(TASKS_DIR) if f.endswith(".md"))
+    files = sorted(_get_tasks_dir().glob("*.md"))
     if not files:
         return "No tasks found."
 
     # Collect task data
     tasks = []
-    for fname in files:
-        path = os.path.join(TASKS_DIR, fname)
-        task_id = _extract_id(fname)
+    for path in files:
+        task_id = _extract_id(path.name)
         title = _parse_title(path)
         status = _parse_status(path)
         if task_id is not None:
@@ -129,25 +132,23 @@ def show_task(task_id):
     """Read and return the contents of a task by its numeric ID."""
     _ensure_tasks_dir()
     task_id = int(task_id)
-    path = os.path.join(TASKS_DIR, f"TASK-{task_id:03d}.md")
-    if not os.path.exists(path):
+    path = _get_tasks_dir() / f"TASK-{task_id:03d}.md"
+    if not path.exists():
         return f"Error: Task TASK-{task_id:03d} not found."
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    return path.read_text(encoding="utf-8")
 
 
 def _update_task_status(task_id, status):
     """Update the status field of a task."""
     _ensure_tasks_dir()
     task_id = int(task_id)
-    path = os.path.join(TASKS_DIR, f"TASK-{task_id:03d}.md")
+    path = _get_tasks_dir() / f"TASK-{task_id:03d}.md"
     
-    if not os.path.exists(path):
+    if not path.exists():
         return f"Error: Task TASK-{task_id:03d} not found."
     
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = path.read_text(encoding="utf-8")
         
         # Replace the status line
         updated_content = re.sub(
@@ -156,8 +157,7 @@ def _update_task_status(task_id, status):
             content
         )
         
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(updated_content)
+        path.write_text(updated_content, encoding="utf-8")
         
         return True
     except Exception as e:
@@ -168,9 +168,9 @@ def implement_task(task_id):
     """Implement a specific task, verify, and set status to done."""
     _ensure_tasks_dir()
     task_id = int(task_id)
-    path = os.path.join(TASKS_DIR, f"TASK-{task_id:03d}.md")
+    path = _get_tasks_dir() / f"TASK-{task_id:03d}.md"
     
-    if not os.path.exists(path):
+    if not path.exists():
         return f"Error: Task TASK-{task_id:03d} not found."
     
     # Check current status
@@ -179,8 +179,7 @@ def implement_task(task_id):
         return f"Task TASK-{task_id:03d} is already completed."
     
     # Get task content
-    with open(path, "r", encoding="utf-8") as f:
-        task_content = f.read()
+    task_content = path.read_text(encoding="utf-8")
     
     # Update status to done
     result = _update_task_status(task_id, "done")
@@ -194,14 +193,13 @@ def implement_all_tasks():
     """Implement all pending tasks one by one."""
     _ensure_tasks_dir()
     
-    files = sorted(f for f in os.listdir(TASKS_DIR) if f.endswith(".md"))
+    files = sorted(_get_tasks_dir().glob("*.md"))
     if not files:
         return "No tasks found."
     
     pending_tasks = []
-    for fname in files:
-        path = os.path.join(TASKS_DIR, fname)
-        task_id = _extract_id(fname)
+    for path in files:
+        task_id = _extract_id(path.name)
         status = _parse_status(path)
         if task_id is not None and status != "done":
             pending_tasks.append((task_id, path))
@@ -214,8 +212,7 @@ def implement_all_tasks():
     
     results = []
     for task_id, path in pending_tasks:
-        with open(path, "r", encoding="utf-8") as f:
-            task_content = f.read()
+        task_content = path.read_text(encoding="utf-8")
         
         results.append(f"=== Implementing TASK-{task_id:03d} ===\n{task_content}\n")
         
