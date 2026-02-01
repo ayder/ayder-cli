@@ -44,7 +44,7 @@ def print_welcome_banner(model, cwd):
     # Right-column content (plain text for width calc, formatted for display)
     info = [
         ("", ""),
-        (f"{W}ayder-cli v0.1.0{R}", "ayder-cli v0.1.0"),
+        (f"{W}ayder-cli v0.4.1{R}", "ayder-cli v0.4.1"),
         (f"{S}{model} · Ollama{R}", f"{model} · Ollama"),
         (f"{G}{display_cwd}{R}", display_cwd),
         ("", ""),
