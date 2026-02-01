@@ -233,10 +233,12 @@ class TestRunShellCommand:
 
     @pytest.mark.skip(reason="Disabled - takes too long to run")
     def test_timeout_handling(self):
-        """Test timeout handling."""
-        # Start a command that sleeps longer than the timeout
-        result = fs_tools.run_shell_command("sleep 65")
-        assert "Error: Command timed out" in result
+        """Test timeout handling - DISABLED."""
+        # This test is disabled because it takes 65+ seconds to run
+        # To test timeout manually, run:
+        #   result = fs_tools.run_shell_command("sleep 65")
+        #   assert "Error: Command timed out" in result
+        pytest.skip("Timeout test disabled - see test source for manual test instructions")
 
     def test_error_handling_invalid_command(self):
         """Test error handling for invalid commands."""

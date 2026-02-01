@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+import shutil
 from ayder_cli.tasks import create_task, show_task, implement_task, implement_all_tasks
 
 # --- 1. Tool Implementations ---
@@ -86,18 +87,229 @@ def run_shell_command(command):
             text=True,
             timeout=60
         )
-        
+
         output = f"Exit Code: {result.returncode}\n"
         if result.stdout:
             output += f"STDOUT:\n{result.stdout}\n"
         if result.stderr:
             output += f"STDERR:\n{result.stderr}\n"
-            
+
         return output
     except subprocess.TimeoutExpired:
         return "Error: Command timed out."
     except Exception as e:
         return f"Error executing command: {str(e)}"
+
+def get_project_structure(max_depth=3):
+    """Generate a tree-style project structure summary."""
+    tree_path = shutil.which("tree")
+
+    if tree_path:
+        cmd = [
+            tree_path, "-L", str(max_depth),
+            "-I", "__pycache__|*.pyc|*.egg-info|.venv|.ayder|.claude|htmlcov|dist|build",
+            "--charset", "ascii", "--noreport"
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=".")
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+
+    # Fallback to manual tree generation
+    return _generate_manual_tree(max_depth)
+
+
+def _generate_manual_tree(max_depth=3, directory="."):
+    """Fallback manual tree generator."""
+    IGNORE_DIRS = {"__pycache__", ".venv", ".ayder", ".claude", ".git", "htmlcov", "dist", "build", "node_modules"}
+    IGNORE_PATTERNS = {".pyc", ".egg-info"}
+
+    def should_ignore(name):
+        return name in IGNORE_DIRS or any(name.endswith(p) for p in IGNORE_PATTERNS)
+
+    lines = [os.path.basename(os.path.abspath(directory)) or "."]
+
+    def walk_dir(path, prefix="", depth=0):
+        if depth >= max_depth:
+            return
+        try:
+            entries = sorted(os.listdir(path))
+        except PermissionError:
+            return
+
+        dirs = [e for e in entries if os.path.isdir(os.path.join(path, e)) and not should_ignore(e)]
+        files = [e for e in entries if os.path.isfile(os.path.join(path, e)) and not should_ignore(e)]
+
+        for i, d in enumerate(dirs):
+            is_last_dir = (i == len(dirs) - 1) and len(files) == 0
+            connector = "`-- " if is_last_dir else "|-- "
+            lines.append(f"{prefix}{connector}{d}/")
+            new_prefix = prefix + ("    " if is_last_dir else "|   ")
+            walk_dir(os.path.join(path, d), new_prefix, depth + 1)
+
+        for i, f in enumerate(files):
+            is_last = i == len(files) - 1
+            connector = "`-- " if is_last else "|-- "
+            lines.append(f"{prefix}{connector}{f}")
+
+    walk_dir(directory)
+    return "\n".join(lines)
+
+def search_codebase(pattern, file_pattern=None, case_sensitive=True,
+                   context_lines=0, max_results=50, directory="."):
+    """
+    Search for a pattern across the codebase using ripgrep (or grep fallback).
+    Returns matching lines with file paths and line numbers.
+    """
+    try:
+        rg_path = shutil.which("rg")
+
+        if rg_path:
+            return _search_with_ripgrep(pattern, file_pattern, case_sensitive,
+                                       context_lines, max_results, directory)
+        else:
+            return _search_with_grep(pattern, file_pattern, case_sensitive,
+                                    context_lines, max_results, directory)
+    except Exception as e:
+        return f"Error during search: {str(e)}"
+
+
+def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
+                        context_lines, max_results, directory):
+    """Implementation using ripgrep."""
+    cmd = [shutil.which("rg"), "--line-number", "--heading",
+           "--color", "never", "--no-messages", "--max-count", str(max_results)]
+
+    if not case_sensitive:
+        cmd.append("--ignore-case")
+    if context_lines > 0:
+        cmd.extend(["--context", str(context_lines)])
+    if file_pattern:
+        cmd.extend(["--glob", file_pattern])
+
+    # Ignore common build artifacts
+    for ignore in ["!.git/", "!__pycache__/", "!*.pyc", "!.venv/", "!.ayder/",
+                   "!.claude/", "!dist/", "!build/", "!*.egg-info/", "!htmlcov/"]:
+        cmd.extend(["--glob", ignore])
+
+    cmd.extend([pattern, directory])
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            return _format_search_results(result.stdout, pattern, max_results)
+        elif result.returncode == 1:
+            return f"=== SEARCH RESULTS ===\nPattern: \"{pattern}\"\nNo matches found.\n=== END SEARCH RESULTS ==="
+        else:
+            return f"Error: ripgrep failed with exit code {result.returncode}\n{result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "Error: Search timed out after 60 seconds."
+    except Exception as e:
+        return f"Error executing ripgrep: {str(e)}"
+
+
+def _search_with_grep(pattern, file_pattern, case_sensitive,
+                     context_lines, max_results, directory):
+    """Fallback implementation using grep."""
+    cmd = ["grep", "-r", "-n", "-E"]
+
+    if not case_sensitive:
+        cmd.append("-i")
+    if context_lines > 0:
+        cmd.extend(["-C", str(context_lines)])
+
+    # Add exclusions
+    for exclude_dir in [".git", "__pycache__", ".venv", ".ayder", ".claude",
+                       "dist", "build", "htmlcov"]:
+        cmd.extend([f"--exclude-dir={exclude_dir}"])
+    cmd.append("--exclude=*.pyc")
+
+    # File pattern (simplified for grep)
+    if file_pattern:
+        include_pattern = file_pattern.split("/")[-1]
+        cmd.extend(["--include", include_pattern])
+
+    cmd.extend([pattern, directory])
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            # Grep output format is different from ripgrep, so format it
+            return _format_grep_results(result.stdout, pattern, max_results)
+        elif result.returncode == 1:
+            return f"=== SEARCH RESULTS ===\nPattern: \"{pattern}\"\nNo matches found.\n=== END SEARCH RESULTS ==="
+        else:
+            return f"Error: grep failed with exit code {result.returncode}\n{result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "Error: Search timed out after 60 seconds."
+    except Exception as e:
+        return f"Error executing grep: {str(e)}"
+
+
+def _format_search_results(raw_output, pattern, max_results):
+    """Format ripgrep --heading output for LLM consumption."""
+    lines = raw_output.strip().split('\n')
+    formatted = ["=== SEARCH RESULTS ===", f"Pattern: \"{pattern}\"", ""]
+
+    current_file = None
+    match_count = 0
+
+    for line in lines:
+        if match_count >= max_results:
+            break
+
+        # Ripgrep --heading format: blank line, then file path, then matches
+        if not line:
+            continue
+        elif ':' not in line or line[0] not in '0123456789':
+            # This is a file path header
+            if current_file:
+                formatted.append("")
+            current_file = line
+            formatted.append("─" * 67)
+            formatted.append(f"FILE: {current_file}")
+            formatted.append("─" * 67)
+        elif current_file:
+            # This is a match line
+            formatted.append(f"Line {line}")
+            match_count += 1
+
+    formatted.insert(2, f"Matches found: {match_count}\n")
+    formatted.append("\n=== END SEARCH RESULTS ===")
+    return "\n".join(formatted)
+
+
+def _format_grep_results(raw_output, pattern, max_results):
+    """Format grep output (file:line:content) for LLM consumption."""
+    lines = raw_output.strip().split('\n')
+    formatted = ["=== SEARCH RESULTS ===", f"Pattern: \"{pattern}\"", ""]
+
+    # Group by file
+    file_matches = {}
+    for line in lines[:max_results]:
+        if ':' in line:
+            parts = line.split(':', 2)
+            if len(parts) >= 3:
+                file_path, line_num, content = parts[0], parts[1], parts[2]
+                if file_path not in file_matches:
+                    file_matches[file_path] = []
+                file_matches[file_path].append((line_num, content))
+
+    match_count = sum(len(matches) for matches in file_matches.values())
+    formatted.insert(2, f"Matches found: {match_count}\n")
+
+    for file_path, matches in file_matches.items():
+        formatted.append("─" * 67)
+        formatted.append(f"FILE: {file_path}")
+        formatted.append("─" * 67)
+        for line_num, content in matches:
+            formatted.append(f"Line {line_num}: {content}")
+        formatted.append("")
+
+    formatted.append("=== END SEARCH RESULTS ===")
+    return "\n".join(formatted)
 
 # --- 2. Tool Definitions (JSON Schema) ---
 
@@ -229,6 +441,43 @@ tools_schema = [
                 "properties": {}
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_codebase",
+            "description": "Search for a regex pattern across the codebase. Returns matching lines with file paths and line numbers. Use this to locate code before reading files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The regex pattern to search for (e.g., 'def read_file', 'class.*Test', 'TODO.*bug')"
+                    },
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "Optional file glob pattern to limit search (e.g., '*.py', 'src/**/*.js')"
+                    },
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "Whether the search is case-sensitive (default: true)"
+                    },
+                    "context_lines": {
+                        "type": "integer",
+                        "description": "Number of context lines to show before/after each match (default: 0)"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of matches to return (default: 50)"
+                    },
+                    "directory": {
+                        "type": "string",
+                        "description": "Root directory to search (default: '.')"
+                    }
+                },
+                "required": ["pattern"]
+            }
+        }
     }
 ]
 
@@ -263,5 +512,7 @@ def execute_tool_call(tool_name, arguments):
         return implement_task(**args)
     elif tool_name == "implement_all_tasks":
         return implement_all_tasks(**args)
+    elif tool_name == "search_codebase":
+        return search_codebase(**args)
     else:
         return f"Error: Unknown tool '{tool_name}'"
