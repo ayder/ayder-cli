@@ -5,6 +5,7 @@ import re
 import pytest
 from datetime import datetime
 from unittest import mock
+from pathlib import Path
 
 import ayder_cli.tasks as tasks_module
 from ayder_cli.tasks import (
@@ -19,17 +20,46 @@ from ayder_cli.tasks import (
     _update_task_status,
     implement_task,
     implement_all_tasks,
+    get_project_context,
 )
+from ayder_cli.path_context import ProjectContext
 
 
 @pytest.fixture
 def project_context(tmp_path, monkeypatch):
     """Create a project context with tmp_path as root and set it for tasks."""
-    from ayder_cli.path_context import ProjectContext
-    
     ctx = ProjectContext(str(tmp_path))
     monkeypatch.setattr(tasks_module, "_default_project_ctx", ctx)
     return ctx
+
+
+class TestGetProjectContext:
+    """Tests for get_project_context() function - Line 16 coverage."""
+
+    def test_module_context_lazy_initialization(self, tmp_path, monkeypatch):
+        """Test lazy initialization of module-level ProjectContext - Line 16."""
+        # Clear the global state to trigger initialization
+        monkeypatch.setattr(tasks_module, "_default_project_ctx", None)
+        
+        # Change to tmp_path for initialization
+        monkeypatch.chdir(tmp_path)
+        
+        # Access should trigger initialization
+        ctx = get_project_context()
+        
+        assert ctx is not None
+        assert isinstance(ctx, ProjectContext)
+        assert ctx.root == tmp_path
+
+    def test_module_context_returns_existing(self, tmp_path, monkeypatch):
+        """Test that existing context is returned if already set."""
+        # Set a specific context
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(tasks_module, "_default_project_ctx", ctx)
+        
+        # Should return the same context
+        result = get_project_context()
+        assert result is ctx
 
 
 class TestEnsureTasksDir:
@@ -452,6 +482,36 @@ Test.
         assert "- **Status:** new_status" in content
         assert "custom_status" not in content
 
+    def test_exception_during_file_write(self, tmp_path, monkeypatch, project_context):
+        """Test exception handling during file write - Lines 175-176."""
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
+        mock_tasks_dir.mkdir(parents=True)
+        
+        # Create task
+        task_content = """# Test Task
+
+- **ID:** TASK-001
+- **Status:** pending
+- **Created:** 2024-01-01 12:00:00
+
+## Description
+
+Test.
+"""
+        task_file = mock_tasks_dir / "TASK-001.md"
+        task_file.write_text(task_content)
+        
+        # Mock write_text to raise an exception
+        def mock_write_text(*args, **kwargs):
+            raise PermissionError("Permission denied")
+        
+        monkeypatch.setattr(Path, "write_text", mock_write_text)
+        
+        result = _update_task_status(1, "done")
+        
+        assert "Error" in result
+        assert "Permission denied" in result
+
 
 class TestImplementTask:
     """Test implement_task() function."""
@@ -500,6 +560,22 @@ class TestImplementTask:
         # Verify status changed
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** done" in content
+
+    def test_error_when_status_update_fails(self, tmp_path, monkeypatch, project_context):
+        """Test error return when _update_task_status fails - Line 199."""
+        create_task("Test Task")
+        
+        # Mock _update_task_status to return an error
+        monkeypatch.setattr(
+            tasks_module,
+            "_update_task_status",
+            lambda task_id, status: "Error: Failed to update"
+        )
+        
+        result = implement_task(1)
+        
+        # Should return the error from _update_task_status
+        assert "Error: Failed to update" in result
 
 
 class TestImplementAllTasks:

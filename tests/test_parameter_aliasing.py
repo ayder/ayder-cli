@@ -4,55 +4,79 @@ Tests the defensive tool calling improvements in TASK-002.
 """
 
 import pytest
+import tempfile
+import os
 from ayder_cli import fs_tools
 from ayder_cli.parser import parse_custom_tool_calls, _infer_parameter_name
 from pathlib import Path
+from ayder_cli.path_context import ProjectContext
+import ayder_cli.tools.impl as impl_module
 
 
-@pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
 def test_parameter_aliases_file_path():
     """Test that 'path' and 'absolute_path' are aliased to 'file_path'."""
-    # Test 'path' → 'file_path'
-    args = {"path": "/tmp/test.txt"}
-    normalized = fs_tools.normalize_tool_arguments("read_file", args)
-    assert "file_path" in normalized
-    assert "path" not in normalized
+    # Create a temp directory as project root for sandboxing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Set up project context with temp directory as root
+        original_ctx = impl_module._default_project_ctx
+        ctx = ProjectContext(tmp_dir)
+        impl_module._default_project_ctx = ctx
+        
+        try:
+            test_file = os.path.join(tmp_dir, "test.txt")
+            
+            # Test 'path' → 'file_path'
+            args = {"path": "test.txt"}
+            normalized = fs_tools.normalize_tool_arguments("read_file", args)
+            assert "file_path" in normalized
+            assert "path" not in normalized
 
-    # Test 'absolute_path' → 'file_path'
-    args = {"absolute_path": "/tmp/test.txt"}
-    normalized = fs_tools.normalize_tool_arguments("read_file", args)
-    assert "file_path" in normalized
-    assert "absolute_path" not in normalized
+            # Test 'absolute_path' → 'file_path'
+            args = {"absolute_path": "test.txt"}
+            normalized = fs_tools.normalize_tool_arguments("read_file", args)
+            assert "file_path" in normalized
+            assert "absolute_path" not in normalized
 
-    # Test 'filepath' → 'file_path'
-    args = {"filepath": "/tmp/test.txt"}
-    normalized = fs_tools.normalize_tool_arguments("read_file", args)
-    assert "file_path" in normalized
-    assert "filepath" not in normalized
+            # Test 'filepath' → 'file_path'
+            args = {"filepath": "test.txt"}
+            normalized = fs_tools.normalize_tool_arguments("read_file", args)
+            assert "file_path" in normalized
+            assert "filepath" not in normalized
 
-    print("✓ Parameter aliases work for file_path")
+            print("✓ Parameter aliases work for file_path")
+        finally:
+            impl_module._default_project_ctx = original_ctx
 
 
-@pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
 def test_parameter_aliases_list_files():
     """Test that 'dir', 'path', 'folder' are aliased to 'directory'."""
-    # Test 'dir' → 'directory'
-    args = {"dir": "/tmp"}
-    normalized = fs_tools.normalize_tool_arguments("list_files", args)
-    assert "directory" in normalized
-    assert "dir" not in normalized
+    # Create a temp directory as project root for sandboxing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Set up project context with temp directory as root
+        original_ctx = impl_module._default_project_ctx
+        ctx = ProjectContext(tmp_dir)
+        impl_module._default_project_ctx = ctx
+        
+        try:
+            # Test 'dir' → 'directory'
+            args = {"dir": "."}
+            normalized = fs_tools.normalize_tool_arguments("list_files", args)
+            assert "directory" in normalized
+            assert "dir" not in normalized
 
-    # Test 'path' → 'directory'
-    args = {"path": "/tmp"}
-    normalized = fs_tools.normalize_tool_arguments("list_files", args)
-    assert "directory" in normalized
+            # Test 'path' → 'directory'
+            args = {"path": "."}
+            normalized = fs_tools.normalize_tool_arguments("list_files", args)
+            assert "directory" in normalized
 
-    # Test 'folder' → 'directory'
-    args = {"folder": "/tmp"}
-    normalized = fs_tools.normalize_tool_arguments("list_files", args)
-    assert "directory" in normalized
+            # Test 'folder' → 'directory'
+            args = {"folder": "."}
+            normalized = fs_tools.normalize_tool_arguments("list_files", args)
+            assert "directory" in normalized
 
-    print("✓ Parameter aliases work for list_files")
+            print("✓ Parameter aliases work for list_files")
+        finally:
+            impl_module._default_project_ctx = original_ctx
 
 
 def test_path_resolution_to_absolute():
@@ -65,17 +89,26 @@ def test_path_resolution_to_absolute():
     print("✓ Paths are resolved to absolute")
 
 
-@pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
 def test_type_coercion_line_numbers():
     """Test that string line numbers are coerced to integers."""
-    args = {"file_path": "/tmp/test.txt", "start_line": "10", "end_line": "20"}
-    normalized = fs_tools.normalize_tool_arguments("read_file", args)
-    assert isinstance(normalized["start_line"], int), f"start_line should be int, got {type(normalized['start_line'])}"
-    assert isinstance(normalized["end_line"], int), f"end_line should be int, got {type(normalized['end_line'])}"
-    assert normalized["start_line"] == 10
-    assert normalized["end_line"] == 20
+    # Create a temp directory as project root for sandboxing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Set up project context with temp directory as root
+        original_ctx = impl_module._default_project_ctx
+        ctx = ProjectContext(tmp_dir)
+        impl_module._default_project_ctx = ctx
+        
+        try:
+            args = {"file_path": "test.txt", "start_line": "10", "end_line": "20"}
+            normalized = fs_tools.normalize_tool_arguments("read_file", args)
+            assert isinstance(normalized["start_line"], int), f"start_line should be int, got {type(normalized['start_line'])}"
+            assert isinstance(normalized["end_line"], int), f"end_line should be int, got {type(normalized['end_line'])}"
+            assert normalized["start_line"] == 10
+            assert normalized["end_line"] == 20
 
-    print("✓ Type coercion works for line numbers")
+            print("✓ Type coercion works for line numbers")
+        finally:
+            impl_module._default_project_ctx = original_ctx
 
 
 def test_validation_missing_required_params():
@@ -88,15 +121,24 @@ def test_validation_missing_required_params():
     print("✓ Validation catches missing required parameters")
 
 
-@pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
 def test_validation_wrong_type():
     """Test that validation catches wrong parameter types."""
-    args = {"file_path": "/tmp/test.txt", "start_line": "not_a_number"}
-    normalized = fs_tools.normalize_tool_arguments("read_file", args)
-    is_valid, error_msg = fs_tools.validate_tool_call("read_file", normalized)
-    # This should still pass because we keep invalid strings as-is during coercion
-    # The actual execution will handle the error
-    print("✓ Validation handles type mismatches appropriately")
+    # Create a temp directory as project root for sandboxing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Set up project context with temp directory as root
+        original_ctx = impl_module._default_project_ctx
+        ctx = ProjectContext(tmp_dir)
+        impl_module._default_project_ctx = ctx
+        
+        try:
+            args = {"file_path": "test.txt", "start_line": "not_a_number"}
+            normalized = fs_tools.normalize_tool_arguments("read_file", args)
+            is_valid, error_msg = fs_tools.validate_tool_call("read_file", normalized)
+            # This should still pass because we keep invalid strings as-is during coercion
+            # The actual execution will handle the error
+            print("✓ Validation handles type mismatches appropriately")
+        finally:
+            impl_module._default_project_ctx = original_ctx
 
 
 def test_parser_standard_format():
@@ -194,14 +236,28 @@ def test_combined_alias_and_normalization():
     print("✓ Combined aliasing and normalization works")
 
 
-@pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
 def test_backward_compatibility():
     """Test that correct parameter names still work."""
-    args = {"file_path": "/tmp/test.txt"}
-    normalized = fs_tools.normalize_tool_arguments("read_file", args)
-    assert normalized["file_path"] == str(Path("/tmp/test.txt").resolve())
+    # Create a temp directory as project root for sandboxing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Set up project context with temp directory as root
+        ctx = ProjectContext(tmp_dir)
+        
+        # We need to patch the get_project_context function used by normalize_tool_arguments
+        from ayder_cli.tools import registry
+        original_get_ctx = registry.get_project_context
+        registry.get_project_context = lambda: ctx
+        
+        try:
+            args = {"file_path": "test.txt"}
+            normalized = fs_tools.normalize_tool_arguments("read_file", args)
+            # Path should be resolved within the sandbox (use resolved path for comparison)
+            assert "test.txt" in normalized["file_path"]
+            assert normalized["file_path"].endswith("test.txt")
 
-    print("✓ Backward compatibility maintained")
+            print("✓ Backward compatibility maintained")
+        finally:
+            registry.get_project_context = original_get_ctx
 
 
 if __name__ == "__main__":

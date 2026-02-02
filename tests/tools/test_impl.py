@@ -2,19 +2,50 @@
 
 import json
 import sys
+import subprocess
+import shutil
+from unittest.mock import patch, MagicMock
 import pytest
 from pathlib import Path
 from ayder_cli.tools import impl
+from ayder_cli.path_context import ProjectContext
 
 
 @pytest.fixture
 def project_context(tmp_path, monkeypatch):
     """Create a project context with tmp_path as root and set it for tools."""
-    from ayder_cli.path_context import ProjectContext
-    
     ctx = ProjectContext(str(tmp_path))
     monkeypatch.setattr(impl, "_default_project_ctx", ctx)
     return ctx
+
+
+class TestGetProjectContext:
+    """Tests for get_project_context() function - Line 24 coverage."""
+
+    def test_module_context_lazy_initialization(self, tmp_path, monkeypatch):
+        """Test lazy initialization of module-level ProjectContext - Line 24."""
+        # Clear the global state to trigger initialization
+        monkeypatch.setattr(impl, "_default_project_ctx", None)
+        
+        # Change to tmp_path for initialization
+        monkeypatch.chdir(tmp_path)
+        
+        # Access should trigger initialization
+        ctx = impl.get_project_context()
+        
+        assert ctx is not None
+        assert isinstance(ctx, ProjectContext)
+        assert ctx.root == tmp_path
+
+    def test_module_context_returns_existing(self, tmp_path, monkeypatch):
+        """Test that existing context is returned if already set."""
+        # Set a specific context
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+        
+        # Should return the same context
+        result = impl.get_project_context()
+        assert result is ctx
 
 
 class TestListFiles:
@@ -243,17 +274,236 @@ class TestRunShellCommand:
         result = impl.run_shell_command("exit 1")
         assert "Exit Code: 1" in result
 
-    @pytest.mark.skip(reason="Disabled - takes too long to run")
-    def test_timeout_handling(self):
-        """Test timeout handling - DISABLED."""
-        # This test is disabled because it takes 65+ seconds to run
-        # To test timeout manually, run:
-        #   result = impl.run_shell_command("sleep 65")
-        #   assert "Error: Command timed out" in result
-        pytest.skip("Timeout test disabled - see test source for manual test instructions")
+    # Note: test_timeout_handling was removed because it takes 65+ seconds
+    # To test timeout manually, run:
+    #   result = impl.run_shell_command("sleep 65")
+    #   assert "Error: Command timed out" in result
 
     def test_error_handling_invalid_command(self, project_context):
         """Test error handling for invalid commands."""
         result = impl.run_shell_command("invalid_command_xyz_12345")
         # Should return error output or error message
         assert "Exit Code:" in result or "Error executing command" in result
+
+
+class TestRunShellCommandExceptions:
+    """Test exception handling in run_shell_command - Lines 205-206."""
+
+    def test_exception_handling_general_error(self, project_context):
+        """Test general exception handling - Lines 205-206."""
+        with patch('subprocess.run', side_effect=OSError("Mocked OS error")):
+            result = impl.run_shell_command("echo test")
+            assert "Error executing command" in result
+            assert "Mocked OS error" in result
+
+
+class TestReadFileExceptions:
+    """Test exception handling in read_file - Lines 90-91."""
+
+    def test_read_file_general_exception(self, tmp_path, project_context):
+        """Test general exception handling in read_file."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+        
+        with patch('builtins.open', side_effect=IOError("Mocked IO error")):
+            result = impl.read_file(str(test_file))
+            assert "Error reading file" in result
+            assert "Mocked IO error" in result
+
+
+class TestWriteFileExceptions:
+    """Test exception handling in write_file - Lines 108-109."""
+
+    def test_write_file_general_exception(self, tmp_path, project_context):
+        """Test general exception handling in write_file."""
+        with patch('builtins.open', side_effect=PermissionError("Permission denied")):
+            result = impl.write_file("test.txt", "content")
+            assert "Error writing file" in result
+            assert "Permission denied" in result
+
+
+class TestReplaceStringExceptions:
+    """Test exception handling in replace_string - Lines 162-163."""
+
+    def test_replace_string_general_exception(self, tmp_path, project_context):
+        """Test general exception handling in replace_string."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+        
+        with patch('builtins.open', side_effect=IOError("Mocked IO error")):
+            result = impl.replace_string(str(test_file), "old", "new")
+            assert "Error replacing text" in result
+            assert "Mocked IO error" in result
+
+
+class TestSearchCodebaseErrors:
+    """Test error handling in search_codebase - Lines 239-240, 248, 252-253."""
+
+    def test_search_codebase_path_not_directory(self, tmp_path, project_context):
+        """Test error when path is not a directory - Lines 239-240."""
+        # Create a file
+        test_file = tmp_path / "not_a_dir.txt"
+        test_file.write_text("content")
+        
+        result = impl.search_codebase("pattern", directory="not_a_dir.txt")
+        assert "Error" in result
+        assert "is not a directory" in result
+
+    def test_search_codebase_value_error_security(self, tmp_path, monkeypatch):
+        """Test ValueError handling for security errors - Lines 252-253."""
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+        
+        result = impl.search_codebase("pattern", directory="/etc")
+        assert "Security Error" in result
+
+    def test_search_codebase_general_exception(self, tmp_path, monkeypatch):
+        """Test general exception handling - Line 248."""
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+        
+        # Mock get_project_context to raise an exception
+        def mock_get_context():
+            raise RuntimeError("Mocked error")
+        
+        monkeypatch.setattr(impl, "get_project_context", mock_get_context)
+        
+        result = impl.search_codebase("pattern")
+        assert "Error during search" in result
+
+
+class TestSearchWithRipgrepErrors:
+    """Test _search_with_ripgrep error paths - Lines 283-287."""
+
+    def test_ripgrep_non_zero_exit(self, tmp_path, project_context):
+        """Test ripgrep non-zero exit code handling - Line 283."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('shutil.which', return_value='/usr/bin/rg'):
+            with patch('subprocess.run') as mock_run:
+                mock_run.return_value = MagicMock(returncode=2, stderr="Mocked error")
+                
+                result = impl._search_with_ripgrep(
+                    "pattern", None, True, 0, 50, tmp_path, ctx
+                )
+                assert "Error: ripgrep failed" in result
+                assert "exit code 2" in result
+
+    def test_ripgrep_timeout(self, tmp_path, project_context):
+        """Test ripgrep timeout handling - Lines 284-285."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('shutil.which', return_value='/usr/bin/rg'):
+            with patch('subprocess.run', side_effect=subprocess.TimeoutExpired("cmd", 60)):
+                result = impl._search_with_ripgrep(
+                    "pattern", None, True, 0, 50, tmp_path, ctx
+                )
+                assert "Search timed out" in result
+
+    def test_ripgrep_general_exception(self, tmp_path, project_context):
+        """Test ripgrep general exception handling - Lines 286-287."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('shutil.which', return_value='/usr/bin/rg'):
+            with patch('subprocess.run', side_effect=OSError("Mocked error")):
+                result = impl._search_with_ripgrep(
+                    "pattern", None, True, 0, 50, tmp_path, ctx
+                )
+                assert "Error executing ripgrep" in result
+
+
+class TestSearchWithGrepFallback:
+    """Test _search_with_grep fallback - Lines 293-325."""
+
+    def test_grep_fallback_used_when_no_ripgrep(self, tmp_path, project_context):
+        """Test grep fallback when ripgrep is not available - Lines 293-325."""
+        # Create a test file with content
+        test_file = tmp_path / "test.py"
+        test_file.write_text("def hello():\n    print('hello')\n")
+        
+        ctx = ProjectContext(str(tmp_path))
+        
+        # Mock shutil.which to return None for rg (ripgrep not found)
+        with patch('shutil.which', return_value=None):
+            result = impl.search_codebase("hello", directory=str(tmp_path))
+            # Should use grep fallback and find the pattern
+            assert "SEARCH RESULTS" in result
+
+    def test_grep_no_matches(self, tmp_path, project_context):
+        """Test grep when no matches found - Line 319."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="")
+            
+            result = impl._search_with_grep(
+                "nonexistent_pattern", None, True, 0, 50, tmp_path, ctx
+            )
+            assert "No matches found" in result
+
+    def test_grep_non_zero_exit(self, tmp_path, project_context):
+        """Test grep non-zero exit code handling - Line 321."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=2, stderr="Mocked grep error")
+            
+            result = impl._search_with_grep(
+                "pattern", None, True, 0, 50, tmp_path, ctx
+            )
+            assert "Error: grep failed" in result
+            assert "exit code 2" in result
+
+    def test_grep_timeout(self, tmp_path, project_context):
+        """Test grep timeout handling - Lines 322-323."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired("cmd", 60)):
+            result = impl._search_with_grep(
+                "pattern", None, True, 0, 50, tmp_path, ctx
+            )
+            assert "Search timed out" in result
+
+    def test_grep_general_exception(self, tmp_path, project_context):
+        """Test grep general exception handling - Lines 324-325."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        with patch('subprocess.run', side_effect=OSError("Mocked error")):
+            result = impl._search_with_grep(
+                "pattern", None, True, 0, 50, tmp_path, ctx
+            )
+            assert "Error executing grep" in result
+
+
+class TestFormatSearchResultsErrors:
+    """Test error handling in _format_search_results - Lines 351-352."""
+
+    def test_format_search_results_path_conversion_error(self, tmp_path, project_context):
+        """Test path conversion error handling in _format_search_results."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        # Create raw output with a path that will cause conversion issues
+        raw_output = "/some/random/path.py\n1: print('hello')\n"
+        
+        result = impl._format_search_results(raw_output, "pattern", 50, ctx)
+        
+        # Should still format without crashing
+        assert "SEARCH RESULTS" in result
+        assert "Pattern:" in result
+
+
+class TestFormatGrepResultsErrors:
+    """Test error handling in _format_grep_results - Lines 391-392."""
+
+    def test_format_grep_results_path_conversion_error(self, tmp_path, project_context):
+        """Test path conversion error handling in _format_grep_results."""
+        ctx = ProjectContext(str(tmp_path))
+        
+        # Create raw output with a path that will cause conversion issues
+        raw_output = "/some/random/path.py:1:print('hello')\n"
+        
+        result = impl._format_grep_results(raw_output, "pattern", 50, ctx)
+        
+        # Should still format without crashing
+        assert "SEARCH RESULTS" in result
+        assert "Pattern:" in result

@@ -4,6 +4,8 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock
 from ayder_cli.tools import registry
+from ayder_cli.tools import impl
+from ayder_cli.path_context import ProjectContext
 
 
 class TestValidateToolCallEdgeCases:
@@ -43,16 +45,19 @@ class TestValidateToolCallEdgeCases:
 class TestToolRegistryExecute:
     """Test ToolRegistry.execute() method directly."""
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - tmp_path outside project root")
-    def test_execute_with_json_string_arguments(self, tmp_path):
+    def test_execute_with_json_string_arguments(self, tmp_path, monkeypatch):
         """Lines 145-149: Execute with JSON string arguments."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         reg = registry.ToolRegistry()
         reg.register("read_file", lambda file_path: open(file_path).read())
 
-        result = reg.execute("read_file", f'{{"file_path": "{test_file}"}}')
+        result = reg.execute("read_file", '{"file_path": "test.txt"}')
 
         assert result == "test content"
 
@@ -114,16 +119,19 @@ class TestToolRegistryExecute:
         assert "Missing required parameter" in result
         mock_func.assert_not_called()
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - tmp_path outside project root")
-    def test_execute_with_dict_arguments(self, tmp_path):
+    def test_execute_with_dict_arguments(self, tmp_path, monkeypatch):
         """Lines 150-151, 154: Execute with dict arguments."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         reg = registry.ToolRegistry()
         reg.register("read_file", lambda file_path: open(file_path).read())
 
-        result = reg.execute("read_file", {"file_path": str(test_file)})
+        result = reg.execute("read_file", {"file_path": "test.txt"})
 
         assert result == "content"
 
@@ -177,24 +185,32 @@ class TestCreateDefaultRegistry:
         for tool in expected_tools:
             assert tool in tool_names, f"Tool {tool} not registered"
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - fix in test refactoring")
-    def test_create_default_registry_executes_read_file(self, tmp_path):
+    def test_create_default_registry_executes_read_file(self, tmp_path, monkeypatch):
         """Lines 188-218: Registry can execute read_file."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 
+        # Set up project context with tmp_path as root (need both registry and impl)
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "_default_project_ctx", ctx)
+        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+
         reg = registry.create_default_registry()
-        result = reg.execute("read_file", {"file_path": str(test_file)})
+        result = reg.execute("read_file", {"file_path": "test.txt"})
 
         assert result == "test content"
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - fix in test refactoring")
-    def test_create_default_registry_executes_list_files(self, tmp_path):
+    def test_create_default_registry_executes_list_files(self, tmp_path, monkeypatch):
         """Lines 188-218: Registry can execute list_files."""
         (tmp_path / "file.txt").write_text("content")
 
+        # Set up project context with tmp_path as root (need both registry and impl)
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "_default_project_ctx", ctx)
+        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+
         reg = registry.create_default_registry()
-        result = reg.execute("list_files", {"directory": str(tmp_path)})
+        result = reg.execute("list_files", {"directory": "."})
 
         files = json.loads(result)
         assert "file.txt" in files
@@ -266,24 +282,32 @@ class TestNormalizeToolArgumentsEdgeCases:
         result = registry.normalize_tool_arguments("read_file", {})
         assert result == {}
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - tmp_path outside project root")
-    def test_normalize_path_resolution(self, tmp_path):
+    def test_normalize_path_resolution(self, tmp_path, monkeypatch):
         """Path parameters are resolved to absolute."""
-        relative_path = str(tmp_path / ".." / "test.txt")
+        # Create a file to test with
+        (tmp_path / "test.txt").write_text("content")
+
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
 
         result = registry.normalize_tool_arguments("read_file", {
-            "file_path": relative_path
+            "file_path": "test.txt"
         })
 
-        # Should be absolute path
+        # Should be absolute path within the project root
         assert result["file_path"].startswith("/")
+        assert "test.txt" in result["file_path"]
         assert ".." not in result["file_path"]
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
-    def test_normalize_integer_type_coercion(self):
+    def test_normalize_integer_type_coercion(self, tmp_path, monkeypatch):
         """String integers are coerced to int."""
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         result = registry.normalize_tool_arguments("read_file", {
-            "file_path": "/test.txt",
+            "file_path": "test.txt",
             "start_line": "10",
             "end_line": "20"
         })
@@ -293,11 +317,14 @@ class TestNormalizeToolArgumentsEdgeCases:
         assert isinstance(result["start_line"], int)
         assert isinstance(result["end_line"], int)
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
-    def test_normalize_invalid_integer_kept_as_string(self):
+    def test_normalize_invalid_integer_kept_as_string(self, tmp_path, monkeypatch):
         """Invalid integer strings are kept as-is."""
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         result = registry.normalize_tool_arguments("read_file", {
-            "file_path": "/test.txt",
+            "file_path": "test.txt",
             "start_line": "not_a_number"
         })
 
@@ -307,33 +334,42 @@ class TestNormalizeToolArgumentsEdgeCases:
 class TestParameterAliases:
     """Test parameter alias handling."""
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
-    def test_path_alias_for_read_file(self):
+    def test_path_alias_for_read_file(self, tmp_path, monkeypatch):
         """'path' is converted to 'file_path'."""
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         result = registry.normalize_tool_arguments("read_file", {
-            "path": "/test.txt"
+            "path": "test.txt"
         })
 
         assert "file_path" in result
-        assert result["file_path"] == "/test.txt"
+        assert "test.txt" in result["file_path"]
         assert "path" not in result
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
-    def test_filepath_alias_for_write_file(self):
+    def test_filepath_alias_for_write_file(self, tmp_path, monkeypatch):
         """'filepath' is converted to 'file_path'."""
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         result = registry.normalize_tool_arguments("write_file", {
-            "filepath": "/test.txt",
+            "filepath": "test.txt",
             "content": "test"
         })
 
         assert "file_path" in result
         assert "filepath" not in result
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - paths outside project root")
-    def test_dir_alias_for_list_files(self):
+    def test_dir_alias_for_list_files(self, tmp_path, monkeypatch):
         """'dir' is converted to 'directory'."""
+        # Set up project context with tmp_path as root
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "get_project_context", lambda: ctx)
+
         result = registry.normalize_tool_arguments("list_files", {
-            "dir": "/some/dir"
+            "dir": "."
         })
 
         assert "directory" in result
@@ -389,15 +425,19 @@ class TestDefaultRegistrySingleton:
         
         assert isinstance(reg, registry._MockableToolRegistry)
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - fix in test refactoring")
-    def test_execute_tool_call_uses_default_registry(self, tmp_path):
+    def test_execute_tool_call_uses_default_registry(self, tmp_path, monkeypatch):
         """execute_tool_call uses the default registry."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
+        # Set up project context with tmp_path as root (need both registry and impl)
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(registry, "_default_project_ctx", ctx)
+        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+
         # Reset to ensure fresh registry
         registry._default_registry = None
 
-        result = registry.execute_tool_call("read_file", {"file_path": str(test_file)})
+        result = registry.execute_tool_call("read_file", {"file_path": "test.txt"})
 
         assert result == "content"

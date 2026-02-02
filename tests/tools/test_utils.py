@@ -6,22 +6,50 @@ This module tests the utility functions including:
 """
 
 import json
-from unittest.mock import mock_open, patch
+from unittest.mock import mock_open, patch, MagicMock
 
 import pytest
 
 from ayder_cli.tools import utils
-from ayder_cli.tools.utils import prepare_new_content
+from ayder_cli.tools.utils import prepare_new_content, get_project_context
+from ayder_cli.path_context import ProjectContext
 
 
 @pytest.fixture
 def project_context(tmp_path, monkeypatch):
     """Create a project context with tmp_path as root and set it for utils."""
-    from ayder_cli.path_context import ProjectContext
-    
     ctx = ProjectContext(str(tmp_path))
     monkeypatch.setattr(utils, "_default_project_ctx", ctx)
     return ctx
+
+
+class TestGetProjectContext:
+    """Tests for get_project_context() function - Line 19 coverage."""
+
+    def test_module_context_lazy_initialization(self, tmp_path, monkeypatch):
+        """Test lazy initialization of module-level ProjectContext - Line 19."""
+        # Clear the global state to trigger initialization
+        monkeypatch.setattr(utils, "_default_project_ctx", None)
+        
+        # Change to tmp_path for initialization
+        monkeypatch.chdir(tmp_path)
+        
+        # Access should trigger initialization
+        ctx = get_project_context()
+        
+        assert ctx is not None
+        assert isinstance(ctx, ProjectContext)
+        assert ctx.root == tmp_path
+
+    def test_module_context_returns_existing(self, tmp_path, monkeypatch):
+        """Test that existing context is returned if already set."""
+        # Set a specific context
+        ctx = ProjectContext(str(tmp_path))
+        monkeypatch.setattr(utils, "_default_project_ctx", ctx)
+        
+        # Should return the same context
+        result = get_project_context()
+        assert result is ctx
 
 
 class TestPrepareNewContentWriteFile:

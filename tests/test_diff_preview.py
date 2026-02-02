@@ -13,7 +13,9 @@ from ayder_cli.ui import (
     generate_diff_preview,
     confirm_with_diff,
 )
-from ayder_cli.client import prepare_new_content
+from ayder_cli.tools.utils import prepare_new_content
+from ayder_cli.path_context import ProjectContext
+import ayder_cli.tools.utils as utils_module
 
 
 class TestColorizeDiff(unittest.TestCase):
@@ -288,7 +290,6 @@ class TestPrepareNewContent(unittest.TestCase):
         result = prepare_new_content("write_file", fargs)
         self.assertEqual(result, "hello dict")
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - temp_dir outside project root")
     def test_replace_string_content_preparation(self):
         """Verify replace_string reads file and applies replacement"""
         file_path = self.temp_dir / "test.txt"
@@ -297,15 +298,22 @@ class TestPrepareNewContent(unittest.TestCase):
         with open(file_path, 'w') as f:
             f.write(original)
 
-        fargs = {
-            "file_path": file_path,
-            "old_string": "world",
-            "new_string": "universe"
-        }
-        result = prepare_new_content("replace_string", fargs)
-        self.assertEqual(result, "hello universe")
+        # Set up project context with temp_dir as root
+        ctx = ProjectContext(str(self.temp_dir))
+        original_ctx = utils_module._default_project_ctx
+        utils_module._default_project_ctx = ctx
 
-    @pytest.mark.skip(reason="TODO: Path safety sandboxing - temp_dir outside project root")
+        try:
+            fargs = {
+                "file_path": "test.txt",
+                "old_string": "world",
+                "new_string": "universe"
+            }
+            result = prepare_new_content("replace_string", fargs)
+            self.assertEqual(result, "hello universe")
+        finally:
+            utils_module._default_project_ctx = original_ctx
+
     def test_replace_string_json_argument(self):
         """Verify replace_string works with JSON string argument"""
         file_path = self.temp_dir / "test.txt"
@@ -313,9 +321,17 @@ class TestPrepareNewContent(unittest.TestCase):
         with open(file_path, 'w') as f:
             f.write("foo bar")
 
-        fargs = f'{{"file_path": "{file_path}", "old_string": "foo", "new_string": "baz"}}'
-        result = prepare_new_content("replace_string", fargs)
-        self.assertEqual(result, "baz bar")
+        # Set up project context with temp_dir as root
+        ctx = ProjectContext(str(self.temp_dir))
+        original_ctx = utils_module._default_project_ctx
+        utils_module._default_project_ctx = ctx
+
+        try:
+            fargs = '{"file_path": "test.txt", "old_string": "foo", "new_string": "baz"}'
+            result = prepare_new_content("replace_string", fargs)
+            self.assertEqual(result, "baz bar")
+        finally:
+            utils_module._default_project_ctx = original_ctx
 
     def test_replace_string_missing_file_returns_empty(self):
         """Verify missing file returns empty string"""
