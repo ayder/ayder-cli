@@ -4,6 +4,20 @@ Utility functions for tool operations.
 
 import json
 from pathlib import Path
+from ayder_cli.path_context import ProjectContext
+
+
+# --- Module-level ProjectContext ---
+
+_default_project_ctx = None
+
+
+def get_project_context():
+    """Get or create the default project context."""
+    global _default_project_ctx
+    if _default_project_ctx is None:
+        _default_project_ctx = ProjectContext(".")
+    return _default_project_ctx
 
 
 def prepare_new_content(fname, args):
@@ -30,9 +44,15 @@ def prepare_new_content(fname, args):
                 return ""
 
             try:
-                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                project = get_project_context()
+                abs_path = project.validate_path(file_path)
+
+                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 return content.replace(old_string, new_string)
+            except ValueError as e:
+                # Security error - return empty to trigger error in UI
+                return ""
             except Exception:
                 return ""
         else:

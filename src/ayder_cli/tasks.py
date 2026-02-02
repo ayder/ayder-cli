@@ -2,13 +2,25 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-# Module-level variable for backwards compatibility with tests
-TASKS_DIR = Path.cwd() / ".ayder" / "tasks"
+from ayder_cli.path_context import ProjectContext
+
+
+# Module-level context - will be initialized on first use
+_default_project_ctx = None
+
+
+def get_project_context():
+    """Get or create the default project context."""
+    global _default_project_ctx
+    if _default_project_ctx is None:
+        _default_project_ctx = ProjectContext(".")
+    return _default_project_ctx
 
 
 def _get_tasks_dir():
-    """Return the tasks directory path for the current working directory."""
-    return Path(TASKS_DIR) if isinstance(TASKS_DIR, str) else TASKS_DIR
+    """Return the tasks directory path for the current project context."""
+    project = get_project_context()
+    return project.root / ".ayder" / "tasks"
 
 
 

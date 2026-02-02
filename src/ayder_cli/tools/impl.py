@@ -8,16 +8,42 @@ import json
 import subprocess
 import shutil
 from pathlib import Path
+from ayder_cli.path_context import ProjectContext
 from ayder_cli.tasks import create_task, show_task, implement_task, implement_all_tasks
+
+
+# --- Module-level ProjectContext ---
+
+_default_project_ctx = None
+
+
+def get_project_context():
+    """Get or create the default project context."""
+    global _default_project_ctx
+    if _default_project_ctx is None:
+        _default_project_ctx = ProjectContext(".")
+    return _default_project_ctx
 
 
 # --- Tool Implementations ---
 
 def list_files(directory="."):
-    """Lists files in the specified directory."""
+    """Lists files in the specified directory.
+    Uses ProjectContext for directory validation."""
     try:
-        files = [item.name for item in Path(directory).iterdir()]
+        project = get_project_context()
+        abs_dir = project.validate_path(directory)
+
+        # Ensure it's a directory
+        if not abs_dir.is_dir():
+            rel_path = project.to_relative(abs_dir)
+            return f"Error: '{rel_path}' is not a directory."
+
+        files = [item.name for item in abs_dir.iterdir()]
         return json.dumps(files)
+
+    except ValueError as e:
+        return f"Security Error: {str(e)}"
     except Exception as e:
         return f"Error listing files: {str(e)}"
 
@@ -25,12 +51,17 @@ def read_file(file_path, start_line=None, end_line=None):
     """
     Reads the content of a file.
     Can optionally read a specific range of lines (1-based indices).
+    Uses ProjectContext for path validation and returns relative paths.
     """
     try:
-        if not Path(file_path).exists():
-            return f"Error: File '{file_path}' does not exist."
+        project = get_project_context()
+        abs_path = project.validate_path(file_path)
 
-        with open(file_path, 'r', encoding='utf-8') as f:
+        if not abs_path.exists():
+            rel_path = project.to_relative(abs_path)
+            return f"Error: File '{rel_path}' does not exist."
+
+        with open(abs_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
         # Handle line filtering
@@ -54,45 +85,69 @@ def read_file(file_path, start_line=None, end_line=None):
         else:
             return "".join(lines)
 
+    except ValueError as e:
+        return f"Security Error: {str(e)}"
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
 def write_file(file_path, content):
-    """Writes content to a file (overwrites entire file)."""
+    """Writes content to a file (overwrites entire file).
+    Uses ProjectContext for path validation and returns relative paths."""
     try:
-        with open(file_path, 'w', encoding='utf-8') as f:
+        project = get_project_context()
+        abs_path = project.validate_path(file_path)
+
+        with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        return f"Successfully wrote to {file_path}"
+
+        rel_path = project.to_relative(abs_path)
+        return f"Successfully wrote to {rel_path}"
+
+    except ValueError as e:
+        return f"Security Error: {str(e)}"
     except Exception as e:
         return f"Error writing file: {str(e)}"
 
 def replace_string(file_path, old_string, new_string):
-    """Replaces a specific string in a file with a new string."""
+    """Replaces a specific string in a file with a new string.
+    Uses ProjectContext for path validation and returns relative paths."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        project = get_project_context()
+        abs_path = project.validate_path(file_path)
+
+        with open(abs_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
         if old_string not in content:
-            return f"Error: 'old_string' not found in {file_path}. No changes made."
+            rel_path = project.to_relative(abs_path)
+            return f"Error: 'old_string' not found in {rel_path}. No changes made."
 
         new_content = content.replace(old_string, new_string)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
 
-        return f"Successfully replaced text in {file_path}"
+        rel_path = project.to_relative(abs_path)
+        return f"Successfully replaced text in {rel_path}"
+
+    except ValueError as e:
+        return f"Security Error: {str(e)}"
     except Exception as e:
         return f"Error replacing text: {str(e)}"
 
 def run_shell_command(command):
-    """Executes a shell command and returns the output."""
+    """Executes a shell command and returns the output.
+    Executes with cwd=project.root to sandbox execution to the project."""
     try:
+        project = get_project_context()
+
         result = subprocess.run(
             command,
             shell=True,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            cwd=str(project.root)
         )
 
         output = f"Exit Code: {result.returncode}\n"
@@ -108,7 +163,8 @@ def run_shell_command(command):
         return f"Error executing command: {str(e)}"
 
 def get_project_structure(max_depth=3):
-    """Generate a tree-style project structure summary."""
+    """Generate a tree-style project structure summary using project root."""
+    project = get_project_context()
     tree_path = shutil.which("tree")
 
     if tree_path:
@@ -118,25 +174,28 @@ def get_project_structure(max_depth=3):
             "--charset", "ascii", "--noreport"
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=".")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=str(project.root))
             if result.returncode == 0:
                 return result.stdout.strip()
         except Exception:
             pass
 
     # Fallback to manual tree generation
-    return _generate_manual_tree(max_depth)
+    return _generate_manual_tree(max_depth, project)
 
 
-def _generate_manual_tree(max_depth=3, directory="."):
-    """Fallback manual tree generator."""
+def _generate_manual_tree(max_depth=3, project=None):
+    """Fallback manual tree generator using project root."""
+    if project is None:
+        project = get_project_context()
+
     IGNORE_DIRS = {"__pycache__", ".venv", ".ayder", ".claude", ".git", "htmlcov", "dist", "build", "node_modules"}
     IGNORE_PATTERNS = {".pyc", ".egg-info"}
 
     def should_ignore(name):
         return name in IGNORE_DIRS or any(name.endswith(p) for p in IGNORE_PATTERNS)
 
-    lines = [Path(directory).resolve().name or "."]
+    lines = [project.root.name or "."]
 
     def walk_dir(path, prefix="", depth=0):
         if depth >= max_depth:
@@ -161,7 +220,7 @@ def _generate_manual_tree(max_depth=3, directory="."):
             connector = "`-- " if is_last else "|-- "
             lines.append(f"{prefix}{connector}{f}")
 
-    walk_dir(directory)
+    walk_dir(project.root)
     return "\n".join(lines)
 
 def search_codebase(pattern, file_pattern=None, case_sensitive=True,
@@ -169,22 +228,33 @@ def search_codebase(pattern, file_pattern=None, case_sensitive=True,
     """
     Search for a pattern across the codebase using ripgrep (or grep fallback).
     Returns matching lines with file paths and line numbers.
+    Uses ProjectContext to sandbox search within project root.
     """
     try:
+        project = get_project_context()
+        abs_dir = project.validate_path(directory)
+
+        # Ensure it's a directory
+        if not abs_dir.is_dir():
+            rel_path = project.to_relative(abs_dir)
+            return f"Error: '{rel_path}' is not a directory."
+
         rg_path = shutil.which("rg")
 
         if rg_path:
             return _search_with_ripgrep(pattern, file_pattern, case_sensitive,
-                                       context_lines, max_results, directory)
+                                       context_lines, max_results, abs_dir, project)
         else:
             return _search_with_grep(pattern, file_pattern, case_sensitive,
-                                    context_lines, max_results, directory)
+                                    context_lines, max_results, abs_dir, project)
+    except ValueError as e:
+        return f"Security Error: {str(e)}"
     except Exception as e:
         return f"Error during search: {str(e)}"
 
 
 def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
-                        context_lines, max_results, directory):
+                        context_lines, max_results, abs_directory, project):
     """Implementation using ripgrep."""
     cmd = [shutil.which("rg"), "--line-number", "--heading",
            "--color", "never", "--no-messages", "--max-count", str(max_results)]
@@ -201,12 +271,12 @@ def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
                    "!.claude/", "!dist/", "!build/", "!*.egg-info/", "!htmlcov/"]:
         cmd.extend(["--glob", ignore])
 
-    cmd.extend([pattern, directory])
+    cmd.extend([pattern, str(abs_directory)])
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
-            return _format_search_results(result.stdout, pattern, max_results)
+            return _format_search_results(result.stdout, pattern, max_results, project)
         elif result.returncode == 1:
             return f"=== SEARCH RESULTS ===\nPattern: \"{pattern}\"\nNo matches found.\n=== END SEARCH RESULTS ==="
         else:
@@ -218,7 +288,7 @@ def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
 
 
 def _search_with_grep(pattern, file_pattern, case_sensitive,
-                     context_lines, max_results, directory):
+                     context_lines, max_results, abs_directory, project):
     """Fallback implementation using grep."""
     cmd = ["grep", "-r", "-n", "-E"]
 
@@ -238,13 +308,13 @@ def _search_with_grep(pattern, file_pattern, case_sensitive,
         include_pattern = file_pattern.split("/")[-1]
         cmd.extend(["--include", include_pattern])
 
-    cmd.extend([pattern, directory])
+    cmd.extend([pattern, str(abs_directory)])
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             # Grep output format is different from ripgrep, so format it
-            return _format_grep_results(result.stdout, pattern, max_results)
+            return _format_grep_results(result.stdout, pattern, max_results, project)
         elif result.returncode == 1:
             return f"=== SEARCH RESULTS ===\nPattern: \"{pattern}\"\nNo matches found.\n=== END SEARCH RESULTS ==="
         else:
@@ -255,7 +325,7 @@ def _search_with_grep(pattern, file_pattern, case_sensitive,
         return f"Error executing grep: {str(e)}"
 
 
-def _format_search_results(raw_output, pattern, max_results):
+def _format_search_results(raw_output, pattern, max_results, project):
     """Format ripgrep --heading output for LLM consumption."""
     lines = raw_output.strip().split('\n')
     formatted = ["=== SEARCH RESULTS ===", f"Pattern: \"{pattern}\"", ""]
@@ -274,7 +344,13 @@ def _format_search_results(raw_output, pattern, max_results):
             # This is a file path header
             if current_file:
                 formatted.append("")
-            current_file = line
+            # Convert absolute path to relative
+            abs_file_path = Path(line)
+            try:
+                rel_file = project.to_relative(abs_file_path)
+            except:
+                rel_file = line
+            current_file = rel_file
             formatted.append("─" * 67)
             formatted.append(f"FILE: {current_file}")
             formatted.append("─" * 67)
@@ -288,7 +364,7 @@ def _format_search_results(raw_output, pattern, max_results):
     return "\n".join(formatted)
 
 
-def _format_grep_results(raw_output, pattern, max_results):
+def _format_grep_results(raw_output, pattern, max_results, project):
     """Format grep output (file:line:content) for LLM consumption."""
     lines = raw_output.strip().split('\n')
     formatted = ["=== SEARCH RESULTS ===", f"Pattern: \"{pattern}\"", ""]
@@ -308,8 +384,14 @@ def _format_grep_results(raw_output, pattern, max_results):
     formatted.insert(2, f"Matches found: {match_count}\n")
 
     for file_path, matches in file_matches.items():
+        # Convert absolute path to relative
+        abs_file_path = Path(file_path)
+        try:
+            rel_file = project.to_relative(abs_file_path)
+        except:
+            rel_file = file_path
         formatted.append("─" * 67)
-        formatted.append(f"FILE: {file_path}")
+        formatted.append(f"FILE: {rel_file}")
         formatted.append("─" * 67)
         for line_num, content in matches:
             formatted.append(f"Line {line_num}: {content}")

@@ -3,71 +3,96 @@ Comprehensive tests for search_codebase and get_project_structure functions.
 """
 import os
 import sys
-import tempfile
-import shutil
+import pytest
 
 # Add the source directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from ayder_cli import fs_tools
+from ayder_cli.tools import impl
+
+
+@pytest.fixture
+def search_context(tmp_path, monkeypatch):
+    """Create a project context with test files and set it for fs_tools and impl."""
+    from ayder_cli.path_context import ProjectContext
+    from ayder_cli.tools import registry
+    
+    # Create test files in tmp_path
+    (tmp_path / "test_file.py").write_text(
+        "def read_file():\n    return 'content'\n\ndef write_file():\n    pass\n"
+    )
+    (tmp_path / "another_file.py").write_text(
+        "class MyTest:\n    def test_something(self):\n        # TODO: fix this\n        pass\n"
+    )
+    (tmp_path / "config.txt").write_text("DEBUG = True\nDEBUG_MODE = False\n")
+    
+    # Create subdirectory
+    (tmp_path / "subdir").mkdir()
+    (tmp_path / "subdir" / "nested.py").write_text("def nested_function():\n    return 42\n")
+    
+    ctx = ProjectContext(str(tmp_path))
+    # Patch the impl module's context (used by search_codebase and get_project_structure)
+    monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+    # Also patch registry for dispatcher tests
+    monkeypatch.setattr(registry, "_default_project_ctx", ctx)
+    return ctx
+
+
+@pytest.fixture
+def structure_context(tmp_path, monkeypatch):
+    """Create a project context with realistic structure for structure tests."""
+    from ayder_cli.path_context import ProjectContext
+    from ayder_cli.tools import registry
+    
+    # Create a realistic project structure
+    (tmp_path / "src" / "myproject").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "dist").mkdir()
+    
+    (tmp_path / "README.md").write_text("# My Project\n")
+    (tmp_path / "src" / "myproject" / "__init__.py").write_text("")
+    (tmp_path / "src" / "myproject" / "main.py").write_text("def main():\n    pass\n")
+    (tmp_path / "tests" / "test_main.py").write_text("def test_something():\n    pass\n")
+    
+    ctx = ProjectContext(str(tmp_path))
+    monkeypatch.setattr(impl, "_default_project_ctx", ctx)
+    monkeypatch.setattr(registry, "_default_project_ctx", ctx)
+    return ctx
 
 
 class TestSearchCodebase:
     """Test the search_codebase function."""
 
-    def setup_method(self):
-        """Create a temporary directory with test files before each test."""
-        self.test_dir = tempfile.mkdtemp()
-        self.original_cwd = os.getcwd()
-        os.chdir(self.test_dir)
-
-        # Create test files
-        with open("test_file.py", "w") as f:
-            f.write("def read_file():\n    return 'content'\n\ndef write_file():\n    pass\n")
-
-        with open("another_file.py", "w") as f:
-            f.write("class MyTest:\n    def test_something(self):\n        # TODO: fix this\n        pass\n")
-
-        with open("config.txt", "w") as f:
-            f.write("DEBUG = True\nDEBUG_MODE = False\n")
-
-        # Create subdirectory
-        os.makedirs("subdir", exist_ok=True)
-        with open("subdir/nested.py", "w") as f:
-            f.write("def nested_function():\n    return 42\n")
-
-    def teardown_method(self):
-        """Clean up temporary directory after each test."""
-        os.chdir(self.original_cwd)
-        shutil.rmtree(self.test_dir)
-
     def test_basic_search(self):
-        """Test basic pattern search."""
+        """Test basic pattern search - uses project root set by setup."""
         result = fs_tools.search_codebase("def read_file")
         assert "=== SEARCH RESULTS ===" in result
         assert "END SEARCH RESULTS ===" in result
         assert "test_file.py" in result or "Pattern: \"def read_file\"" in result
 
-    def test_search_no_matches(self):
+    def test_search_no_matches(self, search_context):
         """Test search with no matches."""
         result = fs_tools.search_codebase("nonexistent_pattern_xyz123")
         assert "No matches found" in result
         assert "=== SEARCH RESULTS ===" in result
 
-    def test_case_insensitive_search(self):
+    def test_case_insensitive_search(self, search_context):
         """Test case-insensitive search."""
-        result = fs_tools.search_codebase("DEBUG", case_sensitive=False)
+        result = fs_tools.search_codebase("debug", case_sensitive=False)
         assert "=== SEARCH RESULTS ===" in result
         # Should find both DEBUG and debug
-        assert result.count("Line") >= 2 or "No matches found" not in result
+        assert result.count("Line") >= 2
 
-    def test_file_pattern_filter(self):
+    def test_file_pattern_filter(self, search_context):
         """Test search with file pattern filter."""
         result = fs_tools.search_codebase("def", file_pattern="*.py")
         assert "=== SEARCH RESULTS ===" in result
         # Should find Python definitions but not config.txt content
 
-    def test_max_results_limit(self):
+    def test_max_results_limit(self, search_context):
         """Test max_results parameter."""
         result = fs_tools.search_codebase("def", max_results=1)
         assert "=== SEARCH RESULTS ===" in result
@@ -75,13 +100,13 @@ class TestSearchCodebase:
         line_count = result.count("Line ")
         assert line_count <= 1
 
-    def test_search_in_subdirectories(self):
+    def test_search_in_subdirectories(self, search_context):
         """Test that search finds files in subdirectories."""
         result = fs_tools.search_codebase("nested_function")
         assert "=== SEARCH RESULTS ===" in result
         # Should find the function in subdir/nested.py
 
-    def test_context_lines(self):
+    def test_context_lines(self, search_context):
         """Test context_lines parameter."""
         result = fs_tools.search_codebase("def", context_lines=1)
         assert "=== SEARCH RESULTS ===" in result
@@ -90,36 +115,6 @@ class TestSearchCodebase:
 
 class TestGetProjectStructure:
     """Test the get_project_structure function."""
-
-    def setup_method(self):
-        """Create a temporary project structure."""
-        self.test_dir = tempfile.mkdtemp()
-        self.original_cwd = os.getcwd()
-        os.chdir(self.test_dir)
-
-        # Create a realistic project structure
-        os.makedirs("src/myproject", exist_ok=True)
-        os.makedirs("tests", exist_ok=True)
-        os.makedirs(".venv", exist_ok=True)
-        os.makedirs("__pycache__", exist_ok=True)
-        os.makedirs("dist", exist_ok=True)
-
-        with open("README.md", "w") as f:
-            f.write("# My Project\n")
-
-        with open("src/myproject/__init__.py", "w") as f:
-            f.write("")
-
-        with open("src/myproject/main.py", "w") as f:
-            f.write("def main():\n    pass\n")
-
-        with open("tests/test_main.py", "w") as f:
-            f.write("def test_something():\n    pass\n")
-
-    def teardown_method(self):
-        """Clean up temporary directory."""
-        os.chdir(self.original_cwd)
-        shutil.rmtree(self.test_dir)
 
     def test_structure_generation(self):
         """Test that project structure is generated."""
@@ -144,12 +139,12 @@ class TestGetProjectStructure:
         structure = fs_tools.get_project_structure(max_depth=3)
         assert "dist" not in structure
 
-    def test_structure_includes_src(self):
+    def test_structure_includes_src(self, structure_context):
         """Test that src directory is included."""
         structure = fs_tools.get_project_structure(max_depth=3)
         assert "src" in structure
 
-    def test_structure_includes_readme(self):
+    def test_structure_includes_readme(self, structure_context):
         """Test that README.md is included."""
         structure = fs_tools.get_project_structure(max_depth=3)
         assert "README.md" in structure
@@ -167,29 +162,15 @@ class TestGetProjectStructure:
 class TestToolIntegration:
     """Test integration with the tool dispatcher."""
 
-    def setup_method(self):
-        """Set up test environment."""
-        self.test_dir = tempfile.mkdtemp()
-        self.original_cwd = os.getcwd()
-        os.chdir(self.test_dir)
-
-        with open("test.py", "w") as f:
-            f.write("def test_func():\n    return True\n")
-
-    def teardown_method(self):
-        """Clean up."""
-        os.chdir(self.original_cwd)
-        shutil.rmtree(self.test_dir)
-
-    def test_dispatcher_calls_search_codebase(self):
+    def test_dispatcher_calls_search_codebase(self, search_context):
         """Test that dispatcher correctly routes search_codebase calls."""
         result = fs_tools.execute_tool_call(
             "search_codebase",
-            {"pattern": "def test_func"}
+            {"pattern": "def read_file"}
         )
         assert "=== SEARCH RESULTS ===" in result
 
-    def test_dispatcher_with_kwargs(self):
+    def test_dispatcher_with_kwargs(self, search_context):
         """Test dispatcher with multiple parameters."""
         result = fs_tools.execute_tool_call(
             "search_codebase",
@@ -202,10 +183,10 @@ class TestToolIntegration:
         )
         assert "=== SEARCH RESULTS ===" in result
 
-    def test_dispatcher_with_json_string(self):
+    def test_dispatcher_with_json_string(self, search_context):
         """Test dispatcher with JSON string arguments."""
         import json
-        args_str = json.dumps({"pattern": "def test_func"})
+        args_str = json.dumps({"pattern": "def read_file"})
         result = fs_tools.execute_tool_call("search_codebase", args_str)
         assert "=== SEARCH RESULTS ===" in result
 
@@ -213,21 +194,7 @@ class TestToolIntegration:
 class TestSearchFallback:
     """Test fallback from ripgrep to grep."""
 
-    def setup_method(self):
-        """Create test environment."""
-        self.test_dir = tempfile.mkdtemp()
-        self.original_cwd = os.getcwd()
-        os.chdir(self.test_dir)
-
-        with open("sample.py", "w") as f:
-            f.write("# This is a comment\nprint('hello')\n")
-
-    def teardown_method(self):
-        """Clean up."""
-        os.chdir(self.original_cwd)
-        shutil.rmtree(self.test_dir)
-
-    def test_search_executes_without_error(self):
+    def test_search_executes_without_error(self, search_context):
         """Test that search executes without raising exceptions."""
         try:
             result = fs_tools.search_codebase("print")
@@ -238,45 +205,4 @@ class TestSearchFallback:
 
 if __name__ == "__main__":
     # Run tests manually
-    print("Testing search_codebase...")
-
-    test_search = TestSearchCodebase()
-    test_search.setup_method()
-    try:
-        test_search.test_basic_search()
-        print("✓ test_basic_search passed")
-    finally:
-        test_search.teardown_method()
-
-    test_search.setup_method()
-    try:
-        test_search.test_search_no_matches()
-        print("✓ test_search_no_matches passed")
-    finally:
-        test_search.teardown_method()
-
-    test_search.setup_method()
-    try:
-        test_search.test_case_insensitive_search()
-        print("✓ test_case_insensitive_search passed")
-    finally:
-        test_search.teardown_method()
-
-    print("\nTesting get_project_structure...")
-
-    test_structure = TestGetProjectStructure()
-    test_structure.setup_method()
-    try:
-        test_structure.test_structure_generation()
-        print("✓ test_structure_generation passed")
-    finally:
-        test_structure.teardown_method()
-
-    test_structure.setup_method()
-    try:
-        test_structure.test_structure_ignores_venv()
-        print("✓ test_structure_ignores_venv passed")
-    finally:
-        test_structure.teardown_method()
-
-    print("\nAll manual tests completed!")
+    pytest.main([__file__, "-v"])

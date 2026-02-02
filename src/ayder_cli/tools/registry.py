@@ -9,6 +9,20 @@ from pathlib import Path
 from typing import Callable, Dict, Tuple
 
 from ayder_cli.tools.schemas import tools_schema
+from ayder_cli.path_context import ProjectContext
+
+
+# --- Module-level ProjectContext ---
+
+_default_project_ctx = None
+
+
+def get_project_context():
+    """Get or create the default project context."""
+    global _default_project_ctx
+    if _default_project_ctx is None:
+        _default_project_ctx = ProjectContext(".")
+    return _default_project_ctx
 
 
 # --- Parameter Normalization & Validation ---
@@ -35,7 +49,7 @@ def normalize_tool_arguments(tool_name: str, arguments: dict) -> dict:
     """
     Normalize arguments by:
     1. Applying parameter aliases (path → file_path)
-    2. Resolving path parameters to absolute paths via Path.resolve()
+    2. Resolving path parameters to absolute paths via ProjectContext (validates sandbox)
     3. Type coercion (string "10" → int 10 for line numbers)
     """
     normalized = dict(arguments)  # Copy to avoid mutation
@@ -46,11 +60,17 @@ def normalize_tool_arguments(tool_name: str, arguments: dict) -> dict:
             if alias in normalized and canonical not in normalized:
                 normalized[canonical] = normalized.pop(alias)
 
-    # Step 2: Resolve paths to absolute
+    # Step 2: Resolve paths to absolute using ProjectContext (validates sandbox)
     if tool_name in PATH_PARAMETERS:
+        project = get_project_context()
         for param_name in PATH_PARAMETERS[tool_name]:
             if param_name in normalized and normalized[param_name]:
-                normalized[param_name] = str(Path(normalized[param_name]).resolve())
+                try:
+                    validated_path = project.validate_path(normalized[param_name])
+                    normalized[param_name] = str(validated_path)
+                except ValueError:
+                    # Security error - let it propagate to caller
+                    raise
 
     # Step 3: Type coercion for line numbers
     if tool_name == "read_file":

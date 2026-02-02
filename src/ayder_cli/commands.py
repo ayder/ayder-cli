@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 from ayder_cli import fs_tools
-from ayder_cli.tasks import list_tasks, TASKS_DIR
+from ayder_cli.tasks import list_tasks, _get_tasks_dir
 from ayder_cli.ui import draw_box
 from ayder_cli.config import load_config
 
@@ -93,7 +93,7 @@ def cmd_task_edit(args, session):
         print(draw_box(f"Invalid task ID: {args.strip()}\nTask ID must be a number.", title="Error", width=80, color_code="31"))
         return True
 
-    task_path = Path(TASKS_DIR) / f"TASK-{task_id:03d}.md"
+    task_path = _get_tasks_dir() / f"TASK-{task_id:03d}.md"
     if not task_path.exists():
         print(draw_box(f"Task TASK-{task_id:03d} not found.", title="Error", width=80, color_code="31"))
         return True

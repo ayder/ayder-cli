@@ -10,7 +10,18 @@ from unittest.mock import mock_open, patch
 
 import pytest
 
+from ayder_cli.tools import utils
 from ayder_cli.tools.utils import prepare_new_content
+
+
+@pytest.fixture
+def project_context(tmp_path, monkeypatch):
+    """Create a project context with tmp_path as root and set it for utils."""
+    from ayder_cli.path_context import ProjectContext
+    
+    ctx = ProjectContext(str(tmp_path))
+    monkeypatch.setattr(utils, "_default_project_ctx", ctx)
+    return ctx
 
 
 class TestPrepareNewContentWriteFile:
@@ -44,7 +55,7 @@ class TestPrepareNewContentWriteFile:
 class TestPrepareNewContentReplaceString:
     """Tests for prepare_new_content with replace_string."""
 
-    def test_replace_string_basic(self, tmp_path):
+    def test_replace_string_basic(self, tmp_path, project_context):
         """Test prepare_new_content for replace_string basic case."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
@@ -57,7 +68,7 @@ class TestPrepareNewContentReplaceString:
         result = prepare_new_content("replace_string", args)
         assert result == "Hello, Universe!"
 
-    def test_replace_string_with_json_args(self, tmp_path):
+    def test_replace_string_with_json_args(self, tmp_path, project_context):
         """Test prepare_new_content for replace_string with JSON string args."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Original text")
@@ -99,7 +110,7 @@ class TestPrepareNewContentReplaceString:
         result = prepare_new_content("replace_string", args)
         assert result == ""
 
-    def test_replace_string_multiple_occurrences(self, tmp_path):
+    def test_replace_string_multiple_occurrences(self, tmp_path, project_context):
         """Test replace_string with multiple occurrences of old_string."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("old old old text")
@@ -112,7 +123,7 @@ class TestPrepareNewContentReplaceString:
         result = prepare_new_content("replace_string", args)
         assert result == "new new new text"
 
-    def test_replace_string_no_match(self, tmp_path):
+    def test_replace_string_no_match(self, tmp_path, project_context):
         """Test replace_string when old_string is not found."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Some content")
@@ -126,7 +137,7 @@ class TestPrepareNewContentReplaceString:
         # Should return original content unchanged
         assert result == "Some content"
 
-    def test_replace_string_empty_old_string(self, tmp_path):
+    def test_replace_string_empty_old_string(self, tmp_path, project_context):
         """Test replace_string with empty old_string."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("ABC")
@@ -140,7 +151,7 @@ class TestPrepareNewContentReplaceString:
         # Empty string replacement behavior
         assert "X" in result
 
-    def test_replace_string_multiline_content(self, tmp_path):
+    def test_replace_string_multiline_content(self, tmp_path, project_context):
         """Test replace_string with multiline content."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3")

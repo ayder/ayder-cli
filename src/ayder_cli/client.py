@@ -3,6 +3,7 @@ from pathlib import Path
 from openai import OpenAI
 from ayder_cli import fs_tools
 from ayder_cli.config import load_config, Config
+from ayder_cli.path_context import ProjectContext
 from ayder_cli.ui import draw_box, print_running, print_assistant_message, print_tool_result, confirm_tool_call, describe_tool_action, print_file_content, confirm_with_diff, print_tool_skipped
 from ayder_cli.banner import print_welcome_banner
 from ayder_cli.parser import parse_custom_tool_calls
@@ -329,14 +330,33 @@ class Agent:
         return False
 
 
-def run_chat(openai_client=None, config=None):
+def set_project_context_for_modules(context):
+    """Propagate project context to all tool modules.
+
+    Args:
+        context: ProjectContext instance to set in all modules
+    """
+    import ayder_cli.tools.impl as impl
+    import ayder_cli.tools.utils as utils
+    import ayder_cli.tools.registry as registry
+    import ayder_cli.tasks as tasks
+
+    impl._default_project_ctx = context
+    utils._default_project_ctx = context
+    registry._default_project_ctx = context
+    tasks._default_project_ctx = context
+
+
+def run_chat(openai_client=None, config=None, project_root="."):
     """
     Main entry point - initializes and delegates to ChatSession and Agent.
     Maintains the dependency injection pattern from TASK-010.
-    
+
     Args:
         openai_client: Optional OpenAI client instance. If None, creates from config.
         config: Optional config dict/model. If None, loads from file.
+        project_root: Optional project root directory (defaults to "."). Used to initialize
+            ProjectContext at startup for all tool modules.
     """
     # Load config and client (dependency injection from TASK-010)
     cfg = config or load_config()
@@ -350,6 +370,10 @@ def run_chat(openai_client=None, config=None):
         api_key = cfg.api_key
     
     client = openai_client or OpenAI(base_url=base_url, api_key=api_key)
+
+    # Initialize ProjectContext at startup and propagate to all tool modules
+    project_ctx = ProjectContext(project_root)
+    set_project_context_for_modules(project_ctx)
 
     # Prepare system prompt with project structure (from TASK-009)
     try:

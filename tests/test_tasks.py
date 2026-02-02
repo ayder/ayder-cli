@@ -6,8 +6,8 @@ import pytest
 from datetime import datetime
 from unittest import mock
 
+import ayder_cli.tasks as tasks_module
 from ayder_cli.tasks import (
-    TASKS_DIR,
     _ensure_tasks_dir,
     _extract_id,
     _next_id,
@@ -22,24 +22,32 @@ from ayder_cli.tasks import (
 )
 
 
+@pytest.fixture
+def project_context(tmp_path, monkeypatch):
+    """Create a project context with tmp_path as root and set it for tasks."""
+    from ayder_cli.path_context import ProjectContext
+    
+    ctx = ProjectContext(str(tmp_path))
+    monkeypatch.setattr(tasks_module, "_default_project_ctx", ctx)
+    return ctx
+
+
 class TestEnsureTasksDir:
     """Test _ensure_tasks_dir() function."""
 
-    def test_directory_creation_when_not_exists(self, tmp_path, monkeypatch):
+    def test_directory_creation_when_not_exists(self, tmp_path, monkeypatch, project_context):
         """Test directory is created when it doesn't exist."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         assert not mock_tasks_dir.exists()
         _ensure_tasks_dir()
         assert mock_tasks_dir.exists()
         assert mock_tasks_dir.is_dir()
 
-    def test_no_error_when_directory_exists(self, tmp_path, monkeypatch):
+    def test_no_error_when_directory_exists(self, tmp_path, monkeypatch, project_context):
         """Test no error when directory already exists."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         # Should not raise an error
         _ensure_tasks_dir()
@@ -72,18 +80,14 @@ class TestExtractId:
 class TestNextId:
     """Test _next_id() function."""
 
-    def test_when_no_tasks_exist(self, tmp_path, monkeypatch):
+    def test_when_no_tasks_exist(self, tmp_path, monkeypatch, project_context):
         """Test returns 1 when no tasks exist."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         assert _next_id() == 1
 
-    def test_with_existing_tasks(self, tmp_path, monkeypatch):
+    def test_with_existing_tasks(self, tmp_path, monkeypatch, project_context):
         """Test returns max + 1 with existing tasks."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         # Create some task files
         (mock_tasks_dir / "TASK-001.md").write_text("task 1")
@@ -92,11 +96,10 @@ class TestNextId:
         
         assert _next_id() == 6
 
-    def test_with_gaps_in_task_ids(self, tmp_path, monkeypatch):
+    def test_with_gaps_in_task_ids(self, tmp_path, monkeypatch, project_context):
         """Test correctly handles gaps in task IDs."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         # Create tasks with gaps
         (mock_tasks_dir / "TASK-001.md").write_text("task 1")
@@ -104,11 +107,10 @@ class TestNextId:
         
         assert _next_id() == 11
 
-    def test_ignores_non_task_files(self, tmp_path, monkeypatch):
+    def test_ignores_non_task_files(self, tmp_path, monkeypatch, project_context):
         """Test ignores files that don't match TASK-XXX.md pattern."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         # Create valid and invalid files
         (mock_tasks_dir / "TASK-005.md").write_text("valid task")
@@ -122,34 +124,28 @@ class TestNextId:
 class TestCreateTask:
     """Test create_task() function."""
 
-    def test_create_task_with_title_only(self, tmp_path, monkeypatch):
+    def test_create_task_with_title_only(self, tmp_path, monkeypatch, project_context):
         """Test creating task with title only."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = create_task("Test Task")
         
         assert "Task TASK-001 created" in result
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         assert (mock_tasks_dir / "TASK-001.md").exists()
 
-    def test_create_task_with_title_and_description(self, tmp_path, monkeypatch):
+    def test_create_task_with_title_and_description(self, tmp_path, monkeypatch, project_context):
         """Test creating task with title and description."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = create_task("Test Task", "This is a description")
         
         assert "Task TASK-001 created" in result
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "This is a description" in content
 
-    def test_verify_task_file_content_format(self, tmp_path, monkeypatch):
+    def test_verify_task_file_content_format(self, tmp_path, monkeypatch, project_context):
         """Verify task file content format."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("My Test Task", "Test description")
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         
         # Check format
@@ -159,30 +155,26 @@ class TestCreateTask:
         assert "- **Created:**" in content
         assert "## Description" in content
 
-    def test_verify_task_id_formatting(self, tmp_path, monkeypatch):
+    def test_verify_task_id_formatting(self, tmp_path, monkeypatch, project_context):
         """Verify task ID formatting (TASK-XXX.md)."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create multiple tasks
         create_task("Task 1")
         create_task("Task 2")
         create_task("Task 3")
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify 3-digit formatting
         assert (mock_tasks_dir / "TASK-001.md").exists()
         assert (mock_tasks_dir / "TASK-002.md").exists()
         assert (mock_tasks_dir / "TASK-003.md").exists()
 
-    def test_verify_timestamp_is_included(self, tmp_path, monkeypatch):
+    def test_verify_timestamp_is_included(self, tmp_path, monkeypatch, project_context):
         """Verify timestamp is included in task file."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         before = datetime.now().replace(microsecond=0)
         create_task("Test Task")
         after = datetime.now().replace(microsecond=0)
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         
         # Extract timestamp
@@ -192,13 +184,11 @@ class TestCreateTask:
         timestamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
         assert before <= timestamp <= after
 
-    def test_create_task_without_description(self, tmp_path, monkeypatch):
+    def test_create_task_without_description(self, tmp_path, monkeypatch, project_context):
         """Test that default description is used when not provided."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "No description provided." in content
 
@@ -206,11 +196,10 @@ class TestCreateTask:
 class TestParseStatus:
     """Test _parse_status() function."""
 
-    def test_extract_status_from_valid_task_file(self, tmp_path, monkeypatch):
+    def test_extract_status_from_valid_task_file(self, tmp_path, monkeypatch, project_context):
         """Test extracting status from valid task file."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         task_content = """# Test Task
 
@@ -228,11 +217,10 @@ Test description.
         status = _parse_status(str(task_file))
         assert status == "in_progress"
 
-    def test_return_unknown_for_missing_status(self, tmp_path, monkeypatch):
+    def test_return_unknown_for_missing_status(self, tmp_path, monkeypatch, project_context):
         """Test returning 'unknown' for missing status."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         task_content = """# Test Task
 
@@ -256,11 +244,10 @@ Test description.
         status = _parse_status(non_existent_file)
         assert status == "unknown"
 
-    def test_extract_different_status_values(self, tmp_path, monkeypatch):
+    def test_extract_different_status_values(self, tmp_path, monkeypatch, project_context):
         """Test extracting different status values."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         statuses = ["pending", "done", "in_progress", "blocked"]
         
@@ -285,11 +272,10 @@ Test.
 class TestParseTitle:
     """Test _parse_title() function."""
 
-    def test_extract_title_from_valid_task_file(self, tmp_path, monkeypatch):
+    def test_extract_title_from_valid_task_file(self, tmp_path, monkeypatch, project_context):
         """Test extracting title from valid task file."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         task_content = """# My Awesome Task
 
@@ -306,11 +292,10 @@ Test.
         title = _parse_title(str(task_file))
         assert title == "My Awesome Task"
 
-    def test_return_filename_for_files_without_title(self, tmp_path, monkeypatch):
+    def test_return_filename_for_files_without_title(self, tmp_path, monkeypatch, project_context):
         """Test returning filename for files without title."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         task_content = """This file has no title
 
@@ -333,20 +318,13 @@ Just some content.
 class TestListTasks:
     """Test list_tasks() function."""
 
-    def test_when_no_tasks_exist(self, tmp_path, monkeypatch):
+    def test_when_no_tasks_exist(self, tmp_path, monkeypatch, project_context):
         """Test when no tasks exist."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = list_tasks()
         assert result == "No tasks found."
 
-    def test_listing_multiple_tasks(self, tmp_path, monkeypatch):
+    def test_listing_multiple_tasks(self, tmp_path, monkeypatch, project_context):
         """Test listing multiple tasks."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create tasks
         create_task("First Task", "Description 1")
         create_task("Second Task", "Description 2")
@@ -359,12 +337,8 @@ class TestListTasks:
         assert "TASK-002" in result
         assert "Second Task" in result
 
-    def test_task_name_truncation(self, tmp_path, monkeypatch):
+    def test_task_name_truncation(self, tmp_path, monkeypatch, project_context):
         """Test task name truncation for long titles."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create task with very long title
         long_title = "A" * 100
         create_task(long_title)
@@ -374,12 +348,8 @@ class TestListTasks:
         # Check title is truncated (should contain ..)
         assert ".." in result or len(long_title) <= 72
 
-    def test_table_formatting(self, tmp_path, monkeypatch):
+    def test_table_formatting(self, tmp_path, monkeypatch, project_context):
         """Verify table formatting."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
         
         result = list_tasks()
@@ -390,12 +360,8 @@ class TestListTasks:
         assert "Status" in result
         assert "|" in result  # Table separator
 
-    def test_sorting_by_id(self, tmp_path, monkeypatch):
+    def test_sorting_by_id(self, tmp_path, monkeypatch, project_context):
         """Test sorting by ID."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create tasks out of order
         create_task("Third Task")  # Will be 001
         create_task("Fourth Task")  # Will be 002
@@ -412,38 +378,26 @@ class TestListTasks:
 class TestShowTask:
     """Test show_task() function."""
 
-    def test_show_existing_task(self, tmp_path, monkeypatch):
+    def test_show_existing_task(self, tmp_path, monkeypatch, project_context):
         """Test showing existing task."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task", "Test description")
-        
+
         result = show_task(1)
-        
+
         assert "# Test Task" in result
         assert "Test description" in result
         assert "TASK-001" in result
 
-    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch):
+    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch, project_context):
         """Test error for non-existent task."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = show_task(999)
         
         assert "Error" in result
         assert "TASK-999" in result
         assert "not found" in result.lower()
 
-    def test_string_task_id(self, tmp_path, monkeypatch):
+    def test_string_task_id(self, tmp_path, monkeypatch, project_context):
         """Test showing task with string ID."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
         
         result = show_task("1")
@@ -454,38 +408,30 @@ class TestShowTask:
 class TestUpdateTaskStatus:
     """Test _update_task_status() function."""
 
-    def test_successful_status_update(self, tmp_path, monkeypatch):
+    def test_successful_status_update(self, tmp_path, monkeypatch, project_context):
         """Test successful status update."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
         
         result = _update_task_status(1, "done")
         
         assert result is True
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify file was updated
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** done" in content
 
-    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch):
+    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch, project_context):
         """Test error for non-existent task."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = _update_task_status(999, "done")
         
         assert "Error" in result
         assert "not found" in result.lower()
 
-    def test_regex_replacement(self, tmp_path, monkeypatch):
+    def test_regex_replacement(self, tmp_path, monkeypatch, project_context):
         """Verify regex replacement works correctly."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
         
         # Create task with custom status
         task_content = """# Test Task
@@ -510,12 +456,8 @@ Test.
 class TestImplementTask:
     """Test implement_task() function."""
 
-    def test_implement_pending_task(self, tmp_path, monkeypatch):
+    def test_implement_pending_task(self, tmp_path, monkeypatch, project_context):
         """Test implementing pending task."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task", "Test description")
         
         result = implement_task(1)
@@ -524,41 +466,30 @@ class TestImplementTask:
         assert "ready to implement" in result.lower() or "marked" in result.lower()
         assert "Test description" in result
 
-    def test_error_for_already_completed_task(self, tmp_path, monkeypatch):
+    def test_error_for_already_completed_task(self, tmp_path, monkeypatch, project_context):
         """Test error for already completed task."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
-        
+
         # First implementation
         implement_task(1)
-        
+
         # Second implementation should show already completed
         result = implement_task(1)
-        
+
         assert "already completed" in result.lower()
 
-    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch):
+    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch, project_context):
         """Test error for non-existent task."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = implement_task(999)
         
         assert "Error" in result
         assert "not found" in result.lower()
 
-    def test_status_updated_to_done(self, tmp_path, monkeypatch):
+    def test_status_updated_to_done(self, tmp_path, monkeypatch, project_context):
         """Verify status is updated to 'done'."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify initial status
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** pending" in content
@@ -574,21 +505,14 @@ class TestImplementTask:
 class TestImplementAllTasks:
     """Test implement_all_tasks() function."""
 
-    def test_when_no_tasks_exist(self, tmp_path, monkeypatch):
+    def test_when_no_tasks_exist(self, tmp_path, monkeypatch, project_context):
         """Test when no tasks exist."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         result = implement_all_tasks()
         
         assert result == "No tasks found."
 
-    def test_no_pending_tasks(self, tmp_path, monkeypatch):
+    def test_no_pending_tasks(self, tmp_path, monkeypatch, project_context):
         """Test when no pending tasks."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create and complete a task
         create_task("Completed Task")
         implement_task(1)
@@ -597,12 +521,8 @@ class TestImplementAllTasks:
         
         assert "No pending tasks" in result
 
-    def test_implement_multiple_pending_tasks(self, tmp_path, monkeypatch):
+    def test_implement_multiple_pending_tasks(self, tmp_path, monkeypatch, project_context):
         """Test implementing multiple pending tasks."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create multiple tasks
         create_task("First Task")
         create_task("Second Task")
@@ -615,26 +535,19 @@ class TestImplementAllTasks:
         assert "First Task" in result
         assert "Second Task" in result
 
-    def test_marks_tasks_as_done(self, tmp_path, monkeypatch):
+    def test_marks_tasks_as_done(self, tmp_path, monkeypatch, project_context):
         """Test that tasks are marked as done."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         create_task("Test Task")
         
         implement_all_tasks()
         
+        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify status changed
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** done" in content
 
-    def test_skips_already_done_tasks(self, tmp_path, monkeypatch):
+    def test_skips_already_done_tasks(self, tmp_path, monkeypatch, project_context):
         """Test that already done tasks are skipped."""
-        mock_tasks_dir = tmp_path / ".ayder" / "tasks"
-        mock_tasks_dir.mkdir(parents=True)
-        monkeypatch.setattr("ayder_cli.tasks.TASKS_DIR", str(mock_tasks_dir))
-        
         # Create tasks, complete first one
         create_task("First Task")
         create_task("Second Task")

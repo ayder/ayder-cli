@@ -22,7 +22,9 @@ from ayder_cli.tools.impl import (
     run_shell_command,
     get_project_structure,
     search_codebase,
+    get_project_context,
 )
+from ayder_cli.path_context import ProjectContext
 
 # Re-export task management functions for backwards compatibility
 from ayder_cli.tasks import (
@@ -51,4 +53,6 @@ __all__ = [
     "show_task",
     "implement_task",
     "implement_all_tasks",
+    "ProjectContext",
+    "get_project_context",
 ]
