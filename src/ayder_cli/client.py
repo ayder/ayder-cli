@@ -1,5 +1,7 @@
 import json
+import asyncio
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
 from ayder_cli import fs_tools
 from ayder_cli.config import load_config, Config
@@ -16,6 +18,48 @@ from prompt_toolkit.formatted_text import ANSI
 
 # Tools that end the agentic loop after execution
 TERMINAL_TOOLS = {"create_task", "list_tasks", "show_task", "implement_task", "implement_all_tasks"}
+
+# Thread pool for running sync code
+_executor = ThreadPoolExecutor(max_workers=2)
+
+
+async def call_llm_async(
+    client: OpenAI,
+    messages: list,
+    model: str,
+    tools: list = None,
+    num_ctx: int = 65536
+) -> dict:
+    """
+    Async wrapper for LLM calls.
+    
+    Runs the synchronous LLM call in a thread pool to avoid blocking the UI.
+    
+    Args:
+        client: OpenAI client instance
+        messages: Conversation history
+        model: Model name
+        tools: Available tools (optional)
+        num_ctx: Context window size
+        
+    Returns:
+        LLM response object
+    """
+    loop = asyncio.get_event_loop()
+    
+    def call_sync():
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "extra_body": {"options": {"num_ctx": num_ctx}}
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        
+        return client.chat.completions.create(**kwargs)
+    
+    return await loop.run_in_executor(_executor, call_sync)
 
 
 class ChatSession:
@@ -197,7 +241,7 @@ class Agent:
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"
-            print("\n" + draw_box(error_msg, title="Error", width=80, color_code="31"))
+            draw_box(error_msg, title="Error", width=80, color_code="31")
 
     def _execute_tool_loop(self, tool_calls) -> bool:
         """Execute the tool call loop.

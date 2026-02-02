@@ -39,7 +39,7 @@ Available Commands:
   /help           - Show this help message
   exit            - Quit the application
 """
-    print(draw_box(help_text, title="Help", width=80, color_code="33"))
+    draw_box(help_text, title="Help", width=80, color_code="33")
     return True
 
 
@@ -58,7 +58,7 @@ def cmd_tools(args, session):
         desc = func.get('description', 'No description provided.')
         tools_info += f"• {name}: {desc}\n"
 
-    print(draw_box(tools_info.strip(), title="Available Tools", width=80, color_code="35"))
+    draw_box(tools_info.strip(), title="Available Tools", width=80, color_code="35")
     return True
 
 
@@ -71,7 +71,7 @@ def cmd_tasks(args, session):
         session: Session dict containing messages, system_prompt, state
     """
     result = list_tasks()
-    print(draw_box(result, title="Tasks", width=80, color_code="35"))
+    draw_box(result, title="Tasks", width=80, color_code="35")
     return True
 
 
@@ -84,18 +84,18 @@ def cmd_task_edit(args, session):
         session: Session dict containing messages, system_prompt, state
     """
     if not args:
-        print(draw_box("Usage: /task-edit <task_id>\nExample: /task-edit 1", title="Error", width=80, color_code="31"))
+        draw_box("Usage: /task-edit <task_id>\nExample: /task-edit 1", title="Error", width=80, color_code="31")
         return True
 
     try:
         task_id = int(args.strip())
     except ValueError:
-        print(draw_box(f"Invalid task ID: {args.strip()}\nTask ID must be a number.", title="Error", width=80, color_code="31"))
+        draw_box(f"Invalid task ID: {args.strip()}\nTask ID must be a number.", title="Error", width=80, color_code="31")
         return True
 
     task_path = _get_tasks_dir() / f"TASK-{task_id:03d}.md"
     if not task_path.exists():
-        print(draw_box(f"Task TASK-{task_id:03d} not found.", title="Error", width=80, color_code="31"))
+        draw_box(f"Task TASK-{task_id:03d} not found.", title="Error", width=80, color_code="31")
         return True
 
     # Get editor from config
@@ -105,11 +105,11 @@ def cmd_task_edit(args, session):
     # Open editor
     try:
         subprocess.run([editor, str(task_path)], check=True)
-        print(draw_box(f"Task TASK-{task_id:03d} edited successfully.", title="Success", width=80, color_code="32"))
+        draw_box(f"Task TASK-{task_id:03d} edited successfully.", title="Success", width=80, color_code="32")
     except subprocess.CalledProcessError:
-        print(draw_box(f"Error opening editor: {editor}", title="Error", width=80, color_code="31"))
+        draw_box(f"Error opening editor: {editor}", title="Error", width=80, color_code="31")
     except FileNotFoundError:
-        print(draw_box(f"Editor not found: {editor}\nUpdate your config at ~/.ayder/config.toml", title="Error", width=80, color_code="31"))
+        draw_box(f"Editor not found: {editor}\nUpdate your config at ~/.ayder/config.toml", title="Error", width=80, color_code="31")
 
     return True
 
@@ -123,12 +123,12 @@ def cmd_edit(args, session):
         session: Session dict containing messages, system_prompt, state
     """
     if not args:
-        print(draw_box("Usage: /edit <file_path>\nExample: /edit src/main.py", title="Error", width=80, color_code="31"))
+        draw_box("Usage: /edit <file_path>\nExample: /edit src/main.py", title="Error", width=80, color_code="31")
         return True
 
     file_path = Path(args.strip())
     if not file_path.exists():
-        print(draw_box(f"File not found: {file_path}", title="Error", width=80, color_code="31"))
+        draw_box(f"File not found: {file_path}", title="Error", width=80, color_code="31")
         return True
 
     cfg = load_config()
@@ -136,11 +136,11 @@ def cmd_edit(args, session):
 
     try:
         subprocess.run([editor, str(file_path)], check=True)
-        print(draw_box(f"Finished editing {file_path}", title="Success", width=80, color_code="32"))
+        draw_box(f"Finished editing {file_path}", title="Success", width=80, color_code="32")
     except subprocess.CalledProcessError:
-        print(draw_box(f"Error opening editor: {editor}", title="Error", width=80, color_code="31"))
+        draw_box(f"Error opening editor: {editor}", title="Error", width=80, color_code="31")
     except FileNotFoundError:
-        print(draw_box(f"Editor not found: {editor}\nUpdate your config at ~/.ayder/config.toml", title="Error", width=80, color_code="31"))
+        draw_box(f"Editor not found: {editor}\nUpdate your config at ~/.ayder/config.toml", title="Error", width=80, color_code="31")
 
     return True
 
@@ -157,9 +157,9 @@ def cmd_verbose(args, session):
     if state is not None:
         state["verbose"] = not state["verbose"]
         status = "ON" if state["verbose"] else "OFF"
-        print(draw_box(f"Verbose mode: {status}", title="System", width=80, color_code="32"))
+        draw_box(f"Verbose mode: {status}", title="System", width=80, color_code="32")
     else:
-        print(draw_box("Verbose mode is not available.", title="Error", width=80, color_code="31"))
+        draw_box("Verbose mode is not available.", title="Error", width=80, color_code="31")
     return True
 
 
@@ -175,7 +175,7 @@ def cmd_clear(args, session):
     system_prompt = session.get("system_prompt")
     messages.clear()
     messages.append({"role": "system", "content": system_prompt})
-    print(draw_box("Conversation history cleared.", title="System", width=80, color_code="32"))
+    draw_box("Conversation history cleared.", title="System", width=80, color_code="32")
     return True
 
 
@@ -197,9 +197,9 @@ def cmd_undo(args, session):
 
     if last_user_idx > 0:  # Ensure we don't delete system prompt (idx 0)
         del messages[last_user_idx:]
-        print(draw_box("Undid last interaction.", title="System", width=80, color_code="32"))
+        draw_box("Undid last interaction.", title="System", width=80, color_code="32")
     else:
-        print(draw_box("Nothing to undo.", title="System", width=80, color_code="33"))
+        draw_box("Nothing to undo.", title="System", width=80, color_code="33")
     return True
 
 
@@ -229,5 +229,5 @@ def handle_command(cmd, messages, system_prompt, state=None):
         handler = COMMANDS[cmd_name]
         return handler(cmd_args, session)
     else:
-        print(draw_box(f"Unknown command: {cmd}", title="Error", width=80, color_code="31"))
+        draw_box(f"Unknown command: {cmd}", title="Error", width=80, color_code="31")
         return True

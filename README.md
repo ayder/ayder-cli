@@ -8,7 +8,8 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 
 - **Fully local** -- runs against Ollama on your machine. While you do not depend on a AI provider, your code never leaves your computer.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 5 consecutive tool calls per user message.
-- **Minimal dependencies** -- just the OpenAI SDK (for Ollama's compatible API) and prompt-toolkit for terminal input. No frameworks, no bloat.
+- **Two interfaces** -- a classic prompt-toolkit CLI and an optional Textual TUI dashboard with chat view, context panel, and tool confirmation modals.
+- **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual. No frameworks, no bloat.
 
 
 ### Why fs_tools?
@@ -32,10 +33,10 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
-  - **WARNING**: No sandboxing provided in this early technology preview version.
-  - This cli do not have a --yolo-its-too-dangerous method as well. **it allows all shell commands to be executed**
-  - Every tool call requires your confirmation before it runs -- you must always stay in control.
-  - Also you may prefer to run ayder-cli agent in a container for additional security.
+  - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
+  - **Safe mode** (TUI): The Textual TUI supports a safe mode that blocks `write_file`, `replace_string`, and `run_shell_command`.
+  - Every tool call requires your confirmation before it runs -- you always stay in control.
+  - You may also prefer to run ayder-cli in a container for additional security.
 
 Of course I am grateful to GEMINI to come up with this idea, KIMI2 for reasoning tasks and CLAUDE and COPILOT to do coding and testing for me. 
 
@@ -112,7 +113,7 @@ python -m ayder_cli
 ```
 ╭──────────────────┬────────────────────────────────────────╮
 │                  │                                        │
-│  ░▒▓▓▓▒░        │ ayder-cli v0.2.0                       │
+│  ░▒▓▓▓▒░        │ ayder-cli v0.6.0                       │
 │       ▓▓        │ qwen3-coder:latest · Ollama            │
 │  ▒▓▓▓▓▓▓        │ ~/projects/my-app                      │
 │  ▓▓  ▓▓▓        │                                        │
@@ -299,42 +300,61 @@ ayder-cli uses emacs-style keybindings via prompt-toolkit:
 
 ```
 src/ayder_cli/
-  client.py       -- Main chat loop and agentic execution loop
-  commands.py     -- Slash command handler with decorator-based registry
-  config.py       -- Configuration loading with Pydantic validation
-  fs_tools.py     -- Backwards compatibility layer (re-exports from tools/)
-  ui.py           -- Terminal UI (ANSI box drawing, message formatting, confirmation prompts)
-  parser.py       -- Custom XML-like tool call parser (fallback for models without function calling)
-  prompts.py      -- System prompts and prompt templates
-  tasks.py        -- Task creation, listing, and implementation (markdown files in .ayder/tasks/)
-  banner.py       -- Welcome banner with gothic art and random tips
-  tools/          -- Modular tools package
-    impl.py       -- Tool implementations (file ops, shell, search)
-    schemas.py    -- OpenAI-format JSON schemas for all tools
-    registry.py   -- ToolRegistry class for tool dispatch and management
+  client.py        -- ChatSession + Agent classes, run_chat() entry point
+  commands.py      -- Slash command handler with decorator-based registry
+  config.py        -- Configuration loading with Pydantic validation
+  fs_tools.py      -- Backwards compatibility layer (re-exports from tools/)
+  ui.py            -- Rich terminal UI (boxes, message formatting, diff previews)
+  tui.py           -- Textual TUI dashboard (chat view, context panel, modals)
+  tui_helpers.py   -- TUI helper functions (safe mode checks)
+  parser.py        -- XML tool call parser (standard + lazy format fallback)
+  prompts.py       -- System prompts and prompt templates
+  tasks.py         -- Task creation, listing, and implementation (.ayder/tasks/)
+  banner.py        -- Welcome banner with version detection and tips
+  console.py       -- Centralized Rich console with custom theme
+  path_context.py  -- ProjectContext for path sandboxing and security
+  tools/           -- Modular tools package
+    impl.py        -- Tool implementations (file ops, shell, search)
+    schemas.py     -- OpenAI-format JSON schemas for all 10 tools
+    registry.py    -- ToolRegistry with middleware, callbacks, and execution timing
+    utils.py       -- Tool utilities (content preparation for diffs)
 ```
 
-## Recent Changes (v0.2.0)
+## Recent Changes (v0.6.0)
 
-### Major Refactoring & Architectural Improvements
+### Textual TUI Dashboard
+- **Interactive TUI**: New `tui.py` module provides a full Textual-based dashboard with chat view, context panel (model info, token usage, file tree), input bar, and keyboard shortcuts (Ctrl+Q, Ctrl+C, Ctrl+L).
+- **Tool confirmation modals**: `ConfirmActionScreen` with inline diff previews for file-modifying tools. `SafeModeBlockScreen` for blocked operations.
+- **Safe mode**: Blocks destructive tools (`write_file`, `replace_string`, `run_shell_command`) via registry middleware.
+- **Async LLM calls**: `call_llm_async()` runs synchronous OpenAI calls in a thread pool so the TUI stays responsive.
 
-This release focuses on improving the maintainability, testability, and extensibility of the codebase.
+### Path Security & Sandboxing
+- **`ProjectContext`**: New `path_context.py` module sandboxes all file operations to the project root. Blocks path traversal (`../`), validates absolute paths, and handles tilde expansion.
+- **Propagated at startup**: `set_project_context_for_modules()` in `client.py` pushes the context to all tool modules (`impl.py`, `utils.py`, `registry.py`, `tasks.py`).
 
-#### Modularized Tool Management
-- **Split `fs_tools.py`**: The monolithic `fs_tools.py` has been decomposed into a dedicated `tools` package:
-  - `tools/impl.py`: Contains the actual tool implementations including new `search_codebase` and `get_project_structure` tools
-  - `tools/schemas.py`: Defines JSON schemas for all 11 tools in OpenAI function calling format
-  - `tools/registry.py`: Implements a `ToolRegistry` class for better tool dispatch and management
-- **Backwards Compatibility**: `fs_tools.py` is maintained as a re-export module to ensure existing imports continue to work
+### ChatSession & Agent Architecture
+- **`ChatSession` class**: Manages conversation state, prompt-toolkit input, message history, and welcome banner display. Replaces the inline logic that was previously in `run_chat()`.
+- **`Agent` class**: Handles the agentic loop (up to 5 consecutive tool calls), tool validation, diff preview for file-modifying tools, and both standard OpenAI and custom XML-parsed tool calls.
+- **`run_chat()` preserved**: Still the entry point, now accepts `project_root` parameter in addition to `openai_client` and `config`.
 
-#### Decomposed Main Chat Loop
-- **Dependency Injection**: The `run_chat()` function now accepts optional `openai_client` and `config` parameters for improved testability
-- **Pydantic Configuration**: Config validation using Pydantic models with field validators for `num_ctx` (positive integer) and `base_url` (valid URL)
-- **Better Separation**: `SYSTEM_PROMPT` moved to `prompts.py` for better organization
+### Enhanced Tool Registry
+- **Middleware support**: `ToolRegistry.add_middleware()` for pre-execution checks (used by TUI safe mode).
+- **Callbacks**: Pre/post-execute callbacks with `ToolExecutionResult` (includes timing, status, error details).
+- **`ToolExecutionStatus`/`ToolExecutionResult`**: Structured result objects for execution tracking.
 
-#### Refactored Command Handling
-- **Command Registry**: Replaced the long `if/elif` chain in `commands.py` with a decorator-based registry (`@register_command`)
-- **Extensibility**: New commands can now be added easily by defining a function and decorating it
+### Enhanced Parser
+- **Lazy format**: Single-param tools can now use `<function=name>value</function>` without explicit `<parameter>` tags. Parameter name is inferred via `_infer_parameter_name()`.
+- **Error reporting**: Malformed tool calls return `{"error": "message"}` objects instead of silently failing.
+
+### Test Coverage
+- **464 tests** (up from 243), **96% coverage** across all modules.
+- New test files: `test_parser.py`, `tools/test_path_security.py`, and coverage-focused test files for `client.py`, `tools/impl.py`, `tools/registry.py`, `ui.py`, `config.py`, `tools/utils.py`.
+
+### Other Improvements
+- **Rich console** (`console.py`): Centralized console instance with custom theme and 20+ file extension syntax mappings.
+- **Welcome banner** (`banner.py`): Version detection via `importlib.metadata`, gothic ASCII art, and random tips.
+- **Pydantic config validation**: Field validators for `base_url` (http/https) and `num_ctx` (positive integer).
+- **Modular tools package**: `fs_tools.py` is now a thin re-export layer; all logic lives in `tools/`.
 
 ## License
 

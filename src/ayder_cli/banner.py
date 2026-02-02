@@ -1,5 +1,8 @@
 import random
 from pathlib import Path
+from importlib.metadata import version, PackageNotFoundError
+from rich.text import Text
+from ayder_cli.console import console
 
 
 TIPS = [
@@ -21,17 +24,24 @@ GOTHIC_A = [
 ]
 
 
-def print_welcome_banner(model, cwd):
-    """Print the ayder-cli welcome banner in a two-column wireframe box."""
-    B = "\033[1;34m"      # bold naval blue
-    W = "\033[1;37m"      # bold white
-    S = "\033[38;5;248m"  # dim silver
-    G = "\033[38;5;243m"  # dim gray
-    Y = "\033[33m"        # yellow
-    D = "\033[2m"         # dim
-    F = "\033[38;5;240m"  # frame color (dark gray)
-    R = "\033[0m"         # reset
+def get_app_version():
+    """
+    Retrieves the version from the installed package metadata.
+    Returns 'unknown (dev)' if the package is not installed (e.g., running raw script).
+    """
+    try:
+        # CRITICAL: This string must match 'name' in pyproject.toml
+        return version("ayder-cli")
+    except PackageNotFoundError:
+        return "unknown (dev)"
 
+
+# Expose version globally if other modules need it
+__version__ = get_app_version()
+
+
+def print_welcome_banner(model, cwd):
+    """Print the ayder-cli welcome banner in a two-column wireframe box using Rich styling."""
     # Shorten home directory
     home = str(Path.home())
     display_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
@@ -39,14 +49,14 @@ def print_welcome_banner(model, cwd):
     # Column widths (inner content, excluding padding)
     left_w = 16   # fits the gothic A art
     right_w = 38  # info text
-    total_w = left_w + right_w + 5  # 1 border + 1 pad + left + 1 border + 1 pad + right + 1 pad + 1 border
 
-    # Right-column content (plain text for width calc, formatted for display)
+    # Right-column content (plain text for width calc)
+    app_ver = __version__
     info = [
         ("", ""),
-        (f"{W}ayder-cli v0.5.0{R}", "ayder-cli v0.5.0"),
-        (f"{S}{model} · Ollama{R}", f"{model} · Ollama"),
-        (f"{G}{display_cwd}{R}", display_cwd),
+        (f"ayder-cli v{app_ver}", "bold white"),
+        (f"{model} · Ollama", "bright_black"),
+        (display_cwd, "dim"),
         ("", ""),
     ]
 
@@ -55,29 +65,42 @@ def print_welcome_banner(model, cwd):
     art_lines = GOTHIC_A + ["" * left_w] * (rows - len(GOTHIC_A))
     info_lines = info + [("", "")] * (rows - len(info))
 
-    # Build output
-    lines = []
+    # Build banner with Rich Text
+    banner = Text()
 
     # Top border
-    lines.append(f"{F}╭{'─' * (left_w + 2)}┬{'─' * (right_w + 2)}╮{R}")
+    banner.append(f"╭{'─' * (left_w + 2)}┬{'─' * (right_w + 2)}╮\n", style="dim")
 
     for i in range(rows):
         art = art_lines[i]
-        formatted, plain = info_lines[i]
+        text_content, style = info_lines[i]
         art_pad = left_w - len(art)
-        info_pad = right_w - len(plain)
-        lines.append(
-            f"{F}│{R} {B}{art}{R}{' ' * art_pad} "
-            f"{F}│{R} {formatted}{' ' * info_pad} {F}│{R}"
-        )
+        info_pad = right_w - len(text_content)
+        
+        # Build each row
+        banner.append("│", style="dim")
+        banner.append(f" {art}{' ' * art_pad} ", style="bold bright_blue")
+        banner.append("│", style="dim")
+        banner.append(" ")
+        if text_content:
+            banner.append(text_content, style=style)
+        banner.append(' ' * info_pad)
+        banner.append(" ")
+        banner.append("│\n", style="dim")
 
-    # Middle separator
-    lines.append(f"{F}╰{'─' * (left_w + 2)}┴{'─' * (right_w + 2)}╯{R}")
+    # Bottom border
+    banner.append(f"╰{'─' * (left_w + 2)}┴{'─' * (right_w + 2)}╯\n", style="dim")
 
     # Tip line below the box
     tip = random.choice(TIPS)
-    lines.append(f" {Y}?{R} {D}Tip: {tip}{R}")
+    tip_line = Text()
+    tip_line.append(" ")
+    tip_line.append("?", style="yellow")
+    tip_line.append(" ")
+    tip_line.append("Tip: ", style="dim")
+    tip_line.append(tip, style="dim")
 
-    print()
-    print("\n".join(lines))
-    print()
+    console.print()
+    console.print(banner)
+    console.print(tip_line)
+    console.print()

@@ -1,78 +1,255 @@
 import json
 import re
-import textwrap
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.markdown import Markdown
+from rich.status import Status
+from rich.text import Text
+from ayder_cli.console import console, get_language_from_path
+
+
+def print_user_message(text):
+    """Print user message in a cyan panel."""
+    console.print(Panel(
+        text, 
+        title="You", 
+        border_style="user",
+        padding=(1, 2)
+    ))
+
+
+def print_assistant_message(text):
+    """Print assistant message in a green panel."""
+    console.print(Panel(
+        text, 
+        title="Assistant", 
+        border_style="assistant",
+        padding=(1, 2)
+    ))
+
+
+def print_tool_call(func_name, args):
+    """Print tool execution in a yellow panel."""
+    text = f"{func_name}({args})"
+    console.print(Panel(
+        text, 
+        title="Tool Call", 
+        border_style="tool_call",
+        padding=(1, 2)
+    ))
 
 
 def draw_box(text, title="", width=80, color_code="36"):
     """
-    Draw horizontal separators around text with optional embedded title.
-    color_code: 36=cyan, 32=green, 33=yellow, 35=magenta, 31=red
+    DEPRECATED: Use Rich Panels directly.
+    Kept for backward compatibility, delegates to Rich Panel.
     """
-    horizontal = "─"
+    style_map = {
+        "36": "cyan",
+        "32": "green", 
+        "33": "yellow",
+        "35": "magenta",
+        "31": "red",
+    }
+    border_style = style_map.get(color_code, "cyan")
+    
+    console.print(Panel(
+        text,
+        title=title if title else None,
+        border_style=border_style,
+        width=width,
+        padding=(1, 2)
+    ))
 
-    # Wrap text to fit within available width
-    wrapped_lines = []
-    for line in text.split('\n'):
-        if line:
-            wrapped_lines.extend(textwrap.wrap(line, width=width))
-        else:
-            wrapped_lines.append("")
 
-    # Build the output
-    lines = []
+def print_file_content_rich(file_path: str, content: str = None) -> None:
+    """
+    Display file content with syntax highlighting.
+    
+    Args:
+        file_path: Path to the file (used for language detection)
+        content: File content (if None, reads from file)
+    """
+    if content is None:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            console.print(Panel(
+                f"Could not read file: {e}",
+                title="Error",
+                border_style="error"
+            ))
+            return
+    
+    language = get_language_from_path(file_path)
+    
+    # Create syntax-highlighted content
+    syntax = Syntax(
+        content,
+        language,
+        theme="monokai",
+        line_numbers=True,
+        word_wrap=True
+    )
+    
+    console.print(Panel(
+        syntax,
+        title=file_path,
+        border_style="info"
+    ))
 
-    # Top separator with optional embedded title
+
+def print_markdown(text: str, title: str = None) -> None:
+    """
+    Render markdown text with proper formatting.
+    
+    Args:
+        text: Markdown text to render
+        title: Optional panel title
+    """
+    md = Markdown(text)
+    
     if title:
-        title_text = f" {title} "
-        remaining = width - len(title_text)
-        left_pad = remaining // 2
-        right_pad = remaining - left_pad
-        lines.append(f"\033[{color_code}m{horizontal * left_pad}{title_text}{horizontal * right_pad}\033[0m")
+        console.print(Panel(md, title=title, border_style="assistant"))
     else:
-        lines.append(f"\033[{color_code}m{horizontal * width}\033[0m")
-
-    # Content lines (no borders, just text)
-    lines.extend(wrapped_lines)
-
-    # Bottom separator
-    lines.append(f"\033[{color_code}m{horizontal * width}\033[0m")
-
-    return "\n".join(lines)
+        console.print(md)
 
 
-def print_user_message(text):
-    """Print user message in a cyan box."""
-    print("\n" + draw_box(text, title="You", width=80, color_code="36"))
-
-
-def print_assistant_message(text):
-    """Print assistant message in a green box."""
-    print("\n" + draw_box(text, title="Assistant", width=80, color_code="32"))
-
-
-def print_tool_call(func_name, args):
-    """Print tool execution in a yellow box."""
-    text = f"{func_name}({args})"
-    print("\n" + draw_box(text, title="Tool Call", width=80, color_code="33"))
+def print_code_block(code: str, language: str = "python", title: str = None) -> None:
+    """
+    Display a code block with syntax highlighting.
+    
+    Args:
+        code: The code to display
+        language: Programming language for highlighting
+        title: Optional panel title
+    """
+    syntax = Syntax(
+        code,
+        language,
+        theme="monokai",
+        line_numbers=True,
+        word_wrap=True
+    )
+    
+    console.print(Panel(
+        syntax,
+        title=title or f"{language}",
+        border_style="info"
+    ))
 
 
 def print_tool_result(result):
     """Print tool result with a checkmark prefix."""
+    from rich.text import Text
+    
     result_str = str(result)
     if len(result_str) > 300:
         result_str = result_str[:300] + "..."
-    print(f"\033[32m✓\033[0m {result_str}")
+    
+    text = Text()
+    text.append("✓ ", style="bold green")
+    text.append(result_str)
+    console.print(text)
 
 
 def print_running():
     """Print a simple running indicator instead of echoing the user prompt."""
-    print("\n\033[33mRunning...\033[0m")
+    console.print("\n[yellow]Running...[/yellow]")
+
+
+@contextmanager
+def agent_working_status(message: str = "Agent is working...") -> Generator[Status, None, None]:
+    """
+    Context manager for showing agent working status.
+    
+    Usage:
+        with agent_working_status("Processing..."):
+            result = call_llm(...)
+    
+    Args:
+        message: Status message to display
+        
+    Yields:
+        Rich Status object
+    """
+    with console.status(f"[bold green]{message}") as status:
+        yield status
+
+
+def print_running_rich(message: str = "Running...") -> None:
+    """
+    Print a Rich-styled running indicator.
+    
+    Args:
+        message: Message to display
+    """
+    console.print(f"[yellow]{message}[/yellow]")
+
+
+@contextmanager
+def tool_execution_status(tool_name: str) -> Generator[Status, None, None]:
+    """
+    Context manager for showing tool execution status.
+    
+    Args:
+        tool_name: Name of the tool being executed
+        
+    Yields:
+        Rich Status object
+    """
+    with console.status(f"[bold yellow]Executing {tool_name}...") as status:
+        yield status
+
+
+@contextmanager
+def file_operation_status(operation: str, file_path: str) -> Generator[Status, None, None]:
+    """
+    Context manager for showing file operation status.
+    
+    Args:
+        operation: Type of operation (reading, writing, etc.)
+        file_path: Path to the file
+        
+    Yields:
+        Rich Status object
+    """
+    display_path = file_path
+    if len(display_path) > 40:
+        display_path = "..." + display_path[-37:]
+    
+    with console.status(f"[bold cyan]{operation} {display_path}...") as status:
+        yield status
+
+
+@contextmanager
+def search_status(pattern: str) -> Generator[Status, None, None]:
+    """
+    Context manager for showing search progress.
+    
+    Args:
+        pattern: Search pattern being used
+        
+    Yields:
+        Rich Status object
+    """
+    display_pattern = pattern if len(pattern) < 30 else pattern[:27] + "..."
+    with console.status(f"[bold blue]Searching for '{display_pattern}'...") as status:
+        yield status
 
 
 def print_tool_skipped():
     """Print a simple tool skipped indicator with icon prefix."""
-    print("\n\033[33m✗  Tool call skipped by user.\033[0m")
+    from rich.text import Text
+    
+    text = Text()
+    text.append("✗  ", style="bold yellow")
+    text.append("Tool call skipped by user.")
+    console.print(text)
 
 
 def describe_tool_action(fname, args):
@@ -117,40 +294,54 @@ def print_file_content(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        print("\n" + draw_box(content, title=file_path, width=80, color_code="36"))
+        console.print(Panel(
+            content,
+            title=file_path,
+            border_style="cyan",
+            padding=(1, 2)
+        ))
     except Exception as e:
-        print("\n" + draw_box(f"Could not read file: {e}", title="Verbose Error", width=80, color_code="31"))
+        console.print(Panel(
+            f"Could not read file: {e}",
+            title="Verbose Error",
+            border_style="red",
+            padding=(1, 2)
+        ))
 
 
 def confirm_tool_call(description=""):
     """Ask user to confirm a tool call with a human-friendly description. Returns True if approved."""
     try:
-        prompt = f"\033[33m{description}. Proceed? (Y/n)\033[0m " if description else "\033[33mProceed? (Y/n)\033[0m "
-        answer = input(prompt).strip().lower()
+        # Build the prompt text with Rich styling
+        prompt_text = Text()
+        if description:
+            prompt_text.append(f"{description}. ", style="yellow")
+        prompt_text.append("Proceed? (Y/n)", style="bold yellow")
+        
+        # Print the prompt and get input
+        console.print(prompt_text, end=" ")
+        answer = input().strip().lower()
         return answer in ("", "y", "yes")
     except (EOFError, KeyboardInterrupt):
-        print()
+        console.print()
         return False
 
 
 def colorize_diff(diff_lines):
     """
-    Apply ANSI color codes to diff lines.
-    Red (31) for deletions (lines starting with - but not ---)
-    Green (32) for additions (lines starting with + but not +++)
-    Cyan (36) for hunk headers (lines starting with @@)
-    Default color for context lines
+    Apply Rich styling to diff lines.
+    Red for deletions, Green for additions, Cyan for hunk headers.
     """
     colorized = []
     for line in diff_lines:
+        text = Text(line)
         if line.startswith('@@'):
-            colorized.append(f"\033[36m{line}\033[0m")
+            text.stylize("cyan")
         elif line.startswith('-') and not line.startswith('---'):
-            colorized.append(f"\033[31m{line}\033[0m")
+            text.stylize("red")
         elif line.startswith('+') and not line.startswith('+++'):
-            colorized.append(f"\033[32m{line}\033[0m")
-        else:
-            colorized.append(line)
+            text.stylize("green")
+        colorized.append(text)
     return colorized
 
 
@@ -175,7 +366,7 @@ def generate_diff_preview(file_path, new_content):
     Generate a unified diff preview of file changes.
     - If file doesn't exist: create "new file" diff (all lines as additions)
     - If file exists: read current and generate diff
-    - Returns formatted diff string or None on error/binary file
+    - Returns Rich Text object with styled diff or None on error/binary file
     """
     import difflib
 
@@ -218,7 +409,14 @@ def generate_diff_preview(file_path, new_content):
         colorized = colorize_diff(diff_lines)
         truncated = truncate_diff(colorized)
 
-        return "\n".join(truncated)
+        # Combine Text objects into a single Text
+        combined = Text()
+        for i, text_obj in enumerate(truncated):
+            if i > 0:
+                combined.append("\n")
+            combined.append(text_obj)
+        
+        return combined
 
     except Exception:
         return None
@@ -233,9 +431,14 @@ def confirm_with_diff(file_path, new_content, description=""):
     diff = generate_diff_preview(file_path, new_content)
 
     if diff:
-        print("\n" + draw_box(diff, title="Preview", color_code="35"))
+        console.print(Panel(
+            diff,
+            title="Preview",
+            border_style="magenta",
+            padding=(1, 2)
+        ))
     else:
-        print("\n\033[33mWarning: Unable to generate preview (binary file or error)\033[0m")
+        console.print("\n[yellow]Warning: Unable to generate preview (binary file or error)[/yellow]")
 
     return confirm_tool_call(description)
 

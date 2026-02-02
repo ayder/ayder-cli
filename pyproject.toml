@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "Interactive AI agent chat client for local LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,8 @@ license = "MIT"
 dependencies = [
     "openai",
     "prompt-toolkit",
+    "rich>=13.0.0",
+    "textual>=0.50.0",
 ]
 
 [project.scripts]

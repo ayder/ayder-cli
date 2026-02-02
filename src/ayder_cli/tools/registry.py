@@ -6,10 +6,39 @@ Provides a registry pattern for tool execution, replacing the if/elif dispatch b
 
 import json
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Tuple, List, Any, Optional
+from dataclasses import dataclass
+from enum import Enum
 
 from ayder_cli.tools.schemas import tools_schema
 from ayder_cli.path_context import ProjectContext
+
+
+# Type alias for middleware functions
+MiddlewareFunc = Callable[[str, Dict[str, Any]], None]
+
+
+class ToolExecutionStatus(Enum):
+    """Status of tool execution for callbacks."""
+    STARTED = "started"
+    SUCCESS = "success"
+    ERROR = "error"
+
+
+@dataclass
+class ToolExecutionResult:
+    """Result object passed to callbacks."""
+    tool_name: str
+    arguments: Dict[str, Any]
+    status: ToolExecutionStatus
+    result: Optional[str] = None
+    error: Optional[str] = None
+    duration_ms: Optional[float] = None
+
+
+# Type aliases for callbacks
+PreExecuteCallback = Callable[[str, Dict[str, Any]], None]
+PostExecuteCallback = Callable[["ToolExecutionResult"], None]
 
 
 # --- Module-level ProjectContext ---
@@ -124,15 +153,20 @@ def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
 
 class ToolRegistry:
     """
-    Registry for managing and executing tool functions.
-
-    Provides a dictionary-based registry pattern for tool execution with
-    built-in argument normalization and validation.
+    Registry for managing and executing tool functions with middleware support.
+    
+    Provides a dictionary-based registry pattern with:
+    - Argument normalization and validation
+    - Middleware hooks for pre-execution checks
+    - Error handling
     """
 
     def __init__(self):
         """Initialize an empty tool registry."""
         self._registry: Dict[str, Callable] = {}
+        self._middlewares: List[MiddlewareFunc] = []
+        self._pre_execute_callbacks: List[PreExecuteCallback] = []
+        self._post_execute_callbacks: List[PostExecuteCallback] = []
 
     def register(self, name: str, func: Callable) -> None:
         """
@@ -144,15 +178,93 @@ class ToolRegistry:
         """
         self._registry[name] = func
 
+    def add_middleware(self, middleware: MiddlewareFunc) -> None:
+        """
+        Add a middleware function for pre-execution checks.
+        
+        Middleware functions receive (tool_name, arguments) and can:
+        - Raise exceptions to block execution (e.g., PermissionError for safe mode)
+        - Log tool calls
+        - Modify arguments (use with caution)
+        
+        Args:
+            middleware: Function(tool_name: str, arguments: dict) -> None
+        """
+        self._middlewares.append(middleware)
+
+    def remove_middleware(self, middleware: MiddlewareFunc) -> None:
+        """
+        Remove a previously added middleware function.
+        
+        Args:
+            middleware: The middleware function to remove
+        """
+        if middleware in self._middlewares:
+            self._middlewares.remove(middleware)
+
+    def clear_middlewares(self) -> None:
+        """Remove all middleware functions."""
+        self._middlewares.clear()
+
+    def get_middlewares(self) -> List[MiddlewareFunc]:
+        """
+        Get a list of all registered middleware functions.
+        
+        Returns:
+            A list of middleware functions
+        """
+        return self._middlewares.copy()
+
+    def add_pre_execute_callback(self, callback: PreExecuteCallback) -> None:
+        """
+        Add a callback that runs before tool execution.
+        
+        Args:
+            callback: Function(tool_name: str, arguments: dict) -> None
+        """
+        self._pre_execute_callbacks.append(callback)
+
+    def add_post_execute_callback(self, callback: PostExecuteCallback) -> None:
+        """
+        Add a callback that runs after tool execution.
+        
+        Args:
+            callback: Function(result: ToolExecutionResult) -> None
+        """
+        self._post_execute_callbacks.append(callback)
+
+    def remove_pre_execute_callback(self, callback: PreExecuteCallback) -> None:
+        """Remove a pre-execute callback."""
+        if callback in self._pre_execute_callbacks:
+            self._pre_execute_callbacks.remove(callback)
+
+    def remove_post_execute_callback(self, callback: PostExecuteCallback) -> None:
+        """Remove a post-execute callback."""
+        if callback in self._post_execute_callbacks:
+            self._post_execute_callbacks.remove(callback)
+    
+    def get_schemas(self) -> List[Dict[str, Any]]:
+        """
+        Get the list of tool schemas for LLM function calling.
+        
+        Returns:
+            List of OpenAI-format tool schemas
+        """
+        return tools_schema
+
     def execute(self, name: str, arguments) -> str:
         """
         Execute a registered tool with the given arguments.
-
-        Handles:
-        - JSON string parsing for arguments
-        - Argument normalization (via normalize_tool_arguments)
-        - Argument validation (via validate_tool_call)
-        - Error handling for unknown tools
+        
+        Execution flow:
+        1. Parse JSON arguments if needed
+        2. Normalize arguments (aliases, paths, types)
+        3. Validate arguments against schema
+        4. Run pre-execute callbacks
+        5. Run middlewares (pre-execution checks)
+        6. Execute tool (with timing)
+        7. Run post-execute callbacks
+        8. Return result
 
         Args:
             name: The name of the registered tool to execute
@@ -161,6 +273,8 @@ class ToolRegistry:
         Returns:
             The result of the tool execution as a string
         """
+        import time
+        
         # Handle arguments being passed as a string (JSON) or a dict
         if isinstance(arguments, str):
             try:
@@ -182,9 +296,59 @@ class ToolRegistry:
         if name not in self._registry:
             return f"Error: Unknown tool '{name}'"
 
-        # Execute the tool
+        # Run pre-execute callbacks
+        for callback in self._pre_execute_callbacks:
+            try:
+                callback(name, args)
+            except Exception:
+                # Don't block execution on callback errors
+                pass
+
+        # Run middlewares (pre-execution checks)
+        for middleware in self._middlewares:
+            try:
+                middleware(name, args)
+            except PermissionError as e:
+                # Re-raise permission errors for safe mode blocking
+                raise
+            except Exception as e:
+                # Log but don't block on middleware errors
+                # (Could be enhanced with a logger)
+                pass
+
+        # Execute the tool with timing
+        start_time = time.time()
         tool_func = self._registry[name]
-        return tool_func(**args)
+        
+        try:
+            result = tool_func(**args)
+            status = ToolExecutionStatus.SUCCESS
+            error = None
+        except Exception as e:
+            result = f"Error executing {name}: {str(e)}"
+            status = ToolExecutionStatus.ERROR
+            error = str(e)
+        
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Run post-execute callbacks
+        execution_result = ToolExecutionResult(
+            tool_name=name,
+            arguments=args,
+            status=status,
+            result=result,
+            error=error,
+            duration_ms=duration_ms
+        )
+        
+        for callback in self._post_execute_callbacks:
+            try:
+                callback(execution_result)
+            except Exception:
+                # Don't block on callback errors
+                pass
+
+        return result
 
     def get_registered_tools(self) -> list:
         """
@@ -250,6 +414,8 @@ class _MockableToolRegistry(ToolRegistry):
     
     def execute(self, name: str, arguments) -> str:
         """Execute with dynamic function lookup for task tools."""
+        import time
+        
         # Handle arguments being passed as a string (JSON) or a dict
         if isinstance(arguments, str):
             try:
@@ -267,6 +433,29 @@ class _MockableToolRegistry(ToolRegistry):
         if not is_valid:
             return f"Validation Error: {error_msg}"
 
+        # Run pre-execute callbacks
+        for callback in self._pre_execute_callbacks:
+            try:
+                callback(name, args)
+            except Exception:
+                # Don't block execution on callback errors
+                pass
+
+        # Run middlewares (pre-execution checks)
+        for middleware in self._middlewares:
+            try:
+                middleware(name, args)
+            except PermissionError as e:
+                # Re-raise permission errors for safe mode blocking
+                raise
+            except Exception as e:
+                # Log but don't block on middleware errors
+                # (Could be enhanced with a logger)
+                pass
+
+        # Execute the tool with timing
+        start_time = time.time()
+        
         # For task tools, look them up dynamically from fs_tools for mockability
         if name in ("create_task", "show_task", "implement_task", "implement_all_tasks"):
             # Import at call time to allow mocking
@@ -281,14 +470,49 @@ class _MockableToolRegistry(ToolRegistry):
             tool_func = func_map.get(name)
             if tool_func is None:
                 return f"Error: Unknown tool '{name}'"
-            return tool_func(**args)
+            try:
+                result = tool_func(**args)
+                status = ToolExecutionStatus.SUCCESS
+                error = None
+            except Exception as e:
+                result = f"Error executing {name}: {str(e)}"
+                status = ToolExecutionStatus.ERROR
+                error = str(e)
+        else:
+            # For other tools, use standard registry lookup
+            if name not in self._registry:
+                return f"Error: Unknown tool '{name}'"
+            
+            tool_func = self._registry[name]
+            try:
+                result = tool_func(**args)
+                status = ToolExecutionStatus.SUCCESS
+                error = None
+            except Exception as e:
+                result = f"Error executing {name}: {str(e)}"
+                status = ToolExecutionStatus.ERROR
+                error = str(e)
         
-        # For other tools, use standard registry lookup
-        if name not in self._registry:
-            return f"Error: Unknown tool '{name}'"
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Run post-execute callbacks
+        execution_result = ToolExecutionResult(
+            tool_name=name,
+            arguments=args,
+            status=status,
+            result=result,
+            error=error,
+            duration_ms=duration_ms
+        )
         
-        tool_func = self._registry[name]
-        return tool_func(**args)
+        for callback in self._post_execute_callbacks:
+            try:
+                callback(execution_result)
+            except Exception:
+                # Don't block on callback errors
+                pass
+
+        return result
 
 
 def _get_default_registry() -> ToolRegistry:
