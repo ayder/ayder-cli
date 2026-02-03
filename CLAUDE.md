@@ -1,6 +1,6 @@
 ## Project Overview
 
-ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version: **0.6.0**.
+ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version: **0.7.0**.
 
 ## Virtual Environment Setup
 
@@ -34,24 +34,57 @@ PYTHONPATH=src python3 -c "from ayder_cli import fs_tools"
 
 ## Testing
 
-The project uses **pytest** for testing. All tests are located in the `tests/` directory.
+The project uses **pytest** for testing with performance-enhancing plugins. All tests are located in the `tests/` directory.
+
+### Installed Pytest Plugins
+
+- **pytest-xdist** - Parallel test execution (use for 100+ tests)
+- **pytest-timeout** - Prevent tests from hanging indefinitely
+- **pytest-instafail** - Show failures immediately
+- **pytest-sugar** - Beautiful progress bar and cleaner output
+
+### Running Tests
 
 ```bash
-# Run all tests (most reliable method)
+# Run all tests (most reliable method) - fastest for current suite size
 .venv/bin/python3 -m pytest tests/ -v
 
+# Run with timeout protection (recommended)
+.venv/bin/python3 -m pytest tests/ --timeout=10 -v
+
+# Run with instant failure feedback
+.venv/bin/python3 -m pytest tests/ --instafail -v
+
 # Run specific test file
-.venv/bin/python3 -m pytest tests/test_fs_tools.py -v
+.venv/bin/python3 -m pytest tests/test_cli_file_stdin.py -v
 
 # Run tests with coverage
 .venv/bin/python3 -m pytest --cov=ayder_cli --cov-report=term-missing tests/
+
+# Parallel execution (only beneficial for 100+ tests or slow tests)
+.venv/bin/python3 -m pytest tests/ -n auto --timeout=10
 
 # Quick verification that imports work
 PYTHONPATH=src python3 -c "from ayder_cli import fs_tools; print(len(fs_tools.tools_schema))"
 ```
 
-**Test Structure** (464 tests, 96% coverage):
+**Performance Note**: Sequential execution is fastest for the current test suite (38 tests in ~0.25s). Use `-n auto` only when the suite grows to 100+ tests or includes slow integration tests.
+
+### System Utilities
+
+**uutils-coreutils** is available at `/opt/homebrew/bin/` and provides GNU-compatible utilities:
+- `uu-timeout` - Timeout command (alternative to GNU timeout)
+- Other uu-* commands for cross-platform compatibility
+
+Example:
+```bash
+/opt/homebrew/bin/uu-timeout 5 .venv/bin/ayder "test command"
+```
+
+**Test Structure** (464+ tests, 96% coverage):
 - `test_client.py` - ChatSession, Agent classes, and main chat loop
+- `test_cli_file_stdin.py` - CLI file/stdin handling, piped input auto-detection, command mode
+- `test_cli_tui.py` - CLI TUI flag integration
 - `test_commands.py` - Slash commands (/help, /tools, etc.)
 - `test_config.py` - Configuration loading
 - `test_config_coverage.py` - Extended config validation coverage
@@ -78,6 +111,8 @@ All tests use pytest fixtures and mocking (no live LLM calls required).
 The application is organized into several modules:
 
 - **`src/ayder_cli/client.py`** — Main chat loop, `ChatSession` class, and `Agent` class. Contains the `run_chat()` entry point which supports dependency injection via optional `openai_client`, `config`, and `project_root` parameters. Also contains `call_llm_async()` for async LLM calls (used by the TUI), and `set_project_context_for_modules()` to propagate `ProjectContext` to all tool modules at startup. The `ChatSession` class manages conversation state, history, and user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `Agent` class handles the agentic loop (up to 5 consecutive tool calls per user message), tool validation, diff preview for file-modifying tools, and both standard OpenAI tool calls and custom XML-parsed calls. Defines `TERMINAL_TOOLS` set for tools that end the agentic loop. Slash commands are delegated to `handle_command()` from `commands.py`.
+
+- **`src/ayder_cli/cli.py`** — Command-line interface with argparse. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`), direct command execution (non-interactive mode), and auto-detection of piped input. The `main()` function routes execution: TUI mode (`--tui`), command mode (direct command passed as positional arg), or interactive chat mode. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag. The `read_input()` function reads from files or stdin with UTF-8 encoding. The `run_command()` function executes a single command via the Agent and returns appropriate exit codes (0=success, 1=error, 2=no response).
 
 - **`src/ayder_cli/prompts.py`** — System prompts and prompt templates. Contains the `SYSTEM_PROMPT` constant that defines the AI agent's behavior and operational principles (extracted from `client.py` for better separation of concerns).
 
@@ -119,7 +154,9 @@ The application is organized into several modules:
 
 - **`src/ayder_cli/ui.py`** — Terminal UI utilities for formatted output, boxes, and user prompts using Rich
 
-Entry point: `ayder_cli.client:run_chat` (registered as the `ayder` CLI script in pyproject.toml).
+Entry points:
+- **CLI**: `ayder_cli.cli:main` (registered as the `ayder` CLI script in pyproject.toml)
+- **Legacy/TUI**: `ayder_cli.client:run_chat` (can be called directly for programmatic use)
 
 ### ChatSession and Agent Classes
 
@@ -248,6 +285,8 @@ The TUI (`tui.py`) provides an alternative dashboard interface built with Textua
 ## Key Design Details
 
 - **Dependency Injection**: The `run_chat()` function accepts optional `openai_client`, `config`, and `project_root` parameters, enabling testing with mocks and custom configurations.
+
+- **CLI with Piped Input Auto-Detection**: The CLI automatically detects piped input (e.g., `echo "text" | ayder`) by checking `sys.stdin.isatty()`. When stdin is piped and no explicit mode flags are set (`--file`, `--stdin`, `--tui`), the CLI auto-enables stdin mode, matching behavior of standard Unix tools. Explicit `--stdin` flag still supported for backwards compatibility.
 
 - **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks), and `utils.py` (helpers). The `fs_tools.py` module serves as a thin compatibility layer.
 

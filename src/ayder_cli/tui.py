@@ -722,7 +722,7 @@ class AyderApp(App):
         finally:
             if not worker.is_cancelled:
                 # Re-enable input
-                self.call_from_thread(self._enable_input)
+                self.call_later(self._enable_input)
     
     async def _handle_llm_response(self, response) -> None:
         """

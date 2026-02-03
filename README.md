@@ -100,12 +100,57 @@ Please adjust *num_ctx* context size window according to your local computer ram
 
 ## Usage
 
+### Interactive Mode
+
 ```bash
-# Start the chat
+# Start interactive chat
 ayder
 
 # Or run as a module
 python -m ayder_cli
+```
+
+### Command Mode (Non-Interactive)
+
+```bash
+# Execute a single command and exit
+ayder "create a hello.py script"
+
+# Pipe input (auto-detected, no flag needed)
+echo "create a test.py file" | ayder
+
+# Read from file
+ayder -f instructions.txt
+ayder --file instructions.txt
+
+# Explicit stdin mode
+ayder --stdin < prompt.txt
+```
+
+### TUI Mode (Dashboard)
+
+```bash
+# Launch Textual TUI dashboard
+ayder --tui
+```
+
+### Command Examples
+
+```bash
+# Quick code generation
+ayder "write a fibonacci function in Python"
+
+# Multi-line piped input
+cat <<EOF | ayder
+Read the README.md file and create a summary.
+Save it to SUMMARY.md.
+EOF
+
+# Combine file input with additional command
+ayder -f requirements.txt "install these dependencies and verify"
+
+# Non-interactive automation
+echo "run all tests and show results" | ayder
 ```
 
 ### Example session
@@ -113,7 +158,7 @@ python -m ayder_cli
 ```
 ╭──────────────────┬────────────────────────────────────────╮
 │                  │                                        │
-│  ░▒▓▓▓▒░        │ ayder-cli v0.6.0                       │
+│  ░▒▓▓▓▒░        │ ayder-cli v0.7.0                       │
 │       ▓▓        │ qwen3-coder:latest · Ollama            │
 │  ▒▓▓▓▓▓▓        │ ~/projects/my-app                      │
 │  ▓▓  ▓▓▓        │                                        │
@@ -300,6 +345,7 @@ ayder-cli uses emacs-style keybindings via prompt-toolkit:
 
 ```
 src/ayder_cli/
+  cli.py           -- Command-line interface (argparse, --tui/--file/--stdin flags, piped input auto-detection)
   client.py        -- ChatSession + Agent classes, run_chat() entry point
   commands.py      -- Slash command handler with decorator-based registry
   config.py        -- Configuration loading with Pydantic validation
@@ -320,7 +366,21 @@ src/ayder_cli/
     utils.py       -- Tool utilities (content preparation for diffs)
 ```
 
-## Recent Changes (v0.6.0)
+## Recent Changes (v0.7.0)
+
+### CLI Enhancements
+- **Command Mode**: Execute single commands non-interactively: `ayder "create file.py"`
+- **Piped Input Auto-Detection**: Unix-style piping works without flags: `echo "text" | ayder`
+- **File Input**: Read instructions from files: `ayder -f instructions.txt`
+- **Multiple Entry Points**: CLI (`cli:main`), programmatic (`client:run_chat`), TUI (`tui.py`)
+- **Improved Exit Codes**: Command mode returns proper exit codes (0=success, 1=error, 2=no response)
+
+### Testing Infrastructure
+- **pytest Plugins**: Added xdist (parallel), timeout (hang prevention), instafail (fast feedback), sugar (progress bar)
+- **38 CLI Tests**: Comprehensive coverage for file/stdin input, piped input auto-detection, TUI flag handling
+- **464+ Total Tests**: 96% code coverage across all modules
+
+### Previous Changes (v0.6.0)
 
 ### Textual TUI Dashboard
 - **Interactive TUI**: New `tui.py` module provides a full Textual-based dashboard with chat view, context panel (model info, token usage, file tree), input bar, and keyboard shortcuts (Ctrl+Q, Ctrl+C, Ctrl+L).
