@@ -144,6 +144,45 @@ class TestRunCommand:
             exit_code = run_command("test command")
             assert exit_code == 1
 
+    def test_run_command_sets_project_context(self):
+        """Test that run_command() calls set_project_context_for_modules() for path sandboxing.
+        
+        This is a security fix (FIX-001) - command mode must set ProjectContext before
+        any tool execution to ensure proper path sandboxing, matching interactive mode behavior.
+        """
+        from ayder_cli.config import Config
+        
+        mock_config = Config(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model"
+        )
+        
+        mock_session = MagicMock()
+        mock_session.get_messages.return_value = [
+            {"role": "user", "content": "test"},
+            {"role": "assistant", "content": "Response"}
+        ]
+        
+        mock_agent = MagicMock()
+        mock_project_ctx = MagicMock()
+        
+        with patch('ayder_cli.client.ChatSession', return_value=mock_session), \
+             patch('ayder_cli.client.Agent', return_value=mock_agent), \
+             patch('ayder_cli.client.set_project_context_for_modules') as mock_set_ctx, \
+             patch('ayder_cli.path_context.ProjectContext') as mock_project_ctx_class, \
+             patch('ayder_cli.config.load_config', return_value=mock_config), \
+             patch('openai.OpenAI'), \
+             patch('builtins.print'):
+            mock_project_ctx_class.return_value = mock_project_ctx
+            from ayder_cli.cli import run_command
+            exit_code = run_command("test command")
+            assert exit_code == 0
+            # Verify ProjectContext was created with current directory
+            mock_project_ctx_class.assert_called_once_with(".")
+            # Verify set_project_context_for_modules was called before any tool execution
+            mock_set_ctx.assert_called_once_with(mock_project_ctx)
+
 
 class TestMainIntegration:
     """Integration tests for main() with file/stdin."""
@@ -159,8 +198,8 @@ class TestMainIntegration:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
-            mock_run_cmd.assert_called_once_with("Test content")
-    
+            mock_run_cmd.assert_called_once_with("Test content", permissions={"r"}, iterations=10)
+
     def test_main_with_stdin_calls_run_command(self):
         """Test that main() with --stdin calls run_command()."""
         mock_stdin = MagicMock()
@@ -174,8 +213,8 @@ class TestMainIntegration:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
-            mock_run_cmd.assert_called_once_with("Stdin content")
-    
+            mock_run_cmd.assert_called_once_with("Stdin content", permissions={"r"}, iterations=10)
+
     def test_main_with_command_calls_run_command(self):
         """Test that main() with command calls run_command()."""
         with patch.object(sys, 'argv', ['ayder', 'test command']), \
@@ -185,8 +224,8 @@ class TestMainIntegration:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
-            mock_run_cmd.assert_called_once_with("test command")
-    
+            mock_run_cmd.assert_called_once_with("test command", permissions={"r"}, iterations=10)
+
     def test_main_no_input_calls_run_chat(self):
         """Test that main() without input calls run_chat()."""
         with patch.object(sys, 'argv', ['ayder']), \
@@ -194,7 +233,7 @@ class TestMainIntegration:
              patch('ayder_cli.client.run_chat') as mock_run_chat:
             from ayder_cli.cli import main
             main()
-            mock_run_chat.assert_called_once()
+            mock_run_chat.assert_called_once_with(permissions={"r"}, iterations=10)
     
     def test_main_file_with_command_combines(self, tmp_path):
         """Test that main() combines file and command."""
@@ -208,8 +247,8 @@ class TestMainIntegration:
                 main()
             assert exc_info.value.code == 0
             expected = "Context:\nContext\n\nQuestion: question"
-            mock_run_cmd.assert_called_once_with(expected)
-    
+            mock_run_cmd.assert_called_once_with(expected, permissions={"r"}, iterations=10)
+
     def test_main_stdin_with_command_combines(self):
         """Test that main() combines stdin and command."""
         mock_stdin = MagicMock()
@@ -224,7 +263,7 @@ class TestMainIntegration:
                 main()
             assert exc_info.value.code == 0
             expected = "Context:\nStdin data\n\nQuestion: analyze"
-            mock_run_cmd.assert_called_once_with(expected)
+            mock_run_cmd.assert_called_once_with(expected, permissions={"r"}, iterations=10)
 
 
 class TestMutualExclusivity:

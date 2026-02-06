@@ -297,6 +297,75 @@ class TestRunShellCommandExceptions:
             assert "Mocked OS error" in result
 
 
+class TestReadFileSizeLimit:
+    """Test file size limit in read_file - FIX-002."""
+
+    def test_read_file_rejects_oversized_file(self, tmp_path, project_context, monkeypatch):
+        """Test that files exceeding MAX_FILE_SIZE are rejected with descriptive error."""
+        # Temporarily set a small max size for testing
+        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 100)  # 100 bytes limit
+        
+        test_file = tmp_path / "large_file.txt"
+        # Create content larger than the limit
+        large_content = "x" * 200  # 200 bytes
+        test_file.write_text(large_content)
+        
+        result = impl.read_file(str(test_file))
+        
+        # Should return an error message, not an exception
+        assert "Error" in result
+        assert "too large" in result.lower()
+        assert "0.0MB" in result or "0.2KB" in result or "200 bytes" in result.lower()
+        assert "Maximum allowed size" in result
+
+    def test_read_file_accepts_normal_size_file(self, tmp_path, project_context, monkeypatch):
+        """Test that normal-sized files are read successfully."""
+        # Temporarily set a small max size for testing
+        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 1024)  # 1KB limit
+        
+        test_file = tmp_path / "normal_file.txt"
+        normal_content = "This is a normal file content."
+        test_file.write_text(normal_content)
+        
+        result = impl.read_file(str(test_file))
+        
+        # Should return the file content successfully
+        assert result == normal_content
+        assert "Error" not in result
+
+    def test_read_file_size_limit_exact_boundary(self, tmp_path, project_context, monkeypatch):
+        """Test that files exactly at the size limit are accepted."""
+        # Set a small max size for testing
+        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 100)  # 100 bytes limit
+        
+        test_file = tmp_path / "boundary_file.txt"
+        # Create content exactly at the limit
+        exact_content = "x" * 100  # Exactly 100 bytes
+        test_file.write_text(exact_content)
+        
+        result = impl.read_file(str(test_file))
+        
+        # Should return the file content successfully (at limit is allowed)
+        assert result == exact_content
+        assert "Error" not in result
+
+    def test_read_file_size_limit_one_byte_over(self, tmp_path, project_context, monkeypatch):
+        """Test that files one byte over the limit are rejected."""
+        # Set a small max size for testing
+        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 100)  # 100 bytes limit
+        
+        test_file = tmp_path / "over_limit_file.txt"
+        # Create content one byte over the limit
+        over_limit_content = "x" * 101  # 101 bytes
+        test_file.write_text(over_limit_content)
+        
+        result = impl.read_file(str(test_file))
+        
+        # Should return an error message
+        assert "Error" in result
+        assert "too large" in result.lower()
+
+
 class TestReadFileExceptions:
     """Test exception handling in read_file - Lines 90-91."""
 

@@ -151,6 +151,111 @@ def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
     return True, ""
 
 
+# --- Shared Execution Logic ---
+
+def _execute_tool_with_hooks(
+    tool_name: str,
+    arguments,
+    tool_func_getter: Callable[[str], Callable],
+    middlewares: List[MiddlewareFunc],
+    pre_execute_callbacks: List[PreExecuteCallback],
+    post_execute_callbacks: List[PostExecuteCallback]
+) -> str:
+    """
+    Execute a tool with the full execution pipeline (normalization, validation, callbacks).
+    
+    This is a shared helper function used by both ToolRegistry and _MockableToolRegistry
+    to avoid code duplication.
+    
+    Args:
+        tool_name: Name of the tool to execute
+        arguments: Either a dict of arguments or a JSON string
+        tool_func_getter: Callable that takes tool_name and returns the tool function or None
+        middlewares: List of middleware functions to run
+        pre_execute_callbacks: List of pre-execute callbacks
+        post_execute_callbacks: List of post-execute callbacks
+        
+    Returns:
+        The result of the tool execution as a string
+    """
+    import time
+    
+    # Handle arguments being passed as a string (JSON) or a dict
+    if isinstance(arguments, str):
+        try:
+            args = json.loads(arguments)
+        except json.JSONDecodeError:
+            return f"Error: Invalid JSON arguments for {tool_name}"
+    else:
+        args = arguments
+
+    # Normalize parameters (apply aliases, resolve paths, coerce types)
+    args = normalize_tool_arguments(tool_name, args)
+
+    # Validate before execution
+    is_valid, error_msg = validate_tool_call(tool_name, args)
+    if not is_valid:
+        return f"Validation Error: {error_msg}"
+
+    # Get the tool function
+    tool_func = tool_func_getter(tool_name)
+    if tool_func is None:
+        return f"Error: Unknown tool '{tool_name}'"
+
+    # Run pre-execute callbacks
+    for callback in pre_execute_callbacks:
+        try:
+            callback(tool_name, args)
+        except Exception:
+            # Don't block execution on callback errors
+            pass
+
+    # Run middlewares (pre-execution checks)
+    for middleware in middlewares:
+        try:
+            middleware(tool_name, args)
+        except PermissionError as e:
+            # Re-raise permission errors for safe mode blocking
+            raise
+        except Exception as e:
+            # Log but don't block on middleware errors
+            # (Could be enhanced with a logger)
+            pass
+
+    # Execute the tool with timing
+    start_time = time.time()
+    
+    try:
+        result = tool_func(**args)
+        status = ToolExecutionStatus.SUCCESS
+        error = None
+    except Exception as e:
+        result = f"Error executing {tool_name}: {str(e)}"
+        status = ToolExecutionStatus.ERROR
+        error = str(e)
+    
+    duration_ms = (time.time() - start_time) * 1000
+
+    # Run post-execute callbacks
+    execution_result = ToolExecutionResult(
+        tool_name=tool_name,
+        arguments=args,
+        status=status,
+        result=result,
+        error=error,
+        duration_ms=duration_ms
+    )
+    
+    for callback in post_execute_callbacks:
+        try:
+            callback(execution_result)
+        except Exception:
+            # Don't block on callback errors
+            pass
+
+    return result
+
+
 class ToolRegistry:
     """
     Registry for managing and executing tool functions with middleware support.
@@ -252,6 +357,10 @@ class ToolRegistry:
         """
         return tools_schema
 
+    def _get_tool_func(self, name: str) -> Optional[Callable]:
+        """Get tool function by name from registry."""
+        return self._registry.get(name)
+
     def execute(self, name: str, arguments) -> str:
         """
         Execute a registered tool with the given arguments.
@@ -273,82 +382,14 @@ class ToolRegistry:
         Returns:
             The result of the tool execution as a string
         """
-        import time
-        
-        # Handle arguments being passed as a string (JSON) or a dict
-        if isinstance(arguments, str):
-            try:
-                args = json.loads(arguments)
-            except json.JSONDecodeError:
-                return f"Error: Invalid JSON arguments for {name}"
-        else:
-            args = arguments
-
-        # Normalize parameters (apply aliases, resolve paths, coerce types)
-        args = normalize_tool_arguments(name, args)
-
-        # Validate before execution
-        is_valid, error_msg = validate_tool_call(name, args)
-        if not is_valid:
-            return f"Validation Error: {error_msg}"
-
-        # Check if tool is registered
-        if name not in self._registry:
-            return f"Error: Unknown tool '{name}'"
-
-        # Run pre-execute callbacks
-        for callback in self._pre_execute_callbacks:
-            try:
-                callback(name, args)
-            except Exception:
-                # Don't block execution on callback errors
-                pass
-
-        # Run middlewares (pre-execution checks)
-        for middleware in self._middlewares:
-            try:
-                middleware(name, args)
-            except PermissionError as e:
-                # Re-raise permission errors for safe mode blocking
-                raise
-            except Exception as e:
-                # Log but don't block on middleware errors
-                # (Could be enhanced with a logger)
-                pass
-
-        # Execute the tool with timing
-        start_time = time.time()
-        tool_func = self._registry[name]
-        
-        try:
-            result = tool_func(**args)
-            status = ToolExecutionStatus.SUCCESS
-            error = None
-        except Exception as e:
-            result = f"Error executing {name}: {str(e)}"
-            status = ToolExecutionStatus.ERROR
-            error = str(e)
-        
-        duration_ms = (time.time() - start_time) * 1000
-
-        # Run post-execute callbacks
-        execution_result = ToolExecutionResult(
+        return _execute_tool_with_hooks(
             tool_name=name,
-            arguments=args,
-            status=status,
-            result=result,
-            error=error,
-            duration_ms=duration_ms
+            arguments=arguments,
+            tool_func_getter=self._get_tool_func,
+            middlewares=self._middlewares,
+            pre_execute_callbacks=self._pre_execute_callbacks,
+            post_execute_callbacks=self._post_execute_callbacks
         )
-        
-        for callback in self._post_execute_callbacks:
-            try:
-                callback(execution_result)
-            except Exception:
-                # Don't block on callback errors
-                pass
-
-        return result
 
     def get_registered_tools(self) -> list:
         """
@@ -412,50 +453,8 @@ class _MockableToolRegistry(ToolRegistry):
     This allows tests to mock functions in fs_tools and have the mocks take effect.
     """
     
-    def execute(self, name: str, arguments) -> str:
-        """Execute with dynamic function lookup for task tools."""
-        import time
-        
-        # Handle arguments being passed as a string (JSON) or a dict
-        if isinstance(arguments, str):
-            try:
-                args = json.loads(arguments)
-            except json.JSONDecodeError:
-                return f"Error: Invalid JSON arguments for {name}"
-        else:
-            args = arguments
-
-        # Normalize parameters (apply aliases, resolve paths, coerce types)
-        args = normalize_tool_arguments(name, args)
-
-        # Validate before execution
-        is_valid, error_msg = validate_tool_call(name, args)
-        if not is_valid:
-            return f"Validation Error: {error_msg}"
-
-        # Run pre-execute callbacks
-        for callback in self._pre_execute_callbacks:
-            try:
-                callback(name, args)
-            except Exception:
-                # Don't block execution on callback errors
-                pass
-
-        # Run middlewares (pre-execution checks)
-        for middleware in self._middlewares:
-            try:
-                middleware(name, args)
-            except PermissionError as e:
-                # Re-raise permission errors for safe mode blocking
-                raise
-            except Exception as e:
-                # Log but don't block on middleware errors
-                # (Could be enhanced with a logger)
-                pass
-
-        # Execute the tool with timing
-        start_time = time.time()
-        
+    def _get_tool_func(self, name: str) -> Optional[Callable]:
+        """Get tool function with dynamic lookup for task tools."""
         # For task tools, look them up dynamically from fs_tools for mockability
         if name in ("create_task", "show_task", "implement_task", "implement_all_tasks"):
             # Import at call time to allow mocking
@@ -467,52 +466,21 @@ class _MockableToolRegistry(ToolRegistry):
                 "implement_task": fs.implement_task,
                 "implement_all_tasks": fs.implement_all_tasks,
             }
-            tool_func = func_map.get(name)
-            if tool_func is None:
-                return f"Error: Unknown tool '{name}'"
-            try:
-                result = tool_func(**args)
-                status = ToolExecutionStatus.SUCCESS
-                error = None
-            except Exception as e:
-                result = f"Error executing {name}: {str(e)}"
-                status = ToolExecutionStatus.ERROR
-                error = str(e)
+            return func_map.get(name)
         else:
             # For other tools, use standard registry lookup
-            if name not in self._registry:
-                return f"Error: Unknown tool '{name}'"
-            
-            tool_func = self._registry[name]
-            try:
-                result = tool_func(**args)
-                status = ToolExecutionStatus.SUCCESS
-                error = None
-            except Exception as e:
-                result = f"Error executing {name}: {str(e)}"
-                status = ToolExecutionStatus.ERROR
-                error = str(e)
-        
-        duration_ms = (time.time() - start_time) * 1000
-
-        # Run post-execute callbacks
-        execution_result = ToolExecutionResult(
+            return self._registry.get(name)
+    
+    def execute(self, name: str, arguments) -> str:
+        """Execute with dynamic function lookup for task tools."""
+        return _execute_tool_with_hooks(
             tool_name=name,
-            arguments=args,
-            status=status,
-            result=result,
-            error=error,
-            duration_ms=duration_ms
+            arguments=arguments,
+            tool_func_getter=self._get_tool_func,
+            middlewares=self._middlewares,
+            pre_execute_callbacks=self._pre_execute_callbacks,
+            post_execute_callbacks=self._post_execute_callbacks
         )
-        
-        for callback in self._post_execute_callbacks:
-            try:
-                callback(execution_result)
-            except Exception:
-                # Don't block on callback errors
-                pass
-
-        return result
 
 
 def _get_default_registry() -> ToolRegistry:

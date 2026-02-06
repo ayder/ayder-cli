@@ -7,7 +7,7 @@ An interactive AI agent chat client for local LLMs. It connects to a locally run
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
 
 - **Fully local** -- runs against Ollama on your machine. While you do not depend on a AI provider, your code never leaves your computer.
-- **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 5 consecutive tool calls per user message.
+- **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 10 consecutive tool calls per user message (configurable with `-I`).
 - **Two interfaces** -- a classic prompt-toolkit CLI and an optional Textual TUI dashboard with chat view, context panel, and tool confirmation modals.
 - **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual. No frameworks, no bloat.
 
@@ -35,7 +35,7 @@ Each tool has an OpenAI-compatible JSON schema so models that support function c
 
   - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
   - **Safe mode** (TUI): The Textual TUI supports a safe mode that blocks `write_file`, `replace_string`, and `run_shell_command`.
-  - Every tool call requires your confirmation before it runs -- you always stay in control.
+  - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
   - You may also prefer to run ayder-cli in a container for additional security.
 
 Of course I am grateful to GEMINI to come up with this idea, KIMI2 for reasoning tasks and CLAUDE and COPILOT to do coding and testing for me. 
@@ -125,6 +125,43 @@ ayder --file instructions.txt
 
 # Explicit stdin mode
 ayder --stdin < prompt.txt
+```
+
+### Tool Permissions (-r/-w/-x)
+
+By default, every tool call requires user confirmation. Use permission flags to auto-approve tool categories:
+
+| Flag | Category | Tools |
+|------|----------|-------|
+| `-r` | Read | `list_files`, `read_file`, `search_codebase`, `get_project_structure`, `show_task`, `list_tasks` |
+| `-w` | Write | `write_file`, `replace_string`, `create_task`, `implement_task`, `implement_all_tasks` |
+| `-x` | Execute | `run_shell_command` |
+
+```bash
+# Auto-approve read-only tools (no confirmations for file reading/searching)
+ayder -r
+
+# Auto-approve read and write tools
+ayder -r -w
+
+# Auto-approve everything (fully autonomous)
+ayder -r -w -x
+
+# Combine with other flags
+ayder -r -w "refactor the login module"
+echo "fix the bug" | ayder -r -w -x
+```
+
+### Agentic Iterations (-I)
+
+The agent can make up to 10 consecutive tool calls per user message (default). Use `-I` to adjust:
+
+```bash
+# Allow up to 20 iterations for complex tasks
+ayder -I 20
+
+# Combine with permissions
+ayder -r -w -I 15 "implement all pending tasks"
 ```
 
 ### TUI Mode (Dashboard)

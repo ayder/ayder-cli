@@ -11,6 +11,7 @@ from ayder_cli.banner import print_welcome_banner
 from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.commands import handle_command
 from ayder_cli.tools import prepare_new_content
+from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 from ayder_cli.prompts import SYSTEM_PROMPT
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -162,18 +163,23 @@ class ChatSession:
 class Agent:
     """Handle OpenAI/Ollama API interaction and tool execution."""
 
-    def __init__(self, openai_client, config, session: ChatSession):
+    def __init__(self, openai_client, config, session: ChatSession,
+                 permissions=None, iterations=10):
         """Initialize agent.
-        
+
         Args:
             openai_client: OpenAI client (injected)
             config: Config object
             session: Reference to ChatSession
+            permissions: Set of granted permission categories (e.g. {"r", "w", "x"})
+            iterations: Max agentic iterations per message (default: 10)
         """
         self.client = openai_client
         self.config = config
         self.session = session
         self.terminal_tools = TERMINAL_TOOLS
+        self.granted_permissions = permissions or set()
+        self.max_iterations = iterations
 
     def chat(self, user_input: str):
         """Process user input through the agentic loop.
@@ -193,8 +199,8 @@ class Agent:
                 model = self.config.model
                 num_ctx = self.config.num_ctx
 
-            # Main Loop for Agentic Steps (Allow up to 5 consecutive tool calls)
-            for _ in range(5):
+            # Main Loop for Agentic Steps
+            for _ in range(self.max_iterations):
                 response = self.client.chat.completions.create(
                     model=model,
                     messages=self.session.get_messages(),
@@ -294,8 +300,13 @@ class Agent:
 
         description = describe_tool_action(fname, normalized)
 
-        # Use diff preview for file-modifying tools
-        if fname in ("write_file", "replace_string"):
+        # Check if tool is auto-approved by permission flags
+        tool_perm = TOOL_PERMISSIONS.get(fname, "x")
+        auto_approved = tool_perm in self.granted_permissions
+
+        if auto_approved:
+            confirmed = True
+        elif fname in ("write_file", "replace_string"):
             file_path = normalized.get("file_path", "")
             new_content = prepare_new_content(fname, normalized)
             confirmed = confirm_with_diff(file_path, new_content, description)
@@ -344,8 +355,13 @@ class Agent:
 
             description = describe_tool_action(fname, normalized)
 
-            # Use diff preview for file-modifying tools
-            if fname in ("write_file", "replace_string"):
+            # Check if tool is auto-approved by permission flags
+            tool_perm = TOOL_PERMISSIONS.get(fname, "x")
+            auto_approved = tool_perm in self.granted_permissions
+
+            if auto_approved:
+                confirmed = True
+            elif fname in ("write_file", "replace_string"):
                 file_path = normalized.get("file_path", "")
                 new_content = prepare_new_content(fname, normalized)
                 confirmed = confirm_with_diff(file_path, new_content, description)
@@ -391,7 +407,8 @@ def set_project_context_for_modules(context):
     tasks._default_project_ctx = context
 
 
-def run_chat(openai_client=None, config=None, project_root="."):
+def run_chat(openai_client=None, config=None, project_root=".",
+             permissions=None, iterations=10):
     """
     Main entry point - initializes and delegates to ChatSession and Agent.
     Maintains the dependency injection pattern from TASK-010.
@@ -401,6 +418,9 @@ def run_chat(openai_client=None, config=None, project_root="."):
         config: Optional config dict/model. If None, loads from file.
         project_root: Optional project root directory (defaults to "."). Used to initialize
             ProjectContext at startup for all tool modules.
+        permissions: Set of granted permission categories (e.g. {"r", "w", "x"}).
+            Tools matching a granted category are auto-approved without confirmation.
+        iterations: Max agentic iterations per message (default: 10).
     """
     # Load config and client (dependency injection from TASK-010)
     cfg = config or load_config()
@@ -441,7 +461,8 @@ This is the current project structure. Use `search_codebase` to locate specific 
     chat_session.start()
 
     # Initialize agent with session reference
-    agent = Agent(client, cfg, chat_session)
+    agent = Agent(client, cfg, chat_session,
+                  permissions=permissions, iterations=iterations)
 
     # Main loop - now simple and readable
     while True:

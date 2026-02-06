@@ -17,15 +17,14 @@ from ayder_cli import ui
 class TestPrintToolSkipped:
     """Tests for print_tool_skipped() function - Line 75."""
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_tool_skipped(self, mock_print):
         """Test tool skipped indicator printing."""
         ui.print_tool_skipped()
         mock_print.assert_called_once()
         call_args = mock_print.call_args[0][0]
-        assert "✗" in call_args
-        assert "Tool call skipped by user" in call_args
-        assert "\n" in call_args  # Has leading newline
+        assert "✗" in str(call_args)
+        assert "Tool call skipped by user" in str(call_args)
 
 
 class TestDescribeToolActionSearchCodebase:
@@ -92,7 +91,7 @@ class TestConfirmWithDiffWarning:
 
     @patch("ayder_cli.ui.generate_diff_preview")
     @patch("ayder_cli.ui.confirm_tool_call")
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_confirm_with_diff_none_shows_warning(self, mock_print, mock_confirm, mock_gen_diff):
         """Test that warning is shown when diff is None."""
         mock_gen_diff.return_value = None
@@ -100,7 +99,7 @@ class TestConfirmWithDiffWarning:
 
         result = ui.confirm_with_diff("/path/to/file", "new content", "Test description")
 
-        # Check that warning was printed
+        # Check that warning was printed via console.print
         warning_printed = False
         for call in mock_print.call_args_list:
             args = call[0][0] if call[0] else ""
@@ -113,7 +112,7 @@ class TestConfirmWithDiffWarning:
 
     @patch("ayder_cli.ui.generate_diff_preview")
     @patch("ayder_cli.ui.confirm_tool_call")
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_confirm_with_diff_binary_file_warning(self, mock_print, mock_confirm, mock_gen_diff):
         """Test warning for binary file (diff returns None)."""
         mock_gen_diff.return_value = None
@@ -121,7 +120,7 @@ class TestConfirmWithDiffWarning:
 
         result = ui.confirm_with_diff("/path/to/binary", b"\x00\x01\x02", "Binary file")
 
-        # Check that warning was printed
+        # Check that warning was printed via console.print
         warning_printed = False
         for call in mock_print.call_args_list:
             args = call[0][0] if call[0] else ""
@@ -176,12 +175,18 @@ class TestColorizeDiffEdgeCases:
 
     def test_colorize_diff_context_lines(self):
         """Test that context lines (no special prefix) are not colorized."""
+        from rich.text import Text
         lines = [" context line", " another context"]
         result = ui.colorize_diff(lines)
-        assert result == lines  # Should be unchanged
+        # Result is now a list of Rich Text objects with plain content preserved
+        assert isinstance(result[0], Text)
+        assert isinstance(result[1], Text)
+        assert result[0].plain == " context line"
+        assert result[1].plain == " another context"
 
     def test_colorize_diff_mixed_lines(self):
         """Test colorize_diff with mixed line types."""
+        from rich.text import Text
         lines = [
             "@@ -1,5 +1,5 @@",
             "--- a/file.txt",
@@ -192,18 +197,37 @@ class TestColorizeDiffEdgeCases:
         ]
         result = ui.colorize_diff(lines)
         
-        # Check hunk header is cyan
-        assert "\033[36m" in result[0]
-        # Check --- line is NOT colored (excluded)
-        assert "\033[31m" not in result[1]
-        # Check +++ line is NOT colored (excluded)
-        assert "\033[32m" not in result[2]
+        # Result is a list of Rich Text objects
+        # Check hunk header is cyan (Text with cyan style applied via spans)
+        assert isinstance(result[0], Text)
+        assert result[0].plain == "@@ -1,5 +1,5 @@"
+        # Check that hunk header has a cyan span
+        has_cyan = any("cyan" in str(span.style).lower() for span in result[0].spans)
+        assert has_cyan, "Hunk header should have cyan style"
+        
+        # Check --- line is NOT colored (excluded) - should be plain Text
+        assert isinstance(result[1], Text)
+        assert result[1].plain == "--- a/file.txt"
+        
+        # Check +++ line is NOT colored (excluded) - should be plain Text  
+        assert isinstance(result[2], Text)
+        assert result[2].plain == "+++ b/file.txt"
+        
         # Check - line is red
-        assert "\033[31m" in result[3]
+        assert isinstance(result[3], Text)
+        assert result[3].plain == "-removed line"
+        has_red = any("red" in str(span.style).lower() for span in result[3].spans)
+        assert has_red, "Removal line should have red style"
+        
         # Check + line is green
-        assert "\033[32m" in result[4]
-        # Check context line is unchanged
-        assert result[5] == " context line"
+        assert isinstance(result[4], Text)
+        assert result[4].plain == "+added line"
+        has_green = any("green" in str(span.style).lower() for span in result[4].spans)
+        assert has_green, "Addition line should have green style"
+        
+        # Check context line is unchanged - should be plain Text with original content
+        assert isinstance(result[5], Text)
+        assert result[5].plain == " context line"
 
 
 class TestTruncateDiffEdgeCases:

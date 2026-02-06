@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
+from rich.text import Text
 from ayder_cli.ui import (
     colorize_diff,
     truncate_diff,
@@ -25,46 +26,69 @@ class TestColorizeDiff(unittest.TestCase):
         """Verify addition lines contain green color code"""
         diff_lines = ["+added line"]
         result = colorize_diff(diff_lines)
-        self.assertIn("\033[32m", result[0])  # Green
-        self.assertIn("+added line", result[0])
+        self.assertTrue(
+            any(span.style == "green" for span in result[0].spans),
+            "Expected green span in Text object"
+        )
+        self.assertEqual(result[0].plain, "+added line")
 
     def test_deletion_lines_colored_red(self):
         """Verify deletion lines contain red color code"""
         diff_lines = ["-removed line"]
         result = colorize_diff(diff_lines)
-        self.assertIn("\033[31m", result[0])  # Red
-        self.assertIn("-removed line", result[0])
+        self.assertTrue(
+            any(span.style == "red" for span in result[0].spans),
+            "Expected red span in Text object"
+        )
+        self.assertEqual(result[0].plain, "-removed line")
 
     def test_hunk_headers_colored_cyan(self):
         """Verify hunk headers contain cyan color code"""
         diff_lines = ["@@ -1,3 +1,4 @@"]
         result = colorize_diff(diff_lines)
-        self.assertIn("\033[36m", result[0])  # Cyan
-        self.assertIn("@@", result[0])
+        self.assertTrue(
+            any(span.style == "cyan" for span in result[0].spans),
+            "Expected cyan span in Text object"
+        )
+        self.assertIn("@@", result[0].plain)
 
     def test_context_lines_not_colored(self):
         """Verify context lines remain uncolored"""
         diff_lines = [" context line"]
         result = colorize_diff(diff_lines)
-        self.assertEqual(" context line", result[0])
+        self.assertEqual(result[0].plain, " context line")
+        # Uncolored lines should have no style spans
+        self.assertEqual(len(result[0].spans), 0)
 
     def test_diff_header_not_mistaken_for_addition(self):
         """Verify +++ is not colored as addition"""
         diff_lines = ["+++b/file.txt"]
         result = colorize_diff(diff_lines)
-        self.assertNotIn("\033[32m", result[0])  # Should not be green
+        # Should not have any green spans
+        self.assertFalse(
+            any(span.style == "green" for span in result[0].spans),
+            "Diff header should not be colored green"
+        )
 
     def test_diff_header_not_mistaken_for_deletion(self):
         """Verify --- is not colored as deletion"""
         diff_lines = ["---a/file.txt"]
         result = colorize_diff(diff_lines)
-        self.assertNotIn("\033[31m", result[0])  # Should not be red
+        # Should not have any red spans
+        self.assertFalse(
+            any(span.style == "red" for span in result[0].spans),
+            "Diff header should not be colored red"
+        )
 
     def test_reset_code_added(self):
         """Verify reset code is added at end of colored lines"""
+        # Rich Text objects handle reset internally, verify span contains color
         diff_lines = ["+added"]
         result = colorize_diff(diff_lines)
-        self.assertIn("\033[0m", result[0])
+        self.assertTrue(
+            any(span.style == "green" for span in result[0].spans),
+            "Expected green span in Text object"
+        )
 
 
 class TestTruncateDiff(unittest.TestCase):
@@ -184,8 +208,9 @@ class TestGenerateDiffPreview(unittest.TestCase):
 
         result = generate_diff_preview(file_path, new)
         self.assertIsNotNone(result)
-        # Should contain ANSI color codes
-        self.assertIn("\033[", result)
+        # Should be a Rich Text object with styling
+        self.assertIsInstance(result, Text)
+        self.assertTrue(len(result.spans) > 0)
 
     def test_large_diff_truncated(self):
         """Verify large diffs are truncated in preview"""

@@ -33,6 +33,32 @@ def create_parser():
         help="Read prompt from stdin"
     )
     
+    # Permission flags (Unix-style: r=read, w=write, x=execute)
+    parser.add_argument(
+        "-r",
+        action="store_true",
+        default=True,
+        help="Auto-approve read tools (default: enabled)"
+    )
+    parser.add_argument(
+        "-w",
+        action="store_true",
+        help="Auto-approve write tools (write_file, replace_string, create_task, etc.)"
+    )
+    parser.add_argument(
+        "-x",
+        action="store_true",
+        help="Auto-approve execute tools (run_shell_command)"
+    )
+
+    # Max agentic iterations
+    parser.add_argument(
+        "-I", "--iterations",
+        type=int,
+        default=10,
+        help="Max agentic iterations per message (default: 10)"
+    )
+
     # Version flag
     parser.add_argument(
         "--version",
@@ -92,33 +118,41 @@ def read_input(args) -> str:
         return None
 
 
-def run_command(prompt: str) -> int:
+def run_command(prompt: str, permissions=None, iterations=10) -> int:
     """Execute a single command and return exit code.
-    
+
     Args:
         prompt: The command/prompt to execute
-        
+        permissions: Set of granted permission categories (e.g. {"r", "w", "x"})
+        iterations: Max agentic iterations per message
+
     Returns:
         Exit code (0 for success, 1 for error)
     """
     try:
-        from ayder_cli.client import ChatSession, Agent, run_chat
+        from ayder_cli.client import ChatSession, Agent, run_chat, set_project_context_for_modules
         from ayder_cli.config import load_config
         from ayder_cli.prompts import SYSTEM_PROMPT
+        from ayder_cli.path_context import ProjectContext
         from openai import OpenAI
-        
+
         # Load config
         config = load_config()
-        
+
         # Initialize OpenAI client (config is a Config model with flat attributes)
         client = OpenAI(
             base_url=config.base_url,
             api_key=config.api_key
         )
-        
+
+        # Initialize ProjectContext at startup and propagate to all tool modules
+        project_ctx = ProjectContext(".")
+        set_project_context_for_modules(project_ctx)
+
         # Create session and agent
         session = ChatSession(config=config, system_prompt=SYSTEM_PROMPT)
-        agent = Agent(openai_client=client, config=config, session=session)
+        agent = Agent(openai_client=client, config=config, session=session,
+                      permissions=permissions, iterations=iterations)
         
         # Add user message and get response
         session.add_message("user", prompt)
@@ -155,14 +189,22 @@ def main():
         run_tui()
         return
     
+    # Build granted permissions set from flags
+    # Read tools are auto-approved by default (use --no-r to disable)
+    granted = {"r"}
+    if args.w:
+        granted.add("w")
+    if args.x:
+        granted.add("x")
+
     # Handle file/stdin input
     prompt = read_input(args)
     if prompt:
-        sys.exit(run_command(prompt))
-    
+        sys.exit(run_command(prompt, permissions=granted, iterations=args.iterations))
+
     # Default: interactive CLI mode
     from ayder_cli.client import run_chat
-    run_chat()
+    run_chat(permissions=granted, iterations=args.iterations)
 
 
 if __name__ == "__main__":

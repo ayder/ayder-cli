@@ -1,6 +1,6 @@
 """Tools package for ayder-cli."""
 
-from ayder_cli.tools.schemas import tools_schema
+from ayder_cli.tools.schemas import tools_schema, TOOL_PERMISSIONS
 from ayder_cli.tools.registry import (
     ToolRegistry,
     normalize_tool_arguments,
@@ -24,6 +24,7 @@ from ayder_cli.tools.utils import prepare_new_content
 __all__ = [
     # Schemas
     "tools_schema",
+    "TOOL_PERMISSIONS",
     # Registry
     "ToolRegistry",
     "create_default_registry",

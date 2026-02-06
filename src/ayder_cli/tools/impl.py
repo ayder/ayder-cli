@@ -5,11 +5,19 @@ This module contains the actual implementation of all file system and code navig
 """
 
 import json
+import os
 import subprocess
 import shutil
 from pathlib import Path
 from ayder_cli.path_context import ProjectContext
 from ayder_cli.tasks import create_task, show_task, implement_task, implement_all_tasks
+
+
+# --- Constants ---
+
+# Maximum file size allowed for read_file() to prevent DoS/memory exhaustion
+# Default: 10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 megabytes
 
 
 # --- Module-level ProjectContext ---
@@ -60,6 +68,12 @@ def read_file(file_path, start_line=None, end_line=None):
         if not abs_path.exists():
             rel_path = project.to_relative(abs_path)
             return f"Error: File '{rel_path}' does not exist."
+
+        # Check file size before reading to prevent DoS/memory exhaustion
+        file_size = os.path.getsize(abs_path)
+        if file_size > MAX_FILE_SIZE:
+            rel_path = project.to_relative(abs_path)
+            return f"Error: File '{rel_path}' is too large ({file_size / (1024 * 1024):.1f}MB). Maximum allowed size is {MAX_FILE_SIZE / (1024 * 1024):.0f}MB."
 
         with open(abs_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()

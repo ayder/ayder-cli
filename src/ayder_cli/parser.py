@@ -2,6 +2,31 @@ import re
 from typing import List, Dict, Any
 
 
+def _build_single_param_map() -> Dict[str, str]:
+    """Build a map of single-param tools by analyzing tool schemas.
+    
+    Returns a dict mapping tool name to its single required parameter name.
+    Only includes tools with exactly one required parameter.
+    """
+    from ayder_cli.tools.schemas import tools_schema
+    
+    single_param_map = {}
+    for tool in tools_schema:
+        func = tool.get("function", {})
+        name = func.get("name")
+        params = func.get("parameters", {})
+        required = params.get("required", [])
+        
+        if name and len(required) == 1:
+            single_param_map[name] = required[0]
+    
+    return single_param_map
+
+
+# Auto-generated map of single-param tools from schemas
+_SINGLE_PARAM_TOOLS = _build_single_param_map()
+
+
 def parse_custom_tool_calls(content: str) -> List[Dict[str, Any]]:
     """
     Enhanced parser handling:
@@ -62,10 +87,9 @@ def parse_custom_tool_calls(content: str) -> List[Dict[str, Any]]:
 
 
 def _infer_parameter_name(func_name: str) -> str:
-    """Infer parameter for single-param tools only."""
-    single_param_tools = {
-        "run_shell_command": "command",
-        "show_task": "task_id",
-        "implement_task": "task_id",
-    }
-    return single_param_tools.get(func_name, "")
+    """Infer parameter for single-param tools only.
+    
+    The single-param tool map is auto-generated from tool schemas by
+    finding tools with exactly one required parameter.
+    """
+    return _SINGLE_PARAM_TOOLS.get(func_name, "")

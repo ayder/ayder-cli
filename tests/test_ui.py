@@ -120,7 +120,7 @@ class TestPrintToolCall:
 class TestPrintToolResult:
     """Tests for print_tool_result() function."""
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_tool_result(self, mock_print):
         """Test tool result printing."""
         ui.print_tool_result("Success result")
@@ -129,7 +129,7 @@ class TestPrintToolResult:
         assert "✓" in call_args
         assert "Success result" in call_args
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_truncation_over_300_chars(self, mock_print):
         """Test that results over 300 chars are truncated."""
         long_result = "A" * 400
@@ -145,7 +145,7 @@ class TestPrintToolResult:
 class TestPrintRunning:
     """Tests for print_running() function."""
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_running(self, mock_print):
         """Test running indicator printing."""
         ui.print_running()
@@ -336,36 +336,47 @@ class TestConfirmToolCall:
         assert result is True
 
     @patch("builtins.input", side_effect=KeyboardInterrupt)
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_keyboard_interrupt_returns_false(self, mock_print, mock_input):
         """Test KeyboardInterrupt returns False."""
         result = ui.confirm_tool_call("Do something")
         assert result is False
-        mock_print.assert_called_once_with()  # Prints newline
+        # console.print is called twice: once for prompt, once for newline on interrupt
+        assert mock_print.call_count == 2
 
     @patch("builtins.input", side_effect=EOFError)
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_eof_error_returns_false(self, mock_print, mock_input):
         """Test EOFError returns False."""
         result = ui.confirm_tool_call("Do something")
         assert result is False
-        mock_print.assert_called_once_with()
+        # console.print is called twice: once for prompt, once for newline on EOFError
+        assert mock_print.call_count == 2
 
     @patch("builtins.input", return_value="y")
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_with_description(self, mock_print, mock_input):
         """Test that description is included in prompt."""
         ui.confirm_tool_call("Create file")
-        call_args = mock_input.call_args[0][0]
-        assert "Create file" in call_args
+        # Description is now printed via console.print, not passed to input()
+        # Check that console.print was called with the description
+        mock_print.assert_called_once()
+        call_args = mock_print.call_args[0][0]
+        assert "Create file" in str(call_args)
+        # input() is called with no args now
+        mock_input.assert_called_once_with()
 
     @patch("builtins.input", return_value="y")
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_without_description(self, mock_print, mock_input):
         """Test that prompt works without description."""
         ui.confirm_tool_call()
-        call_args = mock_input.call_args[0][0]
-        assert "Proceed?" in call_args
+        # Check that console.print was called with "Proceed?"
+        mock_print.assert_called_once()
+        call_args = mock_print.call_args[0][0]
+        assert "Proceed?" in str(call_args)
+        # input() is called with no args now
+        mock_input.assert_called_once_with()
 
     @patch("builtins.input", return_value="maybe")
     @patch("builtins.print")

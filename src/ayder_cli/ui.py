@@ -253,40 +253,64 @@ def print_tool_skipped():
 
 
 def describe_tool_action(fname, args):
-    """Generate a human-friendly description of what a tool call will do."""
+    """Generate a human-friendly description of what a tool call will do.
+    
+    Uses description_template from tool schemas for schema-driven descriptions.
+    Falls back to generic description if tool or template not found.
+    """
+    from ayder_cli.tools.schemas import tools_schema
+    
     if isinstance(args, str):
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
             args = {}
-
-    if fname == "create_task":
-        title = args.get("title", "untitled")
-        return f"Task TASK-XXX.md will be created in .ayder/tasks/"
-    elif fname == "show_task":
-        task_id = args.get("task_id", "?")
-        return f"Task TASK-{task_id:03d} will be displayed" if isinstance(task_id, int) else f"Task TASK-{task_id} will be displayed"
-    elif fname == "write_file":
-        return f"File {args.get('file_path', 'unknown')} will be written"
-    elif fname == "read_file":
-        return f"File {args.get('file_path', 'unknown')} will be read"
-    elif fname == "list_files":
-        return f"Directory {args.get('directory', '.')} will be listed"
-    elif fname == "replace_string":
-        return f"File {args.get('file_path', 'unknown')} will be modified"
-    elif fname == "run_shell_command":
-        return f"Command `{args.get('command', 'unknown')}` will be executed"
-    elif fname == "list_tasks":
+    
+    # Special case for list_tasks (no schema entry but has permission)
+    if fname == "list_tasks":
         return "Tasks will be listed"
-    elif fname == "search_codebase":
+    
+    # Special case for search_codebase with file_pattern (needs dynamic extension)
+    if fname == "search_codebase":
         pattern = args.get('pattern', 'unknown')
         file_pattern = args.get('file_pattern')
+        # Use schema template as base
         desc = f"Codebase will be searched for pattern '{pattern}'"
         if file_pattern:
             desc += f" in files matching '{file_pattern}'"
         return desc
-    else:
-        return f"{fname} will be called"
+    
+    # Find the tool schema and its description template
+    description_template = None
+    for tool in tools_schema:
+        if tool.get("function", {}).get("name") == fname:
+            description_template = tool["function"].get("description_template")
+            break
+    
+    if description_template:
+        try:
+            # Handle special formatting for task_id (zero-padding for integers only)
+            format_args = dict(args)
+            if "task_id" in format_args and isinstance(format_args["task_id"], int):
+                # Format task_id with zero-padding (e.g., 1 -> 001)
+                format_args["task_id"] = f"{format_args['task_id']:03d}"
+            # Handle defaults for optional parameters
+            if fname == "list_files" and "directory" not in format_args:
+                format_args["directory"] = "."
+            # Provide default 'unknown' for missing required parameters
+            # Extract parameter names from template
+            import re
+            param_names = re.findall(r'\{(\w+)', description_template)
+            for param in param_names:
+                if param not in format_args:
+                    format_args[param] = "unknown"
+            return description_template.format(**format_args)
+        except (KeyError, ValueError, TypeError):
+            # Fall through to generic description if formatting fails
+            pass
+    
+    # Fallback for tools without templates or formatting errors
+    return f"{fname} will be called"
 
 
 def print_file_content(file_path):

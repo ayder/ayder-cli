@@ -10,10 +10,11 @@ tools_schema = [
         "function": {
             "name": "list_files",
             "description": "List files in a directory",
+            "description_template": "Directory {directory} will be listed",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "directory": {"type": "string", "description": "The directory path (default: '.')"}
+                    "directory": {"type": "string", "description": "The directory path (default: '.')", "default": "."}
                 }
             }
         }
@@ -23,6 +24,7 @@ tools_schema = [
         "function": {
             "name": "read_file",
             "description": "Read the contents of a file, optionally specifying a line range.",
+            "description_template": "File {file_path} will be read",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -39,6 +41,7 @@ tools_schema = [
         "function": {
             "name": "write_file",
             "description": "Write content to a file (overwrites entire file).",
+            "description_template": "File {file_path} will be written",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -54,6 +57,7 @@ tools_schema = [
         "function": {
             "name": "replace_string",
             "description": "Replace a specific string in a file with a new string.",
+            "description_template": "File {file_path} will be modified",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -70,6 +74,7 @@ tools_schema = [
         "function": {
             "name": "run_shell_command",
             "description": "Execute a shell command.",
+            "description_template": "Command `{command}` will be executed",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -84,6 +89,7 @@ tools_schema = [
         "function": {
             "name": "create_task",
             "description": "Create a task saved as a markdown file. Use this when the user asks to create, add, or plan a task.",
+            "description_template": "Task TASK-XXX.md will be created in .ayder/tasks/",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -99,6 +105,7 @@ tools_schema = [
         "function": {
             "name": "show_task",
             "description": "Show the details of a task by its ID number. Use this when the user asks to see or show a specific task.",
+            "description_template": "Task TASK-{task_id} will be displayed",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -113,6 +120,7 @@ tools_schema = [
         "function": {
             "name": "implement_task",
             "description": "Implement a specific task, verify it, and set the status to done. Use this when the user asks to implement a specific task.",
+            "description_template": "Task TASK-{task_id} will be implemented",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -127,6 +135,7 @@ tools_schema = [
         "function": {
             "name": "implement_all_tasks",
             "description": "Implement all pending tasks one by one, verify them, and set their status to done. Use this when the user asks to implement all tasks.",
+            "description_template": "All pending tasks will be implemented",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -138,6 +147,7 @@ tools_schema = [
         "function": {
             "name": "search_codebase",
             "description": "Search for a regex pattern across the codebase. Returns matching lines with file paths and line numbers. Use this to locate code before reading files.",
+            "description_template": "Codebase will be searched for pattern '{pattern}'",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -171,3 +181,19 @@ tools_schema = [
         }
     }
 ]
+
+# Permission categories for each tool: r=read, w=write, x=execute
+TOOL_PERMISSIONS = {
+    "list_files": "r",
+    "read_file": "r",
+    "search_codebase": "r",
+    "get_project_structure": "r",
+    "show_task": "r",
+    "list_tasks": "r",
+    "write_file": "w",
+    "replace_string": "w",
+    "create_task": "w",
+    "implement_task": "w",
+    "implement_all_tasks": "w",
+    "run_shell_command": "x",
+}
