@@ -1,6 +1,6 @@
 ## Project Overview
 
-ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version: **0.7.0**.
+ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version: **0.7.3**.
 
 ## Virtual Environment Setup
 
@@ -25,7 +25,7 @@ uv pip install pytest
 .venv/bin/python3 -m pytest tests/ -v
 
 # Or set PYTHONPATH for imports without installing
-PYTHONPATH=src python3 -c "from ayder_cli import fs_tools"
+PYTHONPATH=src python3 -c "from ayder_cli.tools import tools_schema"
 
 # Run the CLI
 .venv/bin/python3 -m ayder_cli
@@ -65,7 +65,7 @@ The project uses **pytest** for testing with performance-enhancing plugins. All 
 .venv/bin/python3 -m pytest tests/ -n auto --timeout=10
 
 # Quick verification that imports work
-PYTHONPATH=src python3 -c "from ayder_cli import fs_tools; print(len(fs_tools.tools_schema))"
+PYTHONPATH=src python3 -c "from ayder_cli.tools import tools_schema; print(len(tools_schema))"
 ```
 
 **Performance Note**: Sequential execution is fastest for the current test suite (38 tests in ~0.25s). Use `-n auto` only when the suite grows to 100+ tests or includes slow integration tests.
@@ -110,7 +110,7 @@ All tests use pytest fixtures and mocking (no live LLM calls required).
 
 The application is organized into several modules:
 
-- **`src/ayder_cli/client.py`** — Main chat loop, `ChatSession` class, and `Agent` class. Contains the `run_chat()` entry point which supports dependency injection via optional `openai_client`, `config`, and `project_root` parameters. Also contains `call_llm_async()` for async LLM calls (used by the TUI), and `set_project_context_for_modules()` to propagate `ProjectContext` to all tool modules at startup. The `ChatSession` class manages conversation state, history, and user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `Agent` class handles the agentic loop (up to 5 consecutive tool calls per user message), tool validation, diff preview for file-modifying tools, and both standard OpenAI tool calls and custom XML-parsed calls. Defines `TERMINAL_TOOLS` set for tools that end the agentic loop. Slash commands are delegated to `handle_command()` from `commands.py`.
+- **`src/ayder_cli/client.py`** — Main chat loop, `ChatSession` class, and `Agent` class. Contains the `run_chat()` entry point which supports dependency injection via optional `openai_client`, `config`, and `project_root` parameters. Also contains `call_llm_async()` for async LLM calls (used by the TUI). The `ChatSession` class manages conversation state, history, and user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `Agent` class handles the agentic loop (up to 5 consecutive tool calls per user message), tool validation, diff preview for file-modifying tools, and both standard OpenAI tool calls and custom XML-parsed calls. Defines `TERMINAL_TOOLS` set for tools that end the agentic loop. Slash commands are delegated to `handle_command()` from `commands.py`.
 
 - **`src/ayder_cli/cli.py`** — Command-line interface with argparse. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`), direct command execution (non-interactive mode), and auto-detection of piped input. The `main()` function routes execution: TUI mode (`--tui`), command mode (direct command passed as positional arg), or interactive chat mode. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag. The `read_input()` function reads from files or stdin with UTF-8 encoding. The `run_command()` function executes a single command via the Agent and returns appropriate exit codes (0=success, 1=error, 2=no response).
 
@@ -122,7 +122,7 @@ The application is organized into several modules:
 
 - **`src/ayder_cli/parser.py`** — Enhanced XML tool call parser. Handles standard format (`<function=name><parameter=key>value</parameter></function>`), lazy format for single-param tools (`<function=name>value</function>` with parameter name inference via `_infer_parameter_name()`), and returns `{"error": "message"}` objects for malformed input.
 
-- **`src/ayder_cli/path_context.py`** — Path validation and sandboxing via `ProjectContext` class. Prevents path traversal attacks (`../`), validates absolute paths stay within project root, handles tilde expansion (`~` paths), and converts between relative/absolute paths. Used globally via a module-level `_default_project_ctx` pattern propagated by `set_project_context_for_modules()` at startup.
+- **`src/ayder_cli/core/context.py`** — Path validation and sandboxing via `ProjectContext` class. Prevents path traversal attacks (`../`), validates absolute paths stay within project root, handles tilde expansion (`~` paths), and converts between relative/absolute paths. Injected via dependency injection at startup.
 
 - **`src/ayder_cli/banner.py`** — Welcome banner with version detection (via `importlib.metadata`), gothic ASCII art, model/path display, and random tips. Exposes `__version__` and `print_welcome_banner(model, cwd)`.
 
@@ -132,8 +132,6 @@ The application is organized into several modules:
 
 - **`src/ayder_cli/tui_helpers.py`** — Helper functions for TUI operations. Contains `is_tool_blocked_in_safe_mode(tool_name, safe_mode)` for safe mode checks.
 
-- **`src/ayder_cli/fs_tools.py`** — **Thin compatibility layer** that re-exports all functionality from the `tools/` package and `tasks.py`. Exists solely for backwards compatibility. New code should import from `ayder_cli.tools` directly.
-
 - **`src/ayder_cli/tools/`** — **Core tools package** with modular architecture:
   - **`impl.py`** — Actual tool implementations (`list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command`, `search_codebase`, `get_project_structure`)
   - **`schemas.py`** — OpenAI-format JSON schemas for all available tools (10 tools total)
@@ -141,12 +139,10 @@ The application is organized into several modules:
     - `ToolRegistry` class with middleware support, pre/post-execute callbacks, and execution timing
     - `ToolExecutionStatus` enum (`STARTED`, `SUCCESS`, `ERROR`)
     - `ToolExecutionResult` dataclass (tool_name, arguments, status, result, error, duration_ms)
-    - `execute_tool_call()` convenience function using singleton registry
     - `create_default_registry()` factory function for fully configured registry
     - `normalize_tool_arguments()` for parameter aliasing, path resolution via ProjectContext, and type coercion
     - `validate_tool_call()` for schema validation
     - `PARAMETER_ALIASES` and `PATH_PARAMETERS` constants
-    - `_MockableToolRegistry` internal class for test compatibility (dynamic function lookup for task tools)
   - **`utils.py`** — Utility functions for tool operations, including `prepare_new_content()` for preparing file content before write/replace operations (supports both JSON string and dict arguments)
   - **`__init__.py`** — Complete public API exports (all tools, schemas, registry, and utilities)
 
@@ -189,24 +185,21 @@ class Agent:
 The `tools/` package follows a modular architecture with clear separation of concerns:
 
 **Import Paths:**
-- **Preferred (new code)**: `from ayder_cli.tools import execute_tool_call, ToolRegistry, normalize_tool_arguments`
-- **Backwards compatible**: `from ayder_cli.fs_tools import execute_tool_call, normalize_tool_arguments`
-- Both import paths work identically (fs_tools re-exports from tools package)
+```python
+from ayder_cli.tools import ToolRegistry, create_default_registry, normalize_tool_arguments
+from ayder_cli.tools.schemas import tools_schema
+from ayder_cli.core.context import ProjectContext
+```
 
 **Tool Execution Flow:**
 ```python
-# Option 1: Use execute_tool_call (recommended for most cases)
-from ayder_cli.tools import execute_tool_call
-result = execute_tool_call("read_file", {"file_path": "test.py"})
-
-# Option 2: Use ToolRegistry directly (for custom registries, TUI)
 from ayder_cli.tools import ToolRegistry, create_default_registry
-registry = create_default_registry()
-result = registry.execute("read_file", {"file_path": "test.py"})
+from ayder_cli.core.context import ProjectContext
 
-# Option 3: Backwards compatible (via fs_tools)
-from ayder_cli import fs_tools
-result = fs_tools.execute_tool_call("read_file", {"file_path": "test.py"})
+# Create a registry with project context (DI)
+ctx = ProjectContext(".")
+registry = create_default_registry(ctx)
+result = registry.execute("read_file", {"file_path": "test.py"})
 ```
 
 **Registry Features:**
@@ -230,7 +223,7 @@ normalized = normalize_tool_arguments("read_file", args)
 All file operations are sandboxed via `ProjectContext`:
 
 ```python
-from ayder_cli.path_context import ProjectContext
+from ayder_cli.core.context import ProjectContext
 
 ctx = ProjectContext(".")             # Root is current directory (resolved)
 path = ctx.validate_path("src/main.py")   # Returns absolute Path within root
@@ -238,7 +231,7 @@ path = ctx.validate_path("../../etc/passwd")  # Raises ValueError (traversal blo
 relative = ctx.to_relative(absolute_path)     # Convert back to relative string
 ```
 
-**Integration:** At startup, `run_chat()` creates a `ProjectContext` and calls `set_project_context_for_modules(ctx)` to propagate it to `impl.py`, `utils.py`, `registry.py`, and `tasks.py`. Each module uses a `_default_project_ctx` global with a `get_project_context()` accessor that falls back to `ProjectContext(".")`.
+**Integration:** At startup, `cli.py:_build_services()` creates a `ProjectContext` and injects it into `ToolRegistry` and `ToolExecutor` via constructor arguments. The `prepare_new_content()` utility accepts an optional `project_ctx` parameter for path resolution.
 
 ### Command Registry Pattern
 
@@ -288,11 +281,11 @@ The TUI (`tui.py`) provides an alternative dashboard interface built with Textua
 
 - **CLI with Piped Input Auto-Detection**: The CLI automatically detects piped input (e.g., `echo "text" | ayder`) by checking `sys.stdin.isatty()`. When stdin is piped and no explicit mode flags are set (`--file`, `--stdin`, `--tui`), the CLI auto-enables stdin mode, matching behavior of standard Unix tools. Explicit `--stdin` flag still supported for backwards compatibility.
 
-- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks), and `utils.py` (helpers). The `fs_tools.py` module serves as a thin compatibility layer.
+- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers).
 
 - **Tool Registry with Middleware**: `ToolRegistry` class supports middleware for pre-execution checks (safe mode), pre/post-execute callbacks for UI integration (TUI tool call display), and execution timing via `ToolExecutionResult`.
 
-- **Path Security via ProjectContext**: All file tool operations are sandboxed to the project root. `ProjectContext` validates paths, blocks traversal attacks, and handles tilde expansion. Propagated at startup to all modules.
+- **Path Security via ProjectContext**: All file tool operations are sandboxed to the project root. `ProjectContext` validates paths, blocks traversal attacks, and handles tilde expansion. Injected via DI at startup.
 
 - **Configuration with Pydantic**: Config validation using Pydantic models with field validators. The `Config` model validates `base_url` (http/https), `num_ctx` (positive integer), and other settings. Supports both dict and Config model formats throughout.
 

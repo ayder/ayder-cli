@@ -1,12 +1,13 @@
 import tomllib
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing import Any, Dict, Optional
 
 CONFIG_DIR = Path("~/.ayder").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
-# Backwards compatibility: Keep DEFAULTS dictionary
-DEFAULTS = {
+# Maintained for test compatibility and initial file generation
+DEFAULTS: Dict[str, Any] = {
     "base_url": "http://localhost:11434/v1",
     "api_key": "ollama",
     "model": "qwen3-coder:latest",
@@ -31,20 +32,36 @@ editor = "{editor}"
 verbose = {verbose_str}
 """
 
-
 class Config(BaseModel):
-    """Configuration model with validation."""
-    base_url: str = "http://localhost:11434/v1"
-    api_key: str = "ollama"
-    model: str = "qwen3-coder:latest"
-    num_ctx: int = 65536
-    editor: str = "vim"
-    verbose: bool = False
+    """Unified configuration model with validation."""
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    
+    base_url: str = Field(default="http://localhost:11434/v1")
+    api_key: str = Field(default="ollama")
+    model: str = Field(default="qwen3-coder:latest")
+    num_ctx: int = Field(default=65536)
+    editor: str = Field(default="vim")
+    verbose: bool = Field(default=False)
+
+    @model_validator(mode='before')
+    @classmethod
+    def flatten_nested_sections(cls, data: Any) -> Any:
+        """Flatten nested TOML sections ([llm], [editor], [ui]) into flat fields."""
+        if not isinstance(data, dict):
+            return data
+        
+        new_data = data.copy()
+        # Pull values from known sections
+        for section in ['llm', 'editor', 'ui']:
+            if section in data and isinstance(data[section], dict):
+                section_data = new_data.pop(section)
+                new_data.update(section_data)
+        
+        return new_data
 
     @field_validator("num_ctx")
     @classmethod
     def validate_num_ctx(cls, v: int) -> int:
-        """Validate that num_ctx is positive."""
         if v <= 0:
             raise ValueError("num_ctx must be positive")
         return v
@@ -52,7 +69,6 @@ class Config(BaseModel):
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: str) -> str:
-        """Validate that base_url looks like a valid URL."""
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("base_url must start with http:// or https://")
         return v
@@ -68,23 +84,8 @@ def load_config() -> Config:
         return Config()
 
     with open(CONFIG_PATH, "rb") as f:
-        data = tomllib.load(f)
-
-    # Build config dict from loaded data
-    config_dict = {}
-
-    llm = data.get("llm", {})
-    for key in ["base_url", "api_key", "model", "num_ctx"]:
-        if key in llm:
-            config_dict[key] = llm[key]
-
-    editor = data.get("editor", {})
-    if "editor" in editor:
-        config_dict["editor"] = editor["editor"]
-
-    ui = data.get("ui", {})
-    if "verbose" in ui:
-        config_dict["verbose"] = bool(ui["verbose"])
-
-    # Create Config instance with loaded values, defaults will be used for missing values
-    return Config(**config_dict)
+        try:
+            data = tomllib.load(f)
+            return Config(**data)
+        except Exception:
+            return Config()

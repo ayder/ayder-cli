@@ -4,23 +4,10 @@ Utility functions for tool operations.
 
 import json
 from pathlib import Path
-from ayder_cli.path_context import ProjectContext
+from ayder_cli.core.context import ProjectContext
 
 
-# --- Module-level ProjectContext ---
-
-_default_project_ctx = None
-
-
-def get_project_context():
-    """Get or create the default project context."""
-    global _default_project_ctx
-    if _default_project_ctx is None:
-        _default_project_ctx = ProjectContext(".")
-    return _default_project_ctx
-
-
-def prepare_new_content(fname, args):
+def prepare_new_content(fname, args, project_ctx=None):
     """
     Prepare the content that will be written to a file.
     For write_file: return the content directly.
@@ -44,7 +31,7 @@ def prepare_new_content(fname, args):
                 return ""
 
             try:
-                project = get_project_context()
+                project = project_ctx if project_ctx is not None else ProjectContext(".")
                 abs_path = project.validate_path(file_path)
 
                 with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:

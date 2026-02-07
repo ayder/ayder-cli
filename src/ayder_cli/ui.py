@@ -254,62 +254,44 @@ def print_tool_skipped():
 
 def describe_tool_action(fname, args):
     """Generate a human-friendly description of what a tool call will do.
-    
-    Uses description_template from tool schemas for schema-driven descriptions.
+
+    Uses description_template from ToolDefinition for schema-driven descriptions.
     Falls back to generic description if tool or template not found.
     """
-    from ayder_cli.tools.schemas import tools_schema
-    
+    from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
     if isinstance(args, str):
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
             args = {}
-    
-    # Special case for list_tasks (no schema entry but has permission)
-    if fname == "list_tasks":
-        return "Tasks will be listed"
-    
+
     # Special case for search_codebase with file_pattern (needs dynamic extension)
     if fname == "search_codebase":
         pattern = args.get('pattern', 'unknown')
         file_pattern = args.get('file_pattern')
-        # Use schema template as base
         desc = f"Codebase will be searched for pattern '{pattern}'"
         if file_pattern:
             desc += f" in files matching '{file_pattern}'"
         return desc
-    
-    # Find the tool schema and its description template
-    description_template = None
-    for tool in tools_schema:
-        if tool.get("function", {}).get("name") == fname:
-            description_template = tool["function"].get("description_template")
-            break
-    
-    if description_template:
+
+    tool_def = TOOL_DEFINITIONS_BY_NAME.get(fname)
+    if tool_def and tool_def.description_template:
         try:
-            # Handle special formatting for task_id (zero-padding for integers only)
             format_args = dict(args)
             if "task_id" in format_args and isinstance(format_args["task_id"], int):
-                # Format task_id with zero-padding (e.g., 1 -> 001)
                 format_args["task_id"] = f"{format_args['task_id']:03d}"
-            # Handle defaults for optional parameters
             if fname == "list_files" and "directory" not in format_args:
                 format_args["directory"] = "."
-            # Provide default 'unknown' for missing required parameters
-            # Extract parameter names from template
-            import re
-            param_names = re.findall(r'\{(\w+)', description_template)
+            # Provide default 'unknown' for missing template parameters
+            param_names = re.findall(r'\{(\w+)', tool_def.description_template)
             for param in param_names:
                 if param not in format_args:
                     format_args[param] = "unknown"
-            return description_template.format(**format_args)
+            return tool_def.description_template.format(**format_args)
         except (KeyError, ValueError, TypeError):
-            # Fall through to generic description if formatting fails
             pass
-    
-    # Fallback for tools without templates or formatting errors
+
     return f"{fname} will be called"
 
 
@@ -358,7 +340,7 @@ def colorize_diff(diff_lines):
     """
     colorized = []
     for line in diff_lines:
-        text = Text(line)
+        text = Text(line.strip())
         if line.startswith('@@'):
             text.stylize("cyan")
         elif line.startswith('-') and not line.startswith('---'):

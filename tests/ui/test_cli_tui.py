@@ -45,24 +45,24 @@ def test_tui_with_command_error_message():
 def test_no_tui_flag_does_not_call_run_tui():
     """Test that without --tui flag, run_tui() is not called."""
     with patch('ayder_cli.tui.run_tui') as mock_run_tui, \
-         patch('ayder_cli.client.run_chat') as mock_run_chat, \
+         patch('ayder_cli.cli.run_interactive') as mock_run_interactive, \
          patch.object(sys, 'argv', ['ayder']), \
          patch.object(sys.stdin, 'isatty', return_value=True):
         from ayder_cli.cli import main
         main()
         mock_run_tui.assert_not_called()
-        mock_run_chat.assert_called_once()
+        mock_run_interactive.assert_called_once()
 
 
-def test_tui_flag_exits_before_run_chat():
-    """Test that --tui returns before calling run_chat()."""
+def test_tui_flag_exits_before_run_interactive():
+    """Test that --tui returns before calling run_interactive()."""
     with patch('ayder_cli.tui.run_tui') as mock_run_tui, \
-         patch('ayder_cli.client.run_chat') as mock_run_chat, \
+         patch('ayder_cli.cli.run_interactive') as mock_run_interactive, \
          patch.object(sys, 'argv', ['ayder', '--tui']):
         from ayder_cli.cli import main
         main()
         mock_run_tui.assert_called_once()
-        mock_run_chat.assert_not_called()
+        mock_run_interactive.assert_not_called()
 
 
 def test_tui_with_file_flag():

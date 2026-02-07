@@ -132,37 +132,38 @@ class TestConfirmWithDiffWarning:
         assert result is False
 
 
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
 class TestDrawBoxEdgeCases:
-    """Additional edge case tests for draw_box()."""
+    """Additional edge case tests for draw_box() with Rich."""
 
-    def test_draw_box_very_long_text(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_draw_box_very_long_text(self, mock_print):
         """Test draw_box with very long text that wraps extensively."""
+        from rich.panel import Panel
         very_long_text = "word " * 200  # Very long text
-        result = ui.draw_box(very_long_text, width=40)
-        lines = result.split("\n")
-        # Should have many wrapped lines
-        assert len(lines) > 10
-        # All lines should be within width
-        for line in lines:
-            # Exclude ANSI escape codes for length check
-            clean_line = line.replace("\033[36m", "").replace("\033[0m", "")
-            assert len(clean_line) <= 40 or "─" in clean_line
+        ui.draw_box(very_long_text, width=40)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    def test_draw_box_narrow_width(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_draw_box_narrow_width(self, mock_print):
         """Test draw_box with narrow width."""
+        from rich.panel import Panel
         text = "This is some text that needs wrapping"
-        result = ui.draw_box(text, width=10)
-        lines = result.split("\n")
-        # Should wrap into multiple lines
-        assert len(lines) > 3
+        ui.draw_box(text, width=10)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    def test_draw_box_empty_lines_preserved(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_draw_box_empty_lines_preserved(self, mock_print):
         """Test that empty lines are preserved in output."""
+        from rich.panel import Panel
         text = "Line1\n\n\nLine2"
-        result = ui.draw_box(text, width=20)
-        # Should preserve empty lines
-        assert result.count("\n") >= 4
+        ui.draw_box(text, width=20)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
 
 class TestColorizeDiffEdgeCases:
@@ -256,3 +257,202 @@ class TestTruncateDiffEdgeCases:
         assert any("omitted" in str(line) for line in result)
         # First 80 + separator + last 20 = 101 lines
         assert len(result) == 101
+
+
+# =============================================================================
+# New tests for uncovered lines in ui.py
+# =============================================================================
+
+class TestPrintUserMessage:
+    """Tests for print_user_message() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_prints_panel_with_you_title(self, mock_print):
+        """Verify panel with 'You' title is printed."""
+        from rich.panel import Panel
+        ui.print_user_message("hello")
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "You"
+
+
+class TestPrintAssistantMessage:
+    """Tests for print_assistant_message() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_prints_panel_with_assistant_title(self, mock_print):
+        """Verify panel with 'Assistant' title is printed."""
+        from rich.panel import Panel
+        ui.print_assistant_message("response")
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "Assistant"
+
+
+class TestPrintToolCall:
+    """Tests for print_tool_call() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_prints_tool_call_panel(self, mock_print):
+        """Verify tool call panel is printed."""
+        from rich.panel import Panel
+        ui.print_tool_call("read_file", '{"file_path": "test.py"}')
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "Tool Call"
+
+
+class TestDrawBoxRich:
+    """Tests for draw_box() function with Rich."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_basic_draw_box(self, mock_print):
+        """Test basic draw_box functionality."""
+        ui.draw_box("Hello", width=20)
+        mock_print.assert_called_once()
+
+    @patch("ayder_cli.ui.console.print")
+    def test_draw_box_color_mapping(self, mock_print):
+        """Test different color codes map to Rich styles."""
+        from rich.panel import Panel
+        for code in ["36", "32", "33", "35", "31"]:
+            ui.draw_box("Test", color_code=code)
+            panel = mock_print.call_args[0][0]
+            assert isinstance(panel, Panel)
+
+
+class TestPrintFileContentRich:
+    """Tests for print_file_content_rich() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_with_content_param(self, mock_print):
+        """Test with content parameter."""
+        ui.print_file_content_rich("test.py", content="print('hi')")
+        mock_print.assert_called_once()
+
+    @patch("ayder_cli.ui.console.print")
+    @patch("builtins.open", side_effect=FileNotFoundError("not found"))
+    def test_file_read_error(self, mock_open, mock_print):
+        """Test file read error handling."""
+        from rich.panel import Panel
+        ui.print_file_content_rich("nonexistent.py")
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "Error"
+
+
+class TestPrintMarkdown:
+    """Tests for print_markdown() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_without_title(self, mock_print):
+        """Test without title parameter."""
+        ui.print_markdown("# Hello")
+        mock_print.assert_called_once()
+
+    @patch("ayder_cli.ui.console.print")
+    def test_with_title(self, mock_print):
+        """Test with title parameter."""
+        from rich.panel import Panel
+        ui.print_markdown("# Hello", title="Docs")
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+
+
+class TestPrintCodeBlock:
+    """Tests for print_code_block() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    def test_basic_code_block(self, mock_print):
+        """Test basic code block printing."""
+        ui.print_code_block("x = 1", language="python")
+        mock_print.assert_called_once()
+
+    @patch("ayder_cli.ui.console.print")
+    def test_code_block_with_title(self, mock_print):
+        """Test code block with title."""
+        ui.print_code_block("x = 1", title="Example")
+        mock_print.assert_called_once()
+
+
+class TestContextManagers:
+    """Tests for context manager functions."""
+
+    @patch("ayder_cli.ui.console.status")
+    def test_agent_working_status(self, mock_status):
+        """Test agent_working_status context manager."""
+        with ui.agent_working_status("Processing..."):
+            pass
+        mock_status.assert_called_once()
+
+    @patch("ayder_cli.ui.console.print")
+    def test_print_running_rich(self, mock_print):
+        """Test print_running_rich function."""
+        ui.print_running_rich("Working...")
+        mock_print.assert_called_once()
+
+    @patch("ayder_cli.ui.console.status")
+    def test_tool_execution_status(self, mock_status):
+        """Test tool_execution_status context manager."""
+        with ui.tool_execution_status("read_file"):
+            pass
+        mock_status.assert_called_once()
+
+    @patch("ayder_cli.ui.console.status")
+    def test_file_operation_status(self, mock_status):
+        """Test file_operation_status context manager."""
+        with ui.file_operation_status("reading", "test.py"):
+            pass
+        mock_status.assert_called_once()
+
+    @patch("ayder_cli.ui.console.status")
+    def test_file_operation_status_long_path(self, mock_status):
+        """Paths > 40 chars are truncated with '...' prefix."""
+        long_path = "/very/long/path/that/exceeds/forty/characters/file.txt"
+        with ui.file_operation_status("reading", long_path):
+            pass
+        mock_status.assert_called_once()
+        call_args_str = str(mock_status.call_args)
+        assert "..." in call_args_str
+
+    @patch("ayder_cli.ui.console.status")
+    def test_search_status(self, mock_status):
+        """Test search_status context manager."""
+        with ui.search_status("pattern"):
+            pass
+        mock_status.assert_called_once()
+
+    @patch("ayder_cli.ui.console.status")
+    def test_search_status_long_pattern(self, mock_status):
+        """Patterns > 30 chars are truncated."""
+        long_pattern = "a" * 40
+        with ui.search_status(long_pattern):
+            pass
+        mock_status.assert_called_once()
+        call_args_str = str(mock_status.call_args)
+        assert "..." in call_args_str
+
+
+class TestConfirmWithDiff:
+    """Tests for confirm_with_diff() function."""
+
+    @patch("ayder_cli.ui.console.print")
+    @patch("ayder_cli.ui.confirm_tool_call")
+    @patch("ayder_cli.ui.generate_diff_preview")
+    def test_confirm_with_diff_available(self, mock_gen_diff, mock_confirm, mock_print):
+        """Test when diff is available."""
+        from rich.text import Text
+        mock_diff = Text("diff content")
+        mock_gen_diff.return_value = mock_diff
+        mock_confirm.return_value = True
+
+        result = ui.confirm_with_diff("/path/to/file", "new content", "Test description")
+
+        # Should print the diff panel
+        mock_print.assert_called_once()
+        assert result is True

@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from dataclasses import dataclass
+from ayder_cli.core.config import Config
 
 
 class ProjectContext:
@@ -57,3 +59,15 @@ class ProjectContext:
             return str(absolute_path.relative_to(self.root))
         except ValueError:
             return str(absolute_path)
+
+
+@dataclass
+class SessionContext:
+    """Unified context for a chat session.
+    
+    Holds configuration, project-specific path context, chat history, and runtime state.
+    """
+    config: Config
+    project: ProjectContext
+    messages: list
+    state: dict

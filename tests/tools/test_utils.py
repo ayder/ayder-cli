@@ -10,46 +10,14 @@ from unittest.mock import mock_open, patch, MagicMock
 
 import pytest
 
-from ayder_cli.tools import utils
-from ayder_cli.tools.utils import prepare_new_content, get_project_context
-from ayder_cli.path_context import ProjectContext
+from ayder_cli.tools.utils import prepare_new_content
+from ayder_cli.core.context import ProjectContext
 
 
 @pytest.fixture
-def project_context(tmp_path, monkeypatch):
-    """Create a project context with tmp_path as root and set it for utils."""
-    ctx = ProjectContext(str(tmp_path))
-    monkeypatch.setattr(utils, "_default_project_ctx", ctx)
-    return ctx
-
-
-class TestGetProjectContext:
-    """Tests for get_project_context() function - Line 19 coverage."""
-
-    def test_module_context_lazy_initialization(self, tmp_path, monkeypatch):
-        """Test lazy initialization of module-level ProjectContext - Line 19."""
-        # Clear the global state to trigger initialization
-        monkeypatch.setattr(utils, "_default_project_ctx", None)
-        
-        # Change to tmp_path for initialization
-        monkeypatch.chdir(tmp_path)
-        
-        # Access should trigger initialization
-        ctx = get_project_context()
-        
-        assert ctx is not None
-        assert isinstance(ctx, ProjectContext)
-        assert ctx.root == tmp_path
-
-    def test_module_context_returns_existing(self, tmp_path, monkeypatch):
-        """Test that existing context is returned if already set."""
-        # Set a specific context
-        ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(utils, "_default_project_ctx", ctx)
-        
-        # Should return the same context
-        result = get_project_context()
-        assert result is ctx
+def project_context(tmp_path):
+    """Create a project context with tmp_path as root."""
+    return ProjectContext(str(tmp_path))
 
 
 class TestPrepareNewContentWriteFile:
@@ -87,26 +55,26 @@ class TestPrepareNewContentReplaceString:
         """Test prepare_new_content for replace_string basic case."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
-        
+
         args = {
             "file_path": str(test_file),
             "old_string": "World",
             "new_string": "Universe"
         }
-        result = prepare_new_content("replace_string", args)
+        result = prepare_new_content("replace_string", args, project_context)
         assert result == "Hello, Universe!"
 
     def test_replace_string_with_json_args(self, tmp_path, project_context):
         """Test prepare_new_content for replace_string with JSON string args."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Original text")
-        
+
         args = json.dumps({
             "file_path": str(test_file),
             "old_string": "Original",
             "new_string": "Modified"
         })
-        result = prepare_new_content("replace_string", args)
+        result = prepare_new_content("replace_string", args, project_context)
         assert result == "Modified text"
 
     def test_replace_string_empty_file_path(self):
@@ -142,26 +110,26 @@ class TestPrepareNewContentReplaceString:
         """Test replace_string with multiple occurrences of old_string."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("old old old text")
-        
+
         args = {
             "file_path": str(test_file),
             "old_string": "old",
             "new_string": "new"
         }
-        result = prepare_new_content("replace_string", args)
+        result = prepare_new_content("replace_string", args, project_context)
         assert result == "new new new text"
 
     def test_replace_string_no_match(self, tmp_path, project_context):
         """Test replace_string when old_string is not found."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Some content")
-        
+
         args = {
             "file_path": str(test_file),
             "old_string": "notfound",
             "new_string": "replacement"
         }
-        result = prepare_new_content("replace_string", args)
+        result = prepare_new_content("replace_string", args, project_context)
         # Should return original content unchanged
         assert result == "Some content"
 
@@ -169,13 +137,13 @@ class TestPrepareNewContentReplaceString:
         """Test replace_string with empty old_string."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("ABC")
-        
+
         args = {
             "file_path": str(test_file),
             "old_string": "",
             "new_string": "X"
         }
-        result = prepare_new_content("replace_string", args)
+        result = prepare_new_content("replace_string", args, project_context)
         # Empty string replacement behavior
         assert "X" in result
 
@@ -183,13 +151,13 @@ class TestPrepareNewContentReplaceString:
         """Test replace_string with multiline content."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3")
-        
+
         args = {
             "file_path": str(test_file),
             "old_string": "Line 2",
             "new_string": "Modified Line"
         }
-        result = prepare_new_content("replace_string", args)
+        result = prepare_new_content("replace_string", args, project_context)
         assert result == "Line 1\nModified Line\nLine 3"
 
 

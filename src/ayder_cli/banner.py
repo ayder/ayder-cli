@@ -2,6 +2,11 @@ import random
 from pathlib import Path
 from importlib.metadata import version, PackageNotFoundError
 from rich.text import Text
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.align import Align
+from rich.table import Table
+from rich import box
 from ayder_cli.console import console
 
 
@@ -22,6 +27,22 @@ GOTHIC_A = [
     r"  ░▓▓▓▓▒█     ",
     r"              ",
 ]
+
+# ANSI color codes for direct use in ASCII banners
+_C = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "cyan": "\033[96m",
+    "cyan_bright": "\033[38;5;51m",
+    "blue": "\033[94m",
+    "blue_bright": "\033[38;5;39m",
+    "purple": "\033[38;5;141m",
+    "magenta": "\033[95m",
+    "magenta_bright": "\033[38;5;201m",
+    "green": "\033[92m",
+    "yellow": "\033[93m",
+}
 
 
 def get_app_version():
@@ -104,3 +125,148 @@ def print_welcome_banner(model, cwd):
     console.print(banner)
     console.print(tip_line)
     console.print()
+
+
+def print_rich_banner():
+    """Print a rich panel banner with gradient-colored AYDER title."""
+    # Create the stylized title
+    title_line = Text()
+    title_line.append("◆ ", style="cyan")
+    title_line.append("A", style="bold bright_cyan")
+    title_line.append("Y", style="bold cyan")
+    title_line.append("D", style="bold bright_blue")
+    title_line.append("E", style="bold blue")
+    title_line.append("R", style="bold purple")
+    title_line.append(" ◆", style="bright_magenta")
+    
+    # Subtitle
+    subtitle = Text("AI-Powered Coding Assistant", style="dim italic")
+    
+    # Version badge
+    version = Text(f" v{__version__} ", style="bold green on black")
+    
+    # Create features table
+    features = Table(show_header=False, box=None, padding=(0, 2))
+    features.add_column(style="cyan")
+    features.add_column(style="green")
+    features.add_column(style="yellow")
+    features.add_column(style="magenta")
+    features.add_row(
+        "● Multi-Agent",
+        "● Context Mgmt",
+        "● Local LLMs",
+        "● Tool System"
+    )
+    
+    # Group the content
+    group = Group(
+        Align.center(title_line),
+        Align.center(subtitle),
+        Text(""),
+        Align.center(features),
+    )
+    
+    # Create the panel
+    panel = Panel(
+        group,
+        title=version,
+        title_align="right",
+        border_style="cyan",
+        box=box.ROUNDED,
+        padding=(1, 4),
+    )
+    
+    console.print()
+    console.print(panel)
+    console.print()
+    
+    # Quick start hint
+    hint = Text()
+    hint.append("Run ", style="dim")
+    hint.append("ayder --help", style="bold yellow")
+    hint.append(" for usage information", style="dim")
+    console.print(Align.center(hint))
+    console.print()
+
+
+def print_compact_banner():
+    """Print a compact banner suitable for startup messages."""
+    text = Text()
+    text.append("◆ ", style="cyan")
+    text.append("AYDER", style="bold bright_cyan")
+    text.append(f" v{__version__}", style="dim")
+    text.append(" — AI-Powered Coding Assistant", style="dim")
+    console.print(text)
+
+
+def print_ascii_banner():
+    """Print a pure ASCII art banner with ANSI colors."""
+    c = _C
+    
+    banner = f"""
+{c['cyan']}    ___   {c['cyan_bright']}_____   {c['blue']}_____   {c['purple']}_____   {c['magenta']}_____{c['reset']}
+{c['cyan']}   /\\  \\  {c['cyan_bright']}/\\  __\\  {c['blue']}/\\  __-./{c['purple']}/\\  __-. {c['magenta']}/\\  __-.{c['reset']}
+{c['cyan']}  /::\\  \\{c['cyan_bright']}/::\\_|  \\{c['blue']}\\ \\ \\/__/\\{c['purple']} \\ \\/__/ {c['magenta']}\\ \\ \\/__/{c['reset']}
+{c['cyan']} /:/\\:\\__{c['cyan_bright']}\\:/\\____/{c['blue']}\\ \\____\\{c['purple']}\\ \\____\\{c['magenta']}\\ \\____\\{c['reset']}
+{c['cyan']} \\:\\ \\/__{c['cyan_bright']}\\/____/  {c['blue']}\\/____/ {c['purple']}\\/____/ {c['magenta']}\\/____/{c['reset']}
+{c['cyan']}  \\:\\__\\ {c['cyan_bright']}         {c['blue']}        {c['purple']}        {c['magenta']}       {c['reset']}
+{c['cyan']}   \\/__/  {c['cyan_bright']}         {c['blue']}        {c['purple']}        {c['magenta']}       {c['reset']}
+
+{c['cyan']}╔══════════════════════════════════════════════════╗{c['reset']}
+{c['cyan']}║{c['reset']}  {c['bold']}{c['cyan']}A{c['cyan_bright']}Y{c['blue']}D{c['purple']}E{c['magenta']}R{c['reset']} {c['bold']}CLI{c['reset']}  {c['dim']}— AI-Powered Coding Assistant{c['reset']}     {c['cyan']}║{c['reset']}
+{c['cyan']}╚══════════════════════════════════════════════════╝{c['reset']}
+"""
+    print(banner)
+
+
+def print_minimal_banner():
+    """Print minimal banner with just name and version."""
+    console.print(f"[bold bright_cyan]ayder[/] [green]{__version__}[/] - AI-Powered Coding Assistant")
+
+
+def print_fancy_banner(model,version):
+    """Print a fancy gradient banner with block letters."""
+    # Build the banner with gradient effect
+    art_lines = [
+        "                    █████╗ ██╗   ██╗██████╗ ███████╗██████╗ ",
+        "                   ██╔══██╗╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗",
+        "                   ███████║ ╚████╔╝ ██║  ██║█████╗  ██████╔╝",
+        "                   ██╔══██║  ╚██╔╝  ██║  ██║██╔══╝  ██╔══██╗",
+        "                   ██║  ██║   ██║   ██████╔╝███████╗██║  ██║",
+        "                   ╚═╝  ╚═╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝",
+    ]
+    
+    colors = ["bright_cyan", "cyan", "blue", "purple", "bright_magenta", "magenta"]
+    
+    console.print()
+    for i, line in enumerate(art_lines):
+        console.print(f"[{colors[i]}]{line}[/]")
+    
+    console.print()
+    console.print(Align.center("[bold]AI-Powered Coding Assistant[/]"))
+    console.print(Align.center(f"[dim]Version {__version__}[/]"))
+    console.print(Align.center(f"[dim]Version {model}[/]"))
+    console.print()
+
+
+if __name__ == "__main__":
+    import sys
+    
+    # Self-test: print all banner styles
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        if arg == "--compact":
+            print_compact_banner()
+        elif arg == "--ascii":
+            print_ascii_banner()
+        elif arg == "--minimal":
+            print_minimal_banner()
+        elif arg == "--fancy":
+            print_fancy_banner()
+        elif arg == "--rich":
+            print_rich_banner()
+        else:
+            print_welcome_banner("qwen2.5-coder:14b", str(Path.cwd()))
+    else:
+        # Default: show the welcome banner
+        print_welcome_banner("qwen2.5-coder:14b", str(Path.cwd()))

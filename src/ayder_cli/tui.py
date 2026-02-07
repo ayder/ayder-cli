@@ -21,9 +21,10 @@ from rich.panel import Panel
 from enum import Enum
 
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
+from ayder_cli.core.context import ProjectContext
 from ayder_cli.client import call_llm_async
-from ayder_cli.config import load_config
-from openai import OpenAI
+from ayder_cli.core.config import load_config
+from ayder_cli.services.llm import OpenAIProvider
 
 
 class MessageType(Enum):
@@ -573,13 +574,13 @@ class AyderApp(App):
             base_url = self.config.base_url
             api_key = self.config.api_key
         
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.llm = OpenAIProvider(base_url=base_url, api_key=api_key)
         
         # Conversation history
         self.messages: list[dict] = []
         
         # Tool registry with callbacks and middleware
-        self.registry = create_default_registry()
+        self.registry = create_default_registry(ProjectContext("."))
         self._setup_registry_callbacks()
         self._setup_registry_middleware()
     
@@ -615,20 +616,17 @@ class AyderApp(App):
     def _is_tool_blocked_in_safe_mode(self, tool_name: str) -> bool:
         """
         Check if a tool should be blocked in safe mode.
-        
+
         Args:
             tool_name: Name of the tool
-            
+
         Returns:
             True if tool should be blocked
         """
-        blocked_tools = [
-            "run_shell_command",
-            "write_file",
-            "replace_string",
-        ]
-        
-        return tool_name in blocked_tools
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+        tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+        return tool_def.safe_mode_blocked if tool_def else False
     
     def compose(self) -> ComposeResult:
         """
@@ -702,7 +700,7 @@ class AyderApp(App):
             
             # Call LLM
             response = await call_llm_async(
-                self.client,
+                self.llm,
                 self.messages,
                 model,
                 tools=tool_schemas,

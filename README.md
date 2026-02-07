@@ -12,9 +12,9 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual. No frameworks, no bloat.
 
 
-### Why fs_tools?
+### Tools
 
-LLMs on their own can only generate text. To be a useful coding assistant, the model needs to *act* on your codebase. I find it very hard to properly configure other coding agents to work with local qwen3:coder so I come up with a  `fs_tools` bridge -- it gives the model a set of real tools it can call (not limited with) :
+LLMs on their own can only generate text. To be a useful coding assistant, the model needs to *act* on your codebase. ayder-cli provides a modular `tools/` package that gives the model a set of real tools it can call:
 
 
 | Tool | What it does |
@@ -241,7 +241,7 @@ Proceed? [Y/n] y
 ╭──────────────────────── Tool Result ─────────────────────────────╮
 │ ./prime_calculator.py                                            │
 │ ./src/ayder_cli/client.py                                        │
-│ ./src/ayder_cli/fs_tools.py                                      │
+│ ./src/ayder_cli/cli.py                                           │
 │ ...                                                              │
 ╰──────────────────────────────────────────────────────────────────╯
 
@@ -330,17 +330,15 @@ Proceed? [Y/n] y
 │ ayder-cli                                                        │
 │ ├── src/                                                         │
 │ │   └── ayder_cli/                                               │
+│ │       ├── cli.py                                               │
 │ │       ├── client.py                                            │
-│ │       ├── commands.py                                          │
-│ │       ├── config.py                                            │
-│ │       ├── fs_tools.py                                          │
+│ │       ├── commands/                                            │
+│ │       ├── core/                                                │
+│ │       ├── services/                                            │
+│ │       ├── tools/                                               │
 │ │       ├── parser.py                                            │
 │ │       ├── tasks.py                                             │
-│ │       ├── ui.py                                                │
-│ │       └── tools/                                               │
-│ │           ├── impl.py                                          │
-│ │           ├── schemas.py                                       │
-│ │           └── registry.py                                      │
+│ │       └── ui.py                                                │
 │ ├── tests/                                                       │
 │ └── README.md                                                    │
 ╰──────────────────────────────────────────────────────────────────╯
@@ -382,76 +380,36 @@ ayder-cli uses emacs-style keybindings via prompt-toolkit:
 
 ```
 src/ayder_cli/
-  cli.py           -- Command-line interface (argparse, --tui/--file/--stdin flags, piped input auto-detection)
+  cli.py           -- Command-line interface (argparse, --tui/--file/--stdin flags, piped input)
   client.py        -- ChatSession + Agent classes, run_chat() entry point
-  commands.py      -- Slash command handler with decorator-based registry
-  config.py        -- Configuration loading with Pydantic validation
-  fs_tools.py      -- Backwards compatibility layer (re-exports from tools/)
-  ui.py            -- Rich terminal UI (boxes, message formatting, diff previews)
-  tui.py           -- Textual TUI dashboard (chat view, context panel, modals)
-  tui_helpers.py   -- TUI helper functions (safe mode checks)
   parser.py        -- XML tool call parser (standard + lazy format fallback)
   prompts.py       -- System prompts and prompt templates
   tasks.py         -- Task creation, listing, and implementation (.ayder/tasks/)
+  ui.py            -- Rich terminal UI (boxes, message formatting, diff previews)
+  tui.py           -- Textual TUI dashboard (chat view, context panel, modals)
+  tui_helpers.py   -- TUI helper functions (safe mode checks)
   banner.py        -- Welcome banner with version detection and tips
   console.py       -- Centralized Rich console with custom theme
-  path_context.py  -- ProjectContext for path sandboxing and security
+  commands/        -- Slash command handlers with decorator-based registry
+    base.py        -- BaseCommand abstract class
+    registry.py    -- Command registry and dispatch
+    files.py       -- /edit command
+    tools.py       -- /tools command
+    tasks.py       -- /tasks, /task-edit commands
+    system.py      -- /help, /clear, /undo, /verbose commands
+  core/            -- Core infrastructure
+    config.py      -- Configuration loading with Pydantic validation
+    context.py     -- ProjectContext for path sandboxing and security
+  services/        -- Service layer
+    llm.py         -- OpenAI-compatible LLM provider
+    tools/         -- ToolExecutor for tool confirmation and execution
   tools/           -- Modular tools package
+    definition.py  -- ToolDefinition dataclass and registry
     impl.py        -- Tool implementations (file ops, shell, search)
-    schemas.py     -- OpenAI-format JSON schemas for all 10 tools
+    schemas.py     -- OpenAI-format JSON schemas for all tools
     registry.py    -- ToolRegistry with middleware, callbacks, and execution timing
     utils.py       -- Tool utilities (content preparation for diffs)
 ```
-
-## Recent Changes (v0.7.0)
-
-### CLI Enhancements
-- **Command Mode**: Execute single commands non-interactively: `ayder "create file.py"`
-- **Piped Input Auto-Detection**: Unix-style piping works without flags: `echo "text" | ayder`
-- **File Input**: Read instructions from files: `ayder -f instructions.txt`
-- **Multiple Entry Points**: CLI (`cli:main`), programmatic (`client:run_chat`), TUI (`tui.py`)
-- **Improved Exit Codes**: Command mode returns proper exit codes (0=success, 1=error, 2=no response)
-
-### Testing Infrastructure
-- **pytest Plugins**: Added xdist (parallel), timeout (hang prevention), instafail (fast feedback), sugar (progress bar)
-- **38 CLI Tests**: Comprehensive coverage for file/stdin input, piped input auto-detection, TUI flag handling
-- **464+ Total Tests**: 96% code coverage across all modules
-
-### Previous Changes (v0.6.0)
-
-### Textual TUI Dashboard
-- **Interactive TUI**: New `tui.py` module provides a full Textual-based dashboard with chat view, context panel (model info, token usage, file tree), input bar, and keyboard shortcuts (Ctrl+Q, Ctrl+C, Ctrl+L).
-- **Tool confirmation modals**: `ConfirmActionScreen` with inline diff previews for file-modifying tools. `SafeModeBlockScreen` for blocked operations.
-- **Safe mode**: Blocks destructive tools (`write_file`, `replace_string`, `run_shell_command`) via registry middleware.
-- **Async LLM calls**: `call_llm_async()` runs synchronous OpenAI calls in a thread pool so the TUI stays responsive.
-
-### Path Security & Sandboxing
-- **`ProjectContext`**: New `path_context.py` module sandboxes all file operations to the project root. Blocks path traversal (`../`), validates absolute paths, and handles tilde expansion.
-- **Propagated at startup**: `set_project_context_for_modules()` in `client.py` pushes the context to all tool modules (`impl.py`, `utils.py`, `registry.py`, `tasks.py`).
-
-### ChatSession & Agent Architecture
-- **`ChatSession` class**: Manages conversation state, prompt-toolkit input, message history, and welcome banner display. Replaces the inline logic that was previously in `run_chat()`.
-- **`Agent` class**: Handles the agentic loop (up to 5 consecutive tool calls), tool validation, diff preview for file-modifying tools, and both standard OpenAI and custom XML-parsed tool calls.
-- **`run_chat()` preserved**: Still the entry point, now accepts `project_root` parameter in addition to `openai_client` and `config`.
-
-### Enhanced Tool Registry
-- **Middleware support**: `ToolRegistry.add_middleware()` for pre-execution checks (used by TUI safe mode).
-- **Callbacks**: Pre/post-execute callbacks with `ToolExecutionResult` (includes timing, status, error details).
-- **`ToolExecutionStatus`/`ToolExecutionResult`**: Structured result objects for execution tracking.
-
-### Enhanced Parser
-- **Lazy format**: Single-param tools can now use `<function=name>value</function>` without explicit `<parameter>` tags. Parameter name is inferred via `_infer_parameter_name()`.
-- **Error reporting**: Malformed tool calls return `{"error": "message"}` objects instead of silently failing.
-
-### Test Coverage
-- **464 tests** (up from 243), **96% coverage** across all modules.
-- New test files: `test_parser.py`, `tools/test_path_security.py`, and coverage-focused test files for `client.py`, `tools/impl.py`, `tools/registry.py`, `ui.py`, `config.py`, `tools/utils.py`.
-
-### Other Improvements
-- **Rich console** (`console.py`): Centralized console instance with custom theme and 20+ file extension syntax mappings.
-- **Welcome banner** (`banner.py`): Version detection via `importlib.metadata`, gothic ASCII art, and random tips.
-- **Pydantic config validation**: Field validators for `base_url` (http/https) and `num_ctx` (positive integer).
-- **Modular tools package**: `fs_tools.py` is now a thin re-export layer; all logic lives in `tools/`.
 
 ## License
 

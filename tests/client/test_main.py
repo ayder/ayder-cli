@@ -10,14 +10,14 @@ class TestMainEntryPoint:
 
     def test_main_calls_cli_main(self):
         """Test that running __main__ module calls cli.main()."""
-        with patch("ayder_cli.client.run_chat") as mock_run_chat, \
+        with patch("ayder_cli.cli.run_interactive") as mock_run_interactive, \
              patch("sys.argv", ["ayder"]), \
              patch("sys.stdin.isatty", return_value=True):
             # Run the module as __main__ using runpy
             runpy.run_module("ayder_cli", run_name="__main__")
-            
-            # Verify run_chat was called (via cli.main)
-            mock_run_chat.assert_called_once()
+
+            # Verify run_interactive was called (via cli.main)
+            mock_run_interactive.assert_called_once()
 
     def test_main_module_execution(self):
         """Test that __main__.py properly guards execution with __name__ check."""

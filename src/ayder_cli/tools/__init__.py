@@ -1,5 +1,6 @@
 """Tools package for ayder-cli."""
 
+from ayder_cli.tools.definition import ToolDefinition, TOOL_DEFINITIONS, TOOL_DEFINITIONS_BY_NAME
 from ayder_cli.tools.schemas import tools_schema, TOOL_PERMISSIONS
 from ayder_cli.tools.registry import (
     ToolRegistry,
@@ -7,7 +8,6 @@ from ayder_cli.tools.registry import (
     validate_tool_call,
     PARAMETER_ALIASES,
     PATH_PARAMETERS,
-    execute_tool_call,
     create_default_registry,
 )
 from ayder_cli.tools.impl import (
@@ -20,8 +20,13 @@ from ayder_cli.tools.impl import (
     search_codebase,
 )
 from ayder_cli.tools.utils import prepare_new_content
+from ayder_cli.core.result import ToolSuccess, ToolError, ToolResult
 
 __all__ = [
+    # Definitions
+    "ToolDefinition",
+    "TOOL_DEFINITIONS",
+    "TOOL_DEFINITIONS_BY_NAME",
     # Schemas
     "tools_schema",
     "TOOL_PERMISSIONS",
@@ -32,7 +37,6 @@ __all__ = [
     "validate_tool_call",
     "PARAMETER_ALIASES",
     "PATH_PARAMETERS",
-    "execute_tool_call",
     # Implementations
     "list_files",
     "read_file",
@@ -43,4 +47,8 @@ __all__ = [
     "search_codebase",
     # Utils
     "prepare_new_content",
+    # Result types
+    "ToolSuccess",
+    "ToolError",
+    "ToolResult",
 ]

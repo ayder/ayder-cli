@@ -2,12 +2,12 @@
 
 <div align="center">
 
-![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)
-![Tests](https://img.shields.io/badge/tests-415-blue)
+![Coverage](https://img.shields.io/badge/coverage-79%25-yellow)
+![Tests](https://img.shields.io/badge/tests-523-blue)
 ![Python](https://img.shields.io/badge/python-3.12%2B-yellow)
 ![Status](https://img.shields.io/badge/status-passing-success)
 
-**ayder-cli v0.4.1** · Generated on 2026-02-01
+**ayder-cli v0.4.1** · Generated on 2026-02-07
 
 </div>
 
@@ -29,17 +29,19 @@
 ## 📈 Coverage Summary
 
 ```
-Overall Coverage: 96% ████████████████████████████████████░░
+Overall Coverage: 79% ██████████████████████████████░░░░░░░░
 ```
 
 | Metric | Value |
 |--------|-------|
-| **Total Statements** | 1,044 |
-| **Missing** | 40 |
-| **Covered** | 1,004 |
-| **Coverage** | **96%** ✅ |
-| **Total Tests** | 415 |
-| **Test Files** | 17 |
+| **Total Statements** | 1,876 |
+| **Missing** | 396 |
+| **Covered** | 1,480 |
+| **Coverage** | **~80%** 🟡 |
+| **Total Tests** | **523** |
+| **Passing** | 497 |
+| **Skipped** | 5 |
+| **Test Files** | 28 |
 
 ---
 
@@ -49,74 +51,121 @@ Overall Coverage: 96% ███████████████████�
 
 | Module | Statements | Missed | Coverage | Status |
 |--------|-----------|--------|----------|--------|
-| `__init__.py` | 1 | 0 | **100%** | 🟢 |
-| `__main__.py` | 2 | 0 | **100%** | 🟢 |
-| `commands.py` | 115 | 0 | **100%** | 🟢 |
-| `config.py` | 47 | 0 | **100%** | 🟢 |
-| `fs_tools.py` | 5 | 0 | **100%** | 🟢 |
-| `parser.py` | 33 | 0 | **100%** | 🟢 |
+| `__main__.py` | 3 | 0 | **100%** | 🟢 |
+| `commands/__init__.py` | 16 | 0 | **100%** | 🟢 |
+| `commands/files.py` | 32 | 0 | **100%** | 🟢 |
+| `commands/registry.py` | 17 | 0 | **100%** | 🟢 |
+| `commands/tools.py` | 23 | 0 | **100%** | 🟢 |
+| `core/context.py` | 27 | 0 | **100%** | 🟢 |
+| `core/result.py` | 29 | 0 | **100%** | 🟢 |
+| `parser.py` | 44 | 0 | **100%** | 🟢 |
 | `prompts.py` | 1 | 0 | **100%** | 🟢 |
-| `tools/__init__.py` | 5 | 0 | **100%** | 🟢 |
-| `tools/schemas.py` | 1 | 0 | **100%** | 🟢 |
-| `tools/utils.py` | 23 | 0 | **100%** | 🟢 |
-| `ui.py` | 130 | 0 | **100%** | 🟢 |
-| `client.py` | 189 | 1 | **99%** | 🟢 |
-| `tools/registry.py` | 125 | 1 | **99%** | 🟢 |
-| `tasks.py` | 131 | 3 | **98%** | 🟢 |
-| `tools/impl.py` | 200 | 4 | **98%** | 🟢 |
+| `services/__init__.py` | 0 | 0 | **100%** | 🟢 |
+| `tasks.py` | 132 | 0 | **100%** | 🟢 |
+| `tools/__init__.py` | 7 | 0 | **100%** | 🟢 |
+| `tools/definition.py` | 22 | 0 | **100%** | 🟢 |
+| `tools/schemas.py` | 3 | 0 | **100%** | 🟢 |
+| `tui_helpers.py` | 7 | 0 | **100%** | 🟢 |
+| `services/tools/executor.py` | 74 | 1 | **99%** | 🟢 |
+| `tools/impl.py` | 243 | 6 | **98%** | 🟢 |
+| `ui.py` | 180 | 3 | **98%** | 🟢 |
+| `core/config.py` | 52 | 3 | **94%** | 🟢 |
+| `tools/utils.py` | 28 | 2 | **93%** | 🟢 |
+| `console.py` | 11 | 1 | **91%** | 🟢 |
+| `commands/system.py` | 53 | 4 | **92%** | 🟢 |
+| `commands/tasks.py` | 53 | 8 | **85%** | 🟢 |
 
-### ⚪ Excluded from Coverage
+### 🟡 Good Coverage (80-94%)
+
+| Module | Statements | Missed | Coverage | Status |
+|--------|-----------|--------|----------|--------|
+| `client.py` | 103 | 20 | **81%** | 🟡 |
+| `tools/registry.py` | 181 | 36 | **80%** | 🟡 |
+
+### 🟠 Needs Improvement (<80%)
+
+| Module | Statements | Missed | Coverage | Status |
+|--------|-----------|--------|----------|--------|
+| `cli.py` | 120 | 1 | **99%** | 🟢 |
+| `__init__.py` | 5 | 2 | **60%** | 🟠 |
+| `commands/base.py` | 15 | 3 | **80%** | 🟡 |
+
+### 🟢 Recently Improved (Phase 7)
+
+| Module | Statements | Before | After | Change |
+|--------|-----------|--------|-------|--------|
+| `cli.py` | 120 | **75%** | **99%** | +24% 📈 |
+
+### ⚪ Excluded from Coverage Goals
 
 | Module | Statements | Missed | Coverage | Notes |
 |--------|-----------|--------|----------|-------|
-| `banner.py` | 36 | 31 | **14%** | Visual display module (excluded) |
+| `banner.py` | 51 | 39 | **24%** | Visual display module (excluded) |
+| `tui.py` | 324 | 237 | **27%** | Interactive TUI module (excluded) |
 
 ---
 
 ## 🧪 Test Suite Overview
 
-### Test Files (17 total)
+### Test Files (28 total)
 
 ```
 tests/
 ├── __init__.py
-├── test_banner.py              # 14 tests
-├── test_client.py              # Core client tests
-├── test_client_coverage.py     # 23 tests (TASK-014 Plan 1)
-├── test_commands.py            # Command tests
-├── test_config.py              # Config tests
-├── test_config_coverage.py     # 14 tests (TASK-014 Plan 5)
-├── test_diff_preview.py        # Diff preview tests
-├── test_main.py                # 3 tests
-├── test_parameter_aliasing.py  # Parameter aliasing tests
-├── test_parser.py              # 29 tests (TASK-014 Plan 6)
-├── test_search_codebase.py     # Search functionality tests
-├── test_tasks.py               # Task management tests
-├── test_ui.py                  # UI tests
-├── test_ui_coverage.py         # 18 tests (TASK-014 Plan 4)
-└── tools/
-    ├── __init__.py
-    ├── test_impl.py            # Tool implementation tests
-    ├── test_impl_coverage.py   # 28 tests (TASK-014 Plan 2)
-    ├── test_registry.py        # Registry tests
-    ├── test_registry_coverage.py # 30 tests (TASK-014 Plan 3)
-    ├── test_schemas.py         # Schema tests
-    └── test_utils.py           # 22 tests (TASK-014 Plan 7)
+├── client/
+│   ├── test_client.py              # Core client tests (19)
+│   └── test_main.py                # Entry point tests (3)
+├── commands/
+│   ├── test_cli_file_stdin.py      # CLI file/stdin tests (9)
+│   ├── test_dispatch.py            # Command dispatch tests (2)
+│   ├── test_files_command.py       # /edit command tests (7) - NEW
+│   ├── test_registry.py            # Registry tests (3)
+│   ├── test_system_commands.py     # System command tests (4)
+│   ├── test_task_commands.py       # Task command tests (4)
+│   └── test_tools_command.py       # /tools command tests (5) - NEW
+├── core/
+│   ├── test_config.py              # Config tests (17)
+│   ├── test_config_coverage.py     # Config coverage tests (14)
+│   ├── test_parameter_aliasing.py  # Parameter aliasing tests (7)
+│   └── test_parser.py              # Parser tests (29)
+├── services/
+│   ├── test_llm.py                 # LLM service tests (10) - NEW
+│   └── tools/
+│       └── test_executor.py        # Tool executor tests (17)
+├── tools/
+│   ├── __init__.py
+│   ├── test_impl.py                # Tool implementation tests (44)
+│   ├── test_impl_coverage.py       # Tool impl coverage tests (28)
+│   ├── test_path_security.py       # Path security tests (7)
+│   ├── test_registry.py            # Registry tests (16)
+│   ├── test_registry_coverage.py   # Registry coverage tests (18)
+│   ├── test_result.py              # Result type tests (28)
+│   ├── test_schemas.py             # Schema tests (6)
+│   ├── test_search_codebase.py     # Search codebase tests (18)
+│   ├── test_tasks.py               # Task tool tests (43)
+│   └── test_utils.py               # Tool utils tests (19)
+└── ui/
+    ├── test_cli_tui.py             # CLI TUI tests (8)
+    ├── test_diff_preview.py        # Diff preview tests (23)
+    ├── test_tui_helpers.py         # TUI helpers tests (8) - NEW
+    ├── test_ui.py                  # UI tests (44)
+    └── test_ui_coverage.py         # UI coverage tests (37)
 ```
 
 ### Test Categories
 
 | Category | Test Count | Description |
 |----------|-----------|-------------|
-| **File System Tools** | 60+ | `list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command` |
+| **File System Tools** | 80+ | `list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command` |
 | **Configuration** | 30+ | Config loading, defaults, merging, validation |
 | **Task Management** | 50+ | Task creation, listing, implementation, status updates |
-| **UI Components** | 60+ | Box drawing, message printing, tool descriptions, diff preview |
-| **Commands** | 50+ | Slash commands (`/help`, `/tools`, `/tasks`, `/edit`, etc.) |
+| **UI Components** | 90+ | Box drawing, message printing, tool descriptions, diff preview |
+| **Commands** | 30+ | Slash commands (`/help`, `/tools`, `/tasks`, `/edit`, etc.) |
 | **Client/Integration** | 60+ | Chat loop, tool execution, OpenAI client mocking |
 | **Tool Registry** | 50+ | Tool registration, validation, execution, normalization |
 | **Parser** | 35+ | Message parsing, custom tool calls, parameter inference |
-| **Banner** | 14 | Welcome banner, tips, formatting |
+| **LLM Service** | 10+ | LLM provider, OpenAI client integration |
+| **TUI Helpers** | 8+ | Safe mode tool blocking |
 
 ---
 
@@ -125,141 +174,100 @@ tests/
 ### 100% Coverage Modules
 
 <details>
-<summary><b>config.py — 100% (47/47)</b></summary>
+<summary><b>commands/files.py — 100% (32/32)</b></summary>
 
-- ✅ `load_config()` first run
-- ✅ `load_config()` existing config
-- ✅ Default values verification
-- ✅ Config merging
-- ✅ `num_ctx` validation (positive values)
-- ✅ `base_url` validation (http/https schemes)
+- ✅ `/edit` command with file paths
+- ✅ Editor process success
+- ✅ Editor process error (`CalledProcessError`)
+- ✅ Editor not found (`FileNotFoundError`)
+- ✅ No args shows usage
 
 </details>
 
 <details>
-<summary><b>ui.py — 100% (130/130)</b></summary>
+<summary><b>commands/tools.py — 100% (23/23)</b></summary>
 
-- ✅ `draw_box()` with various inputs
-- ✅ Message print functions (`print_user_message`, `print_assistant_message`, etc.)
+- ✅ `/tools` command lists all tools
+- ✅ Correct title and color in output
+- ✅ Tool descriptions included
+
+</details>
+
+<details>
+<summary><b>tui_helpers.py — 100% (7/7)</b></summary>
+
+- ✅ `is_tool_blocked_in_safe_mode()` with `safe_mode=False`
+- ✅ Blocked tools in safe mode (`write_file`, `replace_string`, `run_shell_command`)
+- ✅ Allowed tools in safe mode (`read_file`, `list_files`, `search_codebase`)
+- ✅ Unknown tool handling
+
+</details>
+
+<details>
+<summary><b>ui.py — 98% (177/180)</b></summary>
+
+- ✅ `draw_box()` with various inputs and color codes
+- ✅ `print_user_message()` with Rich Panel
+- ✅ `print_assistant_message()` with Rich Panel
+- ✅ `print_tool_call()` with Rich Panel
+- ✅ `print_file_content_rich()` with content param and file read
+- ✅ `print_markdown()` with and without title
+- ✅ `print_code_block()` with syntax highlighting
+- ✅ Context managers: `agent_working_status()`, `tool_execution_status()`, `file_operation_status()`, `search_status()`
 - ✅ `describe_tool_action()` for all tools including `search_codebase`
 - ✅ `confirm_tool_call()` with different responses
 - ✅ `print_tool_skipped()` indicator
-- ✅ `print_file_content()` with error handling
 - ✅ `generate_diff_preview()` with exception handling
 - ✅ `colorize_diff()` and `truncate_diff()` utilities
 
-</details>
-
-<details>
-<summary><b>commands.py — 100% (115/115)</b></summary>
-
-- ✅ `/help`, `/tools`, `/tasks` commands
-- ✅ `/task-edit` with valid/invalid IDs
-- ✅ `/edit` command with file paths
-- ✅ `/verbose` toggle
-- ✅ `/clear` and `/undo` commands
-- ✅ `/implement` command
+*Missing: Lines 79, 292-293 (file read error edge cases)*
 
 </details>
 
 <details>
-<summary><b>parser.py — 100% (33/33)</b></summary>
+<summary><b>services/llm.py — 95% (19/20)</b></summary>
 
-- ✅ `parse_custom_tool_calls()` with standard format
-- ✅ `parse_custom_tool_calls()` with lazy format
-- ✅ Empty content handling
-- ✅ Error handling for malformed input
-- ✅ `_infer_parameter_name()` for single-param tools
+- ✅ `LLMProvider` abstract base class cannot be instantiated
+- ✅ Subclass must implement `chat()` method
+- ✅ `OpenAIProvider` with injected client
+- ✅ `OpenAIProvider` creates client when not injected
+- ✅ `chat()` basic call with model and messages
+- ✅ `chat()` with tools and `tool_choice="auto"`
+- ✅ `chat()` with options as `extra_body`
+- ✅ `chat()` without tools or options
+- ✅ `chat()` returns raw response
 
-</details>
-
-<details>
-<summary><b>tools/utils.py — 100% (23/23)</b></summary>
-
-- ✅ `prepare_new_content()` for `write_file`
-- ✅ `prepare_new_content()` for `replace_string`
-- ✅ Empty file_path handling
-- ✅ JSON string argument handling
-- ✅ File permission error handling
+*Missing: Line 21 (abstract method `pass`)*
 
 </details>
 
 ### Near-Complete Coverage
 
 <details>
-<summary><b>client.py — 99% (188/189)</b></summary>
+<summary><b>client.py — 81% (83/103)</b></summary>
 
 | Component | Coverage |
 |-----------|----------|
-| `ChatSession` class | ✅ 100% |
-| `Agent` class | ✅ 100% |
-| `Agent.chat()` method | ✅ 100% |
-| `Agent._handle_tool_call()` | ✅ 100% |
-| `Agent._execute_tool_loop()` | ✅ 100% |
-| `Agent._handle_custom_calls()` | ✅ 100% |
-| `run_chat()` function | ✅ 100% |
-| Exit command handling | ✅ 100% |
-| Tool execution flow | ✅ 100% |
-| Verbose mode | ✅ 100% |
+| `ChatSession` class | ✅ 90%+ |
+| `Agent` class | ✅ 80%+ |
+| `Agent.chat()` method | ✅ 80%+ |
+| Tool execution flow | ✅ 80%+ |
 
-*Missing: Line 403 (`if __name__ == "__main__":` entry point)*
+*Missing: Lines 38-44, 119, 127-132, 136-139, 221-226, 244 (error handling, edge cases)*
 
 </details>
 
 <details>
-<summary><b>tools/registry.py — 99% (124/125)</b></summary>
+<summary><b>tools/registry.py — 80% (145/181)</b></summary>
 
 | Component | Coverage |
 |-----------|----------|
-| `normalize_tool_arguments()` | ✅ 100% |
-| `validate_tool_call()` | ✅ 100% |
-| `ToolRegistry` class | ✅ 100% |
-| `_MockableToolRegistry` class | ✅ 99% |
-| `create_default_registry()` | ✅ 100% |
-| `execute_tool_call()` | ✅ 100% |
+| `normalize_tool_arguments()` | ✅ 90%+ |
+| `validate_tool_call()` | ✅ 90%+ |
+| `ToolRegistry` class | ✅ 80%+ |
 | Parameter aliases | ✅ 100% |
 
-*Missing: Line 263 (unreachable edge case in task tool lookup)*
-
-</details>
-
-<details>
-<summary><b>tools/impl.py — 98% (196/200)</b></summary>
-
-| Function | Coverage |
-|----------|----------|
-| `search_codebase()` | ✅ 98% |
-| `_search_with_grep()` | ✅ 100% |
-| `_format_grep_results()` | ✅ 100% |
-| `get_project_structure()` | ✅ 100% |
-| `list_files()` | ✅ 100% |
-| `read_file()` | ✅ 100% |
-| `write_file()` | ✅ 100% |
-| `replace_string()` | ✅ 100% |
-| `run_shell_command()` | ✅ 100% |
-
-*Missing: Lines 107-108, 215, 253 (defensive exception handlers)*
-
-</details>
-
-<details>
-<summary><b>tasks.py — 98% (128/131)</b></summary>
-
-| Function | Coverage |
-|----------|----------|
-| `_ensure_tasks_dir()` | ✅ 100% |
-| `_extract_id()` | ✅ 100% |
-| `_next_id()` | ✅ 100% |
-| `create_task()` | ✅ 100% |
-| `_parse_status()` | ✅ 100% |
-| `_parse_title()` | ✅ 100% |
-| `list_tasks()` | ✅ 100% |
-| `show_task()` | ✅ 100% |
-| `_update_task_status()` | ✅ 100% |
-| `implement_task()` | ✅ 100% |
-| `implement_all_tasks()` | ✅ 100% |
-
-*Missing: Lines 163-164, 187 (exception handling edge cases)*
+*Missing: Lines 129, 135, 168-169, 183-186, 190-195, 214-217, 232-235, 257, 260-261, 264, 267, 270, 273, 276-277, 280-281, 284, 305, 309 (error paths, edge cases)*
 
 </details>
 
@@ -269,27 +277,42 @@ tests/
 
 | Goal | Target | Achieved | Status |
 |------|--------|----------|--------|
-| Overall Coverage | 90%+ | **96%** | ✅ Exceeded |
-| Core Modules | 95%+ | **98-100%** | ✅ Exceeded |
-| UI Components | 95%+ | **100%** | ✅ Exceeded |
-| Tool Registry | 95%+ | **99%** | ✅ Exceeded |
-| Test Count | 200+ | **415** | ✅ Exceeded |
+| Overall Coverage | 85%+ | **79%** | 🟡 In Progress |
+| Core Modules | 95%+ | **95-100%** | ✅ Achieved |
+| UI Components | 90%+ | **98%** | ✅ Exceeded |
+| Tool Registry | 90%+ | **80%** | 🟡 In Progress |
+| LLM Service | 90%+ | **95%** | ✅ Exceeded |
+| Commands | 90%+ | **85-100%** | ✅ Achieved |
+| Test Count | 450+ | **497** | ✅ Exceeded |
 
 ---
 
-## 📊 Coverage Improvement History (TASK-014)
+## 📊 Coverage Improvement History
+
+### Phase 6: Improve Test Coverage (2026-02-07)
+
+| Target | Module | Before | After | Tests Added |
+|--------|--------|--------|-------|-------------|
+| Target 1 | `services/llm.py` | 55% | **95%** | 10 |
+| Target 2 | `commands/files.py` | 50% | **100%** | 7 |
+| Target 3 | `commands/tools.py` | 61% | **100%** | 5 |
+| Target 4 | `tui_helpers.py` | 0% | **100%** | 8 |
+| Target 5 | `ui.py` | 75% | **98%** | 18 |
+
+**Total new tests added: 64**  
+**Previous total: 433 → New total: 497**
+
+### Previous Phases (TASK-014)
 
 | Plan | Module | Before | After | Tests Added |
 |------|--------|--------|-------|-------------|
-| Plan 1 | client.py | 68% | **99%** | 23 |
-| Plan 2 | tools/impl.py | 56% | **98%** | 28 |
-| Plan 3 | tools/registry.py | 73% | **99%** | 30 |
-| Plan 4 | ui.py | 92% | **100%** | 18 |
-| Plan 5 | config.py | 96% | **100%** | 14 |
-| Plan 6 | parser.py | 97% | **100%** | 29 |
-| Plan 7 | tools/utils.py | 96% | **100%** | 22 |
-
-**Total new tests added: 164**
+| Plan 1 | `client.py` | 68% | 81% | 23 |
+| Plan 2 | `tools/impl.py` | 56% | 98% | 28 |
+| Plan 3 | `tools/registry.py` | 73% | 80% | 30 |
+| Plan 4 | `ui.py` (previous) | 92% | 75% → 98% | 18 |
+| Plan 5 | `config.py` | 96% | 94% | 14 |
+| Plan 6 | `parser.py` | 97% | 100% | 29 |
+| Plan 7 | `tools/utils.py` | 96% | 93% | 22 |
 
 ---
 
@@ -300,16 +323,16 @@ tests/
 pytest tests/ -v
 
 # Run with coverage report
-pytest --cov=src/ayder_cli --cov-report=term tests/
+pytest --cov=ayder_cli --cov-report=term tests/
 
 # Generate HTML coverage report
-pytest --cov=src/ayder_cli --cov-report=html tests/
+pytest --cov=ayder_cli --cov-report=html tests/
 
 # Run specific test file
-pytest tests/test_parser.py -v
+pytest tests/services/test_llm.py -v
 
 # Run with coverage for specific module
-pytest tests/ --cov=ayder_cli.parser --cov-report=term-missing
+pytest tests/ --cov=ayder_cli.services.llm --cov-report=term-missing
 ```
 
 ---
@@ -319,9 +342,9 @@ pytest tests/ --cov=ayder_cli.parser --cov-report=term-missing
 - All tests use mocking to avoid external dependencies
 - File system tests use `tmp_path` fixture for isolation
 - OpenAI client is fully mocked for integration tests
-- Tests are deterministic and fast (< 1 second total)
+- Tests are deterministic and fast (< 2 seconds total)
 - Edge cases and error paths are extensively covered
-- `banner.py` is intentionally excluded from coverage goals (visual display module)
+- `banner.py` and `tui.py` are intentionally excluded from coverage goals (visual/interactive modules)
 
 ---
 

@@ -1,13 +1,10 @@
 """Tests for tasks.py module."""
 
-import os
 import re
 import pytest
 from datetime import datetime
-from unittest import mock
 from pathlib import Path
 
-import ayder_cli.tasks as tasks_module
 from ayder_cli.tasks import (
     _ensure_tasks_dir,
     _extract_id,
@@ -20,67 +17,36 @@ from ayder_cli.tasks import (
     _update_task_status,
     implement_task,
     implement_all_tasks,
-    get_project_context,
 )
-from ayder_cli.path_context import ProjectContext
+from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.result import ToolSuccess, ToolError
 
 
 @pytest.fixture
-def project_context(tmp_path, monkeypatch):
-    """Create a project context with tmp_path as root and set it for tasks."""
-    ctx = ProjectContext(str(tmp_path))
-    monkeypatch.setattr(tasks_module, "_default_project_ctx", ctx)
-    return ctx
-
-
-class TestGetProjectContext:
-    """Tests for get_project_context() function - Line 16 coverage."""
-
-    def test_module_context_lazy_initialization(self, tmp_path, monkeypatch):
-        """Test lazy initialization of module-level ProjectContext - Line 16."""
-        # Clear the global state to trigger initialization
-        monkeypatch.setattr(tasks_module, "_default_project_ctx", None)
-        
-        # Change to tmp_path for initialization
-        monkeypatch.chdir(tmp_path)
-        
-        # Access should trigger initialization
-        ctx = get_project_context()
-        
-        assert ctx is not None
-        assert isinstance(ctx, ProjectContext)
-        assert ctx.root == tmp_path
-
-    def test_module_context_returns_existing(self, tmp_path, monkeypatch):
-        """Test that existing context is returned if already set."""
-        # Set a specific context
-        ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(tasks_module, "_default_project_ctx", ctx)
-        
-        # Should return the same context
-        result = get_project_context()
-        assert result is ctx
+def project_context(tmp_path):
+    """Create a project context with tmp_path as root."""
+    return ProjectContext(str(tmp_path))
 
 
 class TestEnsureTasksDir:
     """Test _ensure_tasks_dir() function."""
 
-    def test_directory_creation_when_not_exists(self, tmp_path, monkeypatch, project_context):
+    def test_directory_creation_when_not_exists(self, tmp_path, project_context):
         """Test directory is created when it doesn't exist."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         
         assert not mock_tasks_dir.exists()
-        _ensure_tasks_dir()
+        _ensure_tasks_dir(project_context)
         assert mock_tasks_dir.exists()
         assert mock_tasks_dir.is_dir()
 
-    def test_no_error_when_directory_exists(self, tmp_path, monkeypatch, project_context):
+    def test_no_error_when_directory_exists(self, tmp_path, project_context):
         """Test no error when directory already exists."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
         
         # Should not raise an error
-        _ensure_tasks_dir()
+        _ensure_tasks_dir(project_context)
         assert mock_tasks_dir.exists()
 
 
@@ -110,11 +76,11 @@ class TestExtractId:
 class TestNextId:
     """Test _next_id() function."""
 
-    def test_when_no_tasks_exist(self, tmp_path, monkeypatch, project_context):
+    def test_when_no_tasks_exist(self, tmp_path, project_context):
         """Test returns 1 when no tasks exist."""
-        assert _next_id() == 1
+        assert _next_id(project_context) == 1
 
-    def test_with_existing_tasks(self, tmp_path, monkeypatch, project_context):
+    def test_with_existing_tasks(self, tmp_path, project_context):
         """Test returns max + 1 with existing tasks."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -124,9 +90,9 @@ class TestNextId:
         (mock_tasks_dir / "TASK-003.md").write_text("task 3")
         (mock_tasks_dir / "TASK-005.md").write_text("task 5")
         
-        assert _next_id() == 6
+        assert _next_id(project_context) == 6
 
-    def test_with_gaps_in_task_ids(self, tmp_path, monkeypatch, project_context):
+    def test_with_gaps_in_task_ids(self, tmp_path, project_context):
         """Test correctly handles gaps in task IDs."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -135,9 +101,9 @@ class TestNextId:
         (mock_tasks_dir / "TASK-001.md").write_text("task 1")
         (mock_tasks_dir / "TASK-010.md").write_text("task 10")
         
-        assert _next_id() == 11
+        assert _next_id(project_context) == 11
 
-    def test_ignores_non_task_files(self, tmp_path, monkeypatch, project_context):
+    def test_ignores_non_task_files(self, tmp_path, project_context):
         """Test ignores files that don't match TASK-XXX.md pattern."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -148,32 +114,33 @@ class TestNextId:
         (mock_tasks_dir / "other.txt").write_text("text file")
         (mock_tasks_dir / ".hidden").write_text("hidden file")
         
-        assert _next_id() == 6
+        assert _next_id(project_context) == 6
 
 
 class TestCreateTask:
     """Test create_task() function."""
 
-    def test_create_task_with_title_only(self, tmp_path, monkeypatch, project_context):
+    def test_create_task_with_title_only(self, tmp_path, project_context):
         """Test creating task with title only."""
-        result = create_task("Test Task")
-        
+        result = create_task(project_context, "Test Task")
+
+        assert isinstance(result, ToolSuccess)
         assert "Task TASK-001 created" in result
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         assert (mock_tasks_dir / "TASK-001.md").exists()
 
-    def test_create_task_with_title_and_description(self, tmp_path, monkeypatch, project_context):
+    def test_create_task_with_title_and_description(self, tmp_path, project_context):
         """Test creating task with title and description."""
-        result = create_task("Test Task", "This is a description")
+        result = create_task(project_context, "Test Task", "This is a description")
         
         assert "Task TASK-001 created" in result
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "This is a description" in content
 
-    def test_verify_task_file_content_format(self, tmp_path, monkeypatch, project_context):
+    def test_verify_task_file_content_format(self, tmp_path, project_context):
         """Verify task file content format."""
-        create_task("My Test Task", "Test description")
+        create_task(project_context, "My Test Task", "Test description")
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
@@ -185,12 +152,12 @@ class TestCreateTask:
         assert "- **Created:**" in content
         assert "## Description" in content
 
-    def test_verify_task_id_formatting(self, tmp_path, monkeypatch, project_context):
+    def test_verify_task_id_formatting(self, tmp_path, project_context):
         """Verify task ID formatting (TASK-XXX.md)."""
         # Create multiple tasks
-        create_task("Task 1")
-        create_task("Task 2")
-        create_task("Task 3")
+        create_task(project_context, "Task 1")
+        create_task(project_context, "Task 2")
+        create_task(project_context, "Task 3")
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify 3-digit formatting
@@ -198,10 +165,10 @@ class TestCreateTask:
         assert (mock_tasks_dir / "TASK-002.md").exists()
         assert (mock_tasks_dir / "TASK-003.md").exists()
 
-    def test_verify_timestamp_is_included(self, tmp_path, monkeypatch, project_context):
+    def test_verify_timestamp_is_included(self, tmp_path, project_context):
         """Verify timestamp is included in task file."""
         before = datetime.now().replace(microsecond=0)
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         after = datetime.now().replace(microsecond=0)
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
@@ -214,9 +181,9 @@ class TestCreateTask:
         timestamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
         assert before <= timestamp <= after
 
-    def test_create_task_without_description(self, tmp_path, monkeypatch, project_context):
+    def test_create_task_without_description(self, tmp_path, project_context):
         """Test that default description is used when not provided."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         content = (mock_tasks_dir / "TASK-001.md").read_text()
@@ -226,7 +193,7 @@ class TestCreateTask:
 class TestParseStatus:
     """Test _parse_status() function."""
 
-    def test_extract_status_from_valid_task_file(self, tmp_path, monkeypatch, project_context):
+    def test_extract_status_from_valid_task_file(self, tmp_path):
         """Test extracting status from valid task file."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -247,7 +214,7 @@ Test description.
         status = _parse_status(str(task_file))
         assert status == "in_progress"
 
-    def test_return_unknown_for_missing_status(self, tmp_path, monkeypatch, project_context):
+    def test_return_unknown_for_missing_status(self, tmp_path):
         """Test returning 'unknown' for missing status."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -274,7 +241,7 @@ Test description.
         status = _parse_status(non_existent_file)
         assert status == "unknown"
 
-    def test_extract_different_status_values(self, tmp_path, monkeypatch, project_context):
+    def test_extract_different_status_values(self, tmp_path):
         """Test extracting different status values."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -302,7 +269,7 @@ Test.
 class TestParseTitle:
     """Test _parse_title() function."""
 
-    def test_extract_title_from_valid_task_file(self, tmp_path, monkeypatch, project_context):
+    def test_extract_title_from_valid_task_file(self, tmp_path):
         """Test extracting title from valid task file."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -322,7 +289,7 @@ Test.
         title = _parse_title(str(task_file))
         assert title == "My Awesome Task"
 
-    def test_return_filename_for_files_without_title(self, tmp_path, monkeypatch, project_context):
+    def test_return_filename_for_files_without_title(self, tmp_path):
         """Test returning filename for files without title."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -348,18 +315,19 @@ Just some content.
 class TestListTasks:
     """Test list_tasks() function."""
 
-    def test_when_no_tasks_exist(self, tmp_path, monkeypatch, project_context):
+    def test_when_no_tasks_exist(self, tmp_path, project_context):
         """Test when no tasks exist."""
-        result = list_tasks()
+        result = list_tasks(project_context)
+        assert isinstance(result, ToolSuccess)
         assert result == "No tasks found."
 
-    def test_listing_multiple_tasks(self, tmp_path, monkeypatch, project_context):
+    def test_listing_multiple_tasks(self, tmp_path, project_context):
         """Test listing multiple tasks."""
         # Create tasks
-        create_task("First Task", "Description 1")
-        create_task("Second Task", "Description 2")
+        create_task(project_context, "First Task", "Description 1")
+        create_task(project_context, "Second Task", "Description 2")
         
-        result = list_tasks()
+        result = list_tasks(project_context)
         
         # Check table contains both tasks
         assert "TASK-001" in result
@@ -367,22 +335,22 @@ class TestListTasks:
         assert "TASK-002" in result
         assert "Second Task" in result
 
-    def test_task_name_truncation(self, tmp_path, monkeypatch, project_context):
+    def test_task_name_truncation(self, tmp_path, project_context):
         """Test task name truncation for long titles."""
         # Create task with very long title
         long_title = "A" * 100
-        create_task(long_title)
+        create_task(project_context, long_title)
         
-        result = list_tasks()
+        result = list_tasks(project_context)
         
         # Check title is truncated (should contain ..)
         assert ".." in result or len(long_title) <= 72
 
-    def test_table_formatting(self, tmp_path, monkeypatch, project_context):
+    def test_table_formatting(self, tmp_path, project_context):
         """Verify table formatting."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         
-        result = list_tasks()
+        result = list_tasks(project_context)
         
         # Check table structure
         assert "Task ID" in result
@@ -390,13 +358,13 @@ class TestListTasks:
         assert "Status" in result
         assert "|" in result  # Table separator
 
-    def test_sorting_by_id(self, tmp_path, monkeypatch, project_context):
+    def test_sorting_by_id(self, tmp_path, project_context):
         """Test sorting by ID."""
         # Create tasks out of order
-        create_task("Third Task")  # Will be 001
-        create_task("Fourth Task")  # Will be 002
+        create_task(project_context, "Third Task")  # Will be 001
+        create_task(project_context, "Fourth Task")  # Will be 002
         
-        result = list_tasks()
+        result = list_tasks(project_context)
         
         # Find positions
         pos_001 = result.find("TASK-001")
@@ -408,29 +376,31 @@ class TestListTasks:
 class TestShowTask:
     """Test show_task() function."""
 
-    def test_show_existing_task(self, tmp_path, monkeypatch, project_context):
+    def test_show_existing_task(self, tmp_path, project_context):
         """Test showing existing task."""
-        create_task("Test Task", "Test description")
+        create_task(project_context, "Test Task", "Test description")
 
-        result = show_task(1)
+        result = show_task(project_context, 1)
 
+        assert isinstance(result, ToolSuccess)
         assert "# Test Task" in result
         assert "Test description" in result
         assert "TASK-001" in result
 
-    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch, project_context):
+    def test_error_for_nonexistent_task(self, tmp_path, project_context):
         """Test error for non-existent task."""
-        result = show_task(999)
-        
+        result = show_task(project_context, 999)
+
+        assert isinstance(result, ToolError)
         assert "Error" in result
         assert "TASK-999" in result
         assert "not found" in result.lower()
 
-    def test_string_task_id(self, tmp_path, monkeypatch, project_context):
+    def test_string_task_id(self, tmp_path, project_context):
         """Test showing task with string ID."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         
-        result = show_task("1")
+        result = show_task(project_context, "1")
         
         assert "# Test Task" in result
 
@@ -438,27 +408,27 @@ class TestShowTask:
 class TestUpdateTaskStatus:
     """Test _update_task_status() function."""
 
-    def test_successful_status_update(self, tmp_path, monkeypatch, project_context):
+    def test_successful_status_update(self, tmp_path, project_context):
         """Test successful status update."""
-        create_task("Test Task")
-        
-        result = _update_task_status(1, "done")
-        
-        assert result is True
+        create_task(project_context, "Test Task")
+
+        result = _update_task_status(project_context, 1, "done")
+
+        assert result.is_success
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify file was updated
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** done" in content
 
-    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch, project_context):
+    def test_error_for_nonexistent_task(self, tmp_path, project_context):
         """Test error for non-existent task."""
-        result = _update_task_status(999, "done")
+        result = _update_task_status(project_context, 999, "done")
         
         assert "Error" in result
         assert "not found" in result.lower()
 
-    def test_regex_replacement(self, tmp_path, monkeypatch, project_context):
+    def test_regex_replacement(self, tmp_path, project_context):
         """Verify regex replacement works correctly."""
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         mock_tasks_dir.mkdir(parents=True)
@@ -476,7 +446,7 @@ Test.
 """
         (mock_tasks_dir / "TASK-001.md").write_text(task_content)
         
-        _update_task_status(1, "new_status")
+        _update_task_status(project_context, 1, "new_status")
         
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** new_status" in content
@@ -507,7 +477,7 @@ Test.
         
         monkeypatch.setattr(Path, "write_text", mock_write_text)
         
-        result = _update_task_status(1, "done")
+        result = _update_task_status(project_context, 1, "done")
         
         assert "Error" in result
         assert "Permission denied" in result
@@ -516,38 +486,38 @@ Test.
 class TestImplementTask:
     """Test implement_task() function."""
 
-    def test_implement_pending_task(self, tmp_path, monkeypatch, project_context):
+    def test_implement_pending_task(self, tmp_path, project_context):
         """Test implementing pending task."""
-        create_task("Test Task", "Test description")
+        create_task(project_context, "Test Task", "Test description")
         
-        result = implement_task(1)
+        result = implement_task(project_context, 1)
         
         assert "TASK-001" in result
         assert "ready to implement" in result.lower() or "marked" in result.lower()
         assert "Test description" in result
 
-    def test_error_for_already_completed_task(self, tmp_path, monkeypatch, project_context):
+    def test_error_for_already_completed_task(self, tmp_path, project_context):
         """Test error for already completed task."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
 
         # First implementation
-        implement_task(1)
+        implement_task(project_context, 1)
 
         # Second implementation should show already completed
-        result = implement_task(1)
+        result = implement_task(project_context, 1)
 
         assert "already completed" in result.lower()
 
-    def test_error_for_nonexistent_task(self, tmp_path, monkeypatch, project_context):
+    def test_error_for_nonexistent_task(self, tmp_path, project_context):
         """Test error for non-existent task."""
-        result = implement_task(999)
+        result = implement_task(project_context, 999)
         
         assert "Error" in result
         assert "not found" in result.lower()
 
-    def test_status_updated_to_done(self, tmp_path, monkeypatch, project_context):
+    def test_status_updated_to_done(self, tmp_path, project_context):
         """Verify status is updated to 'done'."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify initial status
@@ -555,7 +525,7 @@ class TestImplementTask:
         assert "- **Status:** pending" in content
         
         # Implement task
-        implement_task(1)
+        implement_task(project_context, 1)
         
         # Verify status changed
         content = (mock_tasks_dir / "TASK-001.md").read_text()
@@ -563,16 +533,20 @@ class TestImplementTask:
 
     def test_error_when_status_update_fails(self, tmp_path, monkeypatch, project_context):
         """Test error return when _update_task_status fails - Line 199."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         
         # Mock _update_task_status to return an error
-        monkeypatch.setattr(
-            tasks_module,
-            "_update_task_status",
-            lambda task_id, status: "Error: Failed to update"
-        )
+        # Note: we need to mock it in the module where it's called
+        import ayder_cli.tasks as tasks
         
-        result = implement_task(1)
+        # Save original function
+        original = tasks._update_task_status
+        
+        try:
+            tasks._update_task_status = lambda ctx, task_id, status: ToolError("Error: Failed to update")
+            result = implement_task(project_context, 1)
+        finally:
+            tasks._update_task_status = original
         
         # Should return the error from _update_task_status
         assert "Error: Failed to update" in result
@@ -581,29 +555,29 @@ class TestImplementTask:
 class TestImplementAllTasks:
     """Test implement_all_tasks() function."""
 
-    def test_when_no_tasks_exist(self, tmp_path, monkeypatch, project_context):
+    def test_when_no_tasks_exist(self, tmp_path, project_context):
         """Test when no tasks exist."""
-        result = implement_all_tasks()
+        result = implement_all_tasks(project_context)
         
         assert result == "No tasks found."
 
-    def test_no_pending_tasks(self, tmp_path, monkeypatch, project_context):
+    def test_no_pending_tasks(self, tmp_path, project_context):
         """Test when no pending tasks."""
         # Create and complete a task
-        create_task("Completed Task")
-        implement_task(1)
+        create_task(project_context, "Completed Task")
+        implement_task(project_context, 1)
         
-        result = implement_all_tasks()
+        result = implement_all_tasks(project_context)
         
         assert "No pending tasks" in result
 
-    def test_implement_multiple_pending_tasks(self, tmp_path, monkeypatch, project_context):
+    def test_implement_multiple_pending_tasks(self, tmp_path, project_context):
         """Test implementing multiple pending tasks."""
         # Create multiple tasks
-        create_task("First Task")
-        create_task("Second Task")
+        create_task(project_context, "First Task")
+        create_task(project_context, "Second Task")
         
-        result = implement_all_tasks()
+        result = implement_all_tasks(project_context)
         
         assert "Found 2 pending task(s)" in result
         assert "TASK-001" in result
@@ -611,25 +585,25 @@ class TestImplementAllTasks:
         assert "First Task" in result
         assert "Second Task" in result
 
-    def test_marks_tasks_as_done(self, tmp_path, monkeypatch, project_context):
+    def test_marks_tasks_as_done(self, tmp_path, project_context):
         """Test that tasks are marked as done."""
-        create_task("Test Task")
+        create_task(project_context, "Test Task")
         
-        implement_all_tasks()
+        implement_all_tasks(project_context)
         
         mock_tasks_dir = tmp_path / ".ayder" / "tasks"
         # Verify status changed
         content = (mock_tasks_dir / "TASK-001.md").read_text()
         assert "- **Status:** done" in content
 
-    def test_skips_already_done_tasks(self, tmp_path, monkeypatch, project_context):
+    def test_skips_already_done_tasks(self, tmp_path, project_context):
         """Test that already done tasks are skipped."""
         # Create tasks, complete first one
-        create_task("First Task")
-        create_task("Second Task")
-        implement_task(1)  # Complete first task
+        create_task(project_context, "First Task")
+        create_task(project_context, "Second Task")
+        implement_task(project_context, 1)  # Complete first task
         
-        result = implement_all_tasks()
+        result = implement_all_tasks(project_context)
         
         # Should only process second task
         assert "Found 1 pending task(s)" in result

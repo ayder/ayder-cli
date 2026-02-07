@@ -6,7 +6,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, Mock
 from ayder_cli.tools import impl
-from ayder_cli.path_context import ProjectContext
+from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.result import ToolSuccess, ToolError
 
 
 class TestSearchCodebaseNoMatches:
@@ -14,32 +15,31 @@ class TestSearchCodebaseNoMatches:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_search_no_matches_ripgrep(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_search_no_matches_ripgrep(self, mock_run, mock_which, tmp_path):
         """Test search with no matches using ripgrep."""
         mock_which.return_value = "/usr/bin/rg"
         mock_run.return_value = Mock(returncode=1, stdout="", stderr="")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("nonexistent_pattern_xyz")
+        result = impl.search_codebase(ctx, "nonexistent_pattern_xyz")
 
+        assert isinstance(result, ToolSuccess)
         assert "No matches found" in result
         assert "nonexistent_pattern_xyz" in result
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_search_no_matches_grep(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_search_no_matches_grep(self, mock_run, mock_which, tmp_path):
         """Test search with no matches using grep fallback."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.return_value = Mock(returncode=1, stdout="", stderr="")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("nonexistent_pattern_xyz")
+        result = impl.search_codebase(ctx, "nonexistent_pattern_xyz")
 
         assert "No matches found" in result
 
@@ -49,7 +49,7 @@ class TestSearchCodebaseFilePatterns:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_search_with_file_pattern(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_search_with_file_pattern(self, mock_run, mock_which, tmp_path):
         """Test search with file pattern filter."""
         mock_which.return_value = "/usr/bin/rg"
         mock_run.return_value = Mock(
@@ -60,9 +60,8 @@ class TestSearchCodebaseFilePatterns:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("def", file_pattern="*.py")
+        result = impl.search_codebase(ctx, "def", file_pattern="*.py")
 
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
@@ -72,16 +71,15 @@ class TestSearchCodebaseFilePatterns:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_search_case_insensitive(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_search_case_insensitive(self, mock_run, mock_which, tmp_path):
         """Test search with case insensitive flag."""
         mock_which.return_value = "/usr/bin/rg"
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        impl.search_codebase("HELLO", case_sensitive=False)
+        impl.search_codebase(ctx, "HELLO", case_sensitive=False)
 
         call_args = mock_run.call_args[0][0]
         assert "--ignore-case" in call_args
@@ -92,7 +90,7 @@ class TestSearchCodebaseContextLines:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_search_with_context_lines(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_search_with_context_lines(self, mock_run, mock_which, tmp_path):
         """Test search with context lines."""
         mock_which.return_value = "/usr/bin/rg"
         mock_run.return_value = Mock(
@@ -103,9 +101,8 @@ class TestSearchCodebaseContextLines:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("target", context_lines=2)
+        result = impl.search_codebase(ctx, "target", context_lines=2)
 
         call_args = mock_run.call_args[0][0]
         assert "--context" in call_args
@@ -117,46 +114,47 @@ class TestSearchCodebaseErrorHandling:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_ripgrep_error_exit_code(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_ripgrep_error_exit_code(self, mock_run, mock_which, tmp_path):
         """Test ripgrep failing with error exit code."""
         mock_which.return_value = "/usr/bin/rg"
         mock_run.return_value = Mock(returncode=2, stdout="", stderr="some error")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("pattern")
+        result = impl.search_codebase(ctx, "pattern")
 
+        assert isinstance(result, ToolError)
+        assert result.category == "execution"
         assert "Error: ripgrep failed" in result
         assert "some error" in result
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_ripgrep_timeout(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_ripgrep_timeout(self, mock_run, mock_which, tmp_path):
         """Test ripgrep timeout handling."""
         mock_which.return_value = "/usr/bin/rg"
         mock_run.side_effect = Exception("Timeout")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("pattern")
+        result = impl.search_codebase(ctx, "pattern")
 
         assert "Error executing ripgrep" in result or "Error during search" in result
 
     @patch("ayder_cli.tools.impl.shutil.which")
-    def test_search_codebase_exception(self, mock_which, monkeypatch, tmp_path):
+    def test_search_codebase_exception(self, mock_which, tmp_path):
         """Test search_codebase outer exception handler."""
         mock_which.side_effect = Exception("Unexpected error")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("pattern")
+        result = impl.search_codebase(ctx, "pattern")
 
+        assert isinstance(result, ToolError)
+        assert result.category == "execution"
         assert "Error during search" in result
 
 
@@ -165,7 +163,7 @@ class TestSearchWithGrepFallback:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_grep_search_success(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_grep_search_success(self, mock_run, mock_which, tmp_path):
         """Test successful grep search."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.return_value = Mock(
@@ -176,41 +174,38 @@ class TestSearchWithGrepFallback:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("hello")
+        result = impl.search_codebase(ctx, "hello")
 
         assert "SEARCH RESULTS" in result
         assert "Matches found" in result
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_grep_case_insensitive(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_grep_case_insensitive(self, mock_run, mock_which, tmp_path):
         """Test grep with case insensitive flag."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        impl.search_codebase("HELLO", case_sensitive=False)
+        impl.search_codebase(ctx, "HELLO", case_sensitive=False)
 
         call_args = mock_run.call_args[0][0]
         assert "-i" in call_args
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_grep_with_context_lines(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_grep_with_context_lines(self, mock_run, mock_which, tmp_path):
         """Test grep with context lines."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        impl.search_codebase("pattern", context_lines=3)
+        impl.search_codebase(ctx, "pattern", context_lines=3)
 
         call_args = mock_run.call_args[0][0]
         assert "-C" in call_args
@@ -218,16 +213,15 @@ class TestSearchWithGrepFallback:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_grep_with_file_pattern(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_grep_with_file_pattern(self, mock_run, mock_which, tmp_path):
         """Test grep with file pattern."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        impl.search_codebase("pattern", file_pattern="src/*.py")
+        impl.search_codebase(ctx, "pattern", file_pattern="src/*.py")
 
         call_args = mock_run.call_args[0][0]
         assert "--include" in call_args
@@ -235,32 +229,32 @@ class TestSearchWithGrepFallback:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_grep_error_exit_code(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_grep_error_exit_code(self, mock_run, mock_which, tmp_path):
         """Test grep failing with error exit code."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.return_value = Mock(returncode=2, stdout="", stderr="grep error")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("pattern")
+        result = impl.search_codebase(ctx, "pattern")
 
+        assert isinstance(result, ToolError)
+        assert result.category == "execution"
         assert "Error: grep failed" in result
         assert "grep error" in result
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_grep_timeout(self, mock_run, mock_which, monkeypatch, tmp_path):
+    def test_grep_timeout(self, mock_run, mock_which, tmp_path):
         """Test grep timeout handling."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
         mock_run.side_effect = Exception("Timeout")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.search_codebase("pattern")
+        result = impl.search_codebase(ctx, "pattern")
 
         assert "Error executing grep" in result or "Error during search" in result
 
@@ -270,7 +264,7 @@ class TestFormatGrepResults:
 
     def test_format_grep_results_basic(self):
         """Test basic grep result formatting."""
-        from ayder_cli.path_context import ProjectContext
+        from ayder_cli.core.context import ProjectContext
         project = ProjectContext(".")
         raw_output = "file1.txt:1:hello world\nfile1.txt:2:hello again\nfile2.txt:5:another match"
         result = impl._format_grep_results(raw_output, "hello", 50, project)
@@ -282,7 +276,7 @@ class TestFormatGrepResults:
 
     def test_format_grep_results_empty(self):
         """Test formatting empty grep results."""
-        from ayder_cli.path_context import ProjectContext
+        from ayder_cli.core.context import ProjectContext
         project = ProjectContext(".")
         result = impl._format_grep_results("", "pattern", 50, project)
 
@@ -291,7 +285,7 @@ class TestFormatGrepResults:
 
     def test_format_grep_results_max_results(self):
         """Test grep results with max_results limit."""
-        from ayder_cli.path_context import ProjectContext
+        from ayder_cli.core.context import ProjectContext
         project = ProjectContext(".")
         raw_output = "file.txt:1:line1\nfile.txt:2:line2\nfile.txt:3:line3"
         result = impl._format_grep_results(raw_output, "line", 2, project)
@@ -304,23 +298,25 @@ class TestGetProjectStructureEdgeCases:
 
     @patch("ayder_cli.tools.impl.shutil.which")
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_tree_fallback_on_error(self, mock_run, mock_which):
+    def test_tree_fallback_on_error(self, mock_run, mock_which, tmp_path):
         """Test fallback to manual tree when tree command fails."""
         mock_which.return_value = "/usr/bin/tree"
         mock_run.side_effect = Exception("Tree failed")
-
-        result = impl.get_project_structure(max_depth=2)
+        
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.get_project_structure(ctx, max_depth=2)
 
         # Should return the manual tree fallback
         assert isinstance(result, str)
         assert len(result) > 0
 
     @patch("ayder_cli.tools.impl.shutil.which")
-    def test_manual_tree_no_tree_command(self, mock_which):
+    def test_manual_tree_no_tree_command(self, mock_which, tmp_path):
         """Test manual tree generation when tree not available."""
         mock_which.return_value = None
-
-        result = impl.get_project_structure(max_depth=2)
+        
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.get_project_structure(ctx, max_depth=2)
 
         assert isinstance(result, str)
 
@@ -333,13 +329,14 @@ class TestGetProjectStructureEdgeCases:
         (tmp_path / "file1.txt").write_text("content")
 
         monkeypatch.chdir(tmp_path)
+        ctx = ProjectContext(str(tmp_path))
 
         # Test depth 1 - only root level
-        result_depth1 = impl._generate_manual_tree(max_depth=1)
+        result_depth1 = impl._generate_manual_tree(ctx, max_depth=1)
         lines_depth1 = result_depth1.split("\n")
 
         # Test depth 3 - should show more levels
-        result_depth3 = impl._generate_manual_tree(max_depth=3)
+        result_depth3 = impl._generate_manual_tree(ctx, max_depth=3)
         lines_depth3 = result_depth3.split("\n")
 
         # Depth 3 should have more lines than depth 1
@@ -361,7 +358,8 @@ class TestGetProjectStructureEdgeCases:
 
         try:
             monkeypatch.chdir(tmp_path)
-            result = impl._generate_manual_tree(max_depth=3)
+            ctx = ProjectContext(str(tmp_path))
+            result = impl._generate_manual_tree(ctx, max_depth=3)
             # Should complete without error even with permission error
             assert isinstance(result, str)
         finally:
@@ -380,9 +378,8 @@ class TestReadFileEdgeCases:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.read_file("binary.txt")
+        result = impl.read_file(ctx, "binary.txt")
 
         # Should handle encoding error gracefully - errors='replace' should be used
         assert isinstance(result, str)
@@ -391,8 +388,9 @@ class TestReadFileEdgeCases:
         """Test read_file with start_line beyond file length."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\n")
-
-        result = impl.read_file(str(test_file), start_line=100)
+        
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.read_file(ctx, str(test_file), start_line=100)
 
         # Should handle gracefully (empty result or adjusted)
         assert isinstance(result, str)
@@ -404,10 +402,9 @@ class TestReadFileEdgeCases:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
         # Pass strings instead of ints
-        result = impl.read_file("test.txt", start_line="2", end_line="3")
+        result = impl.read_file(ctx, "test.txt", start_line="2", end_line="3")
 
         assert "2: Line 2" in result
         assert "3: Line 3" in result
@@ -420,11 +417,12 @@ class TestWriteFileEncoding:
         """Test write_file with encoding issues (invalid path)."""
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
         # Try to write to a path that can't be created (nested in nonexistent dir)
-        result = impl.write_file("nonexistent_dir_xyz/subdir/file.txt", "content")
+        result = impl.write_file(ctx, "nonexistent_dir_xyz/subdir/file.txt", "content")
 
+        assert isinstance(result, ToolError)
+        assert result.category == "execution"
         assert "Error writing file" in result
 
 
@@ -438,9 +436,8 @@ class TestReplaceStringEdgeCases:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.replace_string("empty.txt", "old", "new")
+        result = impl.replace_string(ctx, "empty.txt", "old", "new")
 
         assert "not found" in result
         assert test_file.read_text() == ""
@@ -462,9 +459,8 @@ class TestListFilesSymlinks:
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        monkeypatch.setattr(impl, "_default_project_ctx", ctx)
 
-        result = impl.list_files(".")
+        result = impl.list_files(ctx, ".")
         files = json.loads(result)
 
         assert "real_file.txt" in files
@@ -475,11 +471,14 @@ class TestRunShellCommandTimeout:
     """Test run_shell_command() timeout handling."""
 
     @patch("ayder_cli.tools.impl.subprocess.run")
-    def test_run_shell_command_timeout(self, mock_run):
+    def test_run_shell_command_timeout(self, mock_run, tmp_path):
         """Test run_shell_command timeout handling."""
         import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 100", timeout=60)
 
-        result = impl.run_shell_command("sleep 100")
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.run_shell_command(ctx, "sleep 100")
 
+        assert isinstance(result, ToolError)
+        assert result.category == "execution"
         assert "timed out" in result.lower()

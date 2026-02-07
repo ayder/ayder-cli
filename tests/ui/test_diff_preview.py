@@ -15,8 +15,7 @@ from ayder_cli.ui import (
     confirm_with_diff,
 )
 from ayder_cli.tools.utils import prepare_new_content
-from ayder_cli.path_context import ProjectContext
-import ayder_cli.tools.utils as utils_module
+from ayder_cli.core.context import ProjectContext
 
 
 class TestColorizeDiff(unittest.TestCase):
@@ -324,21 +323,14 @@ class TestPrepareNewContent(unittest.TestCase):
         with open(file_path, 'w') as f:
             f.write(original)
 
-        # Set up project context with temp_dir as root
         ctx = ProjectContext(str(self.temp_dir))
-        original_ctx = utils_module._default_project_ctx
-        utils_module._default_project_ctx = ctx
-
-        try:
-            fargs = {
-                "file_path": "test.txt",
-                "old_string": "world",
-                "new_string": "universe"
-            }
-            result = prepare_new_content("replace_string", fargs)
-            self.assertEqual(result, "hello universe")
-        finally:
-            utils_module._default_project_ctx = original_ctx
+        fargs = {
+            "file_path": "test.txt",
+            "old_string": "world",
+            "new_string": "universe"
+        }
+        result = prepare_new_content("replace_string", fargs, ctx)
+        self.assertEqual(result, "hello universe")
 
     def test_replace_string_json_argument(self):
         """Verify replace_string works with JSON string argument"""
@@ -347,17 +339,10 @@ class TestPrepareNewContent(unittest.TestCase):
         with open(file_path, 'w') as f:
             f.write("foo bar")
 
-        # Set up project context with temp_dir as root
         ctx = ProjectContext(str(self.temp_dir))
-        original_ctx = utils_module._default_project_ctx
-        utils_module._default_project_ctx = ctx
-
-        try:
-            fargs = '{"file_path": "test.txt", "old_string": "foo", "new_string": "baz"}'
-            result = prepare_new_content("replace_string", fargs)
-            self.assertEqual(result, "baz bar")
-        finally:
-            utils_module._default_project_ctx = original_ctx
+        fargs = '{"file_path": "test.txt", "old_string": "foo", "new_string": "baz"}'
+        result = prepare_new_content("replace_string", fargs, ctx)
+        self.assertEqual(result, "baz bar")
 
     def test_replace_string_missing_file_returns_empty(self):
         """Verify missing file returns empty string"""

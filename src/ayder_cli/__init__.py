@@ -1,2 +1,7 @@
 """ayder-cli: Interactive AI agent chat client for local LLMs."""
-__version__ = "0.1.0"
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("ayder-cli")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"

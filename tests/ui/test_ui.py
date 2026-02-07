@@ -8,113 +8,117 @@ import pytest
 from ayder_cli import ui
 
 
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
 class TestDrawBox:
     """Tests for draw_box() function."""
 
-    def test_basic_box_drawing(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_basic_box_drawing(self, mock_print):
         """Test basic box drawing without title."""
-        result = ui.draw_box("Hello", width=20)
-        assert "─" in result
-        assert "Hello" in result
-        lines = result.split("\n")
-        # Should have top separator, content, and bottom separator
-        assert len(lines) >= 3
+        from rich.panel import Panel
+        ui.draw_box("Hello", width=20)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    def test_box_with_title(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_box_with_title(self, mock_print):
         """Test box drawing with title."""
-        result = ui.draw_box("Content", title="My Title", width=40)
-        assert "My Title" in result
-        assert "Content" in result
-        assert "─" in result
+        from rich.panel import Panel
+        ui.draw_box("Content", title="My Title", width=40)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "My Title"
 
-    def test_empty_text(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_empty_text(self, mock_print):
         """Test box with empty text."""
-        result = ui.draw_box("", width=20)
-        assert "─" in result
-        lines = result.split("\n")
-        # Should have top and bottom separators
-        assert len(lines) >= 2
+        from rich.panel import Panel
+        ui.draw_box("", width=20)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    def test_text_wrapping(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_text_wrapping(self, mock_print):
         """Test text wrapping within box."""
+        from rich.panel import Panel
         long_text = "This is a very long text that should be wrapped to fit within the box width"
-        result = ui.draw_box(long_text, width=40)
-        lines = result.split("\n")
-        # Check that text is wrapped (more than 3 lines for content)
-        assert len(lines) > 3
+        ui.draw_box(long_text, width=40)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    def test_different_color_codes(self):
-        """Test different ANSI color codes."""
-        result_cyan = ui.draw_box("Test", color_code="36")
-        result_green = ui.draw_box("Test", color_code="32")
-        result_yellow = ui.draw_box("Test", color_code="33")
-        result_red = ui.draw_box("Test", color_code="31")
-        
-        assert "\033[36m" in result_cyan
-        assert "\033[32m" in result_green
-        assert "\033[33m" in result_yellow
-        assert "\033[31m" in result_red
+    @patch("ayder_cli.ui.console.print")
+    def test_different_color_codes(self, mock_print):
+        """Test different color codes map to Rich styles."""
+        from rich.panel import Panel
+        for code in ["36", "32", "33", "35", "31"]:
+            ui.draw_box("Test", color_code=code)
+            panel = mock_print.call_args[0][0]
+            assert isinstance(panel, Panel)
 
-    def test_multiline_text(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_multiline_text(self, mock_print):
         """Test box with multiline text."""
+        from rich.panel import Panel
         text = "Line 1\nLine 2\nLine 3"
-        result = ui.draw_box(text, width=20)
-        assert "Line 1" in result
-        assert "Line 2" in result
-        assert "Line 3" in result
+        ui.draw_box(text, width=20)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    def test_preserves_empty_lines(self):
+    @patch("ayder_cli.ui.console.print")
+    def test_preserves_empty_lines(self, mock_print):
         """Test that empty lines in input are preserved."""
+        from rich.panel import Panel
         text = "First\n\nThird"
-        result = ui.draw_box(text, width=20)
-        lines = result.split("\n")
-        # Should have top separator, 3 content lines, and bottom separator
-        # Total of 5 lines (top + First + empty + Third + bottom)
-        assert len(lines) >= 5
+        ui.draw_box(text, width=20)
+        mock_print.assert_called_once()
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
 
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
 class TestPrintUserMessage:
     """Tests for print_user_message() function."""
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_user_message(self, mock_print):
         """Test user message printing."""
+        from rich.panel import Panel
         ui.print_user_message("Hello user")
         mock_print.assert_called_once()
-        call_args = mock_print.call_args[0][0]
-        assert "You" in call_args
-        assert "Hello user" in call_args
-        assert "\n" in call_args  # Has leading newline
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "You"
 
 
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
 class TestPrintAssistantMessage:
     """Tests for print_assistant_message() function."""
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_assistant_message(self, mock_print):
         """Test assistant message printing."""
+        from rich.panel import Panel
         ui.print_assistant_message("Hello from assistant")
         mock_print.assert_called_once()
-        call_args = mock_print.call_args[0][0]
-        assert "Assistant" in call_args
-        assert "Hello from assistant" in call_args
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "Assistant"
 
 
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
 class TestPrintToolCall:
     """Tests for print_tool_call() function."""
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_tool_call(self, mock_print):
         """Test tool call printing."""
+        from rich.panel import Panel
         ui.print_tool_call("my_function", '{"arg": "value"}')
         mock_print.assert_called_once()
-        call_args = mock_print.call_args[0][0]
-        assert "Tool Call" in call_args
-        assert "my_function" in call_args
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "Tool Call"
 
 
 class TestPrintToolResult:
@@ -244,29 +248,29 @@ class TestDescribeToolAction:
         assert "unknown" in result
 
 
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
 class TestPrintFileContent:
     """Tests for print_file_content() function."""
 
-    @patch("builtins.print")
-    @patch("builtins.open", mock_open(read_data="File content here"))
-    def test_print_file_content_success(self, mock_print):
+    @patch("ayder_cli.ui.console.print")
+    def test_print_file_content_success(self, mock_print, tmp_path):
         """Test printing file content successfully."""
-        ui.print_file_content("/tmp/test.txt")
+        from rich.panel import Panel
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("File content here")
+        ui.print_file_content(str(test_file))
         mock_print.assert_called_once()
-        call_args = mock_print.call_args[0][0]
-        assert "File content here" in call_args
-        assert "/tmp/test.txt" in call_args
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
 
-    @patch("builtins.print")
+    @patch("ayder_cli.ui.console.print")
     def test_print_file_content_error(self, mock_print):
         """Test error handling for non-existent file."""
+        from rich.panel import Panel
         ui.print_file_content("/nonexistent/file.txt")
         mock_print.assert_called_once()
-        call_args = mock_print.call_args[0][0]
-        assert "Could not read file" in call_args
-        assert "Verbose Error" in call_args
+        panel = mock_print.call_args[0][0]
+        assert isinstance(panel, Panel)
+        assert panel.title == "Verbose Error"
 
 
 class TestConfirmToolCall:

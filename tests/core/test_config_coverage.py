@@ -8,7 +8,7 @@ This module tests the remaining uncovered lines in config.py:
 import pytest
 from pydantic import ValidationError
 
-from ayder_cli.config import Config, load_config
+from ayder_cli.core.config import Config, load_config
 
 
 class TestConfigValidationNumCtx:
