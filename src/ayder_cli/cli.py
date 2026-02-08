@@ -18,6 +18,25 @@ def create_parser():
         help="Launch TUI mode"
     )
 
+    # Task-related CLI options
+    parser.add_argument(
+        "--tasks",
+        action="store_true",
+        help="List all saved tasks and exit"
+    )
+    parser.add_argument(
+        "--implement",
+        type=str,
+        metavar="TASK",
+        default=None,
+        help="Implement a task by ID or name and exit (e.g., --implement 1 or --implement auth)"
+    )
+    parser.add_argument(
+        "--implement-all",
+        action="store_true",
+        help="Implement all pending tasks sequentially and exit"
+    )
+
     # Mutually exclusive group for file and stdin
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument(
@@ -122,7 +141,7 @@ def _build_services(config=None, project_root="."):
     """Build the service dependency graph (Composition Root).
 
     Returns:
-        Tuple of (config, llm_provider, tool_executor, project_ctx, enhanced_prompt)
+        Tuple of (config, llm_provider, tool_executor, project_ctx, enhanced_system)
     """
     from ayder_cli.core.config import load_config
     from ayder_cli.core.context import ProjectContext
@@ -144,7 +163,9 @@ def _build_services(config=None, project_root="."):
     except Exception:
         macro = ""
 
-    return cfg, llm_provider, tool_executor, project_ctx, SYSTEM_PROMPT + macro
+    enhanced_system = SYSTEM_PROMPT + macro
+
+    return cfg, llm_provider, tool_executor, project_ctx, enhanced_system
 
 
 def run_interactive(permissions=None, iterations=10):
@@ -154,9 +175,10 @@ def run_interactive(permissions=None, iterations=10):
     from ayder_cli.commands import handle_command
     from ayder_cli.ui import draw_box, print_running, print_assistant_message
 
-    cfg, llm_provider, tool_executor, project_ctx, enhanced_prompt = _build_services()
+    cfg, llm_provider, tool_executor, project_ctx, enhanced_system = _build_services()
 
-    chat_session = ChatSession(cfg, enhanced_prompt, permissions, iterations)
+    chat_session = ChatSession(cfg, enhanced_system,
+                               permissions=permissions, iterations=iterations)
     chat_session.start()
     agent = Agent(llm_provider, tool_executor, chat_session)
 
@@ -170,9 +192,28 @@ def run_interactive(permissions=None, iterations=10):
         if user_input.startswith('/'):
             session_ctx = SessionContext(
                 config=cfg, project=project_ctx,
-                messages=chat_session.messages, state=chat_session.state
+                messages=chat_session.messages, state=chat_session.state,
+                system_prompt=enhanced_system
             )
+            # Track message count to detect if command added messages for agent
+            msg_count_before = len(chat_session.messages)
             handle_command(user_input, session_ctx)
+            msg_count_after = len(chat_session.messages)
+
+            # If command added messages (e.g., /implement), process them through agent
+            if msg_count_after > msg_count_before:
+                try:
+                    print_running()
+                    # Get the last added message content
+                    last_msg = chat_session.messages[-1]
+                    if last_msg.get("role") == "user":
+                        # Remove the message we just added (agent.chat will re-add it)
+                        chat_session.messages.pop()
+                        response = agent.chat(last_msg["content"])
+                        if response is not None:
+                            print_assistant_message(response)
+                except Exception as e:
+                    draw_box(f"Error: {str(e)}", title="Error", width=80, color_code="31")
             continue
 
         try:
@@ -198,10 +239,10 @@ def run_command(prompt: str, permissions=None, iterations=10) -> int:
     try:
         from ayder_cli.client import ChatSession, Agent
 
-        cfg, llm_provider, tool_executor, _, enhanced_prompt = _build_services()
+        cfg, llm_provider, tool_executor, _, enhanced_system = _build_services()
 
         session = ChatSession(
-            config=cfg, system_prompt=enhanced_prompt,
+            config=cfg, system_prompt=enhanced_system,
             permissions=permissions, iterations=iterations
         )
         agent = Agent(llm_provider, tool_executor, session)
@@ -210,6 +251,106 @@ def run_command(prompt: str, permissions=None, iterations=10) -> int:
         if response:
             print(response)
 
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def _run_tasks_cli() -> int:
+    """List all tasks and exit."""
+    try:
+        from ayder_cli.core.context import ProjectContext
+        from ayder_cli.tasks import list_tasks
+        result = list_tasks(ProjectContext("."))
+        print(result)
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def _run_implement_cli(task_query: str, permissions=None, iterations=10) -> int:
+    """Implement a specific task by ID or name."""
+    try:
+        from ayder_cli.client import ChatSession, Agent
+        from ayder_cli.core.context import ProjectContext
+        from ayder_cli.prompts import TASK_EXECUTION_PROMPT_TEMPLATE
+        from ayder_cli.tasks import _get_tasks_dir, _get_task_path_by_id, _extract_id, _parse_title
+
+        cfg, llm_provider, tool_executor, _, enhanced_system = _build_services()
+
+        project_ctx = ProjectContext(".")
+        tasks_dir = _get_tasks_dir(project_ctx)
+
+        # Try to find by ID first
+        try:
+            task_id = int(task_query)
+            task_path = _get_task_path_by_id(project_ctx, task_id)
+            if task_path:
+                rel_path = project_ctx.to_relative(task_path)
+                prompt = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
+
+                session = ChatSession(
+                    config=cfg, system_prompt=enhanced_system,
+                    permissions=permissions, iterations=iterations
+                )
+                agent = Agent(llm_provider, tool_executor, session)
+
+                # Add the task execution prompt
+                response = agent.chat(prompt)
+                if response:
+                    print(response)
+                return 0
+        except ValueError:
+            pass
+
+        # Search by name/pattern
+        query_lower = task_query.lower()
+        for task_file in sorted(tasks_dir.glob("*.md")):
+            task_id = _extract_id(task_file.name)
+            if task_id is None:
+                continue
+            title = _parse_title(task_file)
+            if query_lower in title.lower():
+                rel_path = project_ctx.to_relative(task_file)
+                prompt = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
+
+                session = ChatSession(
+                    config=cfg, system_prompt=enhanced_system,
+                    permissions=permissions, iterations=iterations
+                )
+                agent = Agent(llm_provider, tool_executor, session)
+
+                response = agent.chat(prompt)
+                if response:
+                    print(response)
+                return 0
+
+        print(f"No tasks found matching: {task_query}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def _run_implement_all_cli(permissions=None, iterations=10) -> int:
+    """Implement all pending tasks sequentially."""
+    try:
+        from ayder_cli.client import ChatSession, Agent
+        from ayder_cli.prompts import TASK_EXECUTION_ALL_PROMPT_TEMPLATE
+
+        cfg, llm_provider, tool_executor, _, enhanced_system = _build_services()
+
+        session = ChatSession(
+            config=cfg, system_prompt=enhanced_system,
+            permissions=permissions, iterations=iterations
+        )
+        agent = Agent(llm_provider, tool_executor, session)
+
+        response = agent.chat(TASK_EXECUTION_ALL_PROMPT_TEMPLATE)
+        if response:
+            print(response)
         return 0
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -241,6 +382,14 @@ def main():
         granted.add("w")
     if args.x:
         granted.add("x")
+
+    # Handle task-related CLI options
+    if args.tasks:
+        sys.exit(_run_tasks_cli())
+    if args.implement:
+        sys.exit(_run_implement_cli(args.implement, permissions=granted, iterations=args.iterations))
+    if args.implement_all:
+        sys.exit(_run_implement_all_cli(permissions=granted, iterations=args.iterations))
 
     # Handle file/stdin input
     prompt = read_input(args)

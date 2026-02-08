@@ -41,33 +41,17 @@ class TestToolRegistryExecute:
         assert result.category == "validation"
         assert "Invalid JSON arguments" in result
 
-    def test_execute_unregistered_tool_in_schema(self, tmp_path):
-        """Lines 162-163: Tool in schema but not registered returns error."""
+    def test_execute_unregistered_tool_in_definitions(self, tmp_path):
+        """Tool in TOOL_DEFINITIONS but not registered returns error."""
         ctx = ProjectContext(str(tmp_path))
         reg = registry.ToolRegistry(ctx)
-        
-        # Mock tools_schema to include a fake tool that we won't register
-        fake_tool = {
-            "type": "function",
-            "function": {
-                "name": "fake_tool_for_test",
-                "description": "A fake tool for testing",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "arg": {"type": "string", "description": "An argument"}
-                    },
-                    "required": ["arg"]
-                }
-            }
-        }
 
-        with patch.object(registry, 'tools_schema', [fake_tool]):
-            # Execute unregistered tool
-            result = reg.execute("fake_tool_for_test", {"arg": "value"})
-            assert isinstance(result, ToolError)
-            assert result.category == "validation"
-            assert "Error: Unknown tool" in result
+        # create_task is in TOOL_DEFINITIONS but not registered in this empty registry.
+        # Validation passes (it's a known tool) but execution fails (not registered).
+        result = reg.execute("create_task", {"title": "test"})
+        assert isinstance(result, ToolError)
+        assert result.category == "validation"
+        assert "Error: Unknown tool" in result
 
     def test_execute_unknown_tool_not_in_schema(self, tmp_path):
         """Unknown tool not in schema fails validation."""
@@ -139,10 +123,9 @@ class TestCreateDefaultRegistry:
         tools = reg.get_registered_tools()
         expected_tools = [
             "list_files", "read_file", "write_file", "replace_string",
-            "run_shell_command", "get_project_structure", "search_codebase",
-            "create_task", "show_task", "implement_task", "implement_all_tasks", "list_tasks"
+            "run_shell_command", "get_project_structure", "search_codebase"
         ]
-        
+
         for tool in expected_tools:
             assert tool in tools
 
@@ -243,11 +226,40 @@ class TestParameterAliases:
         """'dir' is converted to 'directory'."""
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
-        
+
         args = {"dir": "."}
         normalized = registry.normalize_tool_arguments("list_files", args, ctx)
-        
+
         assert "directory" in normalized
         assert "dir" not in normalized
+
+
+class TestRegistrySchemas:
+    """Test get_schemas and tool accessibility."""
+
+    def test_get_schemas_returns_all_tools(self, tmp_path):
+        """get_schemas() returns all tool schemas."""
+        ctx = ProjectContext(str(tmp_path))
+        reg = registry.ToolRegistry(ctx)
+        schemas = reg.get_schemas()
+        names = {s["function"]["name"] for s in schemas}
+        assert "list_files" in names
+        assert "write_file" in names
+        assert "search_codebase" in names
+        assert "get_project_structure" in names
+
+    def test_validate_tool_call_all_tools_accessible(self):
+        """validate_tool_call works for all tools."""
+        # get_project_structure
+        is_valid, error = registry.validate_tool_call("get_project_structure", {})
+        assert is_valid
+        assert error == ""
+
+        # write_file
+        is_valid, error = registry.validate_tool_call(
+            "write_file", {"file_path": "test.txt", "content": "hi"}
+        )
+        assert is_valid
+        assert error == ""
 
 

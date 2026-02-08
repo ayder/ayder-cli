@@ -3,8 +3,11 @@ Utility functions for tool operations.
 """
 
 import json
+import logging
 from pathlib import Path
 from ayder_cli.core.context import ProjectContext
+
+logger = logging.getLogger(__name__)
 
 
 def prepare_new_content(fname, args, project_ctx=None):
@@ -39,11 +42,17 @@ def prepare_new_content(fname, args, project_ctx=None):
                 return content.replace(old_string, new_string)
             except ValueError as e:
                 # Security error - return empty to trigger error in UI
+                logger.warning(f"Security error in replace_string: {e}")
                 return ""
-            except Exception:
+            except (IOError, OSError) as e:
+                logger.error(f"File error in replace_string: {e}")
                 return ""
         else:
             return ""
 
-    except Exception:
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        return ""
+    except Exception as e:
+        logger.error(f"Unexpected error in prepare_new_content: {e}")
         return ""

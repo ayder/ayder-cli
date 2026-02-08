@@ -6,8 +6,6 @@ from ayder_cli.tools.registry import (
     ToolRegistry,
     normalize_tool_arguments,
     validate_tool_call,
-    PARAMETER_ALIASES,
-    PATH_PARAMETERS,
     create_default_registry,
 )
 from ayder_cli.tools.impl import (
@@ -35,8 +33,6 @@ __all__ = [
     "create_default_registry",
     "normalize_tool_arguments",
     "validate_tool_call",
-    "PARAMETER_ALIASES",
-    "PATH_PARAMETERS",
     # Implementations
     "list_files",
     "read_file",

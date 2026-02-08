@@ -6,7 +6,7 @@ class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
     
     @abstractmethod
-    def chat(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]] = None, options: Optional[Dict[str, Any]] = None) -> Any:
+    def chat(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]] = None, options: Optional[Dict[str, Any]] = None, verbose: bool = False) -> Any:
         """Execute a chat completion.
         
         Args:
@@ -14,6 +14,7 @@ class LLMProvider(ABC):
             model: Model name.
             tools: Optional list of tool schemas.
             options: Optional dictionary of extra options (e.g. num_ctx).
+            verbose: Whether to print debug information about the request.
             
         Returns:
             The raw response object from the LLM (provider specific, but usually expected to have .choices[0].message).
@@ -29,7 +30,10 @@ class OpenAIProvider(LLMProvider):
         else:
             self.client = OpenAI(base_url=base_url, api_key=api_key)
         
-    def chat(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]] = None, options: Optional[Dict[str, Any]] = None) -> Any:
+    def chat(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]] = None, options: Optional[Dict[str, Any]] = None, verbose: bool = False) -> Any:
+        if verbose:
+            self._print_llm_request(messages, model, tools, options)
+        
         kwargs = {
             "model": model,
             "messages": messages,
@@ -42,3 +46,8 @@ class OpenAIProvider(LLMProvider):
              kwargs["extra_body"] = {"options": options}
              
         return self.client.chat.completions.create(**kwargs)
+    
+    def _print_llm_request(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]], options: Optional[Dict[str, Any]]) -> None:
+        """Print formatted LLM request details when verbose mode is active."""
+        from ayder_cli.ui import print_llm_request_debug
+        print_llm_request_debug(messages, model, tools, options)

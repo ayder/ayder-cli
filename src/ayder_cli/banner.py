@@ -14,7 +14,7 @@ TIPS = [
     "Use /help for available commands",
     "Ctrl+R to search command history",
     "Use /tools to see available tools",
-    "Use /clear to reset conversation",
+    "Use /compact to summarize, save, and reset",
     "Use /undo to remove last exchange",
 ]
 
@@ -249,6 +249,58 @@ def print_fancy_banner(model,version):
     console.print()
 
 
+def print_futuristic_banner():
+    """Print a futuristic high-ANSI neon banner with scan-line aesthetic."""
+    c = _C
+
+    # Extended ANSI 256-color codes for the neon/cyber palette
+    _F = {
+        "neon_cyan":    "\033[38;5;87m",
+        "neon_blue":    "\033[38;5;33m",
+        "ice_blue":     "\033[38;5;117m",
+        "electric":     "\033[38;5;45m",
+        "plasma":       "\033[38;5;177m",
+        "hot_pink":     "\033[38;5;198m",
+        "neon_green":   "\033[38;5;46m",
+        "dark_cyan":    "\033[38;5;30m",
+        "grid":         "\033[38;5;238m",
+        "glow":         "\033[38;5;159m",
+        "white":        "\033[38;5;255m",
+        "dim_white":    "\033[38;5;245m",
+        "bg_dark":      "\033[48;5;233m",
+        "bg_strip":     "\033[48;5;234m",
+    }
+    r = c["reset"]
+    b = c["bold"]
+    d = c["dim"]
+
+    # Top chrome border with corner accents
+    print(f"""
+{_F['grid']}{d}  ┌──────────────────────────────────────────────────────────────────┐{r}
+{_F['grid']}{d}  │{_F['dark_cyan']}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓{_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}                                                                  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['neon_cyan']}{b}     ▄▄▄·  ▄· ▄▌·▄▄▄▄  ▄▄▄ .▄▄▄  {r}                         {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['electric']}{b}    ▐█ ▀█ ▐█▪██▌██▪ ██ ▀▄.▀·▀▄ █· {r}                         {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['ice_blue']}{b}    ▄█▀▀█ ▐█▌▐█▪▐█· ▐█▌▐▀▀▪▄▐▀▀▄  {r}                         {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['neon_blue']}{b}    ▐█ ▪▐▌ ▐█▀·.██. ██ ▐█▄▄▌▐█•█▌ {r}                         {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['plasma']}{b}     ▀  ▀   ▀ • ▀▀▀▀▀•  ▀▀▀ .▀  ▀  {r}                         {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}                                                                  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['grid']}──────────────────────────────────────────────────────────────{r}  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}                                                                  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['hot_pink']}{b}  ◈{r}  {_F['glow']}A U T O N O M O U S{r}   {_F['dim_white']}Engine for{r}   {_F['neon_green']}{b}Development{r}      {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}  {_F['hot_pink']}{b}  ◈{r}  {_F['glow']}R E A S O N I N G{r}     {_F['dim_white']}&&{r}          {_F['neon_green']}{b}Execution{r}       {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}                                                                  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}     {_F['electric']}{d}┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐{r}     {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}     {_F['electric']}{d}│{_F['neon_cyan']} ◉ TOOLS {_F['electric']}{d}│  │{_F['neon_green']} ◉ AGENT {_F['electric']}{d}│  │{_F['plasma']} ◉ SHELL {_F['electric']}{d}│  │{_F['hot_pink']} ◉ TASKS {_F['electric']}{d}│{r}     {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}     {_F['electric']}{d}└─────────┘  └─────────┘  └─────────┘  └─────────┘{r}     {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}                                                                  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}     {_F['dim_white']}{d}v{__version__}  ·  local LLM  ·  sandboxed  ·  MIT license{r}     {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{r}                                                                  {_F['grid']}{d}│{r}
+{_F['grid']}{d}  │{_F['dark_cyan']}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓{_F['grid']}{d}│{r}
+{_F['grid']}{d}  └──────────────────────────────────────────────────────────────────┘{r}
+""")
+
+
 if __name__ == "__main__":
     import sys
     
@@ -262,7 +314,9 @@ if __name__ == "__main__":
         elif arg == "--minimal":
             print_minimal_banner()
         elif arg == "--fancy":
-            print_fancy_banner()
+            print_fancy_banner("qwen3-coder:latest", __version__)
+        elif arg == "--futuristic":
+            print_futuristic_banner()
         elif arg == "--rich":
             print_rich_banner()
         else:

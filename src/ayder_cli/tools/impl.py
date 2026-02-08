@@ -5,13 +5,15 @@ This module contains the actual implementation of all file system and code navig
 """
 
 import json
+import logging
 import os
 import subprocess
 import shutil
 from pathlib import Path
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
-from ayder_cli.tasks import create_task, show_task, implement_task, implement_all_tasks
+
+logger = logging.getLogger(__name__)
 
 
 # --- Constants ---
@@ -92,6 +94,9 @@ def write_file(project_ctx: ProjectContext, file_path: str, content: str) -> str
     """Writes content to a file (overwrites entire file)."""
     try:
         abs_path = project_ctx.validate_path(file_path)
+
+        # Create parent directories if they don't exist
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -335,7 +340,8 @@ def _format_search_results(raw_output, pattern, max_results, project_ctx):
             abs_file_path = Path(line)
             try:
                 rel_file = project_ctx.to_relative(abs_file_path)
-            except:
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Failed to convert path to relative: {e}")
                 rel_file = line
             current_file = rel_file
             formatted.append("─" * 67)
@@ -375,7 +381,8 @@ def _format_grep_results(raw_output, pattern, max_results, project_ctx):
         abs_file_path = Path(file_path)
         try:
             rel_file = project_ctx.to_relative(abs_file_path)
-        except:
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Failed to convert path to relative: {e}")
             rel_file = file_path
         formatted.append("─" * 67)
         formatted.append(f"FILE: {rel_file}")

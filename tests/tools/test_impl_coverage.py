@@ -410,20 +410,25 @@ class TestReadFileEdgeCases:
         assert "3: Line 3" in result
 
 
-class TestWriteFileEncoding:
-    """Test write_file() with encoding issues."""
+class TestWriteFileNestedDirectories:
+    """Test write_file() with nested directory creation."""
 
-    def test_write_file_encoding_error(self, tmp_path, monkeypatch):
-        """Test write_file with encoding issues (invalid path)."""
+    def test_write_file_creates_parent_directories(self, tmp_path):
+        """Test write_file creates parent directories automatically."""
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
 
-        # Try to write to a path that can't be created (nested in nonexistent dir)
+        # Write to a path with nested nonexistent directories
         result = impl.write_file(ctx, "nonexistent_dir_xyz/subdir/file.txt", "content")
 
-        assert isinstance(result, ToolError)
-        assert result.category == "execution"
-        assert "Error writing file" in result
+        # Should succeed and create directories
+        assert isinstance(result, ToolSuccess)
+        assert "Successfully wrote" in result
+
+        # Verify file was created
+        created_file = tmp_path / "nonexistent_dir_xyz" / "subdir" / "file.txt"
+        assert created_file.exists()
+        assert created_file.read_text() == "content"
 
 
 class TestReplaceStringEdgeCases:

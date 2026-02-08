@@ -162,22 +162,6 @@ class TestPrintRunning:
 class TestDescribeToolAction:
     """Tests for describe_tool_action() function."""
 
-    def test_create_task(self):
-        """Test description for create_task tool."""
-        result = ui.describe_tool_action("create_task", {"title": "My Task"})
-        assert "TASK-XXX.md" in result
-        assert ".ayder/tasks/" in result
-
-    def test_show_task_with_int_id(self):
-        """Test description for show_task tool with integer ID."""
-        result = ui.describe_tool_action("show_task", {"task_id": 5})
-        assert "TASK-005" in result
-
-    def test_show_task_with_string_id(self):
-        """Test description for show_task tool with string ID."""
-        result = ui.describe_tool_action("show_task", {"task_id": "10"})
-        assert "TASK-10" in result
-
     def test_write_file(self):
         """Test description for write_file tool."""
         result = ui.describe_tool_action("write_file", {"file_path": "/tmp/test.txt"})
@@ -213,11 +197,6 @@ class TestDescribeToolAction:
         assert "ls -la" in result
         assert "will be executed" in result
 
-    def test_list_tasks(self):
-        """Test description for list_tasks tool."""
-        result = ui.describe_tool_action("list_tasks", {})
-        assert "Tasks will be listed" == result
-
     def test_unknown_tool(self):
         """Test description for unknown tool."""
         result = ui.describe_tool_action("unknown_tool", {"arg": "value"})
@@ -226,9 +205,9 @@ class TestDescribeToolAction:
 
     def test_with_string_args(self):
         """Test with JSON string arguments."""
-        args_json = '{"title": "Test Task"}'
-        result = ui.describe_tool_action("create_task", args_json)
-        assert "TASK-XXX.md" in result
+        args_json = '{"file_path": "/tmp/test.txt", "content": "hello"}'
+        result = ui.describe_tool_action("write_file", args_json)
+        assert "/tmp/test.txt" in result
 
     def test_with_dict_args(self):
         """Test with dict arguments directly."""
@@ -238,9 +217,9 @@ class TestDescribeToolAction:
 
     def test_with_invalid_json_string(self):
         """Test with invalid JSON string."""
-        result = ui.describe_tool_action("create_task", "not valid json")
-        # Should fallback to empty args and use default
-        assert "TASK-XXX.md" in result
+        result = ui.describe_tool_action("write_file", "not valid json")
+        # Should fallback to empty args and use default template
+        assert "will be written" in result
 
     def test_missing_required_args(self):
         """Test with missing required arguments."""

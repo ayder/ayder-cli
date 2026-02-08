@@ -88,20 +88,6 @@ class TestParseCustomToolCallsLazyFormat:
         assert result[0]["name"] == "run_shell_command"
         assert result[0]["arguments"] == {"command": "ls -la"}
 
-    def test_show_task_lazy(self):
-        """Test lazy parsing for show_task."""
-        content = '<function=show_task>42</function>'
-        result = parse_custom_tool_calls(content)
-        
-        assert result[0]["arguments"] == {"task_id": "42"}
-
-    def test_implement_task_lazy(self):
-        """Test lazy parsing for implement_task."""
-        content = '<function=implement_task>7</function>'
-        result = parse_custom_tool_calls(content)
-        
-        assert result[0]["arguments"] == {"task_id": "7"}
-
     def test_unknown_tool_lazy_no_infer(self):
         """Test lazy parsing for unknown tool without parameter inference."""
         content = '<function=unknown_tool>some value</function>'
@@ -158,14 +144,6 @@ class TestInferParameterName:
     def test_run_shell_command(self):
         """Test inference for run_shell_command."""
         assert _infer_parameter_name("run_shell_command") == "command"
-
-    def test_show_task(self):
-        """Test inference for show_task."""
-        assert _infer_parameter_name("show_task") == "task_id"
-
-    def test_implement_task(self):
-        """Test inference for implement_task."""
-        assert _infer_parameter_name("implement_task") == "task_id"
 
     def test_unknown_tool(self):
         """Test inference for unknown tool returns empty string."""

@@ -42,6 +42,84 @@ def print_tool_call(func_name, args):
     ))
 
 
+def print_llm_request_debug(messages, model, tools=None, options=None):
+    """Display formatted LLM request details in verbose mode.
+    
+    Args:
+        messages: List of message dicts or objects sent to LLM
+        model: Model name
+        tools: List of tool schemas (optional)
+        options: Model options dict (optional)
+    """
+    from typing import List, Dict, Any, Optional
+    
+    # Format summary line
+    num_messages = len(messages) if messages else 0
+    num_tools = len(tools) if tools else 0
+    ctx_size = options.get("num_ctx", "default") if options and isinstance(options, dict) else "default"
+    
+    summary = f"Messages: {num_messages} | Tools: {num_tools} | Context: {ctx_size} tokens"
+    
+    # Format message preview (first 200 chars per message)
+    content = Text()
+    if messages:
+        for i, msg in enumerate(messages, 1):
+            # Handle both dict and object formats
+            if isinstance(msg, dict):
+                role = msg.get("role", "unknown")
+                msg_content = msg.get("content", "")
+            else:
+                # Handle OpenAI SDK message objects
+                role = getattr(msg, "role", "unknown")
+                msg_content = getattr(msg, "content", "")
+            
+            # Handle non-string content (e.g., tool results)
+            if not isinstance(msg_content, str):
+                msg_content = str(msg_content)
+            
+            # Truncate long messages
+            if len(msg_content) > 200:
+                preview = msg_content[:200] + "..."
+            else:
+                preview = msg_content
+            
+            # Replace newlines with space for compact display
+            preview = preview.replace("\n", " ")
+            
+            content.append(f"[{i}] ", style="bold")
+            content.append(f"{role}: ", style="cyan")
+            content.append(f"{preview}\n", style="dim")
+    
+    # Format tool list (names only)
+    if tools:
+        content.append("\n")
+        # Handle both dict and object formats for tools
+        tool_names = []
+        for t in tools:
+            if isinstance(t, dict):
+                tool_names.append(t.get("function", {}).get("name", "?"))
+            else:
+                # Handle object format
+                func = getattr(t, "function", None)
+                if func:
+                    name = getattr(func, "name", "?") if hasattr(func, "name") else func.get("name", "?")
+                    tool_names.append(name)
+                else:
+                    tool_names.append("?")
+        content.append("Tools: ", style="bold")
+        content.append(", ".join(tool_names), style="yellow")
+    
+    console.print(Panel(
+        content,
+        title=f"🔍 LLM Request (Model: {model})",
+        subtitle=summary,
+        border_style="yellow",
+        padding=(1, 2)
+    ))
+
+
+
+
 def draw_box(text, title="", width=80, color_code="36"):
     """
     DEPRECATED: Use Rich Panels directly.
@@ -340,7 +418,8 @@ def colorize_diff(diff_lines):
     """
     colorized = []
     for line in diff_lines:
-        text = Text(line.strip())
+        # Remove trailing newlines but preserve leading whitespace (diff context lines start with space)
+        text = Text(line.rstrip('\n'))
         if line.startswith('@@'):
             text.stylize("cyan")
         elif line.startswith('-') and not line.startswith('---'):

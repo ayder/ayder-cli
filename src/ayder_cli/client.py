@@ -47,11 +47,12 @@ async def call_llm_async(
 class ChatSession:
     """Manage conversation state, history, and user input."""
 
-    def __init__(self, config, system_prompt: str, permissions: set = None, iterations: int = 10):
+    def __init__(self, config, system_prompt: str,
+                 permissions: set = None, iterations: int = 10):
         """Initialize chat session.
 
         Args:
-            config: Config object from TASK-007
+            config: Config object
             system_prompt: Base SYSTEM_PROMPT (enhanced with project structure)
             permissions: Set of granted permission categories.
             iterations: Max agentic iterations per message.
@@ -62,7 +63,7 @@ class ChatSession:
         self.state = {
             "verbose": config.verbose if hasattr(config, "verbose") else False,
             "permissions": permissions or set(),
-            "iterations": iterations
+            "iterations": iterations,
         }
         self.session = None
 
@@ -107,13 +108,15 @@ class ChatSession:
         self.messages.append(message)
 
     def get_input(self) -> str | None:
-        """Get user input via prompt_toolkit.
+        """Get user input via prompt_toolkit with mode-aware prompt.
 
         Returns:
             User input string, or None for exit/quit/EOF
         """
         try:
-            user_input = self.session.prompt(ANSI("\n\033[1;36m❯\033[0m "), vi_mode=False)
+            prompt_text = ANSI("\n\033[1;36m❯\033[0m ")  # Cyan "❯"
+
+            user_input = self.session.prompt(prompt_text, vi_mode=False)
 
             if not user_input.strip():
                 return ""  # Empty input - continue loop
@@ -197,14 +200,14 @@ class Agent:
 
         # Main Loop for Agentic Steps
         for _ in range(max_iterations):
-            # Retrieve schemas from the registry contained in ToolExecutor
             schemas = self.tools.tool_registry.get_schemas()
 
             response = self.llm.chat(
                 model=model,
                 messages=self.session.get_messages(),
                 tools=schemas,
-                options={"num_ctx": num_ctx}
+                options={"num_ctx": num_ctx},
+                verbose=verbose
             )
 
             msg = response.choices[0].message

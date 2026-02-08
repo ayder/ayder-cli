@@ -29,7 +29,7 @@ class TestChatSession:
         assert session.state == {
             "verbose": False,
             "permissions": set(),
-            "iterations": 10
+            "iterations": 10,
         }
         assert session.session is None
 
@@ -210,6 +210,33 @@ class TestChatSession:
         result = session.get_input()
         assert result is None
         mock_print.assert_called_once()
+
+    @patch("ayder_cli.client.PromptSession")
+    def test_session_get_input_default_mode_prompt(self, mock_prompt_session):
+        """Verify default mode shows cyan '❯' prompt."""
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
+        session = ChatSession(config, "prompt")
+        session.state["mode"] = "default"  # Explicitly set default mode
+        
+        mock_prompt_instance = Mock()
+        mock_prompt_instance.prompt.return_value = "test input"
+        session.session = mock_prompt_instance
+        
+        result = session.get_input()
+        
+        # Check that prompt() was called with cyan ❯
+        call_args = mock_prompt_instance.prompt.call_args
+        prompt_text = str(call_args[0][0])
+        assert "❯" in prompt_text
+        # Check for escaped version (\x1b) as it appears in ANSI object repr
+        assert "\\x1b[1;36m" in prompt_text or "\x1b[1;36m" in prompt_text  # Cyan color code
+        assert result == "test input"
 
 
 class TestAgent:
@@ -529,3 +556,6 @@ class TestAgent:
 
         assert len(session.messages) == 1
         assert session.messages[0] is raw_msg  # Same object, not a dict copy
+
+
+

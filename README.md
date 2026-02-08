@@ -26,10 +26,9 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 | `run_shell_command` | Execute a shell command (60s timeout) |
 | `search_codebase` | Search for patterns across the codebase using ripgrep/grep |
 | `get_project_structure` | Generate a tree-style project structure summary |
-| `create_task` | Save a task as a markdown file in `.ayder/tasks/` (current directory) |
+| `create_task` | Save a task as a markdown file in `.ayder/tasks/` |
 | `show_task` | Show the details of a task by its ID number |
-| `implement_task` | Mark a specific task as done and return its details |
-| `implement_all_tasks` | Process all pending tasks and mark them as done |
+| `list_tasks` | List all tasks from `.ayder/tasks/` |
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
@@ -83,7 +82,7 @@ num_ctx = 65536
 editor = "vim"
 
 [ui]
-# Show written file contents after write_file tool calls
+# Show written file contents after write_file tool calls and LLM request details
 verbose = false
 ```
 
@@ -96,7 +95,7 @@ Please adjust *num_ctx* context size window according to your local computer ram
 | `model` | `[llm]` | `qwen3-coder:latest` | Model to use. Must be pulled in Ollama (`ollama list`). |
 | `num_ctx` | `[llm]` | `65536` | Context window size in tokens. Larger values use more VRAM. |
 | `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` and `/edit` commands. |
-| `verbose` | `[ui]` | `false` | When `true`, prints file contents after each `write_file` call. |
+| `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
 
 ## Usage
 
@@ -125,6 +124,22 @@ ayder --file instructions.txt
 
 # Explicit stdin mode
 ayder --stdin < prompt.txt
+```
+
+### Task Commands (CLI Mode)
+
+Execute task-related commands directly without entering interactive mode:
+
+```bash
+# List all tasks
+ayder --tasks
+
+# Implement a specific task by ID or name
+ayder --implement 1
+ayder --implement auth
+
+# Implement all pending tasks sequentially
+ayder --implement-all
 ```
 
 ### Tool Permissions (-r/-w/-x)
@@ -250,11 +265,88 @@ Proceed? [Y/n] y
 ╰──────────────────────────────────────────────────────────────────╯
 ```
 
-### Task management
+### Operational Modes
 
-ayder-cli includes a built-in task system. Ask the model to create tasks, then manage them with slash commands or let the model implement them.
+ayder-cli has three operational modes, each with a specialized system prompt and tool set:
+
+#### Default Mode
+The standard mode for general coding and chat. Uses the **System Prompt**.
 
 ```
+❯ create a fibonacci function
+# AI writes code, runs tests, etc.
+```
+
+**Available tools:** File read/write, shell commands, search, view tasks.
+
+#### Planning Mode (`/plan`)
+Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Master" focused solely on breaking down requirements into tasks.
+
+```
+❯ /plan
+╭──────────────────────── Mode Switch ─────────────────────────────╮
+│ Entered Planning Mode.                                           │
+│ I will now help you break down requirements into tasks.          │
+╰──────────────────────────────────────────────────────────────────╯
+
+❯ I need to add user authentication to the app
+
+# The agent will analyze the codebase and create tasks...
+
+╭──────────────────────── Tool Result ─────────────────────────────╮
+│ Task TASK-001-add-auth-middleware.md created.                    │
+╰──────────────────────────────────────────────────────────────────╯
+
+❯ /plan
+╭──────────────────────── Mode Switch ─────────────────────────────╮
+│ Exited Planning Mode.                                            │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+**Available tools:** Read-only exploration + `create_task`.
+
+#### Task Mode (`/task`)
+Activated with `/task`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list.
+
+```
+❯ /task
+╭──────────────────────── Mode Switch ─────────────────────────────╮
+│ Entered Task Mode.                                               │
+│ I will help you implement tasks from the task list.              │
+╰──────────────────────────────────────────────────────────────────╯
+
+❯ /implement 1
+
+╭────────────────────────── Running ───────────────────────────────╮
+│ Running TASK-001: Add user authentication                        │
+╰──────────────────────────────────────────────────────────────────╯
+
+# AI implements the task, then marks it done
+```
+
+**Available tools:** Full file system access + task management tools.
+
+**How it works:** Commands inject specialized prompts to guide the AI:
+- `/plan` -- Injects Planning Prompt for task creation focus
+- `/task` -- Injects Task Prompt for task implementation focus
+
+### Task Management
+
+ayder-cli includes a built-in task system for structured development:
+
+1. **Plan** (`/plan`) -- Break down requirements into tasks
+2. **Implement** (`/implement`) -- Work through tasks one by one
+
+The typical workflow:
+
+Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames for readability (e.g., `TASK-001-add-auth-middleware.md`). Legacy `TASK-001.md` filenames are also supported.
+
+```
+❯ /plan
+╭──────────────────────── Mode Switch ─────────────────────────────╮
+│ Entered Planning Mode.                                           │
+╰──────────────────────────────────────────────────────────────────╯
+
 ❯ Create a task to add input validation to the login form
 
 ╭───────────────────────── Tool Call ──────────────────────────────╮
@@ -264,7 +356,12 @@ ayder-cli includes a built-in task system. Ask the model to create tasks, then m
 Proceed? [Y/n] y
 
 ╭──────────────────────── Tool Result ─────────────────────────────╮
-│ Task TASK-001 created.                                           │
+│ Task TASK-001-add-input-validation-to created.                   │
+╰──────────────────────────────────────────────────────────────────╯
+
+❯ /plan
+╭──────────────────────── Mode Switch ─────────────────────────────╮
+│ Exited Implementation Mode.                                      │
 ╰──────────────────────────────────────────────────────────────────╯
 
 ❯ /tasks
@@ -275,18 +372,13 @@ Proceed? [Y/n] y
 │  TASK-001 | Add input validation to login form  | pending         │
 ╰──────────────────────────────────────────────────────────────────╯
 
-❯ /task-edit 1    # opens TASK-001.md in your configured editor
+❯ /task-edit 1    # opens TASK-001-add-input-validation-to.md in your editor
 
-❯ Implement task 1
+❯ /implement 1
 
-╭───────────────────────── Tool Call ──────────────────────────────╮
-│ implement_task({"task_id": 1})                                   │
-╰──────────────────────────────────────────────────────────────────╯
-Proceed? [Y/n] y
+# AI implements TASK-001 and marks it as done
 ...
 ```
-
-Tasks are stored as markdown files in `.ayder/tasks/` within the current working directory.
 
 ### Code Search
 
@@ -358,11 +450,18 @@ You can open any file in your configured editor directly from the chat:
 |---------|-------------|
 | `/help` | Show available commands |
 | `/tools` | List all tools and their descriptions |
+| `/plan` | Toggle Planning Mode (Task Master) for task creation |
+| `/task` | Enter Task Mode for implementing tasks |
 | `/tasks` | List saved tasks from `.ayder/tasks/` |
 | `/task-edit N` | Open task N in your configured editor (e.g. `/task-edit 1`) |
+| `/implement <id/name>` | Run a task by ID, name, or pattern (e.g. `/implement 1`) |
+| `/implement-all` | Implement all undone tasks sequentially without stopping |
 | `/edit <file>` | Open a file in your configured editor (e.g. `/edit src/main.py`) |
-| `/verbose` | Toggle verbose mode (show written file contents after `write_file`) |
+| `/verbose` | Toggle verbose mode (show file contents after `write_file` + LLM request details) |
 | `/clear` | Clear conversation history and reset context |
+| `/compact` | Summarize conversation, save to memory, clear, and reload context |
+| `/summary` | Prompt AI to summarize conversation and save to `.ayder/current_memory.md` |
+| `/load` | Prompt AI to load memory from `.ayder/current_memory.md` |
 | `/undo` | Remove the last user message and assistant response |
 | `exit` | Quit the application |
 
@@ -380,7 +479,7 @@ ayder-cli uses emacs-style keybindings via prompt-toolkit:
 
 ```
 src/ayder_cli/
-  cli.py           -- Command-line interface (argparse, --tui/--file/--stdin flags, piped input)
+  cli.py           -- Command-line interface (argparse, --tui/--file/--stdin/--tasks/--implement/--implement-all flags, piped input)
   client.py        -- ChatSession + Agent classes, run_chat() entry point
   parser.py        -- XML tool call parser (standard + lazy format fallback)
   prompts.py       -- System prompts and prompt templates
@@ -395,8 +494,8 @@ src/ayder_cli/
     registry.py    -- Command registry and dispatch
     files.py       -- /edit command
     tools.py       -- /tools command
-    tasks.py       -- /tasks, /task-edit commands
-    system.py      -- /help, /clear, /undo, /verbose commands
+    tasks.py       -- /tasks, /task-edit, /implement, /implement-all commands
+    system.py      -- /help, /clear, /compact, /summary, /load, /undo, /verbose, /plan commands
   core/            -- Core infrastructure
     config.py      -- Configuration loading with Pydantic validation
     context.py     -- ProjectContext for path sandboxing and security

@@ -15,12 +15,44 @@ def _ensure_tasks_dir(project_ctx: ProjectContext):
     _get_tasks_dir(project_ctx).mkdir(parents=True, exist_ok=True)
 
 
+def _title_to_slug(title: str) -> str:
+    """Convert title to kebab-case slug for filenames.
+
+    Rules:
+    - Lowercase
+    - Replace whitespace and special chars with hyphens
+    - Collapse consecutive hyphens
+    - Strip leading/trailing hyphens
+    - Truncate to 30 chars (at word boundary if possible)
+    - Fall back to 'untitled' if empty after sanitization
+    """
+    slug = title.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    if len(slug) > 30:
+        truncated = slug[:30].rsplit("-", 1)[0]
+        slug = truncated if truncated else slug[:30]
+    return slug or "untitled"
+
+
 def _extract_id(filename):
-    """Extract the numeric ID from a filename like 'TASK-001.md'."""
-    match = re.match(r"^TASK-(\d+)\.md$", filename)
+    """Extract numeric ID from 'TASK-001-some-slug.md' or legacy 'TASK-001.md'."""
+    match = re.match(r"^TASK-(\d+)(?:-.+)?\.md$", filename)
     if match:
         return int(match.group(1))
     return None
+
+
+def _get_task_path_by_id(project_ctx: ProjectContext, task_id: int):
+    """Find a task file by its numeric ID using glob pattern."""
+    tasks_dir = _get_tasks_dir(project_ctx)
+    pattern = f"TASK-{task_id:03d}-*.md"
+    matches = list(tasks_dir.glob(pattern))
+    if matches:
+        return matches[0]
+    # Fallback: check legacy format
+    legacy = tasks_dir / f"TASK-{task_id:03d}.md"
+    return legacy if legacy.exists() else None
 
 
 def _next_id(project_ctx: ProjectContext):
@@ -39,7 +71,8 @@ def create_task(project_ctx: ProjectContext, title: str, description: str = ""):
     _ensure_tasks_dir(project_ctx)
 
     task_id = _next_id(project_ctx)
-    path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}.md"
+    slug = _title_to_slug(title)
+    path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}-{slug}.md"
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     content = f"""# {title}
@@ -129,8 +162,8 @@ def show_task(project_ctx: ProjectContext, task_id: int):
     """Read and return the contents of a task by its numeric ID."""
     _ensure_tasks_dir(project_ctx)
     task_id = int(task_id)
-    path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}.md"
-    if not path.exists():
+    path = _get_task_path_by_id(project_ctx, task_id)
+    if path is None:
         return ToolError(f"Error: Task TASK-{task_id:03d} not found.")
     return ToolSuccess(path.read_text(encoding="utf-8"))
 
@@ -139,9 +172,9 @@ def _update_task_status(project_ctx: ProjectContext, task_id, status):
     """Update the status field of a task."""
     _ensure_tasks_dir(project_ctx)
     task_id = int(task_id)
-    path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}.md"
-    
-    if not path.exists():
+    path = _get_task_path_by_id(project_ctx, task_id)
+
+    if path is None:
         return ToolError(f"Error: Task TASK-{task_id:03d} not found.")
 
     try:
@@ -159,63 +192,3 @@ def _update_task_status(project_ctx: ProjectContext, task_id, status):
         return ToolSuccess("Status updated")
     except Exception as e:
         return ToolError(f"Error updating task status: {str(e)}", "execution")
-
-
-def implement_task(project_ctx: ProjectContext, task_id: int):
-    """Implement a specific task, verify, and set status to done."""
-    _ensure_tasks_dir(project_ctx)
-    task_id = int(task_id)
-    path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}.md"
-
-    if not path.exists():
-        return ToolError(f"Error: Task TASK-{task_id:03d} not found.")
-
-    # Check current status
-    current_status = _parse_status(path)
-    if current_status == "done":
-        return ToolSuccess(f"Task TASK-{task_id:03d} is already completed.")
-    
-    # Get task content
-    task_content = path.read_text(encoding="utf-8")
-    
-    # Update status to done
-    result = _update_task_status(project_ctx, task_id, "done")
-    if result.is_error:
-        return result
-    
-    return ToolSuccess(f"Task TASK-{task_id:03d} has been marked as ready to implement. Here are the details:\n\n{task_content}")
-
-
-def implement_all_tasks(project_ctx: ProjectContext):
-    """Implement all pending tasks one by one."""
-    _ensure_tasks_dir(project_ctx)
-
-    files = sorted(_get_tasks_dir(project_ctx).glob("*.md"))
-    if not files:
-        return ToolSuccess("No tasks found.")
-
-    pending_tasks = []
-    for path in files:
-        task_id = _extract_id(path.name)
-        status = _parse_status(path)
-        if task_id is not None and status != "done":
-            pending_tasks.append((task_id, path))
-
-    if not pending_tasks:
-        return ToolSuccess("No pending tasks to implement.")
-    
-    # Sort by ID
-    pending_tasks.sort(key=lambda t: t[0])
-    
-    results = []
-    for task_id, path in pending_tasks:
-        task_content = path.read_text(encoding="utf-8")
-        
-        results.append(f"=== Implementing TASK-{task_id:03d} ===\n{task_content}\n")
-        
-        # Mark as done
-        _update_task_status(project_ctx, task_id, "done")
-    
-    summary = f"Found {len(pending_tasks)} pending task(s). Processing them one by one:\n\n"
-    summary += "\n".join(results)
-    return ToolSuccess(summary)

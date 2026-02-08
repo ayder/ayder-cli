@@ -99,62 +99,6 @@ class TestExecuteToolCall:
         assert result.category == "validation"
         assert "Error: Unknown tool" in result
 
-    def test_dispatch_create_task(self, tool_registry):
-        """Test dispatch to create_task."""
-        mock_create = MagicMock(return_value="Task created")
-        def create_task(project_ctx, title):
-            return mock_create(project_ctx=project_ctx, title=title)
-        
-        tool_registry.register("create_task", create_task)
-        
-        result = tool_registry.execute("create_task", {"title": "Test Task"})
-        
-        assert result == "Task created"
-        mock_create.assert_called_once()
-        # Verify context injection
-        kwargs = mock_create.call_args[1]
-        assert kwargs['title'] == "Test Task"
-        assert 'project_ctx' in kwargs
-
-    def test_dispatch_show_task(self, tool_registry):
-        """Test dispatch to show_task."""
-        mock_show = MagicMock(return_value="Task details")
-        def show_task(project_ctx, task_id):
-            return mock_show(project_ctx=project_ctx, task_id=task_id)
-            
-        tool_registry.register("show_task", show_task)
-        
-        result = tool_registry.execute("show_task", {"task_id": 1})
-        
-        assert result == "Task details"
-        mock_show.assert_called_once()
-
-    def test_dispatch_implement_task(self, tool_registry):
-        """Test dispatch to implement_task."""
-        mock_imp = MagicMock(return_value="Task implemented")
-        def implement_task(project_ctx, task_id):
-            return mock_imp(project_ctx=project_ctx, task_id=task_id)
-            
-        tool_registry.register("implement_task", implement_task)
-        
-        result = tool_registry.execute("implement_task", {"task_id": 1})
-        
-        assert result == "Task implemented"
-        mock_imp.assert_called_once()
-
-    def test_dispatch_implement_all_tasks(self, tool_registry):
-        """Test dispatch to implement_all_tasks."""
-        mock_imp_all = MagicMock(return_value="All tasks done")
-        def implement_all_tasks(project_ctx):
-            return mock_imp_all(project_ctx=project_ctx)
-            
-        tool_registry.register("implement_all_tasks", implement_all_tasks)
-        
-        result = tool_registry.execute("implement_all_tasks", {})
-        
-        assert result == "All tasks done"
-        mock_imp_all.assert_called_once()
-
 
 class TestNormalizeToolArguments:
     """Tests for normalize_tool_arguments function."""

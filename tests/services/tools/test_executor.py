@@ -172,15 +172,16 @@ class TestToolExecutor:
     ):
         """Test terminal tool in custom calls returns True."""
         mock_registry = Mock()
-        executor = ToolExecutor(mock_registry)
+        # Use custom terminal tools since there are no default terminal tools
+        executor = ToolExecutor(mock_registry, terminal_tools={"test_terminal_tool"})
         session = Mock()
         
-        custom_calls = [{"name": "create_task", "arguments": {"title": "Test"}}]
+        custom_calls = [{"name": "test_terminal_tool", "arguments": {"param": "value"}}]
         
-        mock_registry.normalize_args.return_value = {"title": "Test"}
+        mock_registry.normalize_args.return_value = {"param": "value"}
         mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = "Task created"
-        mock_describe.return_value = "Create task"
+        mock_registry.execute.return_value = "Executed"
+        mock_describe.return_value = "Test terminal"
         mock_confirm.return_value = True
         
         result = executor.execute_custom_calls(custom_calls, session)

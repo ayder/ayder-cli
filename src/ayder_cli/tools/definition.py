@@ -24,7 +24,7 @@ class ToolDefinition:
     permission: str = "r"  # "r", "w", or "x"
     is_terminal: bool = False
     safe_mode_blocked: bool = False
-    exposed_to_llm: bool = True
+
 
     # ---- UI ----
     description_template: Optional[str] = None
@@ -72,6 +72,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             },
         },
         permission="r",
+
         parameter_aliases=(
             ("dir", "directory"),
             ("path", "directory"),
@@ -102,9 +103,66 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["file_path"],
         },
         permission="r",
+
         parameter_aliases=_FILE_PATH_ALIASES,
         path_parameters=("file_path",),
     ),
+    # ---- File System (write) ----
+    # write_file
+    ToolDefinition(
+        name="write_file",
+        description="Write content to a file (overwrites entire file).",
+        description_template="File {file_path} will be written",
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "The path to the file to write",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The content to write",
+                },
+            },
+            "required": ["file_path", "content"],
+        },
+        permission="w",
+
+        safe_mode_blocked=True,
+        parameter_aliases=_FILE_PATH_ALIASES,
+        path_parameters=("file_path",),
+    ),
+    # replace_string
+    ToolDefinition(
+        name="replace_string",
+        description="Replace a specific string in a file with a new string.",
+        description_template="File {file_path} will be modified",
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "The path to the file to modify",
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "The exact string to replace",
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "The new string to insert",
+                },
+            },
+            "required": ["file_path", "old_string", "new_string"],
+        },
+        permission="w",
+
+        safe_mode_blocked=True,
+        parameter_aliases=_FILE_PATH_ALIASES,
+        path_parameters=("file_path",),
+    ),
+    # ---- Search ----
     ToolDefinition(
         name="search_codebase",
         description=(
@@ -152,8 +210,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["pattern"],
         },
         permission="r",
+
         path_parameters=("directory",),
     ),
+    # get_project_structure
     ToolDefinition(
         name="get_project_structure",
         description="Generate a tree-style project structure summary.",
@@ -163,60 +223,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "properties": {},
         },
         permission="r",
-        exposed_to_llm=False,  # not in tools_schema sent to LLM
-    ),
-    # ---- File System (write) ----
-    ToolDefinition(
-        name="write_file",
-        description="Write content to a file (overwrites entire file).",
-        description_template="File {file_path} will be written",
-        parameters={
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "The path to the file to write",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The content to write",
-                },
-            },
-            "required": ["file_path", "content"],
-        },
-        permission="w",
-        safe_mode_blocked=True,
-        parameter_aliases=_FILE_PATH_ALIASES,
-        path_parameters=("file_path",),
-    ),
-    ToolDefinition(
-        name="replace_string",
-        description="Replace a specific string in a file with a new string.",
-        description_template="File {file_path} will be modified",
-        parameters={
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "The path to the file to modify",
-                },
-                "old_string": {
-                    "type": "string",
-                    "description": "The exact string to replace",
-                },
-                "new_string": {
-                    "type": "string",
-                    "description": "The new string to insert",
-                },
-            },
-            "required": ["file_path", "old_string", "new_string"],
-        },
-        permission="w",
-        safe_mode_blocked=True,
-        parameter_aliases=_FILE_PATH_ALIASES,
-        path_parameters=("file_path",),
+
     ),
     # ---- Shell (execute) ----
+    # run_shell_command
     ToolDefinition(
         name="run_shell_command",
         description="Execute a shell command.",
@@ -234,102 +244,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["command"],
         },
         permission="x",
+
         safe_mode_blocked=True,
     ),
-    # ---- Task Management ----
-    ToolDefinition(
-        name="create_task",
-        description=(
-            "Create a task saved as a markdown file. Use this when the user "
-            "asks to create, add, or plan a task."
-        ),
-        description_template="Task TASK-XXX.md will be created in .ayder/tasks/",
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "Short title for the task",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Detailed description of what the task involves",
-                },
-            },
-            "required": ["title"],
-        },
-        permission="w",
-        is_terminal=True,
-    ),
-    ToolDefinition(
-        name="show_task",
-        description=(
-            "Show the details of a task by its ID number. Use this when the "
-            "user asks to see or show a specific task."
-        ),
-        description_template="Task TASK-{task_id} will be displayed",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "The task number (e.g., 1 for TASK-001)",
-                },
-            },
-            "required": ["task_id"],
-        },
-        permission="r",
-        is_terminal=True,
-    ),
-    ToolDefinition(
-        name="list_tasks",
-        description="List all tasks in .ayder/tasks/ in a table format.",
-        description_template="Tasks will be listed",
-        parameters={
-            "type": "object",
-            "properties": {},
-        },
-        permission="r",
-        is_terminal=True,
-        exposed_to_llm=False,  # not in tools_schema sent to LLM
-    ),
-    ToolDefinition(
-        name="implement_task",
-        description=(
-            "Implement a specific task, verify it, and set the status to done. "
-            "Use this when the user asks to implement a specific task."
-        ),
-        description_template="Task TASK-{task_id} will be implemented",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": (
-                        "The task number to implement (e.g., 1 for TASK-001)"
-                    ),
-                },
-            },
-            "required": ["task_id"],
-        },
-        permission="w",
-        is_terminal=True,
-    ),
-    ToolDefinition(
-        name="implement_all_tasks",
-        description=(
-            "Implement all pending tasks one by one, verify them, and set "
-            "their status to done. Use this when the user asks to implement "
-            "all tasks."
-        ),
-        description_template="All pending tasks will be implemented",
-        parameters={
-            "type": "object",
-            "properties": {},
-        },
-        permission="w",
-        is_terminal=True,
-    ),
+
 )
 
 # Lookup by name

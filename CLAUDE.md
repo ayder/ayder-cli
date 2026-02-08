@@ -1,6 +1,6 @@
 ## Project Overview
 
-ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version: **0.7.3**.
+ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version is defined in `pyproject.toml` (see `version` field).
 
 ## Virtual Environment Setup
 
@@ -68,7 +68,7 @@ The project uses **pytest** for testing with performance-enhancing plugins. All 
 PYTHONPATH=src python3 -c "from ayder_cli.tools import tools_schema; print(len(tools_schema))"
 ```
 
-**Performance Note**: Sequential execution is fastest for the current test suite (38 tests in ~0.25s). Use `-n auto` only when the suite grows to 100+ tests or includes slow integration tests.
+**Performance Note**: Sequential execution is fastest for the current test suite (~564 tests in ~0.8s). Use `-n auto` only when the suite grows significantly or includes slow integration tests.
 
 ### System Utilities
 
@@ -81,7 +81,7 @@ Example:
 /opt/homebrew/bin/uu-timeout 5 .venv/bin/ayder "test command"
 ```
 
-**Test Structure** (464+ tests, 96% coverage):
+**Test Structure** (575+ tests, 96% coverage):
 - `test_client.py` - ChatSession, Agent classes, and main chat loop
 - `test_cli_file_stdin.py` - CLI file/stdin handling, piped input auto-detection, command mode
 - `test_cli_tui.py` - CLI TUI flag integration
@@ -110,19 +110,21 @@ All tests use pytest fixtures and mocking (no live LLM calls required).
 
 The application is organized into several modules:
 
-- **`src/ayder_cli/client.py`** — Main chat loop, `ChatSession` class, and `Agent` class. Contains the `run_chat()` entry point which supports dependency injection via optional `openai_client`, `config`, and `project_root` parameters. Also contains `call_llm_async()` for async LLM calls (used by the TUI). The `ChatSession` class manages conversation state, history, and user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `Agent` class handles the agentic loop (up to 5 consecutive tool calls per user message), tool validation, diff preview for file-modifying tools, and both standard OpenAI tool calls and custom XML-parsed calls. Defines `TERMINAL_TOOLS` set for tools that end the agentic loop. Slash commands are delegated to `handle_command()` from `commands.py`.
+- **`src/ayder_cli/client.py`** — Main chat loop, `ChatSession` class, and `Agent` class. Contains `call_llm_async()` for async LLM calls (used by the TUI). The `ChatSession` class manages conversation state, history, user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `get_input()` method displays a cyan `❯` prompt. The `Agent` class handles the agentic loop (up to 10 consecutive tool calls per user message, configurable with `-I`). Supports both standard OpenAI tool calls and custom XML-parsed calls. Slash commands are delegated to `handle_command()` from `commands/`.
 
-- **`src/ayder_cli/cli.py`** — Command-line interface with argparse. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`), direct command execution (non-interactive mode), and auto-detection of piped input. The `main()` function routes execution: TUI mode (`--tui`), command mode (direct command passed as positional arg), or interactive chat mode. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag. The `read_input()` function reads from files or stdin with UTF-8 encoding. The `run_command()` function executes a single command via the Agent and returns appropriate exit codes (0=success, 1=error, 2=no response).
+- **`src/ayder_cli/cli.py`** — Command-line interface with argparse. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`), direct command execution (non-interactive mode), and auto-detection of piped input. The `_build_services()` composition root returns a 6-tuple `(config, llm_provider, tool_executor, project_ctx, enhanced_system, enhanced_planning)` — both prompts are enhanced with the project structure macro. `run_interactive()` and `run_command()` pass both prompts to `ChatSession`. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag.
 
-- **`src/ayder_cli/prompts.py`** — System prompts and prompt templates. Contains the `SYSTEM_PROMPT` constant that defines the AI agent's behavior and operational principles (extracted from `client.py` for better separation of concerns).
+- **`src/ayder_cli/prompts.py`** — System prompts and prompt templates. Contains `SYSTEM_PROMPT` and `PLANNING_PROMPT` (for task creation). Both are enhanced with project structure at startup via `_build_services()`.
 
-- **`src/ayder_cli/commands.py`** — Command registry system for slash commands. Uses a decorator-based registry pattern (`@register_command("/name")`) for extensibility. Contains `COMMANDS` dict that maps command names to handler functions. The `handle_command()` function dispatches to registered handlers with a session dict containing `messages`, `system_prompt`, and `state`. All 8 commands are registered: `/help`, `/tools`, `/tasks`, `/task-edit`, `/edit`, `/verbose`, `/clear`, `/undo`.
-
-- **`src/ayder_cli/config.py`** — Configuration loading from `~/.ayder/config.toml` with Pydantic validation. The `load_config()` function returns a `Config` model with validated settings for LLM, editor preferences, and UI options. Automatically creates default config on first run.
+- **`src/ayder_cli/commands/`** — Command registry system for slash commands. Uses a class-based registry pattern (`@register_command` decorator on `BaseCommand` subclasses). The `handle_command()` function dispatches to registered handlers with a `SessionContext` dataclass. 14 commands registered: `/help`, `/tools`, `/tasks`, `/task-edit`, `/implement`, `/implement-all`, `/edit`, `/verbose`, `/clear`, `/compact`, `/summary`, `/load`, `/undo`, `/plan`.
 
 - **`src/ayder_cli/parser.py`** — Enhanced XML tool call parser. Handles standard format (`<function=name><parameter=key>value</parameter></function>`), lazy format for single-param tools (`<function=name>value</function>` with parameter name inference via `_infer_parameter_name()`), and returns `{"error": "message"}` objects for malformed input.
 
-- **`src/ayder_cli/core/context.py`** — Path validation and sandboxing via `ProjectContext` class. Prevents path traversal attacks (`../`), validates absolute paths stay within project root, handles tilde expansion (`~` paths), and converts between relative/absolute paths. Injected via dependency injection at startup.
+- **`src/ayder_cli/core/config.py`** — Configuration loading from `~/.ayder/config.toml` with Pydantic validation. The `load_config()` function returns a `Config` model with validated settings for LLM, editor preferences, and UI options. Automatically creates default config on first run.
+
+- **`src/ayder_cli/core/context.py`** — `ProjectContext` class for path validation and sandboxing. Prevents path traversal attacks (`../`), validates absolute paths stay within project root, handles tilde expansion. Also defines `SessionContext` dataclass (holds `config`, `project`, `messages`, `state`, `system_prompt`) used by commands.
+
+- **`src/ayder_cli/core/result.py`** — Shared result types: `ToolSuccess(str)` and `ToolError(str)` — str subclasses for zero-breakage. All tool functions in `impl.py` and `tasks.py` return these types. `ToolError` has a `.category` property (`"security"`, `"validation"`, `"execution"`, `"general"`). Re-exported from `tools/__init__.py`.
 
 - **`src/ayder_cli/banner.py`** — Welcome banner with version detection (via `importlib.metadata`), gothic ASCII art, model/path display, and random tips. Exposes `__version__` and `print_welcome_banner(model, cwd)`.
 
@@ -133,20 +135,19 @@ The application is organized into several modules:
 - **`src/ayder_cli/tui_helpers.py`** — Helper functions for TUI operations. Contains `is_tool_blocked_in_safe_mode(tool_name, safe_mode)` for safe mode checks.
 
 - **`src/ayder_cli/tools/`** — **Core tools package** with modular architecture:
+  - **`definition.py`** — `ToolDefinition` frozen dataclass with tool metadata. `TOOL_DEFINITIONS` list and `TOOL_DEFINITIONS_BY_NAME` dict for lookup.
   - **`impl.py`** — Actual tool implementations (`list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command`, `search_codebase`, `get_project_structure`)
-  - **`schemas.py`** — OpenAI-format JSON schemas for all available tools (10 tools total)
+  - **`schemas.py`** — OpenAI-format JSON schemas filtered by default mode (`tools_schema = [td.to_openai_schema() for td in TOOL_DEFINITIONS if "default" in td.modes]`)
   - **`registry.py`** — Tool registry and execution system:
     - `ToolRegistry` class with middleware support, pre/post-execute callbacks, and execution timing
-    - `ToolExecutionStatus` enum (`STARTED`, `SUCCESS`, `ERROR`)
-    - `ToolExecutionResult` dataclass (tool_name, arguments, status, result, error, duration_ms)
+    - `get_schemas()` — Returns all tool schemas
+    - `validate_tool_call()` — Validates against `TOOL_DEFINITIONS_BY_NAME` (all tools, not mode-filtered)
     - `create_default_registry()` factory function for fully configured registry
     - `normalize_tool_arguments()` for parameter aliasing, path resolution via ProjectContext, and type coercion
-    - `validate_tool_call()` for schema validation
-    - `PARAMETER_ALIASES` and `PATH_PARAMETERS` constants
   - **`utils.py`** — Utility functions for tool operations, including `prepare_new_content()` for preparing file content before write/replace operations (supports both JSON string and dict arguments)
   - **`__init__.py`** — Complete public API exports (all tools, schemas, registry, and utilities)
 
-- **`src/ayder_cli/tasks.py`** — Task management system for creating, listing, showing, and implementing tasks stored in `.ayder/tasks/`
+- **`src/ayder_cli/tasks.py`** — Task management system for creating, listing, showing, and implementing tasks stored in `.ayder/tasks/`. Uses slug-based filenames (`TASK-001-add-auth.md`) with backwards-compatible support for legacy `TASK-001.md` format. Includes `_title_to_slug()` helper and `_get_task_path_by_id()` glob-based lookup.
 
 - **`src/ayder_cli/ui.py`** — Terminal UI utilities for formatted output, boxes, and user prompts using Rich
 
@@ -161,23 +162,21 @@ The `client.py` module implements two core classes extracted from the original m
 **ChatSession** — Manages conversation state, history, and user input:
 ```python
 class ChatSession:
-    def __init__(self, config, system_prompt)
-    def start()            # Initialize prompt session, print banner
+    def __init__(self, config, system_prompt, permissions=None, iterations=10)
+    def start()                        # Initialize prompt session, print banner
     def add_message(role, content, **kwargs)
-    def get_input() -> str | None  # prompt-toolkit input, returns None for exit
+    def append_raw(message)            # Append pre-formed message (e.g., tool_calls)
+    def get_input() -> str | None      # Cyan "❯" prompt
     def get_messages() -> list
     def clear_messages(keep_system=True)
-    def render_history()   # Debug display
+    def render_history()               # Debug display
 ```
 
 **Agent** — Handles LLM API interaction and the agentic tool execution loop:
 ```python
 class Agent:
-    def __init__(self, openai_client, config, session: ChatSession)
-    def chat(user_input)           # Main agentic loop (up to 5 tool calls)
-    def _execute_tool_loop(tool_calls) -> bool  # Standard OpenAI tool calls
-    def _handle_tool_call(tool_call) -> dict | None  # Single tool: validate, confirm, execute
-    def _handle_custom_calls(custom_calls) -> bool   # XML-parsed tool calls
+    def __init__(self, llm_provider: LLMProvider, tools: ToolExecutor, session: ChatSession)
+    def chat(user_input) -> str | None  # Main agentic loop
 ```
 
 ### Tools Package Details
@@ -206,7 +205,7 @@ result = registry.execute("read_file", {"file_path": "test.py"})
 - Middleware support: `registry.add_middleware(func)` — Pre-execution checks (e.g., safe mode blocking via `PermissionError`)
 - Pre-execute callbacks: `registry.add_pre_execute_callback(func)` — Called before tool runs
 - Post-execute callbacks: `registry.add_post_execute_callback(func)` — Receives `ToolExecutionResult` with timing
-- Schema access: `registry.get_schemas()` — Returns OpenAI-format tool schemas
+- Schema access: `registry.get_schemas()` — Returns all tool schemas
 
 **Parameter Normalization:**
 ```python
@@ -235,24 +234,33 @@ relative = ctx.to_relative(absolute_path)     # Convert back to relative string
 
 ### Command Registry Pattern
 
-The `commands.py` module uses a registry pattern for slash command handling:
+The `commands/` package uses a class-based registry pattern for slash command handling:
 
 **Command Registration:**
-- `COMMANDS` — Dictionary mapping command names (e.g., `/help`) to handler functions
-- `register_command(name)` — Decorator for registering command handlers
-- Each command handler has signature: `def cmd_name(args: str, session: dict) -> bool`
+- `CommandRegistry` — Singleton registry mapping command names to `BaseCommand` instances
+- `@register_command` — Class decorator that instantiates and registers a `BaseCommand` subclass
+- Each command subclass implements `name`, `description` (properties) and `execute(args, session) -> bool`
 
 **Session Object:**
-- Currently a dict containing `messages`, `system_prompt`, and `state`
-- `handle_command()` bridges the ChatSession attributes into this dict format
+- `SessionContext` dataclass from `core/context.py` containing `config`, `project`, `messages`, `state`, `system_prompt`
+- The enhanced prompts (with project structure macro) are passed through `SessionContext` so commands like `/plan` can use them when swapping modes
+- `handle_command()` dispatches to the correct command handler
 
 **Adding New Commands:**
 ```python
-@register_command("/newcmd")
-def cmd_newcmd(args, session):
-    """Command description."""
-    # Implementation
-    return True
+@register_command
+class MyCommand(BaseCommand):
+    @property
+    def name(self) -> str:
+        return "/mycommand"
+
+    @property
+    def description(self) -> str:
+        return "Does something useful"
+
+    def execute(self, args: str, session: SessionContext) -> bool:
+        # Implementation
+        return True
 ```
 
 ### Textual TUI
@@ -277,11 +285,13 @@ The TUI (`tui.py`) provides an alternative dashboard interface built with Textua
 
 ## Key Design Details
 
-- **Dependency Injection**: The `run_chat()` function accepts optional `openai_client`, `config`, and `project_root` parameters, enabling testing with mocks and custom configurations.
+- **Dependency Injection**: `_build_services()` is the composition root, creating all dependencies. `ChatSession` and `Agent` accept injected providers. Testing uses mocks throughout — no live LLM calls required.
 
 - **CLI with Piped Input Auto-Detection**: The CLI automatically detects piped input (e.g., `echo "text" | ayder`) by checking `sys.stdin.isatty()`. When stdin is piped and no explicit mode flags are set (`--file`, `--stdin`, `--tui`), the CLI auto-enables stdin mode, matching behavior of standard Unix tools. Explicit `--stdin` flag still supported for backwards compatibility.
 
-- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers).
+- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks), `definition.py` (ToolDefinition dataclass with `modes` field), and `utils.py` (helpers).
+
+- **Planning Mode**: Activated via `/plan` command. Injects `PLANNING_PROMPT` as a user message to guide the LLM to act as a "Task Master" for task creation.
 
 - **Tool Registry with Middleware**: `ToolRegistry` class supports middleware for pre-execution checks (safe mode), pre/post-execute callbacks for UI integration (TUI tool call display), and execution timing via `ToolExecutionResult`.
 

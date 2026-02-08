@@ -2,6 +2,9 @@
 
 import pytest
 from ayder_cli.tools import schemas
+from ayder_cli.tools.definition import ToolDefinition, TOOL_DEFINITIONS
+from ayder_cli.tools.registry import ToolRegistry
+from ayder_cli.core.context import ProjectContext
 
 
 class TestToolSchemas:
@@ -30,24 +33,6 @@ class TestToolSchemas:
         names = [schema["function"]["name"] for schema in schemas.tools_schema]
         assert len(names) == len(set(names))
 
-    def test_expected_tools_present(self):
-        """Test that expected tools are present in schemas."""
-        expected_tools = [
-            "list_files",
-            "read_file",
-            "write_file",
-            "replace_string",
-            "run_shell_command",
-            "search_codebase",
-            "create_task",
-            "show_task",
-            "implement_task",
-            "implement_all_tasks",
-        ]
-        names = [schema["function"]["name"] for schema in schemas.tools_schema]
-        for tool in expected_tools:
-            assert tool in names
-
     def test_parameter_properties_valid(self):
         """Test that parameter properties are valid."""
         for schema in schemas.tools_schema:
@@ -56,3 +41,25 @@ class TestToolSchemas:
             assert params["type"] == "object"
             assert "properties" in params
             assert isinstance(params["properties"], dict)
+
+
+class TestToolDefinitions:
+    """Test tool definition properties."""
+
+    def test_all_tools_in_schema(self):
+        """Verify tools_schema contains all defined tools."""
+        expected_tools = {
+            "list_files", "read_file", "write_file", "replace_string",
+            "run_shell_command", "search_codebase", "get_project_structure",
+        }
+        names = {s["function"]["name"] for s in schemas.tools_schema}
+        assert names == expected_tools
+
+    def test_no_exposed_to_llm_field(self):
+        """Verify exposed_to_llm attribute no longer exists on ToolDefinition."""
+        assert not hasattr(ToolDefinition, "exposed_to_llm")
+        # Also check field names in the dataclass
+        field_names = {f.name for f in ToolDefinition.__dataclass_fields__.values()}
+        assert "exposed_to_llm" not in field_names
+
+

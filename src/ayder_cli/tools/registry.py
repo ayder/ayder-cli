@@ -6,15 +6,17 @@ Provides a registry pattern for tool execution, replacing the if/elif dispatch b
 
 import json
 import inspect
+import logging
 from pathlib import Path
 from typing import Callable, Dict, Tuple, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-from ayder_cli.tools.schemas import tools_schema
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 # Type alias for middleware functions
@@ -103,19 +105,18 @@ def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
     """
     Validate tool call against schema.
     Returns: (is_valid, error_message)
-    """
-    # Find tool schema
-    tool_schema = None
-    for tool in tools_schema:
-        if tool.get("function", {}).get("name") == tool_name:
-            tool_schema = tool["function"]
-            break
 
-    if not tool_schema:
+    Searches TOOL_DEFINITIONS_BY_NAME (all tools, regardless of mode)
+    so that any registered tool can be validated.
+    """
+    from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+    td = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    if not td:
         return False, f"Unknown tool: {tool_name}"
 
     # Check required parameters
-    params = tool_schema.get("parameters", {})
+    params = td.parameters
     required = params.get("required", [])
     missing = [p for p in required if p not in arguments or arguments[p] is None]
 
@@ -182,17 +183,17 @@ def _execute_tool_with_hooks(
     for callback in pre_execute_callbacks:
         try:
             callback(tool_name, args)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Pre-execute callback failed for {tool_name}: {e}")
 
     # Run middlewares (pre-execution checks)
     for middleware in middlewares:
         try:
             middleware(tool_name, args)
-        except PermissionError as e:
+        except PermissionError:
             raise
         except Exception as e:
-            pass
+            logger.warning(f"Middleware failed for {tool_name}: {e}")
 
     # Inject project_ctx if the tool function expects it
     sig = inspect.signature(tool_func)
@@ -281,7 +282,8 @@ class ToolRegistry:
             self._post_execute_callbacks.remove(callback)
     
     def get_schemas(self) -> List[Dict[str, Any]]:
-        return tools_schema
+        """Return all tool schemas."""
+        return [td.to_openai_schema() for td in TOOL_DEFINITIONS]
 
     def _get_tool_func(self, name: str) -> Optional[Callable]:
         return self._registry.get(name)
@@ -322,8 +324,6 @@ def create_default_registry(project_ctx: ProjectContext) -> ToolRegistry:
         get_project_structure,
         search_codebase,
     )
-    from ayder_cli.tasks import create_task, show_task, implement_task, implement_all_tasks, list_tasks
-
     registry = ToolRegistry(project_ctx)
 
     # Register file system tools
@@ -336,12 +336,5 @@ def create_default_registry(project_ctx: ProjectContext) -> ToolRegistry:
     # Register code navigation tools
     registry.register("get_project_structure", get_project_structure)
     registry.register("search_codebase", search_codebase)
-
-    # Register task management tools
-    registry.register("create_task", create_task)
-    registry.register("show_task", show_task)
-    registry.register("implement_task", implement_task)
-    registry.register("implement_all_tasks", implement_all_tasks)
-    registry.register("list_tasks", list_tasks)
 
     return registry
