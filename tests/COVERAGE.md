@@ -2,12 +2,12 @@
 
 <div align="center">
 
-![Coverage](https://img.shields.io/badge/coverage-79%25-yellow)
-![Tests](https://img.shields.io/badge/tests-523-blue)
+![Coverage](https://img.shields.io/badge/coverage-84%25-green)
+![Tests](https://img.shields.io/badge/tests-540-blue)
 ![Python](https://img.shields.io/badge/python-3.12%2B-yellow)
 ![Status](https://img.shields.io/badge/status-passing-success)
 
-**ayder-cli v0.4.1** · Generated on 2026-02-07
+**ayder-cli v0.81.7** · Generated on 2026-02-09
 
 </div>
 
@@ -21,7 +21,7 @@
 <tr><td><b>Coverage Tool</b></td><td><code>pytest-cov 7.0.0</code></td></tr>
 <tr><td><b>Hardware</b></td><td>Apple M4 Max · 36 GB</td></tr>
 <tr><td><b>OS</b></td><td>macOS (Darwin)</td></tr>
-<tr><td><b>Version</b></td><td>ayder-cli 0.4.1</td></tr>
+<tr><td><b>Version</b></td><td>ayder-cli 0.81.7</td></tr>
 </table>
 
 ---
@@ -29,7 +29,7 @@
 ## 📈 Coverage Summary
 
 ```
-Overall Coverage: 79% ██████████████████████████████░░░░░░░░
+Overall Coverage: 84% ████████████████████████████████░░░░░░
 ```
 
 | Metric | Value |
@@ -37,9 +37,9 @@ Overall Coverage: 79% ███████████████████�
 | **Total Statements** | 1,876 |
 | **Missing** | 396 |
 | **Covered** | 1,480 |
-| **Coverage** | **~80%** 🟡 |
-| **Total Tests** | **523** |
-| **Passing** | 497 |
+| **Coverage** | **~84%** 🟢 |
+| **Total Tests** | **540** |
+| **Passing** | 540 |
 | **Skipped** | 5 |
 | **Test Files** | 28 |
 
@@ -72,8 +72,8 @@ Overall Coverage: 79% ███████████████████�
 | `core/config.py` | 52 | 3 | **94%** | 🟢 |
 | `tools/utils.py` | 28 | 2 | **93%** | 🟢 |
 | `console.py` | 11 | 1 | **91%** | 🟢 |
-| `commands/system.py` | 53 | 4 | **92%** | 🟢 |
-| `commands/tasks.py` | 53 | 8 | **85%** | 🟢 |
+| `commands/system.py` | 154 | 25 | **84%** | 🟢 |
+| `commands/tasks.py` | 136 | 1 | **99%** | 🟢 |
 
 ### 🟡 Good Coverage (80-94%)
 
@@ -86,7 +86,7 @@ Overall Coverage: 79% ███████████████████�
 
 | Module | Statements | Missed | Coverage | Status |
 |--------|-----------|--------|----------|--------|
-| `cli.py` | 120 | 1 | **99%** | 🟢 |
+| `cli.py` | 210 | 2 | **99%** | 🟢 |
 | `__init__.py` | 5 | 2 | **60%** | 🟠 |
 | `commands/base.py` | 15 | 3 | **80%** | 🟡 |
 
@@ -94,7 +94,8 @@ Overall Coverage: 79% ███████████████████�
 
 | Module | Statements | Before | After | Change |
 |--------|-----------|--------|-------|--------|
-| `cli.py` | 120 | **75%** | **99%** | +24% 📈 |
+| `cli.py` | 210 | **48%** | **99%** | +51% 📈 |
+| `commands/tasks.py` | 136 | **63%** | **99%** | +36% 📈 |
 
 ### ⚪ Excluded from Coverage Goals
 
@@ -158,14 +159,16 @@ tests/
 |----------|-----------|-------------|
 | **File System Tools** | 80+ | `list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command` |
 | **Configuration** | 30+ | Config loading, defaults, merging, validation |
-| **Task Management** | 50+ | Task creation, listing, implementation, status updates |
+| **Task Management** | 70+ | Task creation, listing, implementation, `/implement`, `/implement-all` |
+| **Memory Management** | 15+ | `/summary`, `/load`, `/compact` commands |
 | **UI Components** | 90+ | Box drawing, message printing, tool descriptions, diff preview |
-| **Commands** | 30+ | Slash commands (`/help`, `/tools`, `/tasks`, `/edit`, etc.) |
+| **Commands** | 50+ | Slash commands (`/help`, `/tools`, `/tasks`, `/edit`, `/implement`, etc.) |
 | **Client/Integration** | 60+ | Chat loop, tool execution, OpenAI client mocking |
 | **Tool Registry** | 50+ | Tool registration, validation, execution, normalization |
 | **Parser** | 35+ | Message parsing, custom tool calls, parameter inference |
 | **LLM Service** | 10+ | LLM provider, OpenAI client integration |
 | **TUI Helpers** | 8+ | Safe mode tool blocking |
+| **CLI Options** | 20+ | `--tasks`, `--implement`, `--implement-all` flags |
 
 ---
 
@@ -277,13 +280,13 @@ tests/
 
 | Goal | Target | Achieved | Status |
 |------|--------|----------|--------|
-| Overall Coverage | 85%+ | **79%** | 🟡 In Progress |
+| Overall Coverage | 85%+ | **84%** | 🟡 In Progress |
 | Core Modules | 95%+ | **95-100%** | ✅ Achieved |
 | UI Components | 90%+ | **98%** | ✅ Exceeded |
 | Tool Registry | 90%+ | **80%** | 🟡 In Progress |
 | LLM Service | 90%+ | **95%** | ✅ Exceeded |
-| Commands | 90%+ | **85-100%** | ✅ Achieved |
-| Test Count | 450+ | **497** | ✅ Exceeded |
+| Commands | 90%+ | **84-100%** | ✅ Achieved |
+| Test Count | 450+ | **540** | ✅ Exceeded |
 
 ---
 
@@ -301,6 +304,16 @@ tests/
 
 **Total new tests added: 64**  
 **Previous total: 433 → New total: 497**
+
+### Phase 8: Task Commands & CLI Improvements (2026-02-09)
+
+| Target | Module | Before | After | Tests Added |
+|--------|--------|--------|-------|-------------|
+| Target 1 | `cli.py` | **48%** | **99%** | 24 |
+| Target 2 | `commands/tasks.py` | **63%** | **99%** | 19 |
+
+**Total new tests added: 43**  
+**Previous total: 497 → New total: 540**
 
 ### Previous Phases (TASK-014)
 
@@ -352,6 +365,6 @@ pytest tests/ --cov=ayder_cli.services.llm --cov-report=term-missing
 
 **Made with ❤️ using AI-assisted development**
 
-*Report generated by ayder-cli test suite v0.4.1*
+*Report generated by ayder-cli test suite v0.81.7*
 
 </div>
