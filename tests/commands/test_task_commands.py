@@ -7,7 +7,8 @@ from pathlib import Path
 import tempfile
 
 from ayder_cli.commands.tasks import (
-    TasksCommand, TaskEditCommand, TaskRunCommand, ImplementAllCommand
+    TasksCommand, TaskEditCommand, TaskRunCommand, ImplementAllCommand,
+    ArchiveCompletedTasksCommand,
 )
 from ayder_cli.core.config import Config
 from ayder_cli.core.context import ProjectContext, SessionContext
@@ -448,3 +449,168 @@ class TestImplementAllCommand:
             call_text = mock_draw_box.call_args[0][0]
             assert "Found 2 pending tasks" in call_text
             assert len(session.messages) == 1
+
+
+class TestArchiveCompletedTasksCommand:
+    """Test /archive-completed-tasks command."""
+
+    def test_command_name(self):
+        cmd = ArchiveCompletedTasksCommand()
+        assert cmd.name == "/archive-completed-tasks"
+
+    def test_command_description(self):
+        cmd = ArchiveCompletedTasksCommand()
+        assert "completed" in cmd.description.lower() or "done" in cmd.description.lower()
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_no_tasks_dir(self, mock_get_dir, mock_draw_box):
+        """Test when tasks directory doesn't exist."""
+        mock_dir = Mock(exists=lambda: False)
+        mock_get_dir.return_value = mock_dir
+
+        cmd = ArchiveCompletedTasksCommand()
+        session = _create_session()
+
+        result = cmd.execute("", session)
+
+        assert result is True
+        mock_draw_box.assert_called_once()
+        assert "No tasks directory" in mock_draw_box.call_args[0][0]
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_no_completed_tasks(self, mock_get_dir, mock_draw_box):
+        """Test when no tasks have done status."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_dir = Path(tmpdir) / ".ayder" / "tasks"
+            tasks_dir.mkdir(parents=True)
+            task = tasks_dir / "TASK-001-test.md"
+            task.write_text("# Test\n\n- **Status:** pending\n")
+
+            mock_get_dir.return_value = tasks_dir
+
+            cmd = ArchiveCompletedTasksCommand()
+            session = _create_session()
+
+            result = cmd.execute("", session)
+
+            assert result is True
+            assert "No completed tasks" in mock_draw_box.call_args[0][0]
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_archives_done_task(self, mock_get_dir, mock_draw_box):
+        """Test that done tasks are moved to task_archive."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_dir = Path(tmpdir) / ".ayder" / "tasks"
+            tasks_dir.mkdir(parents=True)
+            task = tasks_dir / "TASK-001-done-task.md"
+            task.write_text("# Done Task\n\n- **Status:** done\n")
+
+            mock_get_dir.return_value = tasks_dir
+
+            cmd = ArchiveCompletedTasksCommand()
+            session = _create_session()
+
+            result = cmd.execute("", session)
+
+            assert result is True
+            # Original file should be gone
+            assert not task.exists()
+            # Archive should contain the file
+            archive_dir = Path(tmpdir) / ".ayder" / "task_archive"
+            assert (archive_dir / "TASK-001-done-task.md").exists()
+            assert "Archived 1" in mock_draw_box.call_args[0][0]
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_archives_multiple_done_tasks(self, mock_get_dir, mock_draw_box):
+        """Test archiving multiple completed tasks."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_dir = Path(tmpdir) / ".ayder" / "tasks"
+            tasks_dir.mkdir(parents=True)
+            t1 = tasks_dir / "TASK-001-first.md"
+            t1.write_text("# First\n\n- **Status:** done\n")
+            t2 = tasks_dir / "TASK-002-second.md"
+            t2.write_text("# Second\n\n- **Status:** done\n")
+            t3 = tasks_dir / "TASK-003-pending.md"
+            t3.write_text("# Pending\n\n- **Status:** pending\n")
+
+            mock_get_dir.return_value = tasks_dir
+
+            cmd = ArchiveCompletedTasksCommand()
+            session = _create_session()
+
+            result = cmd.execute("", session)
+
+            assert result is True
+            # Only done tasks moved
+            assert not t1.exists()
+            assert not t2.exists()
+            assert t3.exists()  # pending stays
+            archive_dir = Path(tmpdir) / ".ayder" / "task_archive"
+            assert (archive_dir / "TASK-001-first.md").exists()
+            assert (archive_dir / "TASK-002-second.md").exists()
+            assert "Archived 2" in mock_draw_box.call_args[0][0]
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_creates_archive_directory(self, mock_get_dir, mock_draw_box):
+        """Test that archive directory is created if missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_dir = Path(tmpdir) / ".ayder" / "tasks"
+            tasks_dir.mkdir(parents=True)
+            task = tasks_dir / "TASK-001-test.md"
+            task.write_text("# Test\n\n- **Status:** done\n")
+
+            archive_dir = Path(tmpdir) / ".ayder" / "task_archive"
+            assert not archive_dir.exists()
+
+            mock_get_dir.return_value = tasks_dir
+
+            cmd = ArchiveCompletedTasksCommand()
+            session = _create_session()
+            cmd.execute("", session)
+
+            assert archive_dir.exists()
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_case_insensitive_status_check(self, mock_get_dir, mock_draw_box):
+        """Test that status check is case-insensitive."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_dir = Path(tmpdir) / ".ayder" / "tasks"
+            tasks_dir.mkdir(parents=True)
+            task = tasks_dir / "TASK-001-test.md"
+            task.write_text("# Test\n\n- **Status:** Done\n")
+
+            mock_get_dir.return_value = tasks_dir
+
+            cmd = ArchiveCompletedTasksCommand()
+            session = _create_session()
+            cmd.execute("", session)
+
+            assert not task.exists()
+            archive_dir = Path(tmpdir) / ".ayder" / "task_archive"
+            assert (archive_dir / "TASK-001-test.md").exists()
+
+    @patch("ayder_cli.commands.tasks.draw_box")
+    @patch("ayder_cli.commands.tasks._get_tasks_dir")
+    def test_skips_files_without_task_id(self, mock_get_dir, mock_draw_box):
+        """Test that files without valid TASK-NNN prefix are skipped."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_dir = Path(tmpdir) / ".ayder" / "tasks"
+            tasks_dir.mkdir(parents=True)
+            invalid = tasks_dir / "notes.md"
+            invalid.write_text("# Notes\n\n- **Status:** done\n")
+
+            mock_get_dir.return_value = tasks_dir
+
+            cmd = ArchiveCompletedTasksCommand()
+            session = _create_session()
+            cmd.execute("", session)
+
+            # Invalid file should remain
+            assert invalid.exists()
+            assert "No completed tasks" in mock_draw_box.call_args[0][0]

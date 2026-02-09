@@ -77,11 +77,8 @@ def parse_custom_tool_calls(content: str) -> List[Dict[str, Any]]:
                     "error": f"Missing <parameter> tags. Use: <function={func_name}><parameter=name>value</parameter></function>"
                 })
         else:
-            calls.append({
-                "name": func_name,
-                "arguments": {},
-                "error": "Tool call has no parameters"
-            })
+            # Empty body, no parameters — valid for tools with no required params
+            calls.append({"name": func_name, "arguments": {}})
 
     return calls
 

@@ -112,3 +112,30 @@ class TestToolPathSecurity:
         assert result.category == "security"
         assert "Security Error" in result
         assert "Security Alert" in result
+
+    def test_insert_line_rejects_path_traversal(self, tmp_path):
+        """Test insert_line rejects ../ paths."""
+        ctx = ProjectContext(str(tmp_path))
+
+        result = impl.insert_line(ctx, "../outside.txt", 1, "content")
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+        assert "Security Error" in result
+
+    def test_delete_line_rejects_path_traversal(self, tmp_path):
+        """Test delete_line rejects ../ paths."""
+        ctx = ProjectContext(str(tmp_path))
+
+        result = impl.delete_line(ctx, "../outside.txt", 1)
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+        assert "Security Error" in result
+
+    def test_get_file_info_rejects_path_traversal(self, tmp_path):
+        """Test get_file_info rejects ../ paths."""
+        ctx = ProjectContext(str(tmp_path))
+
+        result = impl.get_file_info(ctx, "../outside.txt")
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+        assert "Security Error" in result

@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import re
 from pathlib import Path
@@ -22,8 +23,8 @@ class TasksCommand(BaseCommand):
         
     def execute(self, args: str, session: SessionContext) -> bool:
         project_ctx = session.project
-            
-        result = list_tasks(project_ctx)
+
+        result = list_tasks(project_ctx, format="table", status="all")
         draw_box(result, title="Tasks", width=80, color_code="35")
         return True
 
@@ -234,3 +235,48 @@ class ImplementAllCommand(BaseCommand):
         # Sort by task ID
         pending.sort(key=lambda x: x[0])
         return pending
+
+
+@register_command
+class ArchiveCompletedTasksCommand(BaseCommand):
+    @property
+    def name(self) -> str:
+        return "/archive-completed-tasks"
+
+    @property
+    def description(self) -> str:
+        return "Move completed (done) tasks to .ayder/task_archive"
+
+    def execute(self, args: str, session: SessionContext) -> bool:
+        project_ctx = session.project
+        tasks_dir = _get_tasks_dir(project_ctx)
+
+        if not tasks_dir.exists():
+            draw_box("No tasks directory found.", title="Error", width=80, color_code="31")
+            return True
+
+        archive_dir = tasks_dir.parent / "task_archive"
+        archived = []
+
+        for task_file in sorted(tasks_dir.glob("*.md")):
+            task_id = _extract_id(task_file.name)
+            if task_id is None:
+                continue
+
+            content = task_file.read_text(encoding="utf-8")
+            if "- **status:** done" in content.lower():
+                title = _parse_title(task_file)
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(task_file), str(archive_dir / task_file.name))
+                archived.append((task_id, title))
+
+        if not archived:
+            draw_box("No completed tasks to archive.", title="Archive", width=80, color_code="33")
+        else:
+            lines = "\n".join(f"  TASK-{tid:03d}: {title}" for tid, title in archived)
+            draw_box(
+                f"Archived {len(archived)} completed task(s) to .ayder/task_archive/:\n{lines}",
+                title="Archive", width=80, color_code="32"
+            )
+
+        return True

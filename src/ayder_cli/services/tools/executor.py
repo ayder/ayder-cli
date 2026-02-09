@@ -131,7 +131,7 @@ class ToolExecutor:
 
         if auto_approved:
             confirmed = True
-        elif tool_name in ("write_file", "replace_string"):
+        elif tool_name in ("write_file", "replace_string", "insert_line", "delete_line"):
             file_path = normalized.get("file_path", "")
             new_content = prepare_new_content(tool_name, normalized, self.tool_registry.project_ctx)
             confirmed = confirm_with_diff(file_path, new_content, description)

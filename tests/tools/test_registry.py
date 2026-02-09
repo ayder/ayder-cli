@@ -130,6 +130,61 @@ class TestNormalizeToolArguments:
         assert result["start_line"] == "not_a_number"
 
 
+class TestResolveFuncRef:
+    """Tests for _resolve_func_ref() dynamic import function."""
+
+    def test_resolves_valid_reference(self):
+        """Test resolving a valid module:function reference."""
+        func = registry._resolve_func_ref("ayder_cli.tools.impl:read_file")
+        from ayder_cli.tools.impl import read_file
+        assert func is read_file
+
+    def test_resolves_external_module(self):
+        """Test resolving a function from a non-tools module."""
+        func = registry._resolve_func_ref("ayder_cli.notes:create_note")
+        from ayder_cli.notes import create_note
+        assert func is create_note
+
+    def test_invalid_module_raises_import_error(self):
+        """Test that a nonexistent module raises ImportError."""
+        with pytest.raises(ModuleNotFoundError):
+            registry._resolve_func_ref("nonexistent.module:func")
+
+    def test_invalid_function_raises_attribute_error(self):
+        """Test that a nonexistent function raises AttributeError."""
+        with pytest.raises(AttributeError):
+            registry._resolve_func_ref("ayder_cli.tools.impl:nonexistent_func")
+
+    def test_missing_colon_raises_value_error(self):
+        """Test that a reference without colon raises ValueError."""
+        with pytest.raises(ValueError):
+            registry._resolve_func_ref("ayder_cli.tools.impl.read_file")
+
+
+class TestCreateDefaultRegistryAutoDiscovery:
+    """Tests for auto-discovery via func_ref in create_default_registry."""
+
+    def test_registers_all_19_tools(self, project_context):
+        """Test that all 19 TOOL_DEFINITIONS are registered."""
+        reg = registry.create_default_registry(project_context)
+        assert len(reg.get_registered_tools()) == 19
+
+    def test_registered_names_match_definitions(self, project_context):
+        """Test that registered tool names match TOOL_DEFINITIONS names."""
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS
+        reg = registry.create_default_registry(project_context)
+        registered = set(reg.get_registered_tools())
+        expected = {td.name for td in TOOL_DEFINITIONS}
+        assert registered == expected
+
+    def test_all_func_refs_resolve_to_callables(self, project_context):
+        """Test that every func_ref resolves to a callable."""
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS
+        for td in TOOL_DEFINITIONS:
+            func = registry._resolve_func_ref(td.func_ref)
+            assert callable(func), f"{td.name} func_ref does not resolve to callable"
+
+
 class TestToolRegistryUnknownTool:
     """Tests for ToolRegistry with unknown tools."""
 

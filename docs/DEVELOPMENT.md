@@ -29,24 +29,26 @@ src/ayder_cli/tools/
 
 ### Data Flow
 
-1. **Define** → `ToolDefinition` in `definition.py`
+1. **Define** → `ToolDefinition` in `definition.py` (with `func_ref` pointing to implementation)
 2. **Generate** → `tools_schema` auto-generated for OpenAI API
-3. **Implement** → Function in `impl.py`
-4. **Register** → Added to `create_default_registry()` in `registry.py`
-5. **Export** → Added to `__all__` in `__init__.py`
+3. **Implement** → Function in `impl.py` (or any module — `notes.py`, `memory.py`, `process_manager.py`)
+4. **Auto-register** → `create_default_registry()` imports and registers all tools from `TOOL_DEFINITIONS` via `func_ref`
 
 ---
 
 ## Quick Start
 
-To add a new tool, you need to modify **4 files**:
+To add a new tool, you need to modify **3 files**:
 
 | File | Change |
 |------|--------|
-| `src/ayder_cli/tools/definition.py` | Add `ToolDefinition` to `TOOL_DEFINITIONS` |
-| `src/ayder_cli/tools/impl.py` | Implement the tool function |
-| `src/ayder_cli/tools/registry.py` | Register in `create_default_registry()` |
-| `src/ayder_cli/tools/__init__.py` | Export in `__all__` |
+| `src/ayder_cli/tools/definition.py` | Add `ToolDefinition` with `func_ref` to `TOOL_DEFINITIONS` |
+| Implementation module | Implement the tool function (e.g., `impl.py` or a new module) |
+| `src/ayder_cli/prompts.py` | **CRITICAL**: Add tool to CAPABILITIES section in `SYSTEM_PROMPT` |
+
+The registry and `__init__.py` are **not** touched — `create_default_registry()` auto-discovers all tools from `TOOL_DEFINITIONS` via the `func_ref` field.
+
+**Why update prompts.py?** The LLM needs to know about the tool's existence in the system prompt, otherwise it won't know when to use it, even though the tool is registered and functional.
 
 ---
 
@@ -54,16 +56,17 @@ To add a new tool, you need to modify **4 files**:
 
 ### Step 1: Define the Tool in `definition.py`
 
-Add a new `ToolDefinition` to the `TOOL_DEFINITIONS` tuple. This is the **single source of truth** for all tool metadata.
+Add a new `ToolDefinition` to the `TOOL_DEFINITIONS` tuple. This is the **single source of truth** for all tool metadata and implementation binding.
 
 ```python
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     # ... existing tools ...
-    
+
     ToolDefinition(
         name="my_tool",
         description="Brief description of what the tool does",
         description_template="Action {param} will be performed",  # UI display
+        func_ref="ayder_cli.tools.impl:my_tool",  # "module:function" auto-import ref
         parameters={
             "type": "object",
             "properties": {
@@ -77,7 +80,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         permission="r",  # "r", "w", or "x"
         is_terminal=False,
         safe_mode_blocked=False,
-        exposed_to_llm=True,
         parameter_aliases=(),
         path_parameters=(),
     ),
@@ -90,14 +92,28 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
 |-------|------|-------------|
 | `name` | `str` | Unique identifier for the tool |
 | `description` | `str` | Description sent to the LLM |
+| `func_ref` | `str` | `"module.path:function_name"` for auto-registration |
 | `parameters` | `dict` | OpenAI function parameters schema |
 | `permission` | `str` | `"r"` (read), `"w"` (write), or `"x"` (execute) |
 | `is_terminal` | `bool` | If `True`, ends the agentic loop after execution |
 | `safe_mode_blocked` | `bool` | If `True`, blocked when safe mode is enabled |
-| `exposed_to_llm` | `bool` | If `False`, hidden from LLM (internal use only) |
 | `description_template` | `str` | Template for UI confirmation dialogs |
 | `parameter_aliases` | `tuple` | Map alternate param names to canonical names |
 | `path_parameters` | `tuple` | Param names auto-validated via `ProjectContext` |
+
+#### `func_ref` Format
+
+The `func_ref` field uses the `"module.path:function_name"` convention (same as Python entry points). At registry creation time, `create_default_registry()` iterates all `TOOL_DEFINITIONS`, imports each module, and registers the function automatically.
+
+```python
+# Tools in the core tools package
+func_ref="ayder_cli.tools.impl:read_file"
+
+# Tools in separate modules (to avoid circular imports)
+func_ref="ayder_cli.notes:create_note"
+func_ref="ayder_cli.memory:save_memory"
+func_ref="ayder_cli.process_manager:run_background_process"
+```
 
 #### Parameter Aliases
 
@@ -124,37 +140,65 @@ path_parameters=("file_path", "directory")
 
 ---
 
-### Step 2: Implement the Tool in `impl.py`
+### Step 2: Implement the Tool Function
 
-Create the implementation function. All tools receive `project_ctx: ProjectContext` as the first parameter.
+Create the implementation function in the appropriate module. The registry uses **dependency injection** based on function signature inspection — include `project_ctx` and/or `process_manager` parameters and they'll be injected automatically.
 
 ```python
+from ayder_cli.core.result import ToolSuccess, ToolError
+
 def my_tool(project_ctx: ProjectContext, param: str) -> str:
     """
     Implementation of my_tool.
-    
+
     Args:
-        project_ctx: Project context for path validation and sandboxing
+        project_ctx: Project context for path validation (injected by registry)
         param: The parameter description
-    
+
     Returns:
         ToolSuccess or ToolError result
     """
     try:
-        # If using paths, validate them first
-        # abs_path = project_ctx.validate_path(file_path)
-        
         # Your implementation logic here
         result = f"Processed: {param}"
-        
         return ToolSuccess(result)
-        
+
     except ValueError as e:
-        # Path validation errors (security)
         return ToolError(f"Security Error: {str(e)}", "security")
     except Exception as e:
-        # General execution errors
         return ToolError(f"Error: {str(e)}", "execution")
+```
+
+#### Where to Put the Implementation
+
+| Location | When to use |
+|----------|-------------|
+| `tools/impl.py` | Core file system and shell tools |
+| New module at package root (e.g., `notes.py`) | Tools that would cause circular imports if placed in `tools/` |
+
+**Circular import rule**: `tools/__init__.py` → `tools/impl.py` → `tasks.py`, so `tasks.py` cannot import from `tools/`. Modules like `notes.py`, `memory.py`, and `process_manager.py` live at the package root and import from `core/result.py` directly.
+
+#### Dependency Injection
+
+The registry inspects your function's signature and injects available dependencies:
+
+| Parameter | Type | Injected when |
+|-----------|------|---------------|
+| `project_ctx` | `ProjectContext` | Always available |
+| `process_manager` | `ProcessManager` | Available when passed to `create_default_registry()` |
+
+```python
+# Tool that needs only project context
+def my_tool(project_ctx: ProjectContext, file_path: str) -> str: ...
+
+# Tool that needs process manager (e.g., background process tools)
+def my_bg_tool(process_manager: ProcessManager, process_id: int) -> str: ...
+
+# Tool that needs both
+def my_complex_tool(process_manager: ProcessManager, project_ctx: ProjectContext, command: str) -> str: ...
+
+# Tool that needs neither (pure logic)
+def my_simple_tool(content: str) -> str: ...
 ```
 
 #### Return Types
@@ -165,9 +209,9 @@ Import from `ayder_cli.core.result`:
 from ayder_cli.core.result import ToolSuccess, ToolError
 ```
 
-- `ToolSuccess(content: str)` → Successful execution
-- `ToolError(message: str, category: str)` → Failed execution
-  - `category` can be `"security"`, `"validation"`, or `"execution"`
+- `ToolSuccess(content: str)` — Successful execution (str subclass)
+- `ToolError(message: str, category: str)` — Failed execution (str subclass)
+  - `category`: `"security"`, `"validation"`, `"execution"`, or `"general"`
 
 #### Path Security
 
@@ -184,44 +228,24 @@ Convert back to relative for display:
 rel_path = project_ctx.to_relative(abs_path)
 ```
 
----
+### Step 3: Update System Prompt
 
-### Step 3: Register in `registry.py`
-
-Add your tool to `create_default_registry()`:
+**CRITICAL**: Add the new tool to the CAPABILITIES section in `src/ayder_cli/prompts.py` so the LLM knows about it:
 
 ```python
-def create_default_registry(project_ctx: ProjectContext) -> ToolRegistry:
-    from ayder_cli.tools.impl import (
-        # ... existing imports ...
-        my_tool,  # Add your import
-    )
-    
-    registry = ToolRegistry(project_ctx)
-    
-    # ... existing registrations ...
-    registry.register("my_tool", my_tool)  # Register your tool
-    
-    return registry
+SYSTEM_PROMPT = """...
+
+### CAPABILITIES:
+You can perform these actions:
+- **File Operations**: ... existing tools ..., `my_tool` to do something useful
+- **Your Category**: `my_tool` to perform specific action
+...
+"""
 ```
 
----
+**Why this matters**: Even though your tool is registered and functional, the LLM won't know to use it unless it's documented in the system prompt. This is the most commonly forgotten step when adding new tools.
 
-### Step 4: Export in `__init__.py`
-
-Add to the public API:
-
-```python
-from ayder_cli.tools.impl import (
-    # ... existing imports ...
-    my_tool,  # Add your import
-)
-
-__all__ = [
-    # ... existing exports ...
-    "my_tool",  # Add to __all__
-]
-```
+That's it — the `func_ref` in your `ToolDefinition` handles registration automatically.
 
 ---
 
@@ -231,9 +255,9 @@ __all__ = [
 
 | Permission | Meaning | Example Tools |
 |------------|---------|---------------|
-| `"r"` | Read-only operations | `read_file`, `list_files`, `search_codebase` |
-| `"w"` | Write/modify operations | `write_file`, `replace_string` |
-| `"x"` | Execute operations | `run_shell_command` |
+| `"r"` | Read-only operations | `read_file`, `list_files`, `search_codebase`, `get_background_output`, `list_background_processes` |
+| `"w"` | Write/modify operations | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory` |
+| `"x"` | Execute operations | `run_shell_command`, `run_background_process`, `kill_background_process` |
 
 ### Terminal Tools
 
@@ -246,11 +270,11 @@ Set `is_terminal=True` for tools that should end the agentic loop:
 
 Set `safe_mode_blocked=True` for dangerous operations:
 
-- `write_file` - Can overwrite files
-- `replace_string` - Can modify files
-- `run_shell_command` - Can execute arbitrary commands
+- `write_file`, `replace_string`, `insert_line`, `delete_line` — Can modify files
+- `run_shell_command` — Can execute arbitrary commands
+- `run_background_process`, `kill_background_process` — Can start/stop processes
 
-When safe mode is enabled, these tools are blocked with a permission error.
+When safe mode is enabled, these tools are blocked via registry middleware with a `PermissionError`.
 
 ---
 
@@ -318,15 +342,16 @@ description_template="File {file_path} will be written"
 
 ## Example: Complete Tool Implementation
 
-Here's a complete example implementing a `count_lines` tool:
+Here's a complete example implementing a `count_lines` tool. Only **2 files** need changes.
 
-### 1. `definition.py`
+### 1. `definition.py` — Add the ToolDefinition
 
 ```python
 ToolDefinition(
     name="count_lines",
     description="Count the number of lines in a file",
     description_template="Lines in {file_path} will be counted",
+    func_ref="ayder_cli.tools.impl:count_lines",
     parameters={
         "type": "object",
         "properties": {
@@ -346,64 +371,45 @@ ToolDefinition(
 ),
 ```
 
-### 2. `impl.py`
+### 2. `impl.py` — Implement the function
 
 ```python
 def count_lines(project_ctx: ProjectContext, file_path: str) -> str:
     """Count lines in a file."""
     try:
         abs_path = project_ctx.validate_path(file_path)
-        
+
         if not abs_path.exists():
             rel_path = project_ctx.to_relative(abs_path)
             return ToolError(f"Error: File '{rel_path}' does not exist.")
-        
+
         if not abs_path.is_file():
             rel_path = project_ctx.to_relative(abs_path)
             return ToolError(f"Error: '{rel_path}' is not a file.")
-        
+
         with open(abs_path, 'r', encoding='utf-8') as f:
             line_count = sum(1 for _ in f)
-        
+
         rel_path = project_ctx.to_relative(abs_path)
         return ToolSuccess(f"{rel_path}: {line_count} lines")
-        
+
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
     except Exception as e:
         return ToolError(f"Error counting lines: {str(e)}", "execution")
 ```
 
-### 3. `registry.py`
+### 3. `prompts.py` — Update CAPABILITIES Section
+
+Add the tool to the system prompt so the LLM knows about it:
 
 ```python
-from ayder_cli.tools.impl import (
-    # ... existing imports ...
-    count_lines,
-)
-
-def create_default_registry(project_ctx: ProjectContext) -> ToolRegistry:
-    registry = ToolRegistry(project_ctx)
-    
-    # ... existing registrations ...
-    registry.register("count_lines", count_lines)
-    
-    return registry
+### CAPABILITIES:
+You can perform these actions:
+- **File Operations**: ..., `count_lines` to count lines in a file
 ```
 
-### 4. `__init__.py`
-
-```python
-from ayder_cli.tools.impl import (
-    # ... existing imports ...
-    count_lines,
-)
-
-__all__ = [
-    # ... existing exports ...
-    "count_lines",
-]
-```
+That's it. No changes to `registry.py` or `__init__.py` — the `func_ref` handles auto-registration.
 
 ---
 
@@ -421,6 +427,16 @@ ctx = ProjectContext('.')
 registry = create_default_registry(ctx)
 result = registry.execute('count_lines', {'file_path': 'README.md'})
 print(result)
+"
+```
+
+Verify all tools resolve correctly:
+
+```bash
+PYTHONPATH=src python3 -c "
+from ayder_cli.tools.definition import TOOL_DEFINITIONS
+for td in TOOL_DEFINITIONS:
+    print(f'{td.name} -> {td.func_ref}')
 "
 ```
 

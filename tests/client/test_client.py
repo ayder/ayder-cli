@@ -29,7 +29,7 @@ class TestChatSession:
         assert session.state == {
             "verbose": False,
             "permissions": set(),
-            "iterations": 10,
+            "iterations": 50,
         }
         assert session.session is None
 
@@ -558,4 +558,124 @@ class TestAgent:
         assert session.messages[0] is raw_msg  # Same object, not a dict copy
 
 
+class TestAgentIterationFeedback:
+    """Tests for verbose iteration display and max iterations warning."""
+
+    def _make_tool_response(self):
+        """Create a mock LLM response that triggers a tool call."""
+        mock_tool_call = Mock()
+        mock_tool_call.function.name = "read_file"
+        mock_tool_call.function.arguments = '{"file_path": "test.txt"}'
+        mock_tool_call.id = "call_1"
+
+        mock_message = Mock()
+        mock_message.content = None
+        mock_message.tool_calls = [mock_tool_call]
+
+        mock_choice = Mock()
+        mock_choice.message = mock_message
+
+        mock_response = Mock()
+        mock_response.choices = [mock_choice]
+        return mock_response
+
+    def test_max_iterations_warning_shown(self):
+        """Test that a warning is displayed when max iterations are exhausted."""
+        mock_llm = Mock()
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+        )
+        session = ChatSession(config, "prompt", iterations=2)
+
+        mock_executor = Mock()
+        mock_registry = Mock()
+        mock_registry.get_schemas.return_value = []
+        mock_executor.tool_registry = mock_registry
+        mock_executor.execute_tool_calls.return_value = False  # not terminal
+
+        mock_llm.chat.return_value = self._make_tool_response()
+
+        agent = Agent(mock_llm, mock_executor, session)
+
+        with patch("ayder_cli.ui.draw_box") as mock_draw_box:
+            result = agent.chat("do something")
+
+        assert result is None
+        # Should have called LLM exactly 2 times (max_iterations=2)
+        assert mock_llm.chat.call_count == 2
+        # Warning should be shown
+        mock_draw_box.assert_called_once()
+        assert "Reached maximum iterations" in mock_draw_box.call_args[0][0]
+
+    def test_verbose_iteration_counter_shown(self):
+        """Test that iteration counter is shown in verbose mode."""
+        mock_llm = Mock()
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=True,
+        )
+        session = ChatSession(config, "prompt", iterations=2)
+        session.state["verbose"] = True
+
+        mock_executor = Mock()
+        mock_registry = Mock()
+        mock_registry.get_schemas.return_value = []
+        mock_executor.tool_registry = mock_registry
+        mock_executor.execute_tool_calls.return_value = False
+
+        mock_llm.chat.return_value = self._make_tool_response()
+
+        agent = Agent(mock_llm, mock_executor, session)
+
+        with patch("ayder_cli.ui.draw_box") as mock_draw_box:
+            agent.chat("do something")
+
+        # Should have 2 verbose calls + 1 warning = 3
+        calls = [call[0][0] for call in mock_draw_box.call_args_list]
+        assert any("Iteration 1/2" in c for c in calls)
+        assert any("Iteration 2/2" in c for c in calls)
+
+    def test_no_warning_when_iterations_not_exhausted(self):
+        """Test that no warning is shown when agent finishes before limit."""
+        mock_llm = Mock()
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+        )
+        session = ChatSession(config, "prompt", iterations=50)
+
+        mock_message = Mock()
+        mock_message.content = "Here is the answer"
+        mock_message.tool_calls = None
+
+        mock_choice = Mock()
+        mock_choice.message = mock_message
+
+        mock_response = Mock()
+        mock_response.choices = [mock_choice]
+
+        mock_llm.chat.return_value = mock_response
+
+        mock_executor = Mock()
+        mock_registry = Mock()
+        mock_registry.get_schemas.return_value = []
+        mock_executor.tool_registry = mock_registry
+
+        agent = Agent(mock_llm, mock_executor, session)
+
+        with patch("ayder_cli.ui.draw_box") as mock_draw_box:
+            result = agent.chat("hello")
+
+        assert result == "Here is the answer"
+        mock_draw_box.assert_not_called()
 

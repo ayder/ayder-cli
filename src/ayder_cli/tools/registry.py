@@ -12,7 +12,7 @@ from typing import Callable, Dict, Tuple, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-from ayder_cli.tools.definition import TOOL_DEFINITIONS
+from ayder_cli.tools.definition import TOOL_DEFINITIONS, TOOL_DEFINITIONS_BY_NAME
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError, ToolResult
 
@@ -89,10 +89,12 @@ def normalize_tool_arguments(tool_name: str, arguments: dict, project_ctx: Proje
                     # Security error - let it propagate to caller
                     raise
 
-    # Step 3: Type coercion for line numbers
-    if tool_name == "read_file":
-        for key in ["start_line", "end_line"]:
-            if key in normalized and isinstance(normalized[key], str):
+    # Step 3: Type coercion for integer parameters (derived from schema)
+    tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    if tool_def:
+        props = tool_def.parameters.get("properties", {})
+        for key, schema in props.items():
+            if schema.get("type") == "integer" and key in normalized and isinstance(normalized[key], str):
                 try:
                     normalized[key] = int(normalized[key])
                 except ValueError:
@@ -109,8 +111,6 @@ def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
     Searches TOOL_DEFINITIONS_BY_NAME (all tools, regardless of mode)
     so that any registered tool can be validated.
     """
-    from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
-
     td = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if not td:
         return False, f"Unknown tool: {tool_name}"
@@ -147,7 +147,8 @@ def _execute_tool_with_hooks(
     middlewares: List[MiddlewareFunc],
     pre_execute_callbacks: List[PreExecuteCallback],
     post_execute_callbacks: List[PostExecuteCallback],
-    project_ctx: ProjectContext
+    project_ctx: ProjectContext,
+    process_manager=None,
 ) -> ToolResult:
     """
     Execute a tool with the full execution pipeline (normalization, validation, callbacks).
@@ -195,15 +196,13 @@ def _execute_tool_with_hooks(
         except Exception as e:
             logger.warning(f"Middleware failed for {tool_name}: {e}")
 
-    # Inject project_ctx if the tool function expects it
+    # Inject dependencies if the tool function expects them
     sig = inspect.signature(tool_func)
+    call_args = args.copy()
     if "project_ctx" in sig.parameters:
-        # Create a copy of args to avoid mutating the original dict passed to callbacks
-        # (Though callbacks already ran, but safer)
-        call_args = args.copy()
         call_args["project_ctx"] = project_ctx
-    else:
-        call_args = args
+    if "process_manager" in sig.parameters and process_manager is not None:
+        call_args["process_manager"] = process_manager
 
     # Execute the tool with timing
     start_time = time.time()
@@ -243,9 +242,10 @@ class ToolRegistry:
     Registry for managing and executing tool functions with middleware support.
     """
 
-    def __init__(self, project_ctx: ProjectContext):
+    def __init__(self, project_ctx: ProjectContext, process_manager=None):
         """Initialize registry with project context."""
         self.project_ctx = project_ctx
+        self.process_manager = process_manager
         self._registry: Dict[str, Callable] = {}
         self._middlewares: List[MiddlewareFunc] = []
         self._pre_execute_callbacks: List[PreExecuteCallback] = []
@@ -296,7 +296,8 @@ class ToolRegistry:
             middlewares=self._middlewares,
             pre_execute_callbacks=self._pre_execute_callbacks,
             post_execute_callbacks=self._post_execute_callbacks,
-            project_ctx=self.project_ctx
+            project_ctx=self.project_ctx,
+            process_manager=self.process_manager,
         )
 
     def get_registered_tools(self) -> list:
@@ -311,30 +312,24 @@ class ToolRegistry:
         return validate_tool_call(name, arguments)
 
 
-def create_default_registry(project_ctx: ProjectContext) -> ToolRegistry:
+def _resolve_func_ref(func_ref: str) -> Callable:
+    """Import and return a function from a 'module.path:function_name' reference."""
+    import importlib
+    module_path, func_name = func_ref.split(":")
+    module = importlib.import_module(module_path)
+    return getattr(module, func_name)
+
+
+def create_default_registry(project_ctx: ProjectContext, process_manager=None) -> ToolRegistry:
     """
     Create and configure a ToolRegistry with all available tools.
+
+    Tool functions are auto-discovered from TOOL_DEFINITIONS via func_ref.
     """
-    from ayder_cli.tools.impl import (
-        list_files,
-        read_file,
-        write_file,
-        replace_string,
-        run_shell_command,
-        get_project_structure,
-        search_codebase,
-    )
-    registry = ToolRegistry(project_ctx)
+    registry = ToolRegistry(project_ctx, process_manager=process_manager)
 
-    # Register file system tools
-    registry.register("list_files", list_files)
-    registry.register("read_file", read_file)
-    registry.register("write_file", write_file)
-    registry.register("replace_string", replace_string)
-    registry.register("run_shell_command", run_shell_command)
-
-    # Register code navigation tools
-    registry.register("get_project_structure", get_project_structure)
-    registry.register("search_codebase", search_codebase)
+    for td in TOOL_DEFINITIONS:
+        func = _resolve_func_ref(td.func_ref)
+        registry.register(td.name, func)
 
     return registry

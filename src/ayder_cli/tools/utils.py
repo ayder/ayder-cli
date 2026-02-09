@@ -47,6 +47,53 @@ def prepare_new_content(fname, args, project_ctx=None):
             except (IOError, OSError) as e:
                 logger.error(f"File error in replace_string: {e}")
                 return ""
+
+        elif fname == "insert_line":
+            file_path = args.get("file_path", "")
+            line_number = args.get("line_number", 1)
+            content = args.get("content", "")
+
+            if not file_path:
+                return ""
+
+            try:
+                project = project_ctx if project_ctx is not None else ProjectContext(".")
+                abs_path = project.validate_path(file_path)
+
+                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                    lines = f.readlines()
+
+                idx = min(max(int(line_number) - 1, 0), len(lines))
+                if content and not content.endswith('\n'):
+                    content += '\n'
+                lines.insert(idx, content)
+                return "".join(lines)
+            except (ValueError, IOError, OSError) as e:
+                logger.warning(f"Error in insert_line preview: {e}")
+                return ""
+
+        elif fname == "delete_line":
+            file_path = args.get("file_path", "")
+            line_number = args.get("line_number", 1)
+
+            if not file_path:
+                return ""
+
+            try:
+                project = project_ctx if project_ctx is not None else ProjectContext(".")
+                abs_path = project.validate_path(file_path)
+
+                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                    lines = f.readlines()
+
+                idx = int(line_number) - 1
+                if 0 <= idx < len(lines):
+                    lines.pop(idx)
+                return "".join(lines)
+            except (ValueError, IOError, OSError) as e:
+                logger.warning(f"Error in delete_line preview: {e}")
+                return ""
+
         else:
             return ""
 

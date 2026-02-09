@@ -48,7 +48,7 @@ class ChatSession:
     """Manage conversation state, history, and user input."""
 
     def __init__(self, config, system_prompt: str,
-                 permissions: set = None, iterations: int = 10):
+                 permissions: set = None, iterations: int = 50):
         """Initialize chat session.
 
         Args:
@@ -195,11 +195,18 @@ class Agent:
 
         # Get state from session
         permissions = self.session.state.get("permissions", set())
-        max_iterations = self.session.state.get("iterations", 10)
+        max_iterations = self.session.state.get("iterations", 50)
         verbose = self.session.state.get("verbose", False)
 
         # Main Loop for Agentic Steps
-        for _ in range(max_iterations):
+        for iteration in range(1, max_iterations + 1):
+            if verbose:
+                from ayder_cli.ui import draw_box
+                draw_box(
+                    f"Iteration {iteration}/{max_iterations}",
+                    title="Agent Loop", width=50, color_code="33"
+                )
+
             schemas = self.tools.tool_registry.get_schemas()
 
             response = self.llm.chat(
@@ -246,4 +253,11 @@ class Agent:
                 if self.tools.execute_custom_calls(custom_calls, self.session, permissions, verbose):
                     return None  # Terminal tool hit
 
-        return None  # Max iterations reached
+        # Max iterations reached — notify user
+        from ayder_cli.ui import draw_box
+        draw_box(
+            f"Reached maximum iterations ({max_iterations}). "
+            f"Use -I flag or max_iterations in config to increase.",
+            title="Iteration Limit", width=80, color_code="33"
+        )
+        return None

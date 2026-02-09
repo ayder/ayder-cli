@@ -114,3 +114,44 @@ class TestConfigCombinedValidation:
         assert config.num_ctx == 8192
         assert config.editor == "code"
         assert config.verbose is True
+
+
+class TestConfigValidationMaxIterations:
+    """Tests for max_iterations validation."""
+
+    def test_default_value(self):
+        cfg = Config()
+        assert cfg.max_iterations == 50
+
+    def test_valid_value(self):
+        cfg = Config(max_iterations=25)
+        assert cfg.max_iterations == 25
+
+    def test_zero_raises_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Config(max_iterations=0)
+        assert "max_iterations must be between 1 and 100" in str(exc_info.value)
+
+    def test_negative_raises_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Config(max_iterations=-1)
+        assert "max_iterations must be between 1 and 100" in str(exc_info.value)
+
+    def test_too_large_raises_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Config(max_iterations=101)
+        assert "max_iterations must be between 1 and 100" in str(exc_info.value)
+
+    def test_boundary_min(self):
+        cfg = Config(max_iterations=1)
+        assert cfg.max_iterations == 1
+
+    def test_boundary_max(self):
+        cfg = Config(max_iterations=100)
+        assert cfg.max_iterations == 100
+
+    def test_agent_section_flattened_from_toml(self):
+        """Test that [agent] section is properly flattened."""
+        data = {"agent": {"max_iterations": 30}}
+        cfg = Config(**data)
+        assert cfg.max_iterations == 30

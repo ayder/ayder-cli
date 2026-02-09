@@ -116,8 +116,18 @@ def _parse_title(filepath):
     return Path(filepath).name
 
 
-def list_tasks(project_ctx: ProjectContext):
-    """List all tasks in .ayder/tasks/ (current directory) in a table format."""
+def list_tasks(project_ctx: ProjectContext, format: str = "list", status: str = "pending"):
+    """List tasks in .ayder/tasks/ (current directory), filtered by status.
+
+    Args:
+        project_ctx: Project context for path resolution
+        format: Output format - "list" returns filenames, "table" returns formatted table
+        status: Filter by status - "pending", "done", or "all" (default: "pending")
+
+    Returns:
+        ToolSuccess with newline-separated task file paths (format="list")
+        or formatted table (format="table")
+    """
     _ensure_tasks_dir(project_ctx)
 
     files = sorted(_get_tasks_dir(project_ctx).glob("*.md"))
@@ -128,14 +138,34 @@ def list_tasks(project_ctx: ProjectContext):
     tasks = []
     for path in files:
         task_id = _extract_id(path.name)
-        title = _parse_title(path)
-        status = _parse_status(path)
         if task_id is not None:
-            tasks.append((task_id, title, status))
+            task_status = _parse_status(path)
+
+            # Filter by status
+            if status != "all" and task_status.lower() != status.lower():
+                continue
+
+            if format == "list":
+                # Return relative path from project root
+                rel_path = path.relative_to(project_ctx.root)
+                tasks.append((task_id, str(rel_path)))
+            else:
+                title = _parse_title(path)
+                tasks.append((task_id, title, task_status))
+
+    # Check if any tasks matched the filter
+    if not tasks:
+        filter_msg = f" with status '{status}'" if status != "all" else ""
+        return ToolSuccess(f"No tasks found{filter_msg}.")
 
     # Sort by ID
     tasks.sort(key=lambda t: t[0])
 
+    if format == "list":
+        # Simple newline-separated list of relative paths
+        return ToolSuccess("\n".join(t[1] for t in tasks))
+
+    # Table format (for /tasks command)
     # Calculate column widths
     id_w = max(len("Task ID"), max(len(f"TASK-{t[0]:03d}") for t in tasks))
     name_w = max(len("Task Name"), max(len(t[1]) for t in tasks))
@@ -158,14 +188,63 @@ def list_tasks(project_ctx: ProjectContext):
     return ToolSuccess("\n".join(lines))
 
 
-def show_task(project_ctx: ProjectContext, task_id: int):
-    """Read and return the contents of a task by its numeric ID."""
+def show_task(project_ctx: ProjectContext, identifier: str):
+    """Read and return the contents of a task file.
+
+    Args:
+        project_ctx: Project context for path resolution
+        identifier: Can be:
+            - Relative path: ".ayder/tasks/TASK-001-add-auth.md"
+            - Filename: "TASK-001-add-auth.md"
+            - Task ID: "001" or "1" or "TASK-001"
+            - Slug: "add-auth"
+
+    Returns:
+        ToolSuccess with file contents or ToolError if not found
+    """
     _ensure_tasks_dir(project_ctx)
-    task_id = int(task_id)
-    path = _get_task_path_by_id(project_ctx, task_id)
+    tasks_dir = _get_tasks_dir(project_ctx)
+    path = None
+
+    # Strategy 1: Try as relative path from project root
+    try:
+        candidate = project_ctx.root / identifier
+        if candidate.exists() and candidate.is_file():
+            path = candidate
+    except Exception:
+        pass
+
+    # Strategy 2: Try as filename in tasks dir
     if path is None:
-        return ToolError(f"Error: Task TASK-{task_id:03d} not found.")
-    return ToolSuccess(path.read_text(encoding="utf-8"))
+        candidate = tasks_dir / identifier
+        if candidate.exists() and candidate.is_file():
+            path = candidate
+
+    # Strategy 3: Try to extract numeric ID and lookup
+    if path is None:
+        # Try to extract numeric ID from identifier
+        # Matches: "001", "1", "TASK-001", etc.
+        id_match = re.search(r"(\d+)", identifier)
+        if id_match:
+            task_id = int(id_match.group(1))
+            path = _get_task_path_by_id(project_ctx, task_id)
+
+    # Strategy 4: Try as slug match
+    if path is None:
+        # Look for files containing the identifier as a slug
+        slug_pattern = identifier.lower().strip()
+        for candidate in tasks_dir.glob("*.md"):
+            if slug_pattern in candidate.stem.lower():
+                path = candidate
+                break
+
+    if path is None:
+        return ToolError(f"Error: Task not found: {identifier}")
+
+    try:
+        return ToolSuccess(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return ToolError(f"Error reading task file: {str(e)}", "execution")
 
 
 def _update_task_status(project_ctx: ProjectContext, task_id, status):

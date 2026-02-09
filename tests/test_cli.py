@@ -790,7 +790,7 @@ class TestMainTaskOptions:
             
             main()
             
-            mock_run_implement.assert_called_once_with('1', permissions={'r'}, iterations=10)
+            mock_run_implement.assert_called_once_with('1', permissions={'r'}, iterations=50)
             mock_exit.assert_called_once_with(0)
 
     def test_main_implement_all_flag(self):
@@ -814,7 +814,7 @@ class TestMainTaskOptions:
             
             main()
             
-            mock_run_all.assert_called_once_with(permissions={'r'}, iterations=10)
+            mock_run_all.assert_called_once_with(permissions={'r'}, iterations=50)
             mock_exit.assert_called_once_with(0)
 
 
@@ -986,9 +986,9 @@ class TestCreateParser:
 
         parser = create_parser()
         
-        # Default value
+        # Default value (None — resolved from config at runtime)
         args = parser.parse_args([])
-        assert args.iterations == 10
+        assert args.iterations is None
         
         # Custom value
         args = parser.parse_args(['--iterations', '20'])
@@ -997,6 +997,51 @@ class TestCreateParser:
         # Short form
         args = parser.parse_args(['-I', '5'])
         assert args.iterations == 5
+
+    def test_iterations_none_resolved_from_config(self):
+        """Test that None iterations falls back to config.max_iterations."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+
+        mock_config = Config(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+            max_iterations=75,
+        )
+
+        with patch.object(sys, 'argv', ['ayder', 'hello world']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
+             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('sys.exit'):
+            main()
+            mock_run.assert_called_once_with('hello world', permissions={'r'}, iterations=75)
+
+    def test_iterations_cli_overrides_config(self):
+        """Test that -I flag overrides config.max_iterations."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+
+        mock_config = Config(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+            max_iterations=75,
+        )
+
+        with patch.object(sys, 'argv', ['ayder', '-I', '20', 'hello']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
+             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('sys.exit'):
+            main()
+            # CLI flag (20) should win over config (75)
+            mock_run.assert_called_once_with('hello', permissions={'r'}, iterations=20)
 
     def test_parser_command_argument(self):
         """Test positional command argument."""

@@ -70,12 +70,12 @@ def create_parser():
         help="Auto-approve execute tools (run_shell_command)"
     )
 
-    # Max agentic iterations
+    # Max agentic iterations (overrides config.max_iterations)
     parser.add_argument(
         "-I", "--iterations",
         type=int,
-        default=10,
-        help="Max agentic iterations per message (default: 10)"
+        default=None,
+        help="Max agentic iterations per message (default: from config, 50)"
     )
 
     # Version flag
@@ -148,12 +148,14 @@ def _build_services(config=None, project_root="."):
     from ayder_cli.services.llm import OpenAIProvider
     from ayder_cli.services.tools.executor import ToolExecutor
     from ayder_cli.tools.registry import create_default_registry
+    from ayder_cli.process_manager import ProcessManager
     from ayder_cli.prompts import SYSTEM_PROMPT
 
     cfg = config or load_config()
     llm_provider = OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key)
     project_ctx = ProjectContext(project_root)
-    tool_registry = create_default_registry(project_ctx)
+    process_manager = ProcessManager(max_processes=cfg.max_background_processes)
+    tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
     tool_executor = ToolExecutor(tool_registry)
 
     # Build enhanced prompt with project structure
@@ -168,7 +170,7 @@ def _build_services(config=None, project_root="."):
     return cfg, llm_provider, tool_executor, project_ctx, enhanced_system
 
 
-def run_interactive(permissions=None, iterations=10):
+def run_interactive(permissions=None, iterations=50):
     """Run interactive chat mode (REPL)."""
     from ayder_cli.client import ChatSession, Agent
     from ayder_cli.core.context import SessionContext
@@ -225,7 +227,7 @@ def run_interactive(permissions=None, iterations=10):
             draw_box(f"Error: {str(e)}", title="Error", width=80, color_code="31")
 
 
-def run_command(prompt: str, permissions=None, iterations=10) -> int:
+def run_command(prompt: str, permissions=None, iterations=50) -> int:
     """Execute a single command and return exit code.
 
     Args:
@@ -270,7 +272,7 @@ def _run_tasks_cli() -> int:
         return 1
 
 
-def _run_implement_cli(task_query: str, permissions=None, iterations=10) -> int:
+def _run_implement_cli(task_query: str, permissions=None, iterations=50) -> int:
     """Implement a specific task by ID or name."""
     try:
         from ayder_cli.client import ChatSession, Agent
@@ -334,7 +336,7 @@ def _run_implement_cli(task_query: str, permissions=None, iterations=10) -> int:
         return 1
 
 
-def _run_implement_all_cli(permissions=None, iterations=10) -> int:
+def _run_implement_all_cli(permissions=None, iterations=50) -> int:
     """Implement all pending tasks sequentially."""
     try:
         from ayder_cli.client import ChatSession, Agent
@@ -383,21 +385,28 @@ def main():
     if args.x:
         granted.add("x")
 
+    # Resolve iterations: CLI flag overrides config value
+    if args.iterations is None:
+        from ayder_cli.core.config import load_config
+        iterations = load_config().max_iterations
+    else:
+        iterations = args.iterations
+
     # Handle task-related CLI options
     if args.tasks:
         sys.exit(_run_tasks_cli())
     if args.implement:
-        sys.exit(_run_implement_cli(args.implement, permissions=granted, iterations=args.iterations))
+        sys.exit(_run_implement_cli(args.implement, permissions=granted, iterations=iterations))
     if args.implement_all:
-        sys.exit(_run_implement_all_cli(permissions=granted, iterations=args.iterations))
+        sys.exit(_run_implement_all_cli(permissions=granted, iterations=iterations))
 
     # Handle file/stdin input
     prompt = read_input(args)
     if prompt:
-        sys.exit(run_command(prompt, permissions=granted, iterations=args.iterations))
+        sys.exit(run_command(prompt, permissions=granted, iterations=iterations))
 
     # Default: interactive CLI mode
-    run_interactive(permissions=granted, iterations=args.iterations)
+    run_interactive(permissions=granted, iterations=iterations)
 
 
 if __name__ == "__main__":

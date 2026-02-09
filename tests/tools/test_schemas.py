@@ -51,6 +51,11 @@ class TestToolDefinitions:
         expected_tools = {
             "list_files", "read_file", "write_file", "replace_string",
             "run_shell_command", "search_codebase", "get_project_structure",
+            "insert_line", "delete_line", "get_file_info",
+            "create_note", "save_memory", "load_memory",
+            "run_background_process", "get_background_output",
+            "kill_background_process", "list_background_processes",
+            "list_tasks", "show_task",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
         assert names == expected_tools

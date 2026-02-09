@@ -111,23 +111,25 @@ class TestParseCustomToolCallsErrorHandling:
         assert "error" in result[0]
         assert "function name is empty" in result[0]["error"]
 
-    def test_no_parameters(self):
-        """Test handling of function call with no parameters."""
-        content = '<function=read_file></function>'
+    def test_no_parameters_valid(self):
+        """Test that tools with no parameters are parsed as valid calls."""
+        content = '<function=get_project_structure></function>'
         result = parse_custom_tool_calls(content)
-        
-        assert len(result) == 1
-        assert result[0]["name"] == "read_file"
-        assert "error" in result[0]
-        assert "no parameters" in result[0]["error"]
 
-    def test_empty_body(self):
-        """Test handling of function call with empty body."""
-        content = '<function=read_file>   </function>'
-        result = parse_custom_tool_calls(content)
-        
         assert len(result) == 1
-        assert "error" in result[0]
+        assert result[0]["name"] == "get_project_structure"
+        assert result[0]["arguments"] == {}
+        assert "error" not in result[0]
+
+    def test_no_parameters_whitespace_body(self):
+        """Test that tools with whitespace-only body are parsed as valid calls."""
+        content = '<function=list_background_processes>   </function>'
+        result = parse_custom_tool_calls(content)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "list_background_processes"
+        assert result[0]["arguments"] == {}
+        assert "error" not in result[0]
 
     def test_empty_parameter_name(self):
         """Test handling of empty parameter name."""

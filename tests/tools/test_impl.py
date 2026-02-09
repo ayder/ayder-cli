@@ -537,6 +537,195 @@ class TestFormatSearchResultsErrors:
         assert "Pattern:" in result
 
 
+class TestInsertLine:
+    """Test insert_line() function."""
+
+    def test_insert_at_beginning(self, tmp_path, project_context):
+        """Test inserting at line 1."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        result = impl.insert_line(project_context, str(test_file), 1, "Inserted")
+        assert isinstance(result, ToolSuccess)
+        assert "Successfully inserted" in result
+        assert test_file.read_text() == "Inserted\nLine 1\nLine 2\nLine 3\n"
+
+    def test_insert_in_middle(self, tmp_path, project_context):
+        """Test inserting in the middle."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        result = impl.insert_line(project_context, str(test_file), 2, "Inserted")
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "Line 1\nInserted\nLine 2\nLine 3\n"
+
+    def test_insert_at_end(self, tmp_path, project_context):
+        """Test inserting at end (clamp)."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\n")
+
+        result = impl.insert_line(project_context, str(test_file), 100, "Appended")
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "Line 1\nLine 2\nAppended\n"
+
+    def test_insert_line_zero_rejected(self, tmp_path, project_context):
+        """Test that line_number 0 is rejected."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\n")
+
+        result = impl.insert_line(project_context, str(test_file), 0, "bad")
+        assert isinstance(result, ToolError)
+        assert result.category == "validation"
+
+    def test_insert_nonexistent_file(self, tmp_path, project_context):
+        """Test inserting into nonexistent file."""
+        result = impl.insert_line(project_context, "nonexistent.txt", 1, "content")
+        assert isinstance(result, ToolError)
+        assert "does not exist" in result
+
+    def test_insert_path_traversal(self, tmp_path):
+        """Test path traversal is blocked."""
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.insert_line(ctx, "../outside.txt", 1, "content")
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+
+    def test_insert_adds_trailing_newline(self, tmp_path, project_context):
+        """Test that content without trailing newline gets one added."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\n")
+
+        result = impl.insert_line(project_context, str(test_file), 1, "No newline")
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "No newline\nLine 1\n"
+
+
+class TestDeleteLine:
+    """Test delete_line() function."""
+
+    def test_delete_first_line(self, tmp_path, project_context):
+        """Test deleting the first line."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        result = impl.delete_line(project_context, str(test_file), 1)
+        assert isinstance(result, ToolSuccess)
+        assert "Deleted line 1" in result
+        assert "Line 1" in result  # preview of deleted content
+        assert test_file.read_text() == "Line 2\nLine 3\n"
+
+    def test_delete_middle_line(self, tmp_path, project_context):
+        """Test deleting a middle line."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        result = impl.delete_line(project_context, str(test_file), 2)
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "Line 1\nLine 3\n"
+
+    def test_delete_last_line(self, tmp_path, project_context):
+        """Test deleting the last line."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        result = impl.delete_line(project_context, str(test_file), 3)
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "Line 1\nLine 2\n"
+
+    def test_delete_out_of_range(self, tmp_path, project_context):
+        """Test deleting beyond file length."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\n")
+
+        result = impl.delete_line(project_context, str(test_file), 5)
+        assert isinstance(result, ToolError)
+        assert result.category == "validation"
+        assert "out of range" in result
+
+    def test_delete_line_zero_rejected(self, tmp_path, project_context):
+        """Test that line_number 0 is rejected."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\n")
+
+        result = impl.delete_line(project_context, str(test_file), 0)
+        assert isinstance(result, ToolError)
+        assert result.category == "validation"
+
+    def test_delete_nonexistent_file(self, tmp_path, project_context):
+        """Test deleting from nonexistent file."""
+        result = impl.delete_line(project_context, "nonexistent.txt", 1)
+        assert isinstance(result, ToolError)
+        assert "does not exist" in result
+
+    def test_delete_path_traversal(self, tmp_path):
+        """Test path traversal is blocked."""
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.delete_line(ctx, "../outside.txt", 1)
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+
+
+class TestGetFileInfo:
+    """Test get_file_info() function."""
+
+    def test_file_info_basic(self, tmp_path, project_context):
+        """Test basic file info."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        result = impl.get_file_info(project_context, str(test_file))
+        assert isinstance(result, ToolSuccess)
+        info = json.loads(result)
+        assert info["line_count"] == 3
+        assert info["extension"] == ".txt"
+        assert info["is_file"] is True
+        assert info["is_directory"] is False
+        assert info["size_bytes"] > 0
+
+    def test_file_info_directory(self, tmp_path, project_context):
+        """Test directory info."""
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+
+        result = impl.get_file_info(project_context, str(subdir))
+        assert isinstance(result, ToolSuccess)
+        info = json.loads(result)
+        assert info["is_directory"] is True
+        assert info["is_file"] is False
+        assert info["line_count"] is None
+
+    def test_file_info_nonexistent(self, tmp_path, project_context):
+        """Test nonexistent file."""
+        result = impl.get_file_info(project_context, "nonexistent.txt")
+        assert isinstance(result, ToolError)
+        assert "does not exist" in result
+
+    def test_file_info_size_human_bytes(self, tmp_path, project_context):
+        """Test human-readable size for small files."""
+        test_file = tmp_path / "small.txt"
+        test_file.write_text("hi")
+
+        result = impl.get_file_info(project_context, str(test_file))
+        info = json.loads(result)
+        assert "B" in info["size_human"]
+
+    def test_file_info_path_traversal(self, tmp_path):
+        """Test path traversal is blocked."""
+        ctx = ProjectContext(str(tmp_path))
+        result = impl.get_file_info(ctx, "../outside.txt")
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+
+    def test_file_info_no_extension(self, tmp_path, project_context):
+        """Test file with no extension."""
+        test_file = tmp_path / "Makefile"
+        test_file.write_text("all:\n\techo hello\n")
+
+        result = impl.get_file_info(project_context, str(test_file))
+        info = json.loads(result)
+        assert info["extension"] is None or info["extension"] == ""
+
+
 class TestFormatGrepResultsErrors:
     """Test error handling in _format_grep_results - Lines 391-392."""
 
@@ -544,9 +733,27 @@ class TestFormatGrepResultsErrors:
         """Test path conversion error handling in _format_grep_results."""
         # Create raw output with a path that will cause conversion issues
         raw_output = "/some/random/path.py:1:print('hello')\n"
-        
+
         result = impl._format_grep_results(raw_output, "pattern", 50, project_context)
-        
+
         # Should still format without crashing
         assert "SEARCH RESULTS" in result
         assert "Pattern:" in result
+
+
+class TestSearchOutputFormats:
+    """Test search_codebase output_format parameter."""
+
+    def test_format_files_only(self, tmp_path, project_context):
+        """Test _format_files_only helper."""
+        raw = f"{tmp_path}/file1.py\n{tmp_path}/file2.py\n"
+        result = impl._format_files_only(raw, "pattern", project_context)
+        assert "Files with matches: 2" in result
+        assert "SEARCH RESULTS" in result
+
+    def test_format_count_results(self, tmp_path, project_context):
+        """Test _format_count_results helper."""
+        raw = f"{tmp_path}/file1.py:5\n{tmp_path}/file2.py:3\n"
+        result = impl._format_count_results(raw, "pattern", project_context)
+        assert "Total matches: 8" in result
+        assert "SEARCH RESULTS" in result

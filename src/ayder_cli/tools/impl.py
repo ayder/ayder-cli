@@ -216,12 +216,128 @@ def _generate_manual_tree(project_ctx: ProjectContext, max_depth: int = 3) -> st
     walk_dir(project_ctx.root)
     return "\n".join(lines)
 
-def search_codebase(project_ctx: ProjectContext, pattern: str, file_pattern: str = None, 
-                   case_sensitive: bool = True, context_lines: int = 0, 
-                   max_results: int = 50, directory: str = ".") -> str:
+def insert_line(project_ctx: ProjectContext, file_path: str, line_number: int, content: str) -> str:
+    """Insert content at a specific line number in a file."""
+    try:
+        abs_path = project_ctx.validate_path(file_path)
+
+        if not abs_path.exists():
+            rel_path = project_ctx.to_relative(abs_path)
+            return ToolError(f"Error: File '{rel_path}' does not exist.")
+
+        with open(abs_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        if line_number < 1:
+            return ToolError("Error: line_number must be >= 1.", "validation")
+
+        # Clamp to append if beyond end
+        idx = min(line_number - 1, len(lines))
+
+        # Ensure content ends with newline
+        if content and not content.endswith('\n'):
+            content += '\n'
+
+        lines.insert(idx, content)
+
+        with open(abs_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+
+        rel_path = project_ctx.to_relative(abs_path)
+        return ToolSuccess(f"Successfully inserted content at line {line_number} in {rel_path}")
+
+    except ValueError as e:
+        return ToolError(f"Security Error: {str(e)}", "security")
+    except Exception as e:
+        return ToolError(f"Error inserting line: {str(e)}", "execution")
+
+
+def delete_line(project_ctx: ProjectContext, file_path: str, line_number: int) -> str:
+    """Delete a specific line from a file."""
+    try:
+        abs_path = project_ctx.validate_path(file_path)
+
+        if not abs_path.exists():
+            rel_path = project_ctx.to_relative(abs_path)
+            return ToolError(f"Error: File '{rel_path}' does not exist.")
+
+        with open(abs_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        if line_number < 1 or line_number > len(lines):
+            return ToolError(f"Error: line_number {line_number} is out of range (1-{len(lines)}).", "validation")
+
+        deleted = lines.pop(line_number - 1)
+
+        with open(abs_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+
+        rel_path = project_ctx.to_relative(abs_path)
+        preview = deleted.rstrip('\n')[:80]
+        return ToolSuccess(f"Deleted line {line_number} from {rel_path}: '{preview}'")
+
+    except ValueError as e:
+        return ToolError(f"Security Error: {str(e)}", "security")
+    except Exception as e:
+        return ToolError(f"Error deleting line: {str(e)}", "execution")
+
+
+def get_file_info(project_ctx: ProjectContext, file_path: str) -> str:
+    """Get metadata about a file (size, line count, type)."""
+    try:
+        abs_path = project_ctx.validate_path(file_path)
+
+        if not abs_path.exists():
+            rel_path = project_ctx.to_relative(abs_path)
+            return ToolError(f"Error: '{rel_path}' does not exist.")
+
+        rel_path = project_ctx.to_relative(abs_path)
+        stat = abs_path.stat()
+        size_bytes = stat.st_size
+
+        # Human-readable size
+        if size_bytes < 1024:
+            size_human = f"{size_bytes}B"
+        elif size_bytes < 1024 * 1024:
+            size_human = f"{size_bytes / 1024:.1f}KB"
+        else:
+            size_human = f"{size_bytes / (1024 * 1024):.1f}MB"
+
+        # Line count (only for files)
+        line_count = None
+        if abs_path.is_file():
+            try:
+                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                    line_count = sum(1 for _ in f)
+            except Exception:
+                line_count = None
+
+        info = {
+            "path": str(rel_path),
+            "size_bytes": size_bytes,
+            "size_human": size_human,
+            "line_count": line_count,
+            "extension": abs_path.suffix or None,
+            "is_file": abs_path.is_file(),
+            "is_directory": abs_path.is_dir(),
+            "is_symlink": abs_path.is_symlink(),
+        }
+
+        return ToolSuccess(json.dumps(info, indent=2))
+
+    except ValueError as e:
+        return ToolError(f"Security Error: {str(e)}", "security")
+    except Exception as e:
+        return ToolError(f"Error getting file info: {str(e)}", "execution")
+
+
+def search_codebase(project_ctx: ProjectContext, pattern: str, file_pattern: str = None,
+                   case_sensitive: bool = True, context_lines: int = 0,
+                   max_results: int = 50, directory: str = ".", output_format: str = "full") -> str:
     """
     Search for a pattern across the codebase using ripgrep (or grep fallback).
     Returns matching lines with file paths and line numbers.
+    Supports output_format: 'full' (default), 'files_only', 'count'.
     """
     try:
         abs_dir = project_ctx.validate_path(directory)
@@ -235,10 +351,10 @@ def search_codebase(project_ctx: ProjectContext, pattern: str, file_pattern: str
 
         if rg_path:
             return _search_with_ripgrep(pattern, file_pattern, case_sensitive,
-                                       context_lines, max_results, abs_dir, project_ctx)
+                                       context_lines, max_results, abs_dir, project_ctx, output_format)
         else:
             return _search_with_grep(pattern, file_pattern, case_sensitive,
-                                    context_lines, max_results, abs_dir, project_ctx)
+                                    context_lines, max_results, abs_dir, project_ctx, output_format)
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
     except Exception as e:
@@ -246,14 +362,21 @@ def search_codebase(project_ctx: ProjectContext, pattern: str, file_pattern: str
 
 
 def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
-                        context_lines, max_results, abs_directory, project_ctx):
+                        context_lines, max_results, abs_directory, project_ctx,
+                        output_format="full"):
     """Implementation using ripgrep."""
-    cmd = [shutil.which("rg"), "--line-number", "--heading",
-           "--color", "never", "--no-messages", "--max-count", str(max_results)]
+    cmd = [shutil.which("rg"), "--color", "never", "--no-messages"]
+
+    if output_format == "files_only":
+        cmd.append("--files-with-matches")
+    elif output_format == "count":
+        cmd.append("--count")
+    else:
+        cmd.extend(["--line-number", "--heading", "--max-count", str(max_results)])
 
     if not case_sensitive:
         cmd.append("--ignore-case")
-    if context_lines > 0:
+    if context_lines > 0 and output_format == "full":
         cmd.extend(["--context", str(context_lines)])
     if file_pattern:
         cmd.extend(["--glob", file_pattern])
@@ -268,6 +391,10 @@ def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
+            if output_format == "files_only":
+                return ToolSuccess(_format_files_only(result.stdout, pattern, project_ctx))
+            elif output_format == "count":
+                return ToolSuccess(_format_count_results(result.stdout, pattern, project_ctx))
             return ToolSuccess(_format_search_results(result.stdout, pattern, max_results, project_ctx))
         elif result.returncode == 1:
             return ToolSuccess(f"=== SEARCH RESULTS ===\nPattern: \"{pattern}\"\nNo matches found.\n=== END SEARCH RESULTS ===")
@@ -280,13 +407,21 @@ def _search_with_ripgrep(pattern, file_pattern, case_sensitive,
 
 
 def _search_with_grep(pattern, file_pattern, case_sensitive,
-                     context_lines, max_results, abs_directory, project_ctx):
+                     context_lines, max_results, abs_directory, project_ctx,
+                     output_format="full"):
     """Fallback implementation using grep."""
-    cmd = ["grep", "-r", "-n", "-E"]
+    cmd = ["grep", "-r", "-E"]
+
+    if output_format == "files_only":
+        cmd.append("-l")
+    elif output_format == "count":
+        cmd.append("-c")
+    else:
+        cmd.append("-n")
 
     if not case_sensitive:
         cmd.append("-i")
-    if context_lines > 0:
+    if context_lines > 0 and output_format == "full":
         cmd.extend(["-C", str(context_lines)])
 
     # Add exclusions
@@ -305,7 +440,10 @@ def _search_with_grep(pattern, file_pattern, case_sensitive,
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
-            # Grep output format is different from ripgrep, so format it
+            if output_format == "files_only":
+                return ToolSuccess(_format_files_only(result.stdout, pattern, project_ctx))
+            elif output_format == "count":
+                return ToolSuccess(_format_count_results(result.stdout, pattern, project_ctx))
             return ToolSuccess(_format_grep_results(result.stdout, pattern, max_results, project_ctx))
         elif result.returncode == 1:
             return ToolSuccess(f"=== SEARCH RESULTS ===\nPattern: \"{pattern}\"\nNo matches found.\n=== END SEARCH RESULTS ===")
@@ -392,4 +530,44 @@ def _format_grep_results(raw_output, pattern, max_results, project_ctx):
         formatted.append("")
 
     formatted.append("=== END SEARCH RESULTS ===")
+    return "\n".join(formatted)
+
+
+def _format_files_only(raw_output, pattern, project_ctx):
+    """Format file-list output (one path per line) for LLM consumption."""
+    lines = [l for l in raw_output.strip().split('\n') if l]
+    formatted = ["=== SEARCH RESULTS ===", f"Pattern: \"{pattern}\"",
+                 f"Files with matches: {len(lines)}\n"]
+    for line in lines:
+        abs_file_path = Path(line)
+        try:
+            rel_file = project_ctx.to_relative(abs_file_path)
+        except (ValueError, TypeError):
+            rel_file = line
+        formatted.append(str(rel_file))
+    formatted.append("\n=== END SEARCH RESULTS ===")
+    return "\n".join(formatted)
+
+
+def _format_count_results(raw_output, pattern, project_ctx):
+    """Format count output (file:count per line) for LLM consumption."""
+    lines = [l for l in raw_output.strip().split('\n') if l]
+    formatted = ["=== SEARCH RESULTS ===", f"Pattern: \"{pattern}\"", ""]
+    total = 0
+    for line in lines:
+        if ':' in line:
+            file_path, count_str = line.rsplit(':', 1)
+            try:
+                count = int(count_str)
+            except ValueError:
+                continue
+            total += count
+            abs_file_path = Path(file_path)
+            try:
+                rel_file = project_ctx.to_relative(abs_file_path)
+            except (ValueError, TypeError):
+                rel_file = file_path
+            formatted.append(f"{rel_file}: {count}")
+    formatted.insert(2, f"Total matches: {total}\n")
+    formatted.append("\n=== END SEARCH RESULTS ===")
     return "\n".join(formatted)

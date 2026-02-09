@@ -9,7 +9,7 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Fully local** -- runs against Ollama on your machine. While you do not depend on a AI provider, your code never leaves your computer.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 10 consecutive tool calls per user message (configurable with `-I`).
 - **Two interfaces** -- a classic prompt-toolkit CLI and an optional Textual TUI dashboard with chat view, context panel, and tool confirmation modals.
-- **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual. No frameworks, no bloat.
+- **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual.
 
 
 ### Tools
@@ -23,21 +23,28 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 | `read_file` | Read a file (supports line ranges for large files) |
 | `write_file` | Write content to a file |
 | `replace_string` | Find and replace a specific string in a file |
-| `run_shell_command` | Execute a shell command (60s timeout) |
-| `search_codebase` | Search for patterns across the codebase using ripgrep/grep |
-| `get_project_structure` | Generate a tree-style project structure summary |
-| `create_task` | Save a task as a markdown file in `.ayder/tasks/` |
-| `show_task` | Show the details of a task by its ID number |
-| `list_tasks` | List all tasks from `.ayder/tasks/` |
+| `insert_line` | Insert content at a specific line number |
+| `delete_line` | Delete a specific line from a file |
+| `get_file_info` | Get file metadata (size, line count, type, symlink status) |
+| `run_shell_command` | Execute a shell command (60s timeout, use for quick commands) |
+| `search_codebase` | Search for patterns across the codebase (supports `full`, `files_only`, `count` output formats) |
+| `get_project_structure` | Generate a tree-style project structure summary (configurable depth) |
+| `create_note` | Create a markdown note in `.ayder/notes/` with YAML frontmatter and tags |
+| `save_memory` | Save context or insights to persistent cross-session memory |
+| `load_memory` | Load saved memories, filterable by category or search query |
+| `run_background_process` | Start a long-running command in the background (servers, watchers, builds) |
+| `get_background_output` | Get recent stdout/stderr output from a background process |
+| `kill_background_process` | Kill a running background process (SIGTERM, then SIGKILL) |
+| `list_background_processes` | List all background processes and their status |
+| `list_tasks` | List pending task files in `.ayder/tasks/` (default: pending only, use status parameter for all/done) |
+| `show_task` | Show task contents by path, filename, task ID, or slug |
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
   - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
-  - **Safe mode** (TUI): The Textual TUI supports a safe mode that blocks `write_file`, `replace_string`, and `run_shell_command`.
+  - **Safe mode** (TUI): The Textual TUI supports a safe mode that blocks `write_file`, `replace_string`, `insert_line`, `delete_line`, `run_shell_command`, `run_background_process`, and `kill_background_process`.
   - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
   - You may also prefer to run ayder-cli in a container for additional security.
-
-Of course I am grateful to GEMINI to come up with this idea, KIMI2 for reasoning tasks and CLAUDE and COPILOT to do coding and testing for me. 
 
 ## Installation
 
@@ -50,6 +57,9 @@ cd ayder-cli
 
 # Install in development mode
 pip install -e .
+
+# Or best as a uv tool (always on the path)
+uv tool install .
 
 # Make sure Ollama is running with a model
 ollama pull qwen3-coder
@@ -96,6 +106,7 @@ Please adjust *num_ctx* context size window according to your local computer ram
 | `num_ctx` | `[llm]` | `65536` | Context window size in tokens. Larger values use more VRAM. |
 | `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` and `/edit` commands. |
 | `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
+| `max_background_processes` | `[ui]` | `5` | Maximum number of concurrent background processes (1-20). |
 
 ## Usage
 
@@ -148,9 +159,9 @@ By default, every tool call requires user confirmation. Use permission flags to 
 
 | Flag | Category | Tools |
 |------|----------|-------|
-| `-r` | Read | `list_files`, `read_file`, `search_codebase`, `get_project_structure`, `show_task`, `list_tasks` |
-| `-w` | Write | `write_file`, `replace_string`, `create_task`, `implement_task`, `implement_all_tasks` |
-| `-x` | Execute | `run_shell_command` |
+| `-r` | Read | `list_files`, `read_file`, `get_file_info`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
+| `-w` | Write | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory`, `create_task`, `implement_task`, `implement_all_tasks` |
+| `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
 
 ```bash
 # Auto-approve read-only tools (no confirmations for file reading/searching)
@@ -169,15 +180,17 @@ echo "fix the bug" | ayder -r -w -x
 
 ### Agentic Iterations (-I)
 
-The agent can make up to 10 consecutive tool calls per user message (default). Use `-I` to adjust:
+The agent can make up to 50 consecutive tool calls per user message (default). Use `-I` to adjust:
 
 ```bash
-# Allow up to 20 iterations for complex tasks
-ayder -I 20
+# Allow up to 200 iterations for complex tasks
+ayder -I 200
 
 # Combine with permissions
-ayder -r -w -I 15 "implement all pending tasks"
+ayder -r -w -I 150 "implement all pending tasks"
 ```
+
+If you have memory problems decrease iteration size and /compact the LLM memory before it gets worse
 
 ### TUI Mode (Dashboard)
 
@@ -208,14 +221,14 @@ echo "run all tests and show results" | ayder
 ### Example session
 
 ```
-╭──────────────────┬────────────────────────────────────────╮
-│                  │                                        │
+╭─────────────────┬────────────────────────────────────────╮
+│                 │                                        │
 │  ░▒▓▓▓▒░        │ ayder-cli v0.7.0                       │
 │       ▓▓        │ qwen3-coder:latest · Ollama            │
 │  ▒▓▓▓▓▓▓        │ ~/projects/my-app                      │
 │  ▓▓  ▓▓▓        │                                        │
 │  ░▓▓▓▓▒█        │                                        │
-╰──────────────────┴────────────────────────────────────────╯
+╰─────────────────┴────────────────────────────────────────╯
  ? Tip: Use /help for available commands
 
 ❯ create a pyhon script to calculate prime numbers > 10000
@@ -283,13 +296,7 @@ The standard mode for general coding and chat. Uses the **System Prompt**.
 Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Master" focused solely on breaking down requirements into tasks.
 
 ```
-❯ /plan
-╭──────────────────────── Mode Switch ─────────────────────────────╮
-│ Entered Planning Mode.                                           │
-│ I will now help you break down requirements into tasks.          │
-╰──────────────────────────────────────────────────────────────────╯
-
-❯ I need to add user authentication to the app
+❯ /plan add a user authentication to the app
 
 # The agent will analyze the codebase and create tasks...
 
@@ -297,10 +304,6 @@ Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Mas
 │ Task TASK-001-add-auth-middleware.md created.                    │
 ╰──────────────────────────────────────────────────────────────────╯
 
-❯ /plan
-╭──────────────────────── Mode Switch ─────────────────────────────╮
-│ Exited Planning Mode.                                            │
-╰──────────────────────────────────────────────────────────────────╯
 ```
 
 **Available tools:** Read-only exploration + `create_task`.
@@ -309,11 +312,6 @@ Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Mas
 Activated with `/task`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list.
 
 ```
-❯ /task
-╭──────────────────────── Mode Switch ─────────────────────────────╮
-│ Entered Task Mode.                                               │
-│ I will help you implement tasks from the task list.              │
-╰──────────────────────────────────────────────────────────────────╯
 
 ❯ /implement 1
 
@@ -328,7 +326,6 @@ Activated with `/task`. Uses the **Task Prompt**. The AI focuses on implementing
 
 **How it works:** Commands inject specialized prompts to guide the AI:
 - `/plan` -- Injects Planning Prompt for task creation focus
-- `/task` -- Injects Task Prompt for task implementation focus
 
 ### Task Management
 
@@ -342,34 +339,12 @@ The typical workflow:
 Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames for readability (e.g., `TASK-001-add-auth-middleware.md`). Legacy `TASK-001.md` filenames are also supported.
 
 ```
-❯ /plan
-╭──────────────────────── Mode Switch ─────────────────────────────╮
-│ Entered Planning Mode.                                           │
-╰──────────────────────────────────────────────────────────────────╯
-
-❯ Create a task to add input validation to the login form
-
-╭───────────────────────── Tool Call ──────────────────────────────╮
-│ create_task({"title": "Add input validation to login form",      │
-│   "description": "Validate email format and password length..."})│
-╰──────────────────────────────────────────────────────────────────╯
-Proceed? [Y/n] y
-
-╭──────────────────────── Tool Result ─────────────────────────────╮
-│ Task TASK-001-add-input-validation-to created.                   │
-╰──────────────────────────────────────────────────────────────────╯
-
-❯ /plan
-╭──────────────────────── Mode Switch ─────────────────────────────╮
-│ Exited Implementation Mode.                                      │
-╰──────────────────────────────────────────────────────────────────╯
-
 ❯ /tasks
 
 ╭──────────────────────── Tasks ───────────────────────────────────╮
 │  Task ID  | Task Name                          | Status          │
 │  ---------+------------------------------------+---------        │
-│  TASK-001 | Add input validation to login form  | pending         │
+│  TASK-001 | Add input validation to login form | pending         │
 ╰──────────────────────────────────────────────────────────────────╯
 
 ❯ /task-edit 1    # opens TASK-001-add-input-validation-to.md in your editor
@@ -377,12 +352,16 @@ Proceed? [Y/n] y
 ❯ /implement 1
 
 # AI implements TASK-001 and marks it as done
+
+> /implement-all
+
+# Sequentially implements all tasks one after each other. Consider iteration size!
 ...
 ```
 
 ### Code Search
 
-ayder-cli provides powerful code search capabilities:
+ayder-cli provides code search capabilities:
 
 ```
 ❯ Search for all function definitions in Python files
@@ -413,27 +392,26 @@ Quickly get an overview of your project:
 ```
 ❯ Show me the project structure
 
-╭───────────────────────── Tool Call ──────────────────────────────╮
-│ get_project_structure({"max_depth": 3})                          │
-╰──────────────────────────────────────────────────────────────────╯
-Proceed? [Y/n] y
-
-╭──────────────────────── Tool Result ─────────────────────────────╮
-│ ayder-cli                                                        │
-│ ├── src/                                                         │
-│ │   └── ayder_cli/                                               │
-│ │       ├── cli.py                                               │
-│ │       ├── client.py                                            │
-│ │       ├── commands/                                            │
-│ │       ├── core/                                                │
-│ │       ├── services/                                            │
-│ │       ├── tools/                                               │
-│ │       ├── parser.py                                            │
-│ │       ├── tasks.py                                             │
-│ │       └── ui.py                                                │
-│ ├── tests/                                                       │
-│ └── README.md                                                    │
-╰──────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────── Assistant ────────────────────────────────────╮
+│                                                                                   │
+│  I've analyzed the project structure for you. The project has a standard Flask    │
+│  application layout with:                                                         │
+│                                                                                   │
+│  - **app/** directory containing main application components                      │
+│  - **models/** directory for database models and authentication                   │
+│  - **templates/** directory for HTML templates                                    │
+│  - **static/** directory for static files                                         │
+│  - **tests/** directory for test files                                            │
+│  - Configuration files like config.py and requirements.txt                        │
+│  - Main application file app.py                                                   │
+│                                                                                   │
+│  The application appears to be a web application with user authentication         │
+│  (jwt_auth.py, auth.py) and database interaction (database.py, user.py).          │
+│                                                                                   │
+│  Is there anything specific about this structure you'd like me to explore or      │
+│  modify?                                                                          │
+│                                                                                   │
+╰───────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 ### Editing files
@@ -484,6 +462,9 @@ src/ayder_cli/
   parser.py        -- XML tool call parser (standard + lazy format fallback)
   prompts.py       -- System prompts and prompt templates
   tasks.py         -- Task creation, listing, and implementation (.ayder/tasks/)
+  notes.py         -- Note management (.ayder/notes/)
+  memory.py        -- Cross-session memory storage (.ayder/memory/)
+  process_manager.py -- Background process management (ProcessManager + 4 tool functions)
   ui.py            -- Rich terminal UI (boxes, message formatting, diff previews)
   tui.py           -- Textual TUI dashboard (chat view, context panel, modals)
   tui_helpers.py   -- TUI helper functions (safe mode checks)
@@ -499,12 +480,13 @@ src/ayder_cli/
   core/            -- Core infrastructure
     config.py      -- Configuration loading with Pydantic validation
     context.py     -- ProjectContext for path sandboxing and security
+    result.py      -- Shared result types (ToolSuccess, ToolError)
   services/        -- Service layer
     llm.py         -- OpenAI-compatible LLM provider
     tools/         -- ToolExecutor for tool confirmation and execution
-  tools/           -- Modular tools package
+  tools/           -- Modular tools package (19 tools)
     definition.py  -- ToolDefinition dataclass and registry
-    impl.py        -- Tool implementations (file ops, shell, search)
+    impl.py        -- Tool implementations (file ops, line editing, file info, shell, search)
     schemas.py     -- OpenAI-format JSON schemas for all tools
     registry.py    -- ToolRegistry with middleware, callbacks, and execution timing
     utils.py       -- Tool utilities (content preparation for diffs)

@@ -14,6 +14,8 @@ DEFAULTS: Dict[str, Any] = {
     "num_ctx": 65536,
     "editor": "vim",
     "verbose": False,
+    "max_background_processes": 5,
+    "max_iterations": 50,
 }
 
 _DEFAULT_TOML = """\
@@ -30,6 +32,10 @@ editor = "{editor}"
 [ui]
 # Show written file contents after write_file tool calls (true/false)
 verbose = {verbose_str}
+
+[agent]
+# Maximum agentic iterations (tool calls) per user message
+max_iterations = {max_iterations}
 """
 
 class Config(BaseModel):
@@ -42,6 +48,8 @@ class Config(BaseModel):
     num_ctx: int = Field(default=65536)
     editor: str = Field(default="vim")
     verbose: bool = Field(default=False)
+    max_background_processes: int = Field(default=5)
+    max_iterations: int = Field(default=50)
 
     @model_validator(mode='before')
     @classmethod
@@ -52,7 +60,7 @@ class Config(BaseModel):
         
         new_data = data.copy()
         # Pull values from known sections
-        for section in ['llm', 'editor', 'ui']:
+        for section in ['llm', 'editor', 'ui', 'agent']:
             if section in data and isinstance(data[section], dict):
                 section_data = new_data.pop(section)
                 new_data.update(section_data)
@@ -64,6 +72,20 @@ class Config(BaseModel):
     def validate_num_ctx(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("num_ctx must be positive")
+        return v
+
+    @field_validator("max_background_processes")
+    @classmethod
+    def validate_max_background_processes(cls, v: int) -> int:
+        if v < 1 or v > 20:
+            raise ValueError("max_background_processes must be between 1 and 20")
+        return v
+
+    @field_validator("max_iterations")
+    @classmethod
+    def validate_max_iterations(cls, v: int) -> int:
+        if v < 1 or v > 100:
+            raise ValueError("max_iterations must be between 1 and 100")
         return v
 
     @field_validator("base_url")
