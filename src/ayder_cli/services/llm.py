@@ -21,6 +21,15 @@ class LLMProvider(ABC):
         """
         pass
 
+    @abstractmethod
+    def list_models(self) -> List[str]:
+        """List available models from the provider.
+        
+        Returns:
+            List of model names/IDs.
+        """
+        pass
+
 class OpenAIProvider(LLMProvider):
     """OpenAI/Ollama implementation of LLMProvider."""
     
@@ -46,6 +55,14 @@ class OpenAIProvider(LLMProvider):
              kwargs["extra_body"] = {"options": options}
              
         return self.client.chat.completions.create(**kwargs)
+
+    def list_models(self) -> List[str]:
+        """List available models via the OpenAI-compatible API."""
+        try:
+            response = self.client.models.list()
+            return [m.id for m in response.data]
+        except Exception:
+            return []
     
     def _print_llm_request(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]], options: Optional[Dict[str, Any]]) -> None:
         """Print formatted LLM request details when verbose mode is active."""

@@ -2,17 +2,22 @@
 
 import pytest
 from unittest.mock import Mock, patch
-from ayder_cli.commands.system import HelpCommand, ClearCommand, SummaryCommand, LoadCommand, CompactCommand, VerboseCommand, PlanCommand
+from ayder_cli.commands.system import (
+    HelpCommand, ClearCommand, SummaryCommand, LoadCommand, 
+    CompactCommand, VerboseCommand, PlanCommand, ModelCommand
+)
 from ayder_cli.core.context import SessionContext, ProjectContext
 from ayder_cli.core.config import Config
 from ayder_cli.prompts import SYSTEM_PROMPT
 
-def _create_session(messages=None, state=None):
+def _create_session(messages=None, state=None, llm=None):
     return SessionContext(
         config=Config(),
         project=ProjectContext("."),
         messages=messages or [],
-        state=state or {}
+        state=state or {},
+        llm=llm or Mock(),
+        system_prompt=SYSTEM_PROMPT
     )
 
 class TestHelpCommand:
@@ -189,4 +194,40 @@ class TestVerboseCommand:
         cmd.execute("", session)
         assert session.state["verbose"] is False
         assert "OFF" in mock_draw_box.call_args[0][0]
+
+
+class TestModelCommand:
+    """Test /model command."""
+
+    @patch("ayder_cli.commands.system.draw_box")
+    def test_model_list(self, mock_draw_box):
+        """Test listing models."""
+        mock_llm = Mock()
+        mock_llm.list_models.return_value = ["model1", "model2"]
+        session = _create_session(llm=mock_llm)
+        
+        cmd = ModelCommand()
+        result = cmd.execute("", session)
+        
+        assert result is True
+        mock_llm.list_models.assert_called_once()
+        mock_draw_box.assert_called_once()
+        # The first call is "Available Models", second might be "Current Model" if list is empty
+        # In our case list is NOT empty.
+        content = mock_draw_box.call_args[0][0]
+        assert "model1" in content
+        assert "model2" in content
+
+    @patch("ayder_cli.commands.system.draw_box")
+    def test_model_switch(self, mock_draw_box):
+        """Test switching models."""
+        session = _create_session()
+        cmd = ModelCommand()
+        
+        result = cmd.execute("new-model", session)
+        
+        assert result is True
+        assert session.state["model"] == "new-model"
+        mock_draw_box.assert_called_once()
+        assert "Switched to model: new-model" in mock_draw_box.call_args[0][0]
 

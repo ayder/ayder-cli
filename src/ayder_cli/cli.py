@@ -195,6 +195,7 @@ def run_interactive(permissions=None, iterations=50):
             session_ctx = SessionContext(
                 config=cfg, project=project_ctx,
                 messages=chat_session.messages, state=chat_session.state,
+                llm=llm_provider,
                 system_prompt=enhanced_system
             )
             # Track message count to detect if command added messages for agent

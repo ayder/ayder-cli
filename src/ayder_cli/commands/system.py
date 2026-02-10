@@ -284,3 +284,44 @@ class PlanCommand(BaseCommand):
         return True
 
 
+@register_command
+class ModelCommand(BaseCommand):
+    @property
+    def name(self) -> str:
+        return "/model"
+
+    @property
+    def description(self) -> str:
+        return "List available models or switch to a different model"
+
+    def execute(self, args: str, session: SessionContext) -> bool:
+        if not args.strip():
+            # List models
+            try:
+                models = session.llm.list_models()
+                if not models:
+                    draw_box("No models found or error fetching models from LLM provider.", title="Model", width=80, color_code="33")
+                    # Still show the current model
+                    current_model = session.state.get("model", session.config.model)
+                    draw_box(f"Current active model: {current_model}", title="Current Model", width=80, color_code="36")
+                    return True
+                
+                current_model = session.state.get("model", session.config.model)
+                model_list = "Available Models:\n"
+                # Sort models and highlight current
+                for m in sorted(models):
+                    prefix = " * " if m == current_model else "   "
+                    model_list += f"{prefix}{m}\n"
+                
+                draw_box(model_list, title="Available Models", width=80, color_code="36")
+            except Exception as e:
+                draw_box(f"Error listing models: {str(e)}", title="Error", width=80, color_code="31")
+            return True
+        
+        # Switch model
+        new_model = args.strip()
+        session.state["model"] = new_model
+        draw_box(f"Switched to model: {new_model}", title="Model", width=80, color_code="32")
+        return True
+
+

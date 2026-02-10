@@ -190,7 +190,8 @@ class Agent:
 
         # Get config from session
         cfg = self.session.config
-        model = cfg.model
+        # Use model from state if overridden, otherwise from config
+        model = self.session.state.get("model", cfg.model)
         num_ctx = cfg.num_ctx
 
         # Get state from session

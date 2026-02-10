@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Any, Optional
 from ayder_cli.core.config import Config
+from ayder_cli.services.llm import LLMProvider
 
 
 class ProjectContext:
@@ -72,4 +74,5 @@ class SessionContext:
     project: ProjectContext
     messages: list
     state: dict
+    llm: LLMProvider
     system_prompt: str = ""           # Enhanced system prompt with project structure

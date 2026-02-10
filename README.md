@@ -428,6 +428,7 @@ You can open any file in your configured editor directly from the chat:
 |---------|-------------|
 | `/help` | Show available commands |
 | `/tools` | List all tools and their descriptions |
+| `/model` | List available models or switch model (e.g. `/model qwen2.5-coder`) |
 | `/plan` | Toggle Planning Mode (Task Master) for task creation |
 | `/task` | Enter Task Mode for implementing tasks |
 | `/tasks` | List saved tasks from `.ayder/tasks/` |

@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+*.swp
 
 # Virtual environments
 .venv
@@ -17,3 +18,4 @@ TODO
 .coverage
 .crush
 .gemini
+GEMINI.md

@@ -535,6 +535,44 @@ class TestAgent:
             agent.chat("do something")
             spy.assert_called_once_with(mock_message)
 
+    def test_agent_chat_uses_overridden_model(self):
+        """Test that Agent uses the model from session state if overridden."""
+        mock_llm = Mock()
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="original-model",
+            num_ctx=4096,
+            verbose=False
+        )
+        session = ChatSession(config, "prompt")
+        session.state["model"] = "overridden-model"
+
+        # Mock ToolExecutor and its registry
+        mock_executor = Mock()
+        mock_registry = Mock()
+        mock_registry.get_schemas.return_value = []
+        mock_executor.tool_registry = mock_registry
+
+        agent = Agent(mock_llm, mock_executor, session)
+
+        # Mock API response
+        mock_message = Mock()
+        mock_message.content = "Response"
+        mock_message.tool_calls = None
+        mock_choice = Mock()
+        mock_choice.message = mock_message
+        mock_response = Mock()
+        mock_response.choices = [mock_choice]
+        mock_llm.chat.return_value = mock_response
+
+        agent.chat("hello")
+
+        # Verify chat was called with overridden-model
+        mock_llm.chat.assert_called_once()
+        args, kwargs = mock_llm.chat.call_args
+        assert kwargs["model"] == "overridden-model"
+
     def test_session_append_raw(self):
         """Test ChatSession.append_raw preserves raw message objects."""
         config = Config(
