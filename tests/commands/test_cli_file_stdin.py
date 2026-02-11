@@ -5,7 +5,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 from io import StringIO
 
-from ayder_cli.cli import main, read_input, run_command
+from ayder_cli.cli import main, read_input
+from ayder_cli.cli_runner import run_command
 
 
 class TestReadInput:
@@ -103,7 +104,7 @@ class TestRunCommand:
              patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'), \
              patch('builtins.print') as mock_print:
-            from ayder_cli.cli import run_command
+            from ayder_cli.cli_runner import run_command
             exit_code = run_command("test command")
             assert exit_code == 0
 
@@ -111,7 +112,7 @@ class TestRunCommand:
         """Test error handling in command execution."""
         with patch('ayder_cli.core.config.load_config', side_effect=Exception("Config error")), \
              patch('builtins.print'):
-            from ayder_cli.cli import run_command
+            from ayder_cli.cli_runner import run_command
             exit_code = run_command("test")
             assert exit_code == 1
 
@@ -144,6 +145,7 @@ class TestRunCommand:
              patch('openai.OpenAI'), \
              patch('builtins.print'):
             
+            from ayder_cli.cli_runner import run_command
             run_command("test")
             
             # Verify ProjectContext was initialized

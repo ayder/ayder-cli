@@ -1,10 +1,20 @@
+"""
+Client module - Manages chat sessions and agents.
+
+This module provides:
+- ChatSession: Manages conversation state, history, and user input
+- Agent: High-level interface that delegates to ChatLoop for execution
+"""
+
 import asyncio
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from ayder_cli.banner import print_welcome_banner
-from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.services.llm import LLMProvider
 from ayder_cli.services.tools.executor import ToolExecutor
+from ayder_cli.checkpoint_manager import CheckpointManager
+from ayder_cli.memory import MemoryManager
+from ayder_cli.chat_loop import ChatLoop, LoopConfig
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.formatted_text import ANSI
@@ -48,7 +58,9 @@ class ChatSession:
     """Manage conversation state, history, and user input."""
 
     def __init__(self, config, system_prompt: str,
-                 permissions: set = None, iterations: int = 50):
+                 permissions: set = None, iterations: int = 50,
+                 checkpoint_manager: CheckpointManager = None,
+                 memory_manager: MemoryManager = None):
         """Initialize chat session.
 
         Args:
@@ -56,6 +68,8 @@ class ChatSession:
             system_prompt: Base SYSTEM_PROMPT (enhanced with project structure)
             permissions: Set of granted permission categories.
             iterations: Max agentic iterations per message.
+            checkpoint_manager: CheckpointManager for checkpoint/restore cycles.
+            memory_manager: MemoryManager for LLM-based checkpoint operations.
         """
         self.config = config
         self.system_prompt = system_prompt
@@ -66,6 +80,8 @@ class ChatSession:
             "iterations": iterations,
         }
         self.session = None
+        self.checkpoint_manager = checkpoint_manager
+        self.memory_manager = memory_manager
 
     def start(self):
         """Initialize the session, load history, print banner."""
@@ -186,79 +202,27 @@ class Agent:
         Returns:
             The assistant's text response, or None.
         """
-        self.session.add_message("user", user_input)
-
         # Get config from session
         cfg = self.session.config
-        # Use model from state if overridden, otherwise from config
         model = self.session.state.get("model", cfg.model)
-        num_ctx = cfg.num_ctx
-
-        # Get state from session
-        permissions = self.session.state.get("permissions", set())
-        max_iterations = self.session.state.get("iterations", 50)
-        verbose = self.session.state.get("verbose", False)
-
-        # Main Loop for Agentic Steps
-        for iteration in range(1, max_iterations + 1):
-            if verbose:
-                from ayder_cli.ui import draw_box
-                draw_box(
-                    f"Iteration {iteration}/{max_iterations}",
-                    title="Agent Loop", width=50, color_code="33"
-                )
-
-            schemas = [] if self.session.state.pop("no_tools", False) else self.tools.tool_registry.get_schemas()
-
-            response = self.llm.chat(
-                model=model,
-                messages=self.session.get_messages(),
-                tools=schemas,
-                options={"num_ctx": num_ctx},
-                verbose=verbose
-            )
-
-            msg = response.choices[0].message
-            content = msg.content or ""
-
-            tool_calls = msg.tool_calls
-            custom_calls = []
-            if not tool_calls:
-                custom_calls = parse_custom_tool_calls(content)
-
-                # Check for parser errors
-                for call in custom_calls:
-                    if "error" in call:
-                        self.session.add_message(
-                            "user",
-                            f"Tool parsing error: {call['error']}"
-                        )
-                        custom_calls = []
-                        break
-
-            if not tool_calls and not custom_calls:
-                # No tools used, just conversation
-                if content:
-                    self.session.add_message("assistant", content)
-                    return content
-                return None  # Empty response, no tools
-
-            # If tools were called: add the message with tool_calls
-            self.session.append_raw(msg)
-
-            # Execute tool calls
-            if tool_calls:
-                if self.tools.execute_tool_calls(tool_calls, self.session, permissions, verbose):
-                    return None  # Terminal tool hit
-            elif custom_calls:
-                if self.tools.execute_custom_calls(custom_calls, self.session, permissions, verbose):
-                    return None  # Terminal tool hit
-
-        # Max iterations reached — notify user
-        from ayder_cli.ui import draw_box
-        draw_box(
-            f"Reached maximum iterations ({max_iterations}). "
-            f"Use -I flag or max_iterations in config to increase.",
-            title="Iteration Limit", width=80, color_code="33"
+        
+        # Build loop configuration
+        loop_config = LoopConfig(
+            max_iterations=self.session.state.get("iterations", 50),
+            model=model,
+            num_ctx=cfg.num_ctx,
+            verbose=self.session.state.get("verbose", False),
+            permissions=self.session.state.get("permissions", set())
         )
-        return None
+        
+        # Create and run chat loop
+        chat_loop = ChatLoop(
+            llm_provider=self.llm,
+            tool_executor=self.tools,
+            session=self.session,
+            config=loop_config,
+            checkpoint_manager=self.session.checkpoint_manager,
+            memory_manager=self.session.memory_manager
+        )
+        
+        return chat_loop.run(user_input)

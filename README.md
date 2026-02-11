@@ -496,6 +496,26 @@ src/ayder_cli/
     utils.py       -- Tool utilities (content preparation for diffs)
 ```
 
+### Prompt Organization
+
+All prompt templates are centralized in `src/ayder_cli/prompts.py`. Each prompt includes a REASON comment explaining why the LLM is being prompted:
+
+| Prompt | Used By | REASON |
+|--------|---------|--------|
+| `SYSTEM_PROMPT` | `cli_runner.py` | Define AI role, operational principles, reasoning workflow, and available capabilities |
+| `PROJECT_STRUCTURE_MACRO_TEMPLATE` | `cli_runner.py` | Provide codebase overview at startup so LLM knows what files exist |
+| `PLANNING_PROMPT_TEMPLATE` | `commands/system.py` | Transform high-level requests into actionable tasks with acceptance criteria |
+| `TASK_EXECUTION_PROMPT_TEMPLATE` | `cli_runner.py` | Instruct LLM to implement a specific task and mark it complete |
+| `TASK_EXECUTION_ALL_PROMPT_TEMPLATE` | `cli_runner.py` | Process all pending tasks sequentially without stopping between tasks |
+| `CLEAR_COMMAND_RESET_PROMPT` | `commands/system.py` | Confirm LLM understands context is fresh after `/clear` |
+| `SUMMARY_COMMAND_PROMPT_TEMPLATE` | `commands/system.py` | Extract key decisions from conversation to memory file |
+| `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` | `commands/system.py` | Restore context from saved memory to continue previous work |
+| `COMPACT_COMMAND_PROMPT_TEMPLATE` | `commands/system.py` | Combine summary/save/clear/reload to prevent context window overflow |
+| `MEMORY_CHECKPOINT_PROMPT_TEMPLATE` | `checkpoint_manager.py` | Force LLM to save progress before automatic context reset at iteration limit |
+| `MEMORY_RESTORE_PROMPT_TEMPLATE` | `checkpoint_manager.py` | Instruct LLM to read saved memory after checkpoint reset |
+| `MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE` | `checkpoint_manager.py` | Include saved memory directly for immediate restoration after reset |
+| `MEMORY_NO_MEMORY_MESSAGE` | `checkpoint_manager.py` | Fallback when no memory was saved before checkpoint reset |
+
 ## License
 
 MIT

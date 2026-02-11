@@ -45,7 +45,7 @@ def test_tui_with_command_error_message():
 def test_no_tui_flag_does_not_call_run_tui():
     """Test that without --tui flag, run_tui() is not called."""
     with patch('ayder_cli.tui.run_tui') as mock_run_tui, \
-         patch('ayder_cli.cli.run_interactive') as mock_run_interactive, \
+         patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive, \
          patch.object(sys, 'argv', ['ayder']), \
          patch.object(sys.stdin, 'isatty', return_value=True):
         from ayder_cli.cli import main
@@ -57,7 +57,7 @@ def test_no_tui_flag_does_not_call_run_tui():
 def test_tui_flag_exits_before_run_interactive():
     """Test that --tui returns before calling run_interactive()."""
     with patch('ayder_cli.tui.run_tui') as mock_run_tui, \
-         patch('ayder_cli.cli.run_interactive') as mock_run_interactive, \
+         patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive, \
          patch.object(sys, 'argv', ['ayder', '--tui']):
         from ayder_cli.cli import main
         main()

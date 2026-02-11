@@ -11,7 +11,7 @@ class TestBuildServices:
 
     def test_build_services_with_exception_in_structure_macro(self):
         """Test that _build_services handles exception when getting project structure."""
-        from ayder_cli.cli import _build_services
+        from ayder_cli.cli_runner import _build_services
         from ayder_cli.core.config import Config
 
         mock_config = Config(
@@ -28,18 +28,21 @@ class TestBuildServices:
         with patch('ayder_cli.core.config.load_config', return_value=mock_config), \
              patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
-            cfg, llm_provider, tool_executor, project_ctx, enhanced_system = _build_services()
+            services = _build_services()
+            cfg, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
 
             assert cfg == mock_config
             assert llm_provider is not None
             assert tool_executor is not None
             assert project_ctx is not None
+            assert checkpoint_manager is not None
+            assert memory_manager is not None
             # Verify macro is empty when exception occurs
             assert "PROJECT STRUCTURE" not in enhanced_system
 
     def test_build_services_success_with_structure_macro(self):
         """Test _build_services successfully adds structure macro."""
-        from ayder_cli.cli import _build_services
+        from ayder_cli.cli_runner import _build_services
         from ayder_cli.core.config import Config
 
         mock_config = Config(
@@ -56,15 +59,18 @@ class TestBuildServices:
         with patch('ayder_cli.core.config.load_config', return_value=mock_config), \
              patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
-            cfg, llm_provider, tool_executor, project_ctx, enhanced_system = _build_services()
+            services = _build_services()
+            cfg, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
 
             assert "PROJECT STRUCTURE" in enhanced_system
             assert "src/" in enhanced_system
+            assert checkpoint_manager is not None
+            assert memory_manager is not None
             mock_registry.execute.assert_called_once_with("get_project_structure", {"max_depth": 3})
 
     def test_build_services_with_custom_config(self):
         """Test _build_services accepts custom config parameter."""
-        from ayder_cli.cli import _build_services
+        from ayder_cli.cli_runner import _build_services
         from ayder_cli.core.config import Config
 
         mock_config = Config(
@@ -80,14 +86,15 @@ class TestBuildServices:
 
         with patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
-            cfg, _, _, _, _ = _build_services(config=mock_config)
+            services = _build_services(config=mock_config)
+            cfg = services[0]
 
             assert cfg == mock_config
             # load_config should NOT be called when config is provided
 
     def test_build_services_with_custom_project_root(self):
         """Test _build_services accepts custom project root."""
-        from ayder_cli.cli import _build_services
+        from ayder_cli.cli_runner import _build_services
         from ayder_cli.core.config import Config
 
         mock_config = Config(
@@ -172,19 +179,19 @@ class TestReadInput:
 class TestRunCommand:
     """Test run_command function."""
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.client.ChatSession')
     @patch('ayder_cli.client.Agent')
     def test_run_command_success(self, mock_agent_class, mock_session_class, mock_build_services):
         """Test successful command execution."""
-        from ayder_cli.cli import run_command
+        from ayder_cli.cli_runner import run_command
 
         mock_config = MagicMock()
         mock_llm = MagicMock()
         mock_executor = MagicMock()
         mock_system = "system prompt"
 
-        mock_build_services.return_value = (mock_config, mock_llm, mock_executor, MagicMock(), mock_system)
+        mock_build_services.return_value = (mock_config, mock_llm, mock_executor, MagicMock(), mock_system, MagicMock(), MagicMock())
         
         mock_agent = MagicMock()
         mock_agent.chat.return_value = "Response text"
@@ -195,10 +202,10 @@ class TestRunCommand:
         assert result == 0
         mock_agent.chat.assert_called_once_with("test prompt")
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     def test_run_command_error(self, mock_build_services):
         """Test command execution with error."""
-        from ayder_cli.cli import run_command
+        from ayder_cli.cli_runner import run_command
 
         mock_build_services.side_effect = Exception("Build error")
 
@@ -207,14 +214,14 @@ class TestRunCommand:
             assert result == 1
             assert "Build error" in mock_stderr.getvalue()
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.client.ChatSession')
     @patch('ayder_cli.client.Agent')
     def test_run_command_no_response(self, mock_agent_class, mock_session_class, mock_build_services):
         """Test command execution with no response."""
-        from ayder_cli.cli import run_command
+        from ayder_cli.cli_runner import run_command
 
-        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system")
+        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
         
         mock_agent = MagicMock()
         mock_agent.chat.return_value = None
@@ -232,7 +239,7 @@ class TestRunTasksCLI:
     @patch('ayder_cli.tasks.list_tasks')
     def test_run_tasks_cli_success(self, mock_list_tasks, mock_project_ctx):
         """Test successful tasks listing."""
-        from ayder_cli.cli import _run_tasks_cli
+        from ayder_cli.cli_runner import _run_tasks_cli
 
         mock_list_tasks.return_value = "Task 1\nTask 2"
 
@@ -245,7 +252,7 @@ class TestRunTasksCLI:
     @patch('ayder_cli.tasks.list_tasks')
     def test_run_tasks_cli_error(self, mock_list_tasks, mock_project_ctx):
         """Test tasks listing with error."""
-        from ayder_cli.cli import _run_tasks_cli
+        from ayder_cli.cli_runner import _run_tasks_cli
 
         mock_list_tasks.side_effect = Exception("List error")
 
@@ -258,7 +265,7 @@ class TestRunTasksCLI:
 class TestRunImplementCLI:
     """Test _run_implement_cli function."""
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.client.ChatSession')
     @patch('ayder_cli.client.Agent')
     @patch('ayder_cli.core.context.ProjectContext')
@@ -267,7 +274,7 @@ class TestRunImplementCLI:
     def test_run_implement_by_id_success(self, mock_get_path, mock_get_dir, mock_project_ctx,
                                           mock_agent_class, mock_session_class, mock_build_services):
         """Test implementing task by ID."""
-        from ayder_cli.cli import _run_implement_cli
+        from ayder_cli.cli_runner import _run_implement_cli
         from pathlib import Path
         import tempfile
 
@@ -280,7 +287,7 @@ class TestRunImplementCLI:
             mock_get_dir.return_value = tasks_dir
             mock_get_path.return_value = task_file
 
-            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system")
+            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
             mock_agent = MagicMock()
             mock_agent.chat.return_value = "Task completed"
             mock_agent_class.return_value = mock_agent
@@ -291,7 +298,7 @@ class TestRunImplementCLI:
             assert result == 0
             mock_agent.chat.assert_called_once()
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.client.ChatSession')
     @patch('ayder_cli.client.Agent')
     @patch('ayder_cli.core.context.ProjectContext')
@@ -302,7 +309,7 @@ class TestRunImplementCLI:
                                                mock_project_ctx, mock_agent_class, mock_session_class,
                                                mock_build_services):
         """Test implementing task by pattern match."""
-        from ayder_cli.cli import _run_implement_cli
+        from ayder_cli.cli_runner import _run_implement_cli
         from pathlib import Path
         import tempfile
 
@@ -316,7 +323,7 @@ class TestRunImplementCLI:
             mock_extract_id.return_value = 1
             mock_parse_title.return_value = "Implement Authentication"
 
-            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system")
+            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
             mock_agent = MagicMock()
             mock_agent.chat.return_value = "Task completed"
             mock_agent_class.return_value = mock_agent
@@ -326,12 +333,12 @@ class TestRunImplementCLI:
 
             assert result == 0
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.core.context.ProjectContext')
     @patch('ayder_cli.tasks._get_tasks_dir')
     def test_run_implement_no_match(self, mock_get_dir, mock_project_ctx, mock_build_services):
         """Test implementing when no task matches."""
-        from ayder_cli.cli import _run_implement_cli
+        from ayder_cli.cli_runner import _run_implement_cli
         from pathlib import Path
         import tempfile
 
@@ -340,17 +347,17 @@ class TestRunImplementCLI:
             tasks_dir.mkdir(parents=True)
 
             mock_get_dir.return_value = tasks_dir
-            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system")
+            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
 
             with patch('sys.stderr', new=StringIO()) as mock_stderr:
                 result = _run_implement_cli("nonexistent", permissions={"r"})
                 assert result == 1
                 assert "No tasks found" in mock_stderr.getvalue()
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     def test_run_implement_error(self, mock_build_services):
         """Test implement with error."""
-        from ayder_cli.cli import _run_implement_cli
+        from ayder_cli.cli_runner import _run_implement_cli
 
         mock_build_services.side_effect = Exception("Build error")
 
@@ -363,14 +370,14 @@ class TestRunImplementCLI:
 class TestRunImplementAllCLI:
     """Test _run_implement_all_cli function."""
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.client.ChatSession')
     @patch('ayder_cli.client.Agent')
     def test_run_implement_all_success(self, mock_agent_class, mock_session_class, mock_build_services):
         """Test successful implement all."""
-        from ayder_cli.cli import _run_implement_all_cli
+        from ayder_cli.cli_runner import _run_implement_all_cli
 
-        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system")
+        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
         mock_agent = MagicMock()
         mock_agent.chat.return_value = "All tasks completed"
         mock_agent_class.return_value = mock_agent
@@ -381,10 +388,10 @@ class TestRunImplementAllCLI:
         assert result == 0
         mock_agent.chat.assert_called_once()
 
-    @patch('ayder_cli.cli._build_services')
+    @patch('ayder_cli.cli_runner._build_services')
     def test_run_implement_all_error(self, mock_build_services):
         """Test implement all with error."""
-        from ayder_cli.cli import _run_implement_all_cli
+        from ayder_cli.cli_runner import _run_implement_all_cli
 
         mock_build_services.side_effect = Exception("Build error")
 
@@ -399,7 +406,7 @@ class TestRunInteractive:
 
     def test_run_interactive_basic_input(self):
         """Test basic input handling in interactive mode."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = ["hello", None]  # One input then exit
@@ -410,8 +417,8 @@ class TestRunInteractive:
         mock_config = MagicMock()
         mock_config.iterations = 10
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -425,7 +432,7 @@ class TestRunInteractive:
 
     def test_run_interactive_handles_slash_commands(self):
         """Test that slash commands are dispatched correctly."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = ["/help", None]
@@ -436,8 +443,8 @@ class TestRunInteractive:
         mock_config = MagicMock()
         mock_project_ctx = MagicMock()
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), mock_project_ctx, "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), mock_project_ctx, "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -454,7 +461,7 @@ class TestRunInteractive:
 
     def test_run_interactive_slash_command_adds_message(self):
         """Test that slash command adding message triggers agent processing."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = ["/implement 1", None]
@@ -469,8 +476,8 @@ class TestRunInteractive:
             mock_session.messages.append({"role": "user", "content": "Implement task"})
             return True
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -486,7 +493,7 @@ class TestRunInteractive:
 
     def test_run_interactive_slash_command_error(self):
         """Test error handling when processing slash command message."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = ["/implement 1", None]
@@ -500,8 +507,8 @@ class TestRunInteractive:
             mock_session.messages.append({"role": "user", "content": "Implement task"})
             return True
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -516,7 +523,7 @@ class TestRunInteractive:
 
     def test_run_interactive_empty_input_continues(self):
         """Test that empty input continues the loop."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         # Empty string should be skipped, then exit
@@ -525,8 +532,8 @@ class TestRunInteractive:
         mock_agent = MagicMock()
         mock_config = MagicMock()
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -539,7 +546,7 @@ class TestRunInteractive:
 
     def test_run_interactive_error_handling(self):
         """Test error handling in interactive mode."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = ["trigger error", None]
@@ -549,8 +556,8 @@ class TestRunInteractive:
 
         mock_config = MagicMock()
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -565,7 +572,7 @@ class TestRunInteractive:
 
     def test_run_interactive_multiple_messages(self):
         """Test multiple messages in interactive session."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = ["msg1", "msg2", None]
@@ -575,8 +582,8 @@ class TestRunInteractive:
 
         mock_config = MagicMock()
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent', return_value=mock_agent), \
@@ -590,7 +597,7 @@ class TestRunInteractive:
 
     def test_run_interactive_session_start_called(self):
         """Test that session.start() is called on initialization."""
-        from ayder_cli.cli import run_interactive
+        from ayder_cli.cli_runner import run_interactive
 
         mock_session = MagicMock()
         mock_session.get_input.side_effect = [None]
@@ -598,8 +605,8 @@ class TestRunInteractive:
 
         mock_config = MagicMock()
 
-        with patch('ayder_cli.cli._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt"
+        with patch('ayder_cli.cli_runner._build_services', return_value=(
+            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
         )), \
              patch('ayder_cli.client.ChatSession', return_value=mock_session), \
              patch('ayder_cli.client.Agent'):
@@ -653,7 +660,7 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', '-w', 'write something']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             
             main()
@@ -679,7 +686,7 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', '-x', 'run command']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             
             main()
@@ -705,7 +712,7 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', '-w', '-x', 'do something']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             
             main()
@@ -732,7 +739,7 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', 'hello']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             
             main()
@@ -761,7 +768,7 @@ class TestMainTaskOptions:
         with patch.object(sys, 'argv', ['ayder', '--tasks']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli._run_tasks_cli', return_value=0) as mock_run_tasks, \
+             patch('ayder_cli.cli_runner._run_tasks_cli', return_value=0) as mock_run_tasks, \
              patch('sys.exit') as mock_exit:
             
             main()
@@ -785,7 +792,7 @@ class TestMainTaskOptions:
         with patch.object(sys, 'argv', ['ayder', '--implement', '1']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli._run_implement_cli', return_value=0) as mock_run_implement, \
+             patch('ayder_cli.cli_runner._run_implement_cli', return_value=0) as mock_run_implement, \
              patch('sys.exit') as mock_exit:
             
             main()
@@ -809,7 +816,7 @@ class TestMainTaskOptions:
         with patch.object(sys, 'argv', ['ayder', '--implement-all']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli._run_implement_all_cli', return_value=0) as mock_run_all, \
+             patch('ayder_cli.cli_runner._run_implement_all_cli', return_value=0) as mock_run_all, \
              patch('sys.exit') as mock_exit:
             
             main()
@@ -872,7 +879,7 @@ class TestMainTUIAndInteractive:
              patch.object(sys.stdin, 'isatty', return_value=False), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
              patch('sys.stdin.read', return_value="Piped input"), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             
             main()
@@ -897,7 +904,7 @@ class TestMainTUIAndInteractive:
         with patch.object(sys, 'argv', ['ayder']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_interactive') as mock_run_interactive:
+             patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive:
             
             main()
             
@@ -1015,7 +1022,7 @@ class TestCreateParser:
         with patch.object(sys, 'argv', ['ayder', 'hello world']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             main()
             mock_run.assert_called_once_with('hello world', permissions={'r'}, iterations=75)
@@ -1037,7 +1044,7 @@ class TestCreateParser:
         with patch.object(sys, 'argv', ['ayder', '-I', '20', 'hello']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli.run_command', return_value=0) as mock_run, \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
              patch('sys.exit'):
             main()
             # CLI flag (20) should win over config (75)

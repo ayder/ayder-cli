@@ -32,6 +32,7 @@ class TestChatSession:
             "iterations": 50,
         }
         assert session.session is None
+        assert session.checkpoint_manager is None
 
     def test_session_initialization_with_options(self):
         """Test ChatSession initialization with permissions and iterations."""
@@ -48,6 +49,23 @@ class TestChatSession:
         assert session.state["permissions"] == perms
         assert session.state["iterations"] == 5
         assert session.state["verbose"] is True
+
+    def test_session_initialization_with_checkpoint_manager(self):
+        """Test ChatSession initialization with checkpoint_manager."""
+        from ayder_cli.checkpoint_manager import CheckpointManager
+        from ayder_cli.core.context import ProjectContext
+        
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
+        mock_cm = CheckpointManager(ProjectContext("."))
+        session = ChatSession(config, "prompt", checkpoint_manager=mock_cm)
+        
+        assert session.checkpoint_manager is mock_cm
 
     def test_session_add_message(self):
         """Test adding messages to history."""
@@ -347,7 +365,7 @@ class TestAgent:
         # Check delegation
         mock_executor.execute_tool_calls.assert_called_once()
 
-    @patch("ayder_cli.client.parse_custom_tool_calls")
+    @patch("ayder_cli.chat_loop.parse_custom_tool_calls")
     def test_agent_chat_delegates_custom_calls(self, mock_parse):
         """Test agent delegates custom tool calls to ToolExecutor and returns None."""
         mock_llm = Mock()
@@ -682,49 +700,14 @@ class TestAgentIterationFeedback:
 
         agent = Agent(mock_llm, mock_executor, session)
 
-        with patch("ayder_cli.ui.draw_box") as mock_draw_box:
-            result = agent.chat("do something")
+        result = agent.chat("do something")
 
         assert result is None
         # Should have called LLM exactly 2 times (max_iterations=2)
         assert mock_llm.chat.call_count == 2
-        # Warning should be shown
-        mock_draw_box.assert_called_once()
-        assert "Reached maximum iterations" in mock_draw_box.call_args[0][0]
-
-    def test_verbose_iteration_counter_shown(self):
-        """Test that iteration counter is shown in verbose mode."""
-        mock_llm = Mock()
-        config = Config(
-            base_url="http://test.com",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=True,
-        )
-        session = ChatSession(config, "prompt", iterations=2)
-        session.state["verbose"] = True
-
-        mock_executor = Mock()
-        mock_registry = Mock()
-        mock_registry.get_schemas.return_value = []
-        mock_executor.tool_registry = mock_registry
-        mock_executor.execute_tool_calls.return_value = False
-
-        mock_llm.chat.return_value = self._make_tool_response()
-
-        agent = Agent(mock_llm, mock_executor, session)
-
-        with patch("ayder_cli.ui.draw_box") as mock_draw_box:
-            agent.chat("do something")
-
-        # Should have 2 verbose calls + 1 warning = 3
-        calls = [call[0][0] for call in mock_draw_box.call_args_list]
-        assert any("Iteration 1/2" in c for c in calls)
-        assert any("Iteration 2/2" in c for c in calls)
 
     def test_no_warning_when_iterations_not_exhausted(self):
-        """Test that no warning is shown when agent finishes before limit."""
+        """Test that agent returns response when finishing before limit."""
         mock_llm = Mock()
         config = Config(
             base_url="http://test.com",
@@ -754,9 +737,7 @@ class TestAgentIterationFeedback:
 
         agent = Agent(mock_llm, mock_executor, session)
 
-        with patch("ayder_cli.ui.draw_box") as mock_draw_box:
-            result = agent.chat("hello")
+        result = agent.chat("hello")
 
         assert result == "Here is the answer"
-        mock_draw_box.assert_not_called()
 

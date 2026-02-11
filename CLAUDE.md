@@ -82,7 +82,9 @@ Example:
 ```
 
 **Test Structure** (615+ tests, 96% coverage):
-- `test_client.py` - ChatSession, Agent classes, and main chat loop
+- `test_client.py` - ChatSession, Agent classes
+- `test_chat_loop.py` - ChatLoop, IterationController, ToolCallHandler, CheckpointManager
+- `test_checkpoint_manager.py` - CheckpointManager for checkpoint/restore cycles
 - `test_cli_file_stdin.py` - CLI file/stdin handling, piped input auto-detection, command mode
 - `test_cli_tui.py` - CLI TUI flag integration
 - `test_commands.py` - Slash commands (/help, /tools, etc.)
@@ -90,7 +92,8 @@ Example:
 - `test_config_coverage.py` - Extended config validation coverage
 - `test_diff_preview.py` - Diff generation and preview
 - `test_main.py` - Entry point (__main__)
-- `test_memory.py` - Cross-session memory tools (save_memory, load_memory)
+- `test_memory.py` - Cross-session memory tools (save_memory, load_memory) in `memory.py`
+- `test_checkpoint_manager.py` - Checkpoint management in `checkpoint_manager.py`
 - `test_notes.py` - Note creation functionality
 - `test_process_manager.py` - Background process management (ProcessManager, 4 tool functions, config validation)
 - `test_parameter_aliasing.py` - Tool parameter normalization
@@ -113,13 +116,36 @@ All tests use pytest fixtures and mocking (no live LLM calls required).
 
 The application is organized into several modules:
 
-- **`src/ayder_cli/client.py`** — Main chat loop, `ChatSession` class, and `Agent` class. Contains `call_llm_async()` for async LLM calls (used by the TUI). The `ChatSession` class manages conversation state, history, user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `get_input()` method displays a cyan `❯` prompt. The `Agent` class handles the agentic loop (up to 10 consecutive tool calls per user message, configurable with `-I`). Supports both standard OpenAI tool calls and custom XML-parsed calls. Slash commands are delegated to `handle_command()` from `commands/`.
+- **`src/ayder_cli/client.py`** — `ChatSession` class, `Agent` class, and `call_llm_async()` for async LLM calls (used by the TUI). The `ChatSession` class manages conversation state, history, user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `get_input()` method displays a cyan `❯` prompt. The `Agent` class delegates to `ChatLoop` for the agentic loop. Supports both standard OpenAI tool calls and custom XML-parsed calls. Slash commands are delegated to `handle_command()` from `commands/`.
 
-- **`src/ayder_cli/cli.py`** — Command-line interface with argparse. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`), direct command execution (non-interactive mode), and auto-detection of piped input. The `_build_services()` composition root creates a `ProcessManager` and passes it to `create_default_registry()`, then returns a 5-tuple `(config, llm_provider, tool_executor, project_ctx, enhanced_system)` — the system prompt is enhanced with the project structure macro. `run_interactive()` and `run_command()` pass the enhanced prompt to `ChatSession`. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag.
+- **`src/ayder_cli/chat_loop.py`** — **Core chat loop logic** with separated concerns:
+  - `ChatLoop` — Orchestrates the agentic conversation loop, manages iteration counting, memory checkpoints, and tool execution
+  - `IterationController` — Manages iteration counting and triggers memory checkpoints when limits are reached
+  - `ToolCallHandler` — Parses and executes tool calls (both standard OpenAI and custom XML)
+  - `CheckpointManager` — Creates memory checkpoints by asking LLM to summarize and resets conversation context
+  - `LoopConfig` — Configuration dataclass for loop parameters (max_iterations, model, permissions, etc.)
+  - Memory checkpoint cycle: When iteration limit reached → Ask LLM to write summary → Reset conversation → Load memory → Continue with fresh context (prevents context window overflow)
 
-- **`src/ayder_cli/prompts.py`** — System prompts and prompt templates. Contains `SYSTEM_PROMPT` and `PLANNING_PROMPT` (for task creation). Both are enhanced with project structure at startup via `_build_services()`.
+- **`src/ayder_cli/checkpoint_manager.py`** — **Checkpoint management**. `CheckpointManager` class handles saving/loading conversation summaries to `.ayder/memory/current_memory.md`. Used by `ChatLoop` to prevent "content rotting" during long-running tasks. Tracks checkpoint cycles and provides prompt builders (`build_checkpoint_prompt()`, `build_restore_prompt()`, `build_quick_restore_message()`). All prompt templates imported from `prompts.py` (no hardcoded prompts).
 
-- **`src/ayder_cli/commands/`** — Command registry system for slash commands. Uses a class-based registry pattern (`@register_command` decorator on `BaseCommand` subclasses). The `handle_command()` function dispatches to registered handlers with a `SessionContext` dataclass. 14 commands registered: `/help`, `/tools`, `/tasks`, `/task-edit`, `/implement`, `/implement-all`, `/edit`, `/verbose`, `/clear`, `/compact`, `/summary`, `/load`, `/undo`, `/plan`.
+- **`src/ayder_cli/cli.py`** — CLI entry point with argument parsing. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`, `-I/--iterations`), auto-detection of piped input, and delegates execution to `cli_runner.py`. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag. Contains only `create_parser()` and `read_input()` — all execution logic moved to `cli_runner.py`.
+
+- **`src/ayder_cli/cli_runner.py`** — **CLI execution logic** with separated concerns:
+  - `_build_services()` — Composition root that creates `ProcessManager` and `CheckpointManager`, returns 6-tuple `(config, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager)`. Enhances system prompt with project structure macro.
+  - `InteractiveRunner` — Runner class for REPL mode (`run_interactive()`). Manages session lifecycle, command dispatch, and agent interaction loop.
+  - `CommandRunner` — Runner class for single command execution (`run_command()`). Executes one prompt and exits.
+  - `TaskRunner` — Runner class for task CLI operations (`--tasks`, `--implement`, `--implement-all`).
+  - Clean separation: CLI parsing (cli.py) → Execution (cli_runner.py) → Core logic (client.py/chat_loop.py)
+
+- **`src/ayder_cli/prompts.py`** — **Centralized prompt templates** organized by usage. Each prompt has a REASON comment explaining why the LLM is being prompted:
+  - **Core prompts**: `SYSTEM_PROMPT` — defines AI role and capabilities
+  - **Project structure**: `PROJECT_STRUCTURE_MACRO_TEMPLATE` — provides codebase overview at startup so LLM knows what files exist
+  - **Task planning**: `PLANNING_PROMPT_TEMPLATE` — transforms high-level requests into actionable tasks
+  - **Task execution**: `TASK_EXECUTION_PROMPT_TEMPLATE`, `TASK_EXECUTION_ALL_PROMPT_TEMPLATE` — implements specific or all pending tasks
+  - **Conversation management**: `CLEAR_COMMAND_RESET_PROMPT`, `SUMMARY_COMMAND_PROMPT_TEMPLATE`, `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE`, `COMPACT_COMMAND_PROMPT_TEMPLATE` — manage conversation state
+  - **Memory checkpoints**: `MEMORY_CHECKPOINT_PROMPT_TEMPLATE`, `MEMORY_RESTORE_PROMPT_TEMPLATE`, `MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE`, `MEMORY_NO_MEMORY_MESSAGE` — automatic checkpoint/restore at iteration limits
+
+- **`src/ayder_cli/commands/`** — Command registry system for slash commands. Uses a class-based registry pattern (`@register_command` decorator on `BaseCommand` subclasses). The `handle_command()` function dispatches to registered handlers with a `SessionContext` dataclass. 14 commands registered: `/help`, `/tools`, `/tasks`, `/task-edit`, `/implement`, `/implement-all`, `/edit`, `/verbose`, `/clear`, `/compact`, `/summary`, `/load`, `/undo`, `/plan`. `commands/system.py` imports all prompt templates from `prompts.py` (no hardcoded prompts).
 
 - **`src/ayder_cli/parser.py`** — Enhanced XML tool call parser. Handles standard format (`<function=name><parameter=key>value</parameter></function>`), lazy format for single-param tools (`<function=name>value</function>` with parameter name inference via `_infer_parameter_name()`), and returns `{"error": "message"}` objects for malformed input.
 
@@ -165,14 +191,14 @@ Entry points:
 - **CLI**: `ayder_cli.cli:main` (registered as the `ayder` CLI script in pyproject.toml)
 - **Legacy/TUI**: `ayder_cli.client:run_chat` (can be called directly for programmatic use)
 
-### ChatSession and Agent Classes
+### ChatSession, Agent, and ChatLoop Classes
 
-The `client.py` module implements two core classes extracted from the original monolithic `run_chat()`:
+The `client.py` module implements two core classes, delegating loop logic to `chat_loop.py`:
 
 **ChatSession** — Manages conversation state, history, and user input:
 ```python
 class ChatSession:
-    def __init__(self, config, system_prompt, permissions=None, iterations=10)
+    def __init__(self, config, system_prompt, permissions=None, iterations=50, checkpoint_manager=None)
     def start()                        # Initialize prompt session, print banner
     def add_message(role, content, **kwargs)
     def append_raw(message)            # Append pre-formed message (e.g., tool_calls)
@@ -182,16 +208,38 @@ class ChatSession:
     def render_history()               # Debug display
 ```
 
-**Agent** — Handles LLM API interaction and the agentic tool execution loop:
+**Agent** — High-level interface that delegates to `ChatLoop`:
 ```python
 class Agent:
     def __init__(self, llm_provider: LLMProvider, tools: ToolExecutor, session: ChatSession)
-    def chat(user_input) -> str | None  # Main agentic loop
+    def chat(user_input) -> str | None  # Delegates to ChatLoop.run()
 ```
+
+**ChatLoop** — Orchestrates the agentic conversation loop (in `chat_loop.py`):
+```python
+class ChatLoop:
+    def __init__(self, llm_provider, tool_executor, session, config: LoopConfig, checkpoint_manager=None)
+    def run(user_input) -> str | None   # Main loop with memory checkpoint support
+    
+# Supporting classes:
+class IterationController:    # Manages iteration counting and checkpoint triggers
+class ToolCallHandler:        # Parses and executes tool calls
+class CheckpointManager:      # Creates/restores memory checkpoints
+```
+
+**Memory Checkpoint Cycle:**
+The `-I/--iterations` flag sets a high-watermark for automatic memory checkpoints. When the iteration limit is reached:
+1. `CheckpointManager` asks the LLM to summarize the conversation
+2. Summary is saved to `.ayder/memory/current_memory.md`
+3. Conversation is reset (keeping only system prompt)
+4. Memory is loaded back as a user message
+5. Iteration counter resets to 0, allowing the agent to continue with fresh context
+
+This prevents "content rotting" in long-running tasks while maintaining task continuity.
 
 ### Tools Package Details
 
-The `tools/` package follows a modular architecture with clear separation of concerns:
+The `tools/` package and `chat_loop.py` follow a modular architecture with clear separation of concerns:
 
 **Import Paths:**
 ```python
@@ -242,7 +290,7 @@ path = ctx.validate_path("../../etc/passwd")  # Raises ValueError (traversal blo
 relative = ctx.to_relative(absolute_path)     # Convert back to relative string
 ```
 
-**Integration:** At startup, `cli.py:_build_services()` creates a `ProjectContext` and injects it into `ToolRegistry` and `ToolExecutor` via constructor arguments. The `prepare_new_content()` utility accepts an optional `project_ctx` parameter for path resolution.
+**Integration:** At startup, `cli.py:_build_services()` creates a `ProjectContext` and `MemoryManager`, then injects them into `ToolRegistry`, `ToolExecutor`, and `ChatSession` via constructor arguments. The `prepare_new_content()` utility accepts an optional `project_ctx` parameter for path resolution.
 
 ### Command Registry Pattern
 
@@ -355,7 +403,7 @@ The TUI (`tui.py`) provides an alternative dashboard interface built with Textua
 
 - **CLI with Piped Input Auto-Detection**: The CLI automatically detects piped input (e.g., `echo "text" | ayder`) by checking `sys.stdin.isatty()`. When stdin is piped and no explicit mode flags are set (`--file`, `--stdin`, `--tui`), the CLI auto-enables stdin mode, matching behavior of standard Unix tools. Explicit `--stdin` flag still supported for backwards compatibility.
 
-- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (10 core tool implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks + DI), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers). Additional tool modules `notes.py`, `memory.py`, `process_manager.py`, and `tasks.py` provide specialized functionality (3 memory/note tools, 4 background process tools, 2 task management tools). 20 tools total.
+- **Modular Tools and Chat Loop**: The `tools/` package provides clean separation with `impl.py` (10 core tool implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks + DI), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers). The `chat_loop.py` module separates iteration management, tool handling, and memory checkpoints from `client.py`. Additional modules `notes.py`, `memory.py`, `checkpoint_manager.py`, `process_manager.py`, and `tasks.py` provide specialized functionality (3 memory/note tools, 4 background process tools, 2 task management tools, checkpoint management). 20 tools total.
 
 - **Planning Mode**: Activated via `/plan` command. Injects `PLANNING_PROMPT` as a user message to guide the LLM to act as a "Task Master" for task creation.
 

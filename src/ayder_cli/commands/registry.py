@@ -18,6 +18,10 @@ class CommandRegistry:
     def list_commands(self) -> list[BaseCommand]:
         """List all registered commands."""
         return list(self._commands.values())
+    
+    def get_command_names(self) -> list[str]:
+        """Get all registered command names."""
+        return sorted(self._commands.keys())
 
 # Global registry instance
 _registry = CommandRegistry()

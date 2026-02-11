@@ -10,7 +10,7 @@ class TestMainEntryPoint:
 
     def test_main_calls_cli_main(self):
         """Test that running __main__ module calls cli.main()."""
-        with patch("ayder_cli.cli.run_interactive") as mock_run_interactive, \
+        with patch("ayder_cli.cli_runner.run_interactive") as mock_run_interactive, \
              patch("sys.argv", ["ayder"]), \
              patch("sys.stdin.isatty", return_value=True):
             # Run the module as __main__ using runpy

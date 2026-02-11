@@ -60,3 +60,31 @@ class TestCommandRegistry:
                 return True
                 
         assert _registry.get_command("/decorated") is not None
+
+    def test_get_command_names(self):
+        """Test getting all command names."""
+        registry = CommandRegistry()
+        
+        # Register multiple commands
+        cmd1 = MockCommand()
+        registry.register(cmd1)
+        
+        class AnotherMockCommand(BaseCommand):
+            @property
+            def name(self):
+                return "/another"
+            
+            @property
+            def description(self):
+                return "Another mock"
+                
+            def execute(self, args, session):
+                return True
+        
+        cmd2 = AnotherMockCommand()
+        registry.register(cmd2)
+        
+        names = registry.get_command_names()
+        assert len(names) == 2
+        assert "/another" in names  # Sorted alphabetically
+        assert "/mock" in names
