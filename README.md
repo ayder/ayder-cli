@@ -1,12 +1,12 @@
 # ayder-cli
 
-An interactive AI agent chat client for local LLMs. It connects to a locally running [Ollama](https://ollama.com) instance and provides an autonomous coding assistant with file system tools and shell access, all from your terminal.
+An interactive AI agent chat client for [Ollama](https://ollama.com) models. It connects to any Ollama instance (local or cloud) and provides an autonomous coding assistant with file system tools and shell access, all from your terminal.
 
 ## Why ayder-cli?
 
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
 
-- **Fully local** -- runs against Ollama on your machine. While you do not depend on a AI provider, your code never leaves your computer.
+- **Fully local or cloud** -- runs against any Ollama instance. Use locally for privacy, or connect to cloud-hosted Ollama. Your code never leaves your computer when using local Ollama.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 10 consecutive tool calls per user message (configurable with `-I`).
 - **Two interfaces** -- a classic prompt-toolkit CLI and an optional Textual TUI dashboard with chat view, context panel, and tool confirmation modals.
 - **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual.
@@ -38,6 +38,7 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 | `list_background_processes` | List all background processes and their status |
 | `list_tasks` | List pending task files in `.ayder/tasks/` (default: pending only, use status parameter for all/done) |
 | `show_task` | Show task contents by path, filename, task ID, or slug |
+| `manage_environment_vars` | Manage .env files: validate, load, generate secure values, and set environment variables |
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
@@ -62,9 +63,10 @@ pip install -e .
 uv tool install .
 
 # Make sure Ollama is running with a model
+# You can use any Ollama model - qwen3-coder is recommended for best results
 ollama pull qwen3-coder
 
-# optimize ollama for qwen3-coder
+# Optional: optimize ollama for your model
 export OLLAMA_CONTEXT_LENGTH=65536
 export OLLAMA_FLASH_ATTENTION=true
 export OLLAMA_MAX_LOADED_MODELS=1
@@ -102,7 +104,7 @@ Please adjust *num_ctx* context size window according to your local computer ram
 |--------|---------|---------|-------------|
 | `base_url` | `[llm]` | `http://localhost:11434/v1` | API endpoint. Works with any OpenAI-compatible server. |
 | `api_key` | `[llm]` | `ollama` | API key. Set to `"ollama"` for local Ollama. |
-| `model` | `[llm]` | `qwen3-coder:latest` | Model to use. Must be pulled in Ollama (`ollama list`). |
+| `model` | `[llm]` | `qwen3-coder:latest` | Model to use. Any Ollama model works (`ollama list`). qwen3-coder recommended for tool use. |
 | `num_ctx` | `[llm]` | `65536` | Context window size in tokens. Larger values use more VRAM. |
 | `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` and `/edit` commands. |
 | `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
@@ -160,7 +162,7 @@ By default, every tool call requires user confirmation. Use permission flags to 
 | Flag | Category | Tools |
 |------|----------|-------|
 | `-r` | Read | `list_files`, `read_file`, `get_file_info`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
-| `-w` | Write | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory`, `create_task`, `implement_task`, `implement_all_tasks` |
+| `-w` | Write | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory`, `manage_environment_vars`, `create_task`, `implement_task`, `implement_all_tasks` |
 | `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
 
 ```bash
@@ -429,6 +431,7 @@ You can open any file in your configured editor directly from the chat:
 | `/help` | Show available commands |
 | `/tools` | List all tools and their descriptions |
 | `/model` | List available models or switch model (e.g. `/model qwen2.5-coder`) |
+| `/ask` | Ask a general question without using tools (e.g. `/ask explain REST vs GraphQL`) |
 | `/plan` | Toggle Planning Mode (Task Master) for task creation |
 | `/task` | Enter Task Mode for implementing tasks |
 | `/tasks` | List saved tasks from `.ayder/tasks/` |

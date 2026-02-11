@@ -7,6 +7,7 @@ from ayder_cli.commands.registry import get_registry
 from ayder_cli.commands.base import BaseCommand
 from ayder_cli.core.context import SessionContext, ProjectContext
 from ayder_cli.core.config import Config
+from ayder_cli.services.llm import LLMProvider
 
 class TestHandleCommand:
     """Test handle_command function."""
@@ -24,7 +25,8 @@ class TestHandleCommand:
             config=Config(),
             project=ProjectContext("."),
             messages=[],
-            state={}
+            state={},
+            llm=Mock(spec=LLMProvider)
         )
 
     @patch("ayder_cli.commands.draw_box")

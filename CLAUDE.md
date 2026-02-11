@@ -138,7 +138,7 @@ The application is organized into several modules:
 - **`src/ayder_cli/tui_helpers.py`** — Helper functions for TUI operations. Contains `is_tool_blocked_in_safe_mode(tool_name, safe_mode)` for safe mode checks.
 
 - **`src/ayder_cli/tools/`** — **Core tools package** with modular architecture:
-  - **`definition.py`** — `ToolDefinition` frozen dataclass with tool metadata. `TOOL_DEFINITIONS` list (19 tools) and `TOOL_DEFINITIONS_BY_NAME` dict for lookup.
+  - **`definition.py`** — `ToolDefinition` frozen dataclass with tool metadata. `TOOL_DEFINITIONS` list (20 tools) and `TOOL_DEFINITIONS_BY_NAME` dict for lookup.
   - **`impl.py`** — Core tool implementations (`list_files`, `read_file`, `write_file`, `replace_string`, `insert_line`, `delete_line`, `get_file_info`, `run_shell_command`, `search_codebase`, `get_project_structure`)
   - **`schemas.py`** — OpenAI-format JSON schemas (`tools_schema = [td.to_openai_schema() for td in TOOL_DEFINITIONS]`)
   - **`registry.py`** — Tool registry and execution system:
@@ -355,7 +355,7 @@ The TUI (`tui.py`) provides an alternative dashboard interface built with Textua
 
 - **CLI with Piped Input Auto-Detection**: The CLI automatically detects piped input (e.g., `echo "text" | ayder`) by checking `sys.stdin.isatty()`. When stdin is piped and no explicit mode flags are set (`--file`, `--stdin`, `--tui`), the CLI auto-enables stdin mode, matching behavior of standard Unix tools. Explicit `--stdin` flag still supported for backwards compatibility.
 
-- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (10 core tool implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks + DI), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers). Additional tool modules `notes.py`, `memory.py`, `process_manager.py`, and `tasks.py` provide specialized functionality (3 memory/note tools, 4 background process tools, 2 task management tools). 19 tools total.
+- **Modular Tools Package**: The `tools/` package provides a clean separation with `impl.py` (10 core tool implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks + DI), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers). Additional tool modules `notes.py`, `memory.py`, `process_manager.py`, and `tasks.py` provide specialized functionality (3 memory/note tools, 4 background process tools, 2 task management tools). 20 tools total.
 
 - **Planning Mode**: Activated via `/plan` command. Injects `PLANNING_PROMPT` as a user message to guide the LLM to act as a "Task Master" for task creation.
 

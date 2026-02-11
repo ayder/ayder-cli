@@ -208,7 +208,7 @@ class Agent:
                     title="Agent Loop", width=50, color_code="33"
                 )
 
-            schemas = self.tools.tool_registry.get_schemas()
+            schemas = [] if self.session.state.pop("no_tools", False) else self.tools.tool_registry.get_schemas()
 
             response = self.llm.chat(
                 model=model,

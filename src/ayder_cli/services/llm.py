@@ -1,6 +1,9 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any, Dict
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
@@ -61,7 +64,8 @@ class OpenAIProvider(LLMProvider):
         try:
             response = self.client.models.list()
             return [m.id for m in response.data]
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to list models from LLM provider: {e}")
             return []
     
     def _print_llm_request(self, messages: List[Dict[str, Any]], model: str, tools: Optional[List[Dict[str, Any]]], options: Optional[Dict[str, Any]]) -> None:

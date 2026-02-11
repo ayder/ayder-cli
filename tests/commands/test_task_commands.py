@@ -12,6 +12,7 @@ from ayder_cli.commands.tasks import (
 )
 from ayder_cli.core.config import Config
 from ayder_cli.core.context import ProjectContext, SessionContext
+from ayder_cli.services.llm import LLMProvider
 
 
 def _create_session(config=None, project_root="."):
@@ -19,7 +20,8 @@ def _create_session(config=None, project_root="."):
         config=config or Config(),
         project=ProjectContext(project_root),
         messages=[],
-        state={}
+        state={},
+        llm=Mock(spec=LLMProvider)
     )
 
 

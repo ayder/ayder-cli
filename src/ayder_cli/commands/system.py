@@ -325,3 +325,33 @@ class ModelCommand(BaseCommand):
         return True
 
 
+@register_command
+class AskCommand(BaseCommand):
+    @property
+    def name(self) -> str:
+        return "/ask"
+
+    @property
+    def description(self) -> str:
+        return "Ask a general question (no tools used)"
+
+    def execute(self, args: str, session: SessionContext) -> bool:
+        if not args.strip():
+            draw_box(
+                "Usage: /ask <question>\n\n"
+                "Example: /ask What is the difference between REST and GraphQL?",
+                title="Error", width=80, color_code="31"
+            )
+            return True
+
+        # Set flag to suppress tool schemas in the next LLM call
+        session.state["no_tools"] = True
+
+        # Inject the question as a user message
+        session.messages.append({"role": "user", "content": args.strip()})
+
+        draw_box(
+            f"Question: {args.strip()[:60]}...",
+            title="Ask", width=80, color_code="36"
+        )
+        return True

@@ -56,6 +56,7 @@ class TestToolDefinitions:
             "run_background_process", "get_background_output",
             "kill_background_process", "list_background_processes",
             "list_tasks", "show_task",
+            "manage_environment_vars",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
         assert names == expected_tools

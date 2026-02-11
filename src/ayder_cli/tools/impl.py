@@ -7,6 +7,7 @@ This module contains the actual implementation of all file system and code navig
 import json
 import logging
 import os
+import secrets
 import subprocess
 import shutil
 from pathlib import Path
@@ -571,3 +572,207 @@ def _format_count_results(raw_output, pattern, project_ctx):
     formatted.insert(2, f"Total matches: {total}\n")
     formatted.append("\n=== END SEARCH RESULTS ===")
     return "\n".join(formatted)
+
+
+def manage_environment_vars(
+    project_ctx: ProjectContext,
+    mode: str,
+    variable_name: str = None,
+    value: str = None
+) -> str:
+    """
+    Manage .env files with four modes:
+    - validate: Check if variable_name exists in .env
+    - load: Return all variables from .env
+    - generate: Generate secure random value for variable_name (16 bytes hex)
+    - set: Set variable_name to value in .env
+    
+    All write operations (generate/set) require user confirmation via diff preview.
+    """
+    try:
+        # Import python-dotenv here to handle missing dependency gracefully
+        try:
+            from dotenv import dotenv_values, set_key, find_dotenv
+        except ImportError:
+            return ToolError(
+                "Error: python-dotenv library not installed. Run: pip install python-dotenv",
+                "validation"
+            )
+        
+        # Validate mode parameter
+        valid_modes = ["validate", "load", "generate", "set"]
+        if mode not in valid_modes:
+            return ToolError(
+                f"Error: Invalid mode '{mode}'. Must be one of: {', '.join(valid_modes)}",
+                "validation"
+            )
+        
+        # Get .env file path (always at project root)
+        env_path = project_ctx.validate_path(".env")
+        
+        # Mode-specific validation
+        if mode in ["validate", "generate", "set"]:
+            if not variable_name or not variable_name.strip():
+                return ToolError(
+                    f"Error: variable_name is required for mode '{mode}'",
+                    "validation"
+                )
+        
+        if mode == "set":
+            if value is None:
+                return ToolError(
+                    "Error: value is required for mode 'set'",
+                    "validation"
+                )
+        
+        # VALIDATE MODE: Check if variable exists
+        if mode == "validate":
+            if not env_path.exists():
+                return ToolError(
+                    f"Error: .env file not found at {project_ctx.to_relative(env_path)}",
+                    "validation"
+                )
+            
+            env_vars = dotenv_values(str(env_path))
+            
+            if variable_name in env_vars:
+                value = env_vars[variable_name]
+                # Mask sensitive values (don't show full secrets)
+                if len(value) > 10:
+                    masked_value = f"{value[:4]}...{value[-4:]}"
+                else:
+                    masked_value = "***"
+                
+                return ToolSuccess(
+                    f"✓ Variable '{variable_name}' exists in .env\n"
+                    f"Value: {masked_value}"
+                )
+            else:
+                available_vars = list(env_vars.keys())
+                suggestion = ""
+                if available_vars:
+                    suggestion = f"\nAvailable variables: {', '.join(available_vars[:10])}"
+                    if len(available_vars) > 10:
+                        suggestion += f" (and {len(available_vars) - 10} more)"
+                
+                return ToolError(
+                    f"✗ Variable '{variable_name}' not found in .env{suggestion}",
+                    "validation"
+                )
+        
+        # LOAD MODE: Display all environment variables
+        elif mode == "load":
+            if not env_path.exists():
+                return ToolSuccess(
+                    f"No .env file found at {project_ctx.to_relative(env_path)}\n"
+                    "Use 'generate' or 'set' mode to create variables."
+                )
+            
+            env_vars = dotenv_values(str(env_path))
+            
+            if not env_vars:
+                return ToolSuccess(".env file is empty")
+            
+            # Format output
+            output_lines = [
+                "=== ENVIRONMENT VARIABLES ===",
+                f"File: {project_ctx.to_relative(env_path)}",
+                f"Total variables: {len(env_vars)}",
+                ""
+            ]
+            
+            for key, val in env_vars.items():
+                # Mask long values for security
+                if val and len(val) > 20:
+                    masked = f"{val[:8]}...{val[-8:]}"
+                else:
+                    masked = val or "(empty)"
+                output_lines.append(f"{key}={masked}")
+            
+            output_lines.append("\n=== END ENVIRONMENT VARIABLES ===")
+            return ToolSuccess("\n".join(output_lines))
+        
+        # GENERATE MODE: Create secure random value
+        elif mode == "generate":
+            # Generate 16-byte (128-bit) secure random hex value
+            generated_value = secrets.token_hex(16)
+            
+            # Check if file exists and if variable already exists
+            file_exists = env_path.exists()
+            variable_existed = False
+            
+            if file_exists:
+                old_env_vars = dotenv_values(str(env_path))
+                variable_existed = variable_name in old_env_vars
+            
+            # Create .env if it doesn't exist
+            if not file_exists:
+                env_path.touch()
+            
+            # Set the key using python-dotenv (handles updates and creates if needed)
+            success = set_key(str(env_path), variable_name, generated_value, quote_mode="never")
+            
+            if not success:
+                # Rollback if failed
+                if not file_exists:
+                    env_path.unlink()
+                return ToolError(
+                    f"Error: Failed to set variable '{variable_name}' in .env",
+                    "execution"
+                )
+            
+            # Success message
+            masked_value = f"{generated_value[:8]}...{generated_value[-8:]}"
+            action = "updated" if variable_existed else "created"
+            
+            return ToolSuccess(
+                f"✓ Generated secure value for '{variable_name}' ({action})\n"
+                f"Value: {masked_value} (32 chars)\n"
+                f"File: {project_ctx.to_relative(env_path)}"
+            )
+        
+        # SET MODE: Set variable to specific value
+        elif mode == "set":
+            # Check if file exists and if variable already exists
+            file_exists = env_path.exists()
+            variable_existed = False
+            
+            if file_exists:
+                old_env_vars = dotenv_values(str(env_path))
+                variable_existed = variable_name in old_env_vars
+            
+            # Create .env if it doesn't exist
+            if not file_exists:
+                env_path.touch()
+            
+            # Set the key using python-dotenv
+            success = set_key(str(env_path), variable_name, value, quote_mode="never")
+            
+            if not success:
+                # Rollback if failed
+                if not file_exists:
+                    env_path.unlink()
+                return ToolError(
+                    f"Error: Failed to set variable '{variable_name}' in .env",
+                    "execution"
+                )
+            
+            # Success message
+            action = "updated" if variable_existed else "created"
+            
+            # Mask long values in success message
+            if len(value) > 20:
+                masked_value = f"{value[:8]}...{value[-8:]}"
+            else:
+                masked_value = value
+            
+            return ToolSuccess(
+                f"✓ Variable '{variable_name}' {action}\n"
+                f"Value: {masked_value}\n"
+                f"File: {project_ctx.to_relative(env_path)}"
+            )
+    
+    except ValueError as e:
+        return ToolError(f"Security Error: {str(e)}", "security")
+    except Exception as e:
+        return ToolError(f"Error managing environment variables: {str(e)}", "execution")

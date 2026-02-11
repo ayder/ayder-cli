@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import Mock, patch
 from ayder_cli.commands.system import (
-    HelpCommand, ClearCommand, SummaryCommand, LoadCommand, 
-    CompactCommand, VerboseCommand, PlanCommand, ModelCommand
+    HelpCommand, ClearCommand, SummaryCommand, LoadCommand,
+    CompactCommand, VerboseCommand, PlanCommand, ModelCommand, AskCommand
 )
 from ayder_cli.core.context import SessionContext, ProjectContext
 from ayder_cli.core.config import Config
@@ -230,4 +230,54 @@ class TestModelCommand:
         assert session.state["model"] == "new-model"
         mock_draw_box.assert_called_once()
         assert "Switched to model: new-model" in mock_draw_box.call_args[0][0]
+
+
+class TestAskCommand:
+    """Test /ask command."""
+
+    @patch("ayder_cli.commands.system.draw_box")
+    def test_ask_no_args(self, mock_draw_box):
+        """Test /ask with no question shows usage error."""
+        cmd = AskCommand()
+        session = _create_session(messages=[])
+
+        result = cmd.execute("", session)
+
+        assert result is True
+        # No message should be injected
+        assert len(session.messages) == 0
+        # no_tools flag should NOT be set
+        assert "no_tools" not in session.state
+        # Should show usage error
+        mock_draw_box.assert_called_once()
+        assert "Usage" in mock_draw_box.call_args[0][0]
+
+    @patch("ayder_cli.commands.system.draw_box")
+    def test_ask_with_question(self, mock_draw_box):
+        """Test /ask sets no_tools flag and injects user message."""
+        cmd = AskCommand()
+        session = _create_session(messages=[])
+
+        result = cmd.execute("What is REST?", session)
+
+        assert result is True
+        # no_tools flag should be set
+        assert session.state["no_tools"] is True
+        # User message should be injected
+        assert len(session.messages) == 1
+        assert session.messages[0]["role"] == "user"
+        assert session.messages[0]["content"] == "What is REST?"
+        mock_draw_box.assert_called_once()
+
+    @patch("ayder_cli.commands.system.draw_box")
+    def test_ask_preserves_question(self, mock_draw_box):
+        """Test full question text is preserved in injected message."""
+        cmd = AskCommand()
+        session = _create_session(messages=[])
+
+        long_question = "What is the difference between REST and GraphQL APIs?"
+        result = cmd.execute(f"  {long_question}  ", session)
+
+        assert result is True
+        assert session.messages[0]["content"] == long_question
 

@@ -596,6 +596,49 @@ class TestAgent:
         assert session.messages[0] is raw_msg  # Same object, not a dict copy
 
 
+    def test_agent_chat_no_tools_flag(self):
+        """Test that no_tools flag causes empty tools to be passed to LLM."""
+        mock_llm = Mock()
+        config = Config(
+            base_url="http://test.com",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False
+        )
+        session = ChatSession(config, "prompt")
+        session.state["no_tools"] = True
+
+        mock_executor = Mock()
+        mock_registry = Mock()
+        mock_registry.get_schemas.return_value = [{"type": "function", "function": {"name": "read_file"}}]
+        mock_executor.tool_registry = mock_registry
+
+        agent = Agent(mock_llm, mock_executor, session)
+
+        # Mock API response - simple text (no tools)
+        mock_message = Mock()
+        mock_message.content = "REST is an architectural style..."
+        mock_message.tool_calls = None
+
+        mock_choice = Mock()
+        mock_choice.message = mock_message
+
+        mock_response = Mock()
+        mock_response.choices = [mock_choice]
+
+        mock_llm.chat.return_value = mock_response
+
+        result = agent.chat("What is REST?")
+
+        assert result == "REST is an architectural style..."
+        # Verify empty tools were passed
+        _, kwargs = mock_llm.chat.call_args
+        assert kwargs["tools"] == []
+        # Verify flag was consumed
+        assert "no_tools" not in session.state
+
+
 class TestAgentIterationFeedback:
     """Tests for verbose iteration display and max iterations warning."""
 

@@ -49,6 +49,7 @@ You can perform these actions:
 - **Background Processes**: `run_background_process` to start long-running commands (servers, watchers, builds), `get_background_output` to check output, `kill_background_process` to stop processes, `list_background_processes` to see all running processes **NON-BLOCKING**.
 - **Task Management**: `list_tasks` to see pending task files in .ayder/tasks/ (default: pending only; use status='all' for all, status='done' for completed), `show_task` to read task contents (accepts path, filename, ID, or slug).
 - **Notes & Memory**: `create_note` to create markdown notes in .ayder/notes/ with tags, `save_memory` to save context to persistent cross-session memory, `load_memory` to retrieve saved memories (filterable by category/query).
+- **Environment Management**: `manage_environment_vars` to manage .env files - modes: `validate` (check variable exists), `load` (display all variables), `generate` (create secure random value like JWT secrets), `set` (update variable). Helps prevent misconfigurations and missing secrets.
 
 ### EXECUTION FLOW:
 1. Receive request.
