@@ -36,7 +36,7 @@ def run_tui(model: str = "default", safe_mode: bool = False, permissions: set = 
         permissions: Set of granted permission levels ("r", "w", "x")
     """
     app = AyderApp(model=model, safe_mode=safe_mode, permissions=permissions)
-    app.run(inline=True, inline_no_clear=True, mouse=False)
+    app.run(mouse=False)
 
 
 __all__ = [

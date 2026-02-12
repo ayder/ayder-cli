@@ -11,11 +11,13 @@ CLAUDE_CSS = """\
 /* ── Variables (via Textual design tokens) ─────────────────────────── */
 /* Using explicit colors because Textual tokens don't cover everything */
 
-/* CLIConfirmScreen - Confirmation modal */
+/* CLIConfirmScreen - The modal dialog that appears when a tool needs user approval.
+   Targets the 'CLIConfirmScreen' class in screens.py. */
 CLIConfirmScreen {
     align: center bottom;
 }
 
+/* The main container within the confirmation screen. */
 CLIConfirmScreen > Vertical {
     width: 100%;
     height: auto;
@@ -24,16 +26,19 @@ CLIConfirmScreen > Vertical {
     padding: 1 2;
 }
 
+/* The question/prompt text in the confirmation dialog ("Allow tool execution?"). */
 CLIConfirmScreen .prompt {
     text-style: bold;
     color: #5eaff5;
 }
 
+/* The description of the tool action ("Run command: ls -la"). */
 CLIConfirmScreen .description {
     color: #b8b8c8;
     margin-bottom: 1;
 }
 
+/* The container showing the code diff for file modifications. */
 CLIConfirmScreen .diff-container {
     height: 15;
     border: solid #333350;
@@ -42,6 +47,7 @@ CLIConfirmScreen .diff-container {
     overflow: auto scroll;
 }
 
+/* The list of options (Approve, Deny, etc.) in the confirmation dialog. */
 CLIConfirmScreen .option-list {
     height: auto;
     max-height: 10;
@@ -50,6 +56,7 @@ CLIConfirmScreen .option-list {
     padding: 0 1;
 }
 
+/* The input field for providing custom instructions when denying a tool. */
 CLIConfirmScreen #instruction-input {
     display: none;
     margin: 1 0;
@@ -58,13 +65,15 @@ CLIConfirmScreen #instruction-input {
     color: #e0e0e8;
 }
 
+/* Hint text at the bottom of the confirmation screen. */
 CLIConfirmScreen .hint {
     color: #666680;
     text-style: dim;
     margin-top: 1;
 }
 
-/* CLIPermissionScreen - Permission toggle modal */
+/* CLIPermissionScreen - The modal for changing tool permissions (/permission command).
+   Targets 'CLIPermissionScreen' in screens.py. */
 CLIPermissionScreen {
     align: center bottom;
 }
@@ -101,7 +110,8 @@ CLIPermissionScreen .hint {
     margin-top: 1;
 }
 
-/* CLISafeModeScreen - Safe mode block modal */
+/* CLISafeModeScreen - The modal warning when a tool is blocked by safe mode.
+   Targets 'CLISafeModeScreen' in screens.py. */
 CLISafeModeScreen {
     align: center bottom;
 }
@@ -119,7 +129,8 @@ CLISafeModeScreen .title {
     color: #c45050;
 }
 
-/* CLISelectScreen - Selection modal */
+/* CLISelectScreen - A generic selection modal (used for picking tasks, etc.).
+   Targets 'CLISelectScreen' in screens.py. */
 CLISelectScreen {
     align: center bottom;
 }
@@ -158,7 +169,8 @@ CLISelectScreen .hint {
     margin-top: 1;
 }
 
-/* TaskEditScreen - In-app task editor */
+/* TaskEditScreen - The full-screen(ish) editor for editing task descriptions.
+   Targets 'TaskEditScreen' in screens.py. */
 TaskEditScreen {
     align: center bottom;
 }
@@ -189,19 +201,21 @@ TaskEditScreen .hint {
     margin-top: 1;
 }
 
-/* Text selection highlight */
+/* Generic text selection highlight color. */
 .selection {
     background: #264f78;
     color: #e0e0e8;
 }
 
-/* ChatView - Main chat display */
+/* ChatView - The main scrollable area displaying the chat history.
+   Targets 'ChatView' widget in widgets.py. */
 ChatView {
     height: 100%;
     padding: 0 1;
     background: transparent;
 }
 
+/* Base style for all message lines within ChatView. */
 ChatView Static {
     height: auto;
     margin: 0;
@@ -209,21 +223,25 @@ ChatView Static {
     background: transparent;
 }
 
+/* User message text ("> Hello"). */
 ChatView .user-message {
     color: #5eaff5;
     margin: 1 0 0 0;
 }
 
+/* Assistant message prefix ("<"). */
 ChatView .assistant-message {
     color: #b8b8c8;
     margin: 1 0 0 0;
 }
 
+/* The actual Markdown content of the assistant's reply. */
 ChatView .assistant-message-content {
     margin: 0 0 0 2;
     color: #b8b8c8;
 }
 
+/* Styling for the <think> blocks (reasoning text). */
 ChatView .thinking {
     color: #555570;
     margin: 0;
@@ -231,29 +249,34 @@ ChatView .thinking {
     text-style: italic;
 }
 
+/* Tool call display ("→ write_file ..."). */
 ChatView .tool-call {
     color: #d4a043;
     margin: 0;
     padding-left: 2;
 }
 
+/* Tool result display ("✓ File written"). */
 ChatView .tool-result {
     color: #5cb870;
     margin: 0;
     padding-left: 2;
 }
 
+/* System messages ("Operation cancelled", "Error: ..."). */
 ChatView .system-message {
     color: #666680;
     margin: 1 0 0 0;
     text-style: italic;
 }
 
+/* Separator lines (if used). */
 ChatView .separator {
     color: #333350;
     margin: 1 0 0 0;
 }
 
+/* The "Thinking..." spinner message. */
 ChatView .thinking-message {
     color: #d4a043;
     margin: 1 0 0 0;
@@ -271,7 +294,8 @@ ChatView .tool-completed {
     padding-left: 2;
 }
 
-/* AutoCompleteInput - Input with slash command suggestions */
+/* AutoCompleteInput - The input field widget with slash command suggestions.
+   Targets 'AutoCompleteInput' in widgets.py. */
 AutoCompleteInput {
     border: none;
     background: transparent;
@@ -287,6 +311,7 @@ AutoCompleteInput > .input--placeholder {
     color: #666680;
 }
 
+/* The dropdown menu for slash command suggestions. */
 AutoCompleteInput .suggestions {
     background: #12122a;
     border: solid #333350;
@@ -303,10 +328,11 @@ AutoCompleteInput .suggestion--highlighted {
     background: #333350;
 }
 
-/* CLIInputBar - Input bar with prompt */
+/* CLIInputBar - The container at the bottom holding the prompt ">" and the input field.
+   Targets 'CLIInputBar' in widgets.py. */
 CLIInputBar {
     height: 3;
-    background: transparent;
+    background: transparent; 
     border-top: solid #333350;
     padding: 0;
 }
@@ -317,12 +343,13 @@ CLIInputBar Static {
     padding: 0 1;
 }
 
+/* The actual text area inside the input bar. */
 CLIInputBar #chat-input {
     width: 1fr;
     height: 3;
     border: none;
-    background: transparent;
-    color: #e0e0e8;
+    background: transparent; 
+    color: #e0e0e8; 
     padding: 0 1;
 }
 
@@ -330,12 +357,14 @@ CLIInputBar #chat-input:focus {
     border: none;
 }
 
+/* The ">" prompt character. */
 CLIInputBar .prompt {
     color: #5eaff5;
     text-style: bold;
 }
 
-/* StatusBar - Bottom status bar */
+/* StatusBar - The bar at the very bottom showing context info (model, tokens).
+   Targets 'StatusBar' in widgets.py. */
 StatusBar {
     height: 1;
     background: #12122a;
@@ -355,13 +384,13 @@ StatusBar .key-hint {
     color: #555570;
 }
 
-/* Banner spacer - pushes banner to bottom on startup */
+/* Banner spacer - An invisible widget used to push the banner to the bottom initially. */
 #banner-spacer {
     height: 0;
     background: transparent;
 }
 
-/* BannerWidget - Top banner */
+/* BannerWidget - The ASCII art banner shown at startup. */
 BannerWidget {
     height: auto;
     background: transparent;
@@ -386,7 +415,8 @@ BannerWidget .banner-version {
     color: #5cb870;
 }
 
-/* ToolPanel - Tool execution display */
+/* ToolPanel - The panel that slides up/appears above the input bar showing running tools.
+   Targets 'ToolPanel' in widgets.py. */
 ToolPanel {
     layout: vertical;
     height: auto;
@@ -413,23 +443,26 @@ ToolPanel .tool-item.completed {
     color: #5cb870;
 }
 
-/* AyderApp - Main application */
+/* AyderApp - The root application screen. */
 Screen {
     layout: vertical;
     background: #0d0d1a;
 }
 
-/* Inline mode - runs within terminal flow, not full-screen */
+/* Inline mode - Configures the app to run within the terminal flow rather than full screen.
+   Sets the height of the 'window' seen in the terminal. */
 Screen:inline {
     height: 80vh;
     min-height: 20;
 }
 
+/* ID-based selectors for the main layout components in app.py compose() */
+
 #chat-view {
-    height: 1fr;
+    height: 1fr; /* Takes up all available space above the input/tools */
     width: 100%;
     background: transparent;
-    scrollbar-size: 0 0;
+    scrollbar-size: 0 0; /* Hides the scrollbar track */
     scrollbar-size-horizontal: 0;
     scrollbar-size-vertical: 0;
 }

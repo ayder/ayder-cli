@@ -14,17 +14,6 @@ from pathlib import Path
 from ayder_cli.tui.types import MessageType
 
 
-class _SubmitTextArea(TextArea):
-    """TextArea that doesn't consume Enter — lets parent handle submission."""
-
-    async def _on_key(self, event) -> None:
-        if event.key == "enter":
-            # Don't insert newline; let the event bubble to CLIInputBar.on_key
-            event.prevent_default()
-            return
-        await super()._on_key(event)
-
-
 class ChatView(VerticalScroll):
     """
     CLI-style chat display.
@@ -283,8 +272,7 @@ class AutoCompleteInput(Input):
 
 class CLIInputBar(Horizontal):
     """
-    CLI-style input bar with multiline text area (max 3 lines, wraps).
-    Enter submits, Shift+Enter inserts a newline.
+    CLI-style input bar with single-line Input.
     """
 
     class Submitted(Message):
@@ -297,7 +285,7 @@ class CLIInputBar(Horizontal):
     def __init__(self, commands: list[str], **kwargs):
         super().__init__(**kwargs)
         self.commands = commands
-        self._textarea: TextArea | None = None
+        self._input: Input | None = None
         self._history_file = Path.home() / ".ayder_chat_history"
         self._history: list[str] = self._load_history()
         self._history_index: int = len(self._history)
@@ -325,62 +313,39 @@ class CLIInputBar(Horizontal):
     def compose(self) -> ComposeResult:
         """Compose the input bar."""
         yield Static(">", classes="prompt")
-        self._textarea = _SubmitTextArea(
-            "",
+        self._input = AutoCompleteInput(
+            commands=self.commands,
+            placeholder="",
             id="chat-input",
-            language=None,
-            theme="css",
-            soft_wrap=True,
-            show_line_numbers=False,
         )
-        yield self._textarea
+        yield self._input
 
     def on_mount(self) -> None:
         """Focus input on mount."""
-        self._textarea = self.query_one("#chat-input", _SubmitTextArea)
-        self._textarea.focus()
+        self._input = self.query_one("#chat-input", Input)
+        self._input.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter (submit)."""
+        event.prevent_default()
+        event.stop()
+        self._submit()
 
     def on_key(self, event) -> None:
-        """Handle Enter (submit), Shift+Enter (newline), and history navigation."""
-        if event.key == "enter":
-            # Plain Enter = submit
+        """Handle history navigation."""
+        if event.key == "up":
             event.prevent_default()
             event.stop()
-            self._submit()
-        elif event.key == "up":
-            # Only navigate history if cursor is on the first line
-            if self._textarea and self._textarea.cursor_location[0] == 0:
-                event.prevent_default()
-                event.stop()
-                self._history_navigate(-1)
+            self._history_navigate(-1)
         elif event.key == "down":
-            # Only navigate history if cursor is on the last line
-            if self._textarea:
-                last_row = self._textarea.document.line_count - 1
-                if self._textarea.cursor_location[0] >= last_row:
-                    event.prevent_default()
-                    event.stop()
-                    self._history_navigate(1)
-        elif event.key == "tab":
-            if self._textarea and self._textarea.text.startswith("/"):
-                event.prevent_default()
-                event.stop()
-                self._tab_complete()
-
-    def _tab_complete(self) -> None:
-        """Attempt slash command tab-completion."""
-        text = self._textarea.text.strip()
-        if not text.startswith("/"):
-            return
-        matches = [c for c in self.commands if c.startswith(text)]
-        if len(matches) == 1:
-            self._textarea.clear()
-            self._textarea.insert(matches[0])
+            event.prevent_default()
+            event.stop()
+            self._history_navigate(1)
 
     def _submit(self) -> None:
         """Submit the current input value."""
-        if self._textarea:
-            value = self._textarea.text.strip()
+        if self._input:
+            value = self._input.value.strip()
             if value:
                 if not self._history or self._history[-1] != value:
                     self._history.append(value)
@@ -388,17 +353,17 @@ class CLIInputBar(Horizontal):
                 self._history_index = len(self._history)
                 self._current_input = ""
                 self.app.post_message(self.Submitted(value))
-                self._textarea.clear()
+                self._input.value = ""
 
     def focus_input(self) -> None:
         """Focus the input field."""
-        if self._textarea:
-            self._textarea.focus()
+        if self._input:
+            self._input.focus()
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable input."""
-        if self._textarea:
-            self._textarea.disabled = not enabled
+        if self._input:
+            self._input.disabled = not enabled
 
     def _history_navigate(self, direction: int) -> None:
         """Navigate through command history.
@@ -410,7 +375,7 @@ class CLIInputBar(Horizontal):
             return
 
         if self._history_index == len(self._history):
-            self._current_input = self._textarea.text
+            self._current_input = self._input.value
 
         new_index = self._history_index + direction
 
@@ -426,8 +391,8 @@ class CLIInputBar(Horizontal):
         else:
             text = self._history[self._history_index]
 
-        self._textarea.clear()
-        self._textarea.insert(text)
+        self._input.value = text
+        self._input.cursor_position = len(text)
 
 
 class StatusBar(Horizontal):
@@ -449,7 +414,7 @@ class StatusBar(Horizontal):
         yield Label(f" | tokens: 0", id="token-label")
         yield Label(f" | files: 0", id="files-label")
         yield Static(classes="spacer")
-        yield Label("^C:cancel ^L:clear ^D:quit", classes="key-hint")
+        yield Label("^C:cancel ^L:clear ^Q:quit", classes="key-hint")
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""

@@ -169,64 +169,65 @@ class TestToolNeedsConfirmation:
 
     def test_read_tool_auto_approved_with_default_permissions(self):
         """Test that read tools are auto-approved with default permissions."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from unittest.mock import MagicMock
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r"}
-        assert not app._tool_needs_confirmation("read_file")
-        assert not app._tool_needs_confirmation("list_files")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r"})
+        assert not loop._tool_needs_confirmation("read_file")
+        assert not loop._tool_needs_confirmation("list_files")
 
     def test_write_tool_needs_confirmation_with_default_permissions(self):
         """Test that write tools need confirmation with default permissions."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r"}
-        assert app._tool_needs_confirmation("write_file")
-        assert app._tool_needs_confirmation("replace_string")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r"})
+        assert loop._tool_needs_confirmation("write_file")
+        assert loop._tool_needs_confirmation("replace_string")
 
     def test_execute_tool_needs_confirmation_with_default_permissions(self):
         """Test that execute tools need confirmation with default permissions."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r"}
-        assert app._tool_needs_confirmation("run_shell_command")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r"})
+        assert loop._tool_needs_confirmation("run_shell_command")
 
     def test_write_tool_auto_approved_with_w_permission(self):
         """Test that write tools are auto-approved with w permission."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r", "w"}
-        assert not app._tool_needs_confirmation("write_file")
-        assert not app._tool_needs_confirmation("replace_string")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r", "w"})
+        assert not loop._tool_needs_confirmation("write_file")
+        assert not loop._tool_needs_confirmation("replace_string")
 
     def test_execute_tool_auto_approved_with_x_permission(self):
         """Test that execute tools are auto-approved with x permission."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r", "x"}
-        assert not app._tool_needs_confirmation("run_shell_command")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r", "x"})
+        assert not loop._tool_needs_confirmation("run_shell_command")
 
     def test_all_tools_auto_approved_with_full_permissions(self):
         """Test that all tools are auto-approved with rwx permissions."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r", "w", "x"}
-        assert not app._tool_needs_confirmation("read_file")
-        assert not app._tool_needs_confirmation("write_file")
-        assert not app._tool_needs_confirmation("run_shell_command")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r", "w", "x"})
+        assert not loop._tool_needs_confirmation("read_file")
+        assert not loop._tool_needs_confirmation("write_file")
+        assert not loop._tool_needs_confirmation("run_shell_command")
 
     def test_unknown_tool_auto_approved(self):
         """Test that unknown tools default to 'r' permission and are auto-approved."""
-        from ayder_cli.tui import AyderApp
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
-        app = AyderApp.__new__(AyderApp)
-        app.permissions = {"r"}
-        assert not app._tool_needs_confirmation("nonexistent_tool")
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r"})
+        assert not loop._tool_needs_confirmation("nonexistent_tool")
 
 
 class TestGenerateDiff:

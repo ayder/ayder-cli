@@ -1,7 +1,8 @@
 """
 AyderApp — main Textual application for ayder-cli TUI.
 
-Contains init, compose, LLM pipeline, tool confirmation, and UI actions.
+Contains init, compose, AppCallbacks, and UI actions.
+LLM pipeline and tool execution are delegated to TuiChatLoop.
 Command handlers are in tui.commands.
 """
 
@@ -10,16 +11,12 @@ from textual.widgets import Static
 from textual.worker import get_current_worker
 from textual.timer import Timer
 from textual import on
-from rich.text import Text
 from pathlib import Path
 import asyncio
 import difflib
-import json
-import re
 
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.client import call_llm_async
 from ayder_cli.core.config import load_config
 from ayder_cli.services.llm import OpenAIProvider
 from ayder_cli.commands.registry import get_registry
@@ -29,6 +26,82 @@ from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.screens import CLIConfirmScreen
 from ayder_cli.tui.widgets import ChatView, ToolPanel, CLIInputBar, StatusBar
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
+from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+
+
+class AppCallbacks:
+    """Implements TuiCallbacks by dispatching to Textual widgets."""
+
+    def __init__(self, app: "AyderApp") -> None:
+        self._app = app
+        self._worker = None
+
+    def on_thinking_start(self) -> None:
+        chat_view = self._app.query_one("#chat-view", ChatView)
+        chat_view.show_thinking()
+        self._app._thinking_timer = self._app.set_interval(
+            0.1, self._app._animate_thinking
+        )
+
+    def on_thinking_stop(self) -> None:
+        chat_view = self._app.query_one("#chat-view", ChatView)
+        chat_view.hide_thinking()
+        if self._app._thinking_timer:
+            self._app._thinking_timer.stop()
+            self._app._thinking_timer = None
+
+    def on_assistant_content(self, text: str) -> None:
+        chat_view = self._app.query_one("#chat-view", ChatView)
+        chat_view.add_assistant_message(text)
+
+    def on_thinking_content(self, text: str) -> None:
+        chat_view = self._app.query_one("#chat-view", ChatView)
+        chat_view.add_thinking_message(text)
+
+    def on_token_usage(self, total_tokens: int) -> None:
+        self._app.call_later(
+            lambda t=total_tokens: self._app.query_one(
+                "#status-bar", StatusBar
+            ).update_token_usage(t)
+        )
+
+    def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
+        tool_panel = self._app.query_one("#tool-panel", ToolPanel)
+        tool_panel.add_tool(call_id, name, arguments)
+        # Start tools spinner if not already running
+        if not self._app._tools_timer:
+            self._app._tools_timer = self._app.set_interval(
+                0.1, self._app._animate_running_tools
+            )
+
+    def on_tool_complete(self, call_id: str, result: str) -> None:
+        tool_panel = self._app.query_one("#tool-panel", ToolPanel)
+        self._app.call_later(
+            lambda tid=call_id, res=result: tool_panel.complete_tool(tid, res)
+        )
+
+    def on_tools_cleanup(self) -> None:
+        # Stop tools spinner
+        if self._app._tools_timer:
+            self._app._tools_timer.stop()
+            self._app._tools_timer = None
+        # Schedule panel cleanup after a short delay
+        tool_panel = self._app.query_one("#tool-panel", ToolPanel)
+        self._app.set_timer(2.0, lambda: tool_panel.clear_completed())
+
+    def on_system_message(self, text: str) -> None:
+        chat_view = self._app.query_one("#chat-view", ChatView)
+        chat_view.add_system_message(text)
+
+    async def request_confirmation(
+        self, name: str, arguments: dict
+    ) -> ConfirmResult | None:
+        return await self._app._request_confirmation(name, arguments)
+
+    def is_cancelled(self) -> bool:
+        if self._worker is None:
+            return False
+        return self._worker.is_cancelled
 
 
 class AyderApp(App):
@@ -46,7 +119,7 @@ class AyderApp(App):
     ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
-        ("ctrl+d", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
         ("ctrl+x", "cancel", "Cancel"),
         ("ctrl+c", "cancel", "Cancel"),
         ("ctrl+l", "clear", "Clear Chat"),
@@ -103,7 +176,21 @@ class AyderApp(App):
 
         self._thinking_timer: Timer | None = None
         self._tools_timer: Timer | None = None
-        self._total_tokens: int = 0
+
+        # Create chat loop
+        num_ctx = self.config.num_ctx if not isinstance(self.config, dict) else self.config.get("num_ctx", 65536)
+        self._callbacks = AppCallbacks(self)
+        self.chat_loop = TuiChatLoop(
+            llm=self.llm,
+            registry=self.registry,
+            messages=self.messages,
+            config=TuiLoopConfig(
+                model=self.model,
+                num_ctx=num_ctx,
+                permissions=self.permissions,
+            ),
+            callbacks=self._callbacks,
+        )
 
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt with project structure."""
@@ -115,8 +202,20 @@ class AyderApp(App):
         except Exception:
             macro = ""
 
-        system_prompt = SYSTEM_PROMPT + macro
+        system_prompt = SYSTEM_PROMPT.format(model_name=self.model) + macro
         self.messages.append({"role": "system", "content": system_prompt})
+
+    def update_system_prompt_model(self) -> None:
+        """Update the model name in the system prompt after /model switch."""
+        from ayder_cli.prompts import SYSTEM_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE
+
+        if self.messages and self.messages[0].get("role") == "system":
+            try:
+                structure = self.registry.execute("get_project_structure", {"max_depth": 3})
+                macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
+            except Exception:
+                macro = ""
+            self.messages[0]["content"] = SYSTEM_PROMPT.format(model_name=self.model) + macro
 
     def _animate_running_tools(self) -> None:
         """Animate spinner for running tools."""
@@ -128,7 +227,7 @@ class AyderApp(App):
 
         Note: Registry callbacks run inside asyncio.to_thread() (background thread),
         so they MUST NOT mount widgets on the ChatView (not thread-safe in Textual).
-        Tool call/result display is handled by the ToolPanel and by _handle_llm_response
+        Tool call/result display is handled by the ToolPanel and by TuiChatLoop
         which runs on the main event loop.
         """
         pass
@@ -148,13 +247,6 @@ class AyderApp(App):
 
         tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
         return tool_def.safe_mode_blocked if tool_def else False
-
-    def _tool_needs_confirmation(self, tool_name: str) -> bool:
-        """Check if a tool requires user confirmation based on permissions."""
-        from ayder_cli.tools.schemas import TOOL_PERMISSIONS
-
-        tool_perm = TOOL_PERMISSIONS.get(tool_name, "r")
-        return tool_perm not in self.permissions
 
     def _generate_diff(self, tool_name: str, arguments: dict) -> str | None:
         """Generate a diff preview for file-modifying tools."""
@@ -304,12 +396,30 @@ class AyderApp(App):
 
         self.messages.append({"role": "user", "content": user_input})
 
+        self.start_llm_processing()
+
+    def start_llm_processing(self, *, no_tools: bool = False) -> None:
+        """Disable input and launch the chat loop worker.
+
+        Called from _process_next_message and from command handlers.
+        """
         input_bar = self.query_one("#input-bar", CLIInputBar)
         input_bar.set_enabled(False)
-        chat_view.show_thinking()
-        self._thinking_timer = self.set_interval(0.1, self._animate_thinking)
+        self.run_worker(self._run_chat_loop(no_tools=no_tools), exclusive=True)
 
-        self.run_worker(self._process_llm_response(), exclusive=True)
+    async def _run_chat_loop(self, *, no_tools: bool = False) -> None:
+        """Thin wrapper: sets worker on callbacks, runs loop, finishes."""
+        worker = get_current_worker()
+        self._callbacks._worker = worker
+        try:
+            await self.chat_loop.run(no_tools=no_tools)
+        except Exception as e:
+            if not worker.is_cancelled:
+                chat_view = self.query_one("#chat-view", ChatView)
+                chat_view.add_system_message(f"Error: {e}")
+        finally:
+            if not worker.is_cancelled:
+                self.call_later(self._finish_processing)
 
     def _animate_thinking(self) -> None:
         """Animate the thinking indicator."""
@@ -334,323 +444,15 @@ class AyderApp(App):
         except Exception as e:
             chat_view.add_system_message(f"Command error: {type(e).__name__}: {e}")
 
-    async def _process_llm_response(self, no_tools: bool = False, _is_continuation: bool = False) -> None:
-        """Process LLM response (runs in worker thread).
-
-        Args:
-            no_tools: If True, don't send tool schemas to the LLM.
-            _is_continuation: Internal flag -- True for recursive calls after tool execution.
-                Prevents duplicate _finish_processing scheduling.
-        """
-        worker = get_current_worker()
-
-        try:
-            tool_schemas = [] if no_tools else self.registry.get_schemas()
-
-            if isinstance(self.config, dict):
-                model = self.config.get("model", "qwen3-coder:latest")
-                num_ctx = self.config.get("num_ctx", 65536)
-            else:
-                model = self.config.model
-                num_ctx = self.config.num_ctx
-
-            response = await call_llm_async(
-                self.llm,
-                self.messages,
-                model,
-                tools=tool_schemas,
-                num_ctx=num_ctx
-            )
-
-            if worker.is_cancelled:
-                return
-
-            await self._handle_llm_response(response)
-
-        except Exception as e:
-            if not worker.is_cancelled:
-                chat_view = self.query_one("#chat-view", ChatView)
-                chat_view.add_system_message(f"Error: {str(e)}")
-        finally:
-            if not worker.is_cancelled and not _is_continuation:
-                self.call_later(self._finish_processing)
-
-    async def _handle_llm_response(self, response) -> None:
-        """Handle the LLM response, including tool calls."""
-        # Hide thinking spinner as soon as LLM responds
-        chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.hide_thinking()
-        if self._thinking_timer:
-            self._thinking_timer.stop()
-            self._thinking_timer = None
-
-        message = response.choices[0].message
-        content = message.content or ""
-        tool_calls = message.tool_calls
-
-        # Update token counter from usage stats
-        usage = getattr(response, "usage", None)
-        if usage:
-            tokens = getattr(usage, "total_tokens", 0) or 0
-            self._total_tokens += tokens
-            self.call_later(
-                lambda t=self._total_tokens: self.query_one(
-                    "#status-bar", StatusBar
-                ).update_token_usage(t)
-            )
-
-        msg_dict = {
-            "role": "assistant",
-            "content": content
-        }
-
-        if tool_calls:
-            msg_dict["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": tc.type,
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                }
-                for tc in tool_calls
-            ]
-
-        self.messages.append(msg_dict)
-
-        # Extract and display <think>...</think> blocks separately
-
-        # Extract <think> blocks -- handle both closed and unclosed tags
-        think_blocks = re.findall(r"<think>(.*?)</think>", content, flags=re.DOTALL)
-        display_content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
-
-        # Handle unclosed <think> (model didn't emit </think>)
-        unclosed = re.findall(r"<think>(.*)", display_content, flags=re.DOTALL)
-        if unclosed:
-            think_blocks.extend(unclosed)
-            display_content = re.sub(r"<think>.*", "", display_content, flags=re.DOTALL)
-
-        for think_text in think_blocks:
-            think_text = think_text.strip()
-            if think_text:
-                chat_view.add_thinking_message(think_text)
-
-        # Collapse excessive blank lines
-        display_content = re.sub(r"\n{3,}", "\n\n", display_content).strip()
-        if display_content:
-            chat_view.add_assistant_message(display_content)
-
-        if tool_calls:
-            tool_panel = self.query_one("#tool-panel", ToolPanel)
-
-            # Split tools into auto-approved and needs-confirmation
-            auto_approved = []
-            needs_confirmation = []
-            for tc in tool_calls:
-                tool_name = tc.function.name
-                if self._tool_needs_confirmation(tool_name):
-                    needs_confirmation.append(tc)
-                else:
-                    auto_approved.append(tc)
-
-            # Show all tools as running first
-            for tool_call in tool_calls:
-                tool_name = tool_call.function.name
-                arguments = tool_call.function.arguments
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        arguments = {}
-                tool_panel.add_tool(tool_call.id, tool_name, arguments)
-
-            # Start spinner animation for running tools
-            self._tools_timer = self.set_interval(0.1, self._animate_running_tools)
-
-            try:
-                # Execute auto-approved tools in parallel
-                async def execute_tool_async(tool_call):
-                    """Execute a single tool call asynchronously."""
-                    tool_name = tool_call.function.name
-                    arguments = tool_call.function.arguments
-
-                    if isinstance(arguments, str):
-                        try:
-                            arguments = json.loads(arguments)
-                        except json.JSONDecodeError as e:
-                            return {
-                                "tool_call_id": tool_call.id,
-                                "name": tool_name,
-                                "result": f"Error: Invalid JSON arguments: {e}"
-                            }
-
-                    result = await asyncio.to_thread(
-                        self.registry.execute,
-                        tool_name,
-                        arguments
-                    )
-
-                    return {
-                        "tool_call_id": tool_call.id,
-                        "name": tool_name,
-                        "result": result
-                    }
-
-                tool_results = []
-                if auto_approved:
-                    auto_tasks = [execute_tool_async(tc) for tc in auto_approved]
-                    auto_results = await asyncio.gather(*auto_tasks, return_exceptions=True)
-                    tool_results.extend(auto_results)
-
-                # Execute needs-confirmation tools sequentially with user prompts
-                custom_instructions = None
-                for tc in needs_confirmation:
-                    tool_name = tc.function.name
-                    arguments = tc.function.arguments
-                    if isinstance(arguments, str):
-                        try:
-                            arguments = json.loads(arguments)
-                        except json.JSONDecodeError as e:
-                            tool_results.append({
-                                "tool_call_id": tc.id,
-                                "name": tool_name,
-                                "result": f"Error: Invalid JSON arguments: {e}"
-                            })
-                            continue
-
-                    confirm_result = await self._request_confirmation(tool_name, arguments)
-
-                    if confirm_result is not None and confirm_result.action == "approve":
-                        result = await asyncio.to_thread(
-                            self.registry.execute,
-                            tool_name,
-                            arguments
-                        )
-                        tool_results.append({
-                            "tool_call_id": tc.id,
-                            "name": tool_name,
-                            "result": result
-                        })
-                    elif confirm_result is not None and confirm_result.action == "instruct":
-                        # Deny this tool and capture instructions
-                        tool_results.append({
-                            "tool_call_id": tc.id,
-                            "name": tool_name,
-                            "result": "Tool call denied by user."
-                        })
-                        custom_instructions = confirm_result.instructions
-                        # Skip remaining unconfirmed tools
-                        remaining = needs_confirmation[needs_confirmation.index(tc) + 1:]
-                        for remaining_tc in remaining:
-                            tool_results.append({
-                                "tool_call_id": remaining_tc.id,
-                                "name": remaining_tc.function.name,
-                                "result": "Tool call skipped (user provided instructions)."
-                            })
-                        break
-                    else:
-                        # Denied or dismissed (None)
-                        tool_results.append({
-                            "tool_call_id": tc.id,
-                            "name": tool_name,
-                            "result": "Tool call denied by user."
-                        })
-
-                # Process results and mark tools as complete
-                for i, result_data in enumerate(tool_results):
-                    if isinstance(result_data, Exception):
-                        # Recover the real tool_call_id and name from auto_approved
-                        if i < len(auto_approved):
-                            err_tc = auto_approved[i]
-                            err_id = err_tc.id
-                            err_name = err_tc.function.name
-                        else:
-                            err_id = "error"
-                            err_name = "unknown"
-                        error_msg = f"Error: {str(result_data)}"
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": err_id,
-                            "name": err_name,
-                            "content": error_msg
-                        })
-                    else:
-                        tool_call_id = result_data["tool_call_id"]
-                        tool_name = result_data["name"]
-                        result = result_data["result"]
-
-                        # Update ToolPanel (tool display is handled there, not in ChatView)
-                        self.call_later(
-                            lambda tid=tool_call_id, res=result: tool_panel.complete_tool(tid, str(res))
-                        )
-
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": tool_name,
-                            "content": str(result)
-                        })
-
-                # If user provided custom instructions, inject them as a user message
-                if custom_instructions:
-                    self.messages.append({
-                        "role": "user",
-                        "content": custom_instructions
-                    })
-
-                # Schedule panel cleanup after a short delay
-                self.set_timer(2.0, lambda: tool_panel.clear_completed())
-
-                worker = get_current_worker()
-                if not worker.is_cancelled:
-                    # Re-show thinking spinner while waiting for next LLM response
-                    chat_view.show_thinking()
-                    self._thinking_timer = self.set_interval(0.1, self._animate_thinking)
-                    await self._process_llm_response(_is_continuation=True)
-
-            finally:
-                # Ensure _tools_timer is always stopped even on exceptions
-                if self._tools_timer:
-                    self._tools_timer.stop()
-                    self._tools_timer = None
-
-        elif content and "<function=" in content:
-            # XML tool call fallback — matches chat_loop.py:ToolCallHandler pattern
-            from ayder_cli.parser import parse_custom_tool_calls
-
-            custom_calls = parse_custom_tool_calls(content)
-            # Filter out parser errors
-            valid_calls = [c for c in custom_calls if "error" not in c]
-
-            if valid_calls:
-                results_text = []
-                for call in valid_calls:
-                    tool_name = call.get("name", "unknown")
-                    arguments = call.get("arguments", {})
-                    try:
-                        result = self.registry.execute(tool_name, arguments)
-                        results_text.append(f"[{tool_name}] {result}")
-                    except Exception as e:
-                        results_text.append(f"[{tool_name}] Error: {e}")
-
-                # Feed results back as user role (custom call convention)
-                self.messages.append({
-                    "role": "user",
-                    "content": "\n".join(results_text)
-                })
-
-                worker = get_current_worker()
-                if not worker.is_cancelled:
-                    chat_view.show_thinking()
-                    self._thinking_timer = self.set_interval(0.1, self._animate_thinking)
-                    await self._process_llm_response(_is_continuation=True)
-
     def _finish_processing(self) -> None:
         """Finish processing - hide thinking indicator and process next message."""
         if self._thinking_timer:
             self._thinking_timer.stop()
             self._thinking_timer = None
+
+        if self._tools_timer:
+            self._tools_timer.stop()
+            self._tools_timer = None
 
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.hide_thinking()

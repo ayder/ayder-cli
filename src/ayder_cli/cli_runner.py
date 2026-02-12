@@ -51,7 +51,7 @@ def _build_services(config=None, project_root="."):
     except Exception:
         macro = ""
 
-    enhanced_system = SYSTEM_PROMPT + macro
+    enhanced_system = SYSTEM_PROMPT.format(model_name=cfg.model) + macro
 
     return (cfg, llm_provider, tool_executor, project_ctx, 
             enhanced_system, checkpoint_manager, memory_manager)

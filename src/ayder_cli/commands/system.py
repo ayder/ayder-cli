@@ -178,6 +178,21 @@ class ModelCommand(BaseCommand):
         # Switch model
         new_model = args.strip()
         session.state["model"] = new_model
+        # Update model name in system prompt so LLM knows its identity
+        if session.messages and session.messages[0].get("role") == "system":
+            from ayder_cli.prompts import SYSTEM_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE
+            old_content = session.messages[0]["content"]
+            # Rebuild: system prompt (with new model) + any macro suffix
+            try:
+                from ayder_cli.tools.registry import create_default_registry
+                from ayder_cli.core.context import ProjectContext
+                ctx = ProjectContext(".")
+                reg = create_default_registry(ctx)
+                structure = reg.execute("get_project_structure", {"max_depth": 3})
+                macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
+            except Exception:
+                macro = ""
+            session.messages[0]["content"] = SYSTEM_PROMPT.format(model_name=new_model) + macro
         draw_box(f"Switched to model: {new_model}", title="Model", width=80, color_code="32")
         return True
 

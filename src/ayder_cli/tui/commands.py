@@ -27,7 +27,7 @@ def handle_help(app: AyderApp, args: str, chat_view: ChatView) -> None:
         help_text += f"- `{cmd_name}` — {desc}\n"
 
     help_text += "\n**Keyboard Shortcuts:**\n"
-    help_text += "- `Ctrl+D` — Quit\n"
+    help_text += "- `Ctrl+Q` — Quit\n"
     help_text += "- `Ctrl+X` / `Ctrl+C` — Cancel operation\n"
     help_text += "- `Ctrl+L` — Clear chat\n"
 
@@ -49,6 +49,8 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
             def on_model_selected(selected: str | None) -> None:
                 if selected:
                     app.model = selected
+                    app.chat_loop.config.model = selected
+                    app.update_system_prompt_model()
                     status_bar = app.query_one("#status-bar", StatusBar)
                     status_bar.set_model(selected)
                     chat_view.add_system_message(f"Switched to model: {selected}")
@@ -67,6 +69,8 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
     else:
         new_model = args.strip()
         app.model = new_model
+        app.chat_loop.config.model = new_model
+        app.update_system_prompt_model()
         status_bar = app.query_one("#status-bar", StatusBar)
         status_bar.set_model(new_model)
         chat_view.add_system_message(f"Switched to model: {new_model}")
@@ -192,11 +196,8 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.messages.append({"role": "user", "content": compact_prompt})
     chat_view.add_system_message("Compacting: summarize → save → clear → load")
 
-    input_bar = app.query_one("#input-bar", CLIInputBar)
-    input_bar.set_enabled(False)
-    chat_view.show_thinking()
-    app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-    app.run_worker(app._process_llm_response(), exclusive=True)
+    app.chat_loop.reset_iterations()
+    app.start_llm_processing()
 
 
 def handle_plan(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -211,11 +212,7 @@ def handle_plan(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.messages.append({"role": "user", "content": planning_prompt})
     chat_view.add_system_message(f"Planning: {args.strip()[:50]}...")
 
-    input_bar = app.query_one("#input-bar", CLIInputBar)
-    input_bar.set_enabled(False)
-    chat_view.show_thinking()
-    app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-    app.run_worker(app._process_llm_response(), exclusive=True)
+    app.start_llm_processing()
 
 
 def handle_ask(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -224,15 +221,10 @@ def handle_ask(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message("Usage: /ask <question>\nExample: /ask What is Python?")
         return
 
-    app._no_tools_for_next = True
     app.messages.append({"role": "user", "content": args.strip()})
     chat_view.add_user_message(args.strip())
 
-    input_bar = app.query_one("#input-bar", CLIInputBar)
-    input_bar.set_enabled(False)
-    chat_view.show_thinking()
-    app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-    app.run_worker(app._process_llm_response(no_tools=True), exclusive=True)
+    app.start_llm_processing(no_tools=True)
 
 
 def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -258,11 +250,7 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
             app.messages.append({"role": "user", "content": command})
             chat_view.add_system_message(f"Running TASK-{task_id:03d}: {title}")
 
-            input_bar = app.query_one("#input-bar", CLIInputBar)
-            input_bar.set_enabled(False)
-            chat_view.show_thinking()
-            app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-            app.run_worker(app._process_llm_response(), exclusive=True)
+            app.start_llm_processing()
             return
     except ValueError:
         pass
@@ -288,11 +276,7 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     chat_view.add_system_message(f"Running {len(matching)} matching task(s)...")
 
-    input_bar = app.query_one("#input-bar", CLIInputBar)
-    input_bar.set_enabled(False)
-    chat_view.show_thinking()
-    app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-    app.run_worker(app._process_llm_response(), exclusive=True)
+    app.start_llm_processing()
 
 
 def handle_implement_all(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -326,11 +310,7 @@ def handle_implement_all(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     app.messages.append({"role": "user", "content": TASK_EXECUTION_ALL_PROMPT_TEMPLATE})
 
-    input_bar = app.query_one("#input-bar", CLIInputBar)
-    input_bar.set_enabled(False)
-    chat_view.show_thinking()
-    app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-    app.run_worker(app._process_llm_response(), exclusive=True)
+    app.start_llm_processing()
 
 
 def _open_task_in_editor(app: AyderApp, task_id: int, task_path, chat_view: ChatView) -> None:
@@ -475,6 +455,7 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
     def on_result(new_permissions: set | None):
         if new_permissions is not None:
             app.permissions = new_permissions
+            app.chat_loop.config.permissions = new_permissions
             status_bar = app.query_one("#status-bar", StatusBar)
             status_bar.update_permissions(new_permissions)
             mode_str = "".join(sorted(new_permissions))
@@ -496,6 +477,7 @@ def do_clear(app: AyderApp, chat_view: ChatView) -> None:
         else:
             app.messages.clear()
 
+    app.chat_loop.reset_iterations()
     chat_view.clear_messages()
     chat_view.add_system_message("Conversation history cleared.")
 
@@ -517,11 +499,7 @@ def _run_implement_task(app: AyderApp, task_id: int, title: str, chat_view: Chat
     app.messages.append({"role": "user", "content": command})
     chat_view.add_system_message(f"Running TASK-{task_id:03d}: {title}")
 
-    input_bar = app.query_one("#input-bar", CLIInputBar)
-    input_bar.set_enabled(False)
-    chat_view.show_thinking()
-    app._thinking_timer = app.set_interval(0.1, app._animate_thinking)
-    app.run_worker(app._process_llm_response(), exclusive=True)
+    app.start_llm_processing()
 
 
 # Command dispatch map: command name -> handler function

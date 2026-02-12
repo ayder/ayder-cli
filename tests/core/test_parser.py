@@ -9,7 +9,7 @@ This module tests the parser functionality including:
 
 import pytest
 
-from ayder_cli.parser import parse_custom_tool_calls, _infer_parameter_name
+from ayder_cli.parser import parse_custom_tool_calls, _infer_parameter_name, _normalize_tool_call_markup
 
 
 class TestParseCustomToolCallsEmpty:
@@ -138,6 +138,63 @@ class TestParseCustomToolCallsErrorHandling:
         
         # Empty parameter names should be ignored
         assert result[0]["arguments"] == {}
+
+
+class TestToolCallWrapperFormat:
+    """Tests for <tool_call> wrapper format used by some models (e.g. Ministral)."""
+
+    def test_tool_call_wrapper_with_function_close(self):
+        """Test <tool_call> wrapper where </function> is present."""
+        content = '<tool_call> <function=read_file><parameter=file_path>test.py</parameter></function> </tool_call>'
+        result = parse_custom_tool_calls(content)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "read_file"
+        assert result[0]["arguments"] == {"file_path": "test.py"}
+
+    def test_tool_call_wrapper_without_function_close(self):
+        """Test <tool_call> wrapper where </function> is missing (closed by </tool_call>)."""
+        content = '<tool_call> <function=run_shell_command> <parameter=command>echo "hello"  </tool_call>'
+        result = parse_custom_tool_calls(content)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "run_shell_command"
+        assert result[0]["arguments"]["command"] == 'echo "hello"'
+
+    def test_tool_call_wrapper_lazy_format(self):
+        """Test <tool_call> wrapper with lazy format (no parameter tags)."""
+        content = '<tool_call> <function=run_shell_command>ls -la </tool_call>'
+        result = parse_custom_tool_calls(content)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "run_shell_command"
+        assert result[0]["arguments"] == {"command": "ls -la"}
+
+    def test_multiple_tool_call_wrappers(self):
+        """Test multiple <tool_call> blocks."""
+        content = (
+            '<tool_call> <function=read_file><parameter=file_path>a.py</parameter> </tool_call>'
+            '<tool_call> <function=read_file><parameter=file_path>b.py</parameter> </tool_call>'
+        )
+        result = parse_custom_tool_calls(content)
+
+        assert len(result) == 2
+        assert result[0]["arguments"]["file_path"] == "a.py"
+        assert result[1]["arguments"]["file_path"] == "b.py"
+
+    def test_normalize_strips_wrapper_keeps_function_close(self):
+        """Test normalizer preserves </function> when present."""
+        content = '<tool_call><function=test><parameter=x>1</parameter></function></tool_call>'
+        normalized = _normalize_tool_call_markup(content)
+        assert "</function>" in normalized
+        assert "<tool_call>" not in normalized
+
+    def test_normalize_adds_function_close_when_missing(self):
+        """Test normalizer adds </function> when missing."""
+        content = '<tool_call><function=test><parameter=x>1</parameter></tool_call>'
+        normalized = _normalize_tool_call_markup(content)
+        assert "</function>" in normalized
+        assert "<tool_call>" not in normalized
 
 
 class TestInferParameterName:

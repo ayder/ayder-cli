@@ -2,6 +2,8 @@
 
 An AI agent chat client for [Ollama](https://ollama.com) models. It connects to any Ollama instance (local or cloud) and provides an autonomous coding assistant with file system tools and shell access, all from your terminal.
 
+![ayder](docs/cc.png)
+
 ## Why ayder-cli?
 
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
@@ -10,6 +12,19 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 50 consecutive tool calls per user message (configurable with `-I`).
 - **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. Falls back to a classic prompt-toolkit REPL with `--cli`.
 - **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual.
+
+
+### Tested Models with tool support (+ OpenAI Compatible Tools)
+
+| Provider      | Location | Model                      |
+|---------------|----------|----------------------------|
+| ollama        | Cloud    | gemini-3-pro-preview:latest|
+| ollama        | Cloud    | glm-4.7-flash:latest       |
+| ollama        | Cloud    | glm-4.7:cloud              |
+| ollama        | Cloud    | kimi-k2.5:cloud            |
+| ollama        | Local    | ministral-3:14b            |
+| ollama        | Local    | translategemma:4b          |
+| ollama        | Local    | qwen3-coder:latest         |
 
 
 ### Tools
@@ -287,10 +302,6 @@ Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames
 
 ayder-cli provides code search capabilities via the `search_codebase` tool. The LLM calls it automatically when you ask it to search for patterns, function definitions, or usages across the codebase.
 
-### Webview POC (Windows/Desktop)
-
-A proof-of-concept for running the TUI inside a native desktop window is available in `poc/webview_tui/`. See its [README](poc/webview_tui/README.md) for details.
-
 ## Project Structure
 
 ```
@@ -339,23 +350,6 @@ src/ayder_cli/
     registry.py      -- ToolRegistry with middleware, callbacks, and execution timing
     utils.py         -- Tool utilities (content preparation for diffs)
 ```
-
-### Prompt Organization
-
-All prompt templates are centralized in `src/ayder_cli/prompts.py`. Each prompt includes a REASON comment explaining why the LLM is being prompted:
-
-| Prompt | Used By | REASON |
-|--------|---------|--------|
-| `SYSTEM_PROMPT` | `cli_runner.py`, `tui/app.py` | Define AI role, operational principles, reasoning workflow, and available capabilities |
-| `PROJECT_STRUCTURE_MACRO_TEMPLATE` | `cli_runner.py`, `tui/app.py` | Provide codebase overview at startup so LLM knows what files exist |
-| `PLANNING_PROMPT_TEMPLATE` | `commands/system.py`, `tui/commands.py` | Transform high-level requests into actionable tasks with acceptance criteria |
-| `TASK_EXECUTION_PROMPT_TEMPLATE` | `cli_runner.py`, `tui/commands.py` | Instruct LLM to implement a specific task and mark it complete |
-| `TASK_EXECUTION_ALL_PROMPT_TEMPLATE` | `cli_runner.py`, `tui/commands.py` | Process all pending tasks sequentially without stopping between tasks |
-| `COMPACT_COMMAND_PROMPT_TEMPLATE` | `commands/system.py`, `tui/commands.py` | Combine summary/save/clear/reload to prevent context window overflow |
-| `MEMORY_CHECKPOINT_PROMPT_TEMPLATE` | `checkpoint_manager.py` | Force LLM to save progress before automatic context reset at iteration limit |
-| `MEMORY_RESTORE_PROMPT_TEMPLATE` | `checkpoint_manager.py` | Instruct LLM to read saved memory after checkpoint reset |
-| `MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE` | `checkpoint_manager.py` | Include saved memory directly for immediate restoration after reset |
-| `MEMORY_NO_MEMORY_MESSAGE` | `checkpoint_manager.py` | Fallback when no memory was saved before checkpoint reset |
 
 ## License
 
