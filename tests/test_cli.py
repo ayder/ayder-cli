@@ -660,11 +660,11 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', '-w', 'write something']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            
-            main()
-            
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+
+            with pytest.raises(SystemExit):
+                main()
+
             # Verify run_command was called with 'w' in permissions
             call_kwargs = mock_run.call_args[1]
             assert 'w' in call_kwargs['permissions']
@@ -686,11 +686,11 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', '-x', 'run command']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            
-            main()
-            
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+
+            with pytest.raises(SystemExit):
+                main()
+
             # Verify run_command was called with 'x' in permissions
             call_kwargs = mock_run.call_args[1]
             assert 'x' in call_kwargs['permissions']
@@ -712,11 +712,11 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', '-w', '-x', 'do something']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            
-            main()
-            
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+
+            with pytest.raises(SystemExit):
+                main()
+
             # Verify run_command was called with both permissions
             call_kwargs = mock_run.call_args[1]
             assert 'w' in call_kwargs['permissions']
@@ -739,11 +739,11 @@ class TestMainPermissionHandling:
         with patch.object(sys, 'argv', ['ayder', 'hello']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            
-            main()
-            
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+
+            with pytest.raises(SystemExit):
+                main()
+
             # Verify run_command was called with only 'r' permission
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs['permissions'] == {'r'}
@@ -768,13 +768,12 @@ class TestMainTaskOptions:
         with patch.object(sys, 'argv', ['ayder', '--tasks']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner._run_tasks_cli', return_value=0) as mock_run_tasks, \
-             patch('sys.exit') as mock_exit:
-            
-            main()
-            
+             patch('ayder_cli.cli_runner._run_tasks_cli', return_value=0) as mock_run_tasks:
+
+            with pytest.raises(SystemExit):
+                main()
+
             mock_run_tasks.assert_called_once()
-            mock_exit.assert_called_once_with(0)
 
     def test_main_implement_flag(self):
         """Test --implement flag calls _run_implement_cli."""
@@ -792,13 +791,12 @@ class TestMainTaskOptions:
         with patch.object(sys, 'argv', ['ayder', '--implement', '1']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner._run_implement_cli', return_value=0) as mock_run_implement, \
-             patch('sys.exit') as mock_exit:
-            
-            main()
-            
+             patch('ayder_cli.cli_runner._run_implement_cli', return_value=0) as mock_run_implement:
+
+            with pytest.raises(SystemExit):
+                main()
+
             mock_run_implement.assert_called_once_with('1', permissions={'r'}, iterations=50)
-            mock_exit.assert_called_once_with(0)
 
     def test_main_implement_all_flag(self):
         """Test --implement-all flag calls _run_implement_all_cli."""
@@ -816,51 +814,40 @@ class TestMainTaskOptions:
         with patch.object(sys, 'argv', ['ayder', '--implement-all']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner._run_implement_all_cli', return_value=0) as mock_run_all, \
-             patch('sys.exit') as mock_exit:
-            
-            main()
-            
+             patch('ayder_cli.cli_runner._run_implement_all_cli', return_value=0) as mock_run_all:
+
+            with pytest.raises(SystemExit):
+                main()
+
             mock_run_all.assert_called_once_with(permissions={'r'}, iterations=50)
-            mock_exit.assert_called_once_with(0)
 
 
 class TestMainTUIAndInteractive:
     """Test main() function TUI and interactive modes."""
 
-    def test_main_tui_mode(self):
-        """Test --tui flag launches TUI mode."""
+    def test_main_default_tui_mode(self):
+        """Test default (no flags) launches TUI mode."""
         from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
 
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False
-        )
-
-        with patch.object(sys, 'argv', ['ayder', '--tui']), \
+        with patch.object(sys, 'argv', ['ayder']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
-             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
              patch('ayder_cli.tui.run_tui') as mock_run_tui:
-            
+
             main()
-            
+
             mock_run_tui.assert_called_once()
 
-    def test_main_tui_with_command_error(self):
-        """Test --tui with command argument shows error."""
-        from ayder_cli.cli import create_parser
+    def test_main_cli_flag_launches_repl(self):
+        """Test --cli flag launches interactive REPL."""
+        from ayder_cli.cli import main
 
-        parser = create_parser()
-        
-        # --tui with command is actually allowed by argparse
-        # The error happens in main() when it checks args.tui and args.command
-        args = parser.parse_args(['--tui', 'some command'])
-        assert args.tui is True
-        assert args.command == 'some command'
+        with patch.object(sys, 'argv', ['ayder', '--cli']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive:
+
+            main()
+
+            mock_run_interactive.assert_called_once()
 
     def test_main_auto_detect_piped_input(self):
         """Test auto-detection of piped input."""
@@ -879,17 +866,17 @@ class TestMainTUIAndInteractive:
              patch.object(sys.stdin, 'isatty', return_value=False), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
              patch('sys.stdin.read', return_value="Piped input"), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            
-            main()
-            
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+
+            with pytest.raises(SystemExit):
+                main()
+
             # Should call run_command with piped input
             mock_run.assert_called_once()
             assert "Piped input" in mock_run.call_args[0][0]
 
-    def test_main_interactive_mode_default(self):
-        """Test default interactive mode when no command."""
+    def test_main_interactive_mode_with_cli_flag(self):
+        """Test --cli flag launches interactive REPL mode."""
         from ayder_cli.cli import main
         from ayder_cli.core.config import Config
 
@@ -901,13 +888,13 @@ class TestMainTUIAndInteractive:
             verbose=False
         )
 
-        with patch.object(sys, 'argv', ['ayder']), \
+        with patch.object(sys, 'argv', ['ayder', '--cli']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
              patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive:
-            
+
             main()
-            
+
             mock_run_interactive.assert_called_once()
 
 
@@ -945,13 +932,13 @@ class TestCreateParser:
         assert version_action is not None
         assert version_action.version == get_app_version()
 
-    def test_parser_tui_flag(self):
-        """Test --tui flag is configured."""
+    def test_parser_cli_flag(self):
+        """Test --cli flag is configured."""
         from ayder_cli.cli import create_parser
 
         parser = create_parser()
-        args = parser.parse_args(['--tui'])
-        assert args.tui is True
+        args = parser.parse_args(['--cli'])
+        assert args.cli is True
 
     def test_parser_file_flag(self):
         """Test --file flag is configured."""
@@ -1022,9 +1009,9 @@ class TestCreateParser:
         with patch.object(sys, 'argv', ['ayder', 'hello world']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            main()
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+            with pytest.raises(SystemExit):
+                main()
             mock_run.assert_called_once_with('hello world', permissions={'r'}, iterations=75)
 
     def test_iterations_cli_overrides_config(self):
@@ -1044,9 +1031,9 @@ class TestCreateParser:
         with patch.object(sys, 'argv', ['ayder', '-I', '20', 'hello']), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
              patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run, \
-             patch('sys.exit'):
-            main()
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+            with pytest.raises(SystemExit):
+                main()
             # CLI flag (20) should win over config (75)
             mock_run.assert_called_once_with('hello', permissions={'r'}, iterations=20)
 

@@ -1,6 +1,6 @@
 ## Project Overview
 
-ayder-cli is an interactive AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), prompt-toolkit for the CLI interface, and Textual for an optional TUI dashboard. Current version is defined in `pyproject.toml` (see `version` field).
+ayder-cli is an AI agent chat client for local LLMs. It connects to an Ollama instance running `qwen3-coder:latest` and provides an autonomous coding assistant with file system tools and shell access. Built with Python 3.12+, using the OpenAI SDK (for Ollama compatibility), Textual for the default TUI dashboard, and prompt-toolkit for a fallback CLI REPL (`--cli`). Current version is defined in `pyproject.toml` (see `version` field).
 
 ## Virtual Environment Setup
 
@@ -27,9 +27,10 @@ uv pip install pytest
 # Or set PYTHONPATH for imports without installing
 PYTHONPATH=src python3 -c "from ayder_cli.tools import tools_schema"
 
-# Run the CLI
+# Run the app (launches TUI by default)
 .venv/bin/python3 -m ayder_cli
 # or if installed: ayder
+# Classic CLI REPL: ayder --cli
 ```
 
 ## Testing
@@ -68,7 +69,7 @@ The project uses **pytest** for testing with performance-enhancing plugins. All 
 PYTHONPATH=src python3 -c "from ayder_cli.tools import tools_schema; print(len(tools_schema))"
 ```
 
-**Performance Note**: Sequential execution is fastest for the current test suite (~615 tests in ~1.6s). Use `-n auto` only when the suite grows significantly or includes slow integration tests.
+**Performance Note**: Sequential execution is fastest for the current test suite (~796 tests in ~1.5s). Use `-n auto` only when the suite grows significantly or includes slow integration tests.
 
 ### System Utilities
 
@@ -81,7 +82,7 @@ Example:
 /opt/homebrew/bin/uu-timeout 5 .venv/bin/ayder "test command"
 ```
 
-**Test Structure** (615+ tests, 96% coverage):
+**Test Structure** (796+ tests, 96% coverage):
 - `test_client.py` - ChatSession, Agent classes
 - `test_chat_loop.py` - ChatLoop, IterationController, ToolCallHandler, CheckpointManager
 - `test_checkpoint_manager.py` - CheckpointManager for checkpoint/restore cycles
@@ -114,132 +115,109 @@ All tests use pytest fixtures and mocking (no live LLM calls required).
 
 ## Architecture
 
-The application is organized into several modules:
+The application has two interfaces: a **Textual TUI** (default) and a **prompt-toolkit CLI REPL** (`--cli`). Both share the same core: tools package, prompts, config, and services.
 
-- **`src/ayder_cli/client.py`** — `ChatSession` class, `Agent` class, and `call_llm_async()` for async LLM calls (used by the TUI). The `ChatSession` class manages conversation state, history, user input via prompt-toolkit (emacs keybindings, persistent history at `~/.ayder_chat_history`). The `get_input()` method displays a cyan `❯` prompt. The `Agent` class delegates to `ChatLoop` for the agentic loop. Supports both standard OpenAI tool calls and custom XML-parsed calls. Slash commands are delegated to `handle_command()` from `commands/`.
+### Entry Points
 
-- **`src/ayder_cli/chat_loop.py`** — **Core chat loop logic** with separated concerns:
+- **Default (TUI)**: `ayder` → `cli.py:main()` → `tui/__init__.py:run_tui()` → `tui/app.py:AyderApp`
+- **CLI REPL**: `ayder --cli` → `cli.py:main()` → `cli_runner.py:run_interactive()`
+- **Command mode**: `ayder "prompt"` → `cli.py:main()` → `cli_runner.py:run_command()`
+- **Task CLI**: `ayder --tasks` / `--implement` / `--implement-all` → `cli_runner.py`
+
+### Module Map
+
+- **`src/ayder_cli/cli.py`** — CLI entry point with argument parsing. Handles flags (`--version`, `--cli`, `-f/--file`, `--stdin`, `-I/--iterations`, `--tasks`, `--implement`, `--implement-all`), auto-detection of piped input. TUI is the default; `--cli` falls back to prompt-toolkit REPL. Contains only `create_parser()` and `read_input()` — all execution logic in `cli_runner.py`.
+
+- **`src/ayder_cli/tui/`** — **Textual TUI package** (default interface). Modular architecture split across multiple files:
+  - **`__init__.py`** — `run_tui(model, safe_mode, permissions)` entry point. Runs `AyderApp` inline.
+  - **`app.py`** — `AyderApp` main Textual application. Manages LLM pipeline (`_process_llm_response`, `_handle_llm_response`), tool execution with parallel auto-approved + sequential confirmation flow, `ProcessManager` injection, safe mode middleware, diff preview generation, async LLM calls via workers, XML tool call fallback, and `json.loads` error handling. Timer management: `_thinking_timer` for LLM wait animation, `_tools_timer` for tool execution spinner (wrapped in try/finally to prevent leaks).
+  - **`commands.py`** — TUI slash command handlers. Each handler has signature `(app, args, chat_view) -> None`. `COMMAND_MAP` dict dispatches by command name. 13 commands: `/help`, `/model`, `/tasks`, `/tools`, `/verbose`, `/compact`, `/plan`, `/ask`, `/implement`, `/implement-all`, `/task-edit`, `/archive-completed-tasks`, `/permission`. TUI `/help` shows commands from `COMMAND_MAP` (not CLI registry).
+  - **`widgets.py`** — UI widgets: `ChatView` (scrollable message display), `ToolPanel` (tool execution display with spinners), `CLIInputBar` (text input with Enter-to-submit via `_SubmitTextArea`, tab completion, command history), `StatusBar` (model, permissions, token count), `AutoCompleteInput`.
+  - **`screens.py`** — Modal screens: `CLIConfirmScreen` (tool confirmation with diff preview and approve/deny/instruct actions), `CLIPermissionScreen` (toggle r/w/x permissions), `CLISafeModeScreen` (blocked tool notification), `CLISelectScreen` (generic list selector), `TaskEditScreen` (in-app task editor with TextArea).
+  - **`types.py`** — Shared types: `MessageType` enum, `ConfirmResult` dataclass.
+  - **`helpers.py`** — `is_tool_blocked_in_safe_mode()` helper function.
+  - **`theme_manager.py`** — `get_theme_css()` loads CSS from the active theme in `themes/`.
+
+- **`src/ayder_cli/themes/`** — Theme CSS files (`claude.py`, `original.py`). Each exports a CSS string used by `AyderApp`.
+
+- **`src/ayder_cli/client.py`** — `ChatSession` class (conversation state, prompt-toolkit input for `--cli` mode, persistent history at `~/.ayder_chat_history`), `Agent` class (delegates to `ChatLoop`), and `call_llm_async()` for non-blocking LLM calls (used by TUI).
+
+- **`src/ayder_cli/chat_loop.py`** — **Core chat loop logic** (used by `--cli` mode via `Agent`):
   - `ChatLoop` — Orchestrates the agentic conversation loop, manages iteration counting, memory checkpoints, and tool execution
   - `IterationController` — Manages iteration counting and triggers memory checkpoints when limits are reached
   - `ToolCallHandler` — Parses and executes tool calls (both standard OpenAI and custom XML)
   - `CheckpointManager` — Creates memory checkpoints by asking LLM to summarize and resets conversation context
   - `LoopConfig` — Configuration dataclass for loop parameters (max_iterations, model, permissions, etc.)
-  - Memory checkpoint cycle: When iteration limit reached → Ask LLM to write summary → Reset conversation → Load memory → Continue with fresh context (prevents context window overflow)
 
-- **`src/ayder_cli/checkpoint_manager.py`** — **Checkpoint management**. `CheckpointManager` class handles saving/loading conversation summaries to `.ayder/memory/current_memory.md`. Used by `ChatLoop` to prevent "content rotting" during long-running tasks. Tracks checkpoint cycles and provides prompt builders (`build_checkpoint_prompt()`, `build_restore_prompt()`, `build_quick_restore_message()`). All prompt templates imported from `prompts.py` (no hardcoded prompts).
+- **`src/ayder_cli/checkpoint_manager.py`** — `CheckpointManager` class handles saving/loading conversation summaries to `.ayder/memory/current_memory.md`. Used by `ChatLoop` to prevent "content rotting" during long-running tasks. All prompt templates imported from `prompts.py`.
 
-- **`src/ayder_cli/cli.py`** — CLI entry point with argument parsing. Handles CLI flags (`--version`, `--tui`, `-f/--file`, `--stdin`, `-I/--iterations`), auto-detection of piped input, and delegates execution to `cli_runner.py`. Supports Unix-style piping: `echo "create test.py" | ayder` auto-enables stdin mode without requiring `--stdin` flag. Contains only `create_parser()` and `read_input()` — all execution logic moved to `cli_runner.py`.
-
-- **`src/ayder_cli/cli_runner.py`** — **CLI execution logic** with separated concerns:
-  - `_build_services()` — Composition root that creates `ProcessManager` and `CheckpointManager`, returns 6-tuple `(config, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager)`. Enhances system prompt with project structure macro.
-  - `InteractiveRunner` — Runner class for REPL mode (`run_interactive()`). Manages session lifecycle, command dispatch, and agent interaction loop.
-  - `CommandRunner` — Runner class for single command execution (`run_command()`). Executes one prompt and exits.
+- **`src/ayder_cli/cli_runner.py`** — **CLI execution logic** (for `--cli` REPL and command mode):
+  - `_build_services()` — Composition root that creates `ProcessManager` and `CheckpointManager`, returns services tuple. Enhances system prompt with project structure macro.
+  - `InteractiveRunner` — Runner class for REPL mode (`run_interactive()`).
+  - `CommandRunner` — Runner class for single command execution (`run_command()`).
   - `TaskRunner` — Runner class for task CLI operations (`--tasks`, `--implement`, `--implement-all`).
-  - Clean separation: CLI parsing (cli.py) → Execution (cli_runner.py) → Core logic (client.py/chat_loop.py)
 
-- **`src/ayder_cli/prompts.py`** — **Centralized prompt templates** organized by usage. Each prompt has a REASON comment explaining why the LLM is being prompted:
-  - **Core prompts**: `SYSTEM_PROMPT` — defines AI role and capabilities
-  - **Project structure**: `PROJECT_STRUCTURE_MACRO_TEMPLATE` — provides codebase overview at startup so LLM knows what files exist
-  - **Task planning**: `PLANNING_PROMPT_TEMPLATE` — transforms high-level requests into actionable tasks
-  - **Task execution**: `TASK_EXECUTION_PROMPT_TEMPLATE`, `TASK_EXECUTION_ALL_PROMPT_TEMPLATE` — implements specific or all pending tasks
-  - **Conversation management**: `CLEAR_COMMAND_RESET_PROMPT`, `SUMMARY_COMMAND_PROMPT_TEMPLATE`, `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE`, `COMPACT_COMMAND_PROMPT_TEMPLATE` — manage conversation state
-  - **Memory checkpoints**: `MEMORY_CHECKPOINT_PROMPT_TEMPLATE`, `MEMORY_RESTORE_PROMPT_TEMPLATE`, `MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE`, `MEMORY_NO_MEMORY_MESSAGE` — automatic checkpoint/restore at iteration limits
+- **`src/ayder_cli/prompts.py`** — **Centralized prompt templates** organized by usage. Each prompt has a REASON comment:
+  - **Core**: `SYSTEM_PROMPT` — defines AI role and capabilities
+  - **Project structure**: `PROJECT_STRUCTURE_MACRO_TEMPLATE` — codebase overview at startup
+  - **Task planning**: `PLANNING_PROMPT_TEMPLATE` — transforms requests into tasks
+  - **Task execution**: `TASK_EXECUTION_PROMPT_TEMPLATE`, `TASK_EXECUTION_ALL_PROMPT_TEMPLATE`
+  - **Conversation management**: `COMPACT_COMMAND_PROMPT_TEMPLATE`
+  - **Memory checkpoints**: `MEMORY_CHECKPOINT_PROMPT_TEMPLATE`, `MEMORY_RESTORE_PROMPT_TEMPLATE`, `MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE`, `MEMORY_NO_MEMORY_MESSAGE`
 
-- **`src/ayder_cli/commands/`** — Command registry system for slash commands. Uses a class-based registry pattern (`@register_command` decorator on `BaseCommand` subclasses). The `handle_command()` function dispatches to registered handlers with a `SessionContext` dataclass. 14 commands registered: `/help`, `/tools`, `/tasks`, `/task-edit`, `/implement`, `/implement-all`, `/edit`, `/verbose`, `/clear`, `/compact`, `/summary`, `/load`, `/undo`, `/plan`. `commands/system.py` imports all prompt templates from `prompts.py` (no hardcoded prompts).
+- **`src/ayder_cli/commands/`** — Command registry for `--cli` REPL mode. Class-based registry pattern (`@register_command` on `BaseCommand` subclasses). `handle_command()` dispatches to handlers with `SessionContext`. Commands: `/help`, `/tools`, `/tasks`, `/task-edit`, `/implement`, `/implement-all`, `/verbose`, `/compact`, `/plan`, `/model`, `/ask`, `/undo`.
 
-- **`src/ayder_cli/parser.py`** — Enhanced XML tool call parser. Handles standard format (`<function=name><parameter=key>value</parameter></function>`), lazy format for single-param tools (`<function=name>value</function>` with parameter name inference via `_infer_parameter_name()`), and returns `{"error": "message"}` objects for malformed input.
+- **`src/ayder_cli/parser.py`** — Enhanced XML tool call parser. Handles standard format (`<function=name><parameter=key>value</parameter></function>`), lazy format for single-param tools, and returns `{"error": "message"}` for malformed input.
 
-- **`src/ayder_cli/core/config.py`** — Configuration loading from `~/.ayder/config.toml` with Pydantic validation. The `load_config()` function returns a `Config` model with validated settings for LLM, editor preferences, UI options, and `max_background_processes` (1-20, default 5). Automatically creates default config on first run.
+- **`src/ayder_cli/core/config.py`** — Configuration loading from `~/.ayder/config.toml` with Pydantic validation. `Config` model validates `base_url`, `num_ctx`, `max_background_processes` (1-20, default 5), etc.
 
-- **`src/ayder_cli/core/context.py`** — `ProjectContext` class for path validation and sandboxing. Prevents path traversal attacks (`../`), validates absolute paths stay within project root, handles tilde expansion. Also defines `SessionContext` dataclass (holds `config`, `project`, `messages`, `state`, `system_prompt`) used by commands.
+- **`src/ayder_cli/core/context.py`** — `ProjectContext` class for path validation and sandboxing. Prevents path traversal attacks. Also defines `SessionContext` dataclass used by `--cli` commands.
 
-- **`src/ayder_cli/core/result.py`** — Shared result types: `ToolSuccess(str)` and `ToolError(str)` — str subclasses for zero-breakage. All tool functions in `impl.py`, `tasks.py`, `notes.py`, `memory.py`, and `process_manager.py` return these types. `ToolError` has a `.category` property (`"security"`, `"validation"`, `"execution"`, `"general"`). Re-exported from `tools/__init__.py`.
+- **`src/ayder_cli/core/result.py`** — Shared result types: `ToolSuccess(str)` and `ToolError(str)` — str subclasses. `ToolError` has `.category` property. Re-exported from `tools/__init__.py`.
 
-- **`src/ayder_cli/banner.py`** — Welcome banner with version detection (via `importlib.metadata`), gothic ASCII art, model/path display, and random tips. Exposes `__version__` and `print_welcome_banner(model, cwd)`.
+- **`src/ayder_cli/banner.py`** — Welcome banner with version detection, ASCII art, model/path display, tips. `create_tui_banner()` for TUI, `print_welcome_banner()` for CLI.
 
-- **`src/ayder_cli/console.py`** — Centralized Rich console instance with custom theme (`CUSTOM_THEME`) and file extension-to-syntax-language mapping (`EXTENSION_MAP`, 20+ file types). Provides `get_console()` and `get_language_from_path()` helpers.
-
-- **`src/ayder_cli/tui.py`** — Textual TUI (Terminal User Interface) providing an interactive dashboard. Components: `AyderApp` (main app with header, chat view, context panel, input bar, footer), `ChatView` (scrollable message display with Rich panels), `InputBar` (text input + submit button), `ContextPanel` (model info, token usage, file tree), `ConfirmActionScreen` (modal for tool confirmations with diff preview), `SafeModeBlockScreen` (modal for blocked tools). Supports safe mode (blocks `write_file`, `replace_string`, `run_shell_command`, `run_background_process`, `kill_background_process`), registry middleware/callbacks for TUI integration, and async LLM calls via workers. Entry point: `run_tui(model)`.
-
-- **`src/ayder_cli/tui_helpers.py`** — Helper functions for TUI operations. Contains `is_tool_blocked_in_safe_mode(tool_name, safe_mode)` for safe mode checks.
+- **`src/ayder_cli/console.py`** — Centralized Rich console with custom theme and file extension mapping.
 
 - **`src/ayder_cli/tools/`** — **Core tools package** with modular architecture:
-  - **`definition.py`** — `ToolDefinition` frozen dataclass with tool metadata. `TOOL_DEFINITIONS` list (20 tools) and `TOOL_DEFINITIONS_BY_NAME` dict for lookup.
-  - **`impl.py`** — Core tool implementations (`list_files`, `read_file`, `write_file`, `replace_string`, `insert_line`, `delete_line`, `get_file_info`, `run_shell_command`, `search_codebase`, `get_project_structure`)
-  - **`schemas.py`** — OpenAI-format JSON schemas (`tools_schema = [td.to_openai_schema() for td in TOOL_DEFINITIONS]`)
-  - **`registry.py`** — Tool registry and execution system:
-    - `ToolRegistry` class with middleware support, pre/post-execute callbacks, execution timing, and `process_manager` DI
-    - `get_schemas()` — Returns all tool schemas
-    - `validate_tool_call()` — Validates against `TOOL_DEFINITIONS_BY_NAME` (all tools, not mode-filtered)
-    - `create_default_registry(project_ctx, process_manager=None)` factory function for fully configured registry
-    - `normalize_tool_arguments()` for parameter aliasing, path resolution via ProjectContext, and data-driven type coercion from schema
-    - DI injection: inspects tool function signatures and injects `project_ctx` and/or `process_manager` as needed
-  - **`utils.py`** — Utility functions for tool operations, including `prepare_new_content()` for preparing file content before write/replace/insert/delete operations (supports both JSON string and dict arguments)
-  - **`__init__.py`** — Complete public API exports (all tools, schemas, registry, and utilities)
+  - **`definition.py`** — `ToolDefinition` frozen dataclass. `TOOL_DEFINITIONS` list (20 tools) and `TOOL_DEFINITIONS_BY_NAME` dict.
+  - **`impl.py`** — Core tool implementations (10 tools: file ops, line editing, file info, shell, search, project structure)
+  - **`schemas.py`** — OpenAI-format JSON schemas
+  - **`registry.py`** — `ToolRegistry` with middleware, callbacks, execution timing, DI injection. `create_default_registry(project_ctx, process_manager=None)` factory.
+  - **`utils.py`** — Tool utilities (`prepare_new_content()`)
+  - **`__init__.py`** — Public API exports
 
-- **`src/ayder_cli/notes.py`** — Note management. Creates markdown notes in `.ayder/notes/` with YAML frontmatter (title, date, tags). `create_note()` function with slugified filenames. Imports from `core/result.py` (NOT from `tools/`) to avoid circular imports.
+- **`src/ayder_cli/notes.py`** — Note management in `.ayder/notes/`. Imports from `core/result.py` (NOT `tools/`) to avoid circular imports.
 
-- **`src/ayder_cli/memory.py`** — Cross-session memory storage. Saves memories as JSON Lines (`.jsonl`) in `.ayder/memory/memories.jsonl`. Each entry has `id`, `content`, `category`, `tags`, `timestamp`. `save_memory()` appends entries; `load_memory()` reads, filters by category/query, and returns most recent first. Imports from `core/result.py` (NOT from `tools/`) to avoid circular imports.
+- **`src/ayder_cli/memory.py`** — Cross-session memory storage in `.ayder/memory/memories.jsonl`. Imports from `core/result.py`.
 
-- **`src/ayder_cli/process_manager.py`** — Background process management. `ProcessManager` class manages long-running processes (dev servers, watchers, builds) with `ManagedProcess` dataclass tracking id, command, Popen, status, exit_code, and ring-buffer output capture (stdout/stderr, maxlen=500 lines each via daemon threads). Enforces configurable max running process limit, provides SIGTERM/SIGKILL lifecycle, and atexit cleanup. Exposes 4 tool functions: `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes`. Imports from `core/result.py` (NOT from `tools/`) to avoid circular imports.
+- **`src/ayder_cli/process_manager.py`** — `ProcessManager` class for background processes. Ring-buffer output capture (500 lines), SIGTERM/SIGKILL lifecycle, atexit cleanup. 4 tool functions. Imports from `core/result.py`.
 
-- **`src/ayder_cli/tasks.py`** — Task management system for creating, listing, showing, and implementing tasks stored in `.ayder/tasks/`. Uses slug-based filenames (`TASK-001-add-auth.md`) with backwards-compatible support for legacy `TASK-001.md` format. Includes `_title_to_slug()` helper and `_get_task_path_by_id()` glob-based lookup. Exposes two tool functions: `list_tasks(project_ctx, format="list", status="pending")` returns newline-separated relative paths of pending tasks by default (or formatted table with `format="table"`; use `status="all"` for all tasks, `status="done"` for completed), and `show_task(project_ctx, identifier)` accepts flexible input (relative path, filename, task ID, or slug) with fallback strategies for task lookup.
+- **`src/ayder_cli/tasks.py`** — Task management in `.ayder/tasks/`. Slug-based filenames. 2 tool functions: `list_tasks`, `show_task`. Imports from `core/result.py`.
 
-- **`src/ayder_cli/ui.py`** — Terminal UI utilities for formatted output, boxes, and user prompts using Rich
+- **`src/ayder_cli/ui.py`** — Rich terminal UI utilities (boxes, message formatting, diff previews). Used by `--cli` REPL mode.
 
-Entry points:
-- **CLI**: `ayder_cli.cli:main` (registered as the `ayder` CLI script in pyproject.toml)
-- **Legacy/TUI**: `ayder_cli.client:run_chat` (can be called directly for programmatic use)
+### TUI Architecture (tui/)
 
-### ChatSession, Agent, and ChatLoop Classes
+The TUI is the default interface. Key flow:
 
-The `client.py` module implements two core classes, delegating loop logic to `chat_loop.py`:
+1. **Startup**: `AyderApp.__init__()` loads config, creates `OpenAIProvider`, creates `ToolRegistry` with `ProcessManager` injected, builds system prompt with project structure macro.
+2. **Input**: `CLIInputBar` uses `_SubmitTextArea` (TextArea subclass where Enter submits instead of inserting newlines). Tab completes slash commands. Up/Down navigates history.
+3. **Commands**: `_handle_command()` dispatches to `COMMAND_MAP` handlers in `tui/commands.py`.
+4. **LLM pipeline**: `_process_llm_response()` → `call_llm_async()` → `_handle_llm_response()`. Supports `<think>` block extraction, tool call splitting (auto-approved vs needs-confirmation), parallel execution of auto-approved tools, sequential confirmation for others, and XML tool call fallback.
+5. **Tool confirmation**: `_request_confirmation()` pushes `CLIConfirmScreen` with diff preview. User can approve, deny, or provide alternative instructions.
+6. **Input disable**: Input bar is disabled during LLM processing and re-enabled in `_finish_processing()`.
 
-**ChatSession** — Manages conversation state, history, and user input:
-```python
-class ChatSession:
-    def __init__(self, config, system_prompt, permissions=None, iterations=50, checkpoint_manager=None)
-    def start()                        # Initialize prompt session, print banner
-    def add_message(role, content, **kwargs)
-    def append_raw(message)            # Append pre-formed message (e.g., tool_calls)
-    def get_input() -> str | None      # Cyan "❯" prompt
-    def get_messages() -> list
-    def clear_messages(keep_system=True)
-    def render_history()               # Debug display
-```
+### CLI REPL Architecture (--cli)
 
-**Agent** — High-level interface that delegates to `ChatLoop`:
-```python
-class Agent:
-    def __init__(self, llm_provider: LLMProvider, tools: ToolExecutor, session: ChatSession)
-    def chat(user_input) -> str | None  # Delegates to ChatLoop.run()
-```
+The `--cli` flag activates the prompt-toolkit REPL:
 
-**ChatLoop** — Orchestrates the agentic conversation loop (in `chat_loop.py`):
-```python
-class ChatLoop:
-    def __init__(self, llm_provider, tool_executor, session, config: LoopConfig, checkpoint_manager=None)
-    def run(user_input) -> str | None   # Main loop with memory checkpoint support
-    
-# Supporting classes:
-class IterationController:    # Manages iteration counting and checkpoint triggers
-class ToolCallHandler:        # Parses and executes tool calls
-class CheckpointManager:      # Creates/restores memory checkpoints
-```
-
-**Memory Checkpoint Cycle:**
-The `-I/--iterations` flag sets a high-watermark for automatic memory checkpoints. When the iteration limit is reached:
-1. `CheckpointManager` asks the LLM to summarize the conversation
-2. Summary is saved to `.ayder/memory/current_memory.md`
-3. Conversation is reset (keeping only system prompt)
-4. Memory is loaded back as a user message
-5. Iteration counter resets to 0, allowing the agent to continue with fresh context
-
-This prevents "content rotting" in long-running tasks while maintaining task continuity.
+1. **Startup**: `_build_services()` creates all dependencies. `InteractiveRunner` creates `ChatSession` and `Agent`.
+2. **Input**: `ChatSession.get_input()` via prompt-toolkit (emacs keybindings, cyan `❯` prompt).
+3. **Commands**: `handle_command()` dispatches to `commands/` registry (`BaseCommand` subclasses).
+4. **Agent loop**: `Agent.chat()` → `ChatLoop.run()` → `ToolCallHandler` parses/executes tool calls, `IterationController` manages checkpoint triggers.
 
 ### Tools Package Details
-
-The `tools/` package and `chat_loop.py` follow a modular architecture with clear separation of concerns:
 
 **Import Paths:**
 ```python
@@ -254,7 +232,6 @@ from ayder_cli.tools import ToolRegistry, create_default_registry
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.process_manager import ProcessManager
 
-# Create a registry with project context and process manager (DI)
 ctx = ProjectContext(".")
 pm = ProcessManager(max_processes=5)
 registry = create_default_registry(ctx, process_manager=pm)
@@ -262,20 +239,9 @@ result = registry.execute("read_file", {"file_path": "test.py"})
 ```
 
 **Registry Features:**
-- Middleware support: `registry.add_middleware(func)` — Pre-execution checks (e.g., safe mode blocking via `PermissionError`)
-- Pre-execute callbacks: `registry.add_pre_execute_callback(func)` — Called before tool runs
-- Post-execute callbacks: `registry.add_post_execute_callback(func)` — Receives `ToolExecutionResult` with timing
-- Schema access: `registry.get_schemas()` — Returns all tool schemas
-
-**Parameter Normalization:**
-```python
-from ayder_cli.tools import normalize_tool_arguments
-
-# Input: Various parameter names
-args = {"path": "file.txt"}  # alias
-normalized = normalize_tool_arguments("read_file", args)
-# Output: {"file_path": "/absolute/path/to/file.txt"}  # canonical + resolved via ProjectContext
-```
+- Middleware: `registry.add_middleware(func)` — Pre-execution checks (safe mode blocking)
+- Pre/post callbacks for UI integration and timing
+- DI injection: inspects function signatures, injects `project_ctx` and/or `process_manager`
 
 ### ProjectContext and Path Security
 
@@ -288,39 +254,6 @@ ctx = ProjectContext(".")             # Root is current directory (resolved)
 path = ctx.validate_path("src/main.py")   # Returns absolute Path within root
 path = ctx.validate_path("../../etc/passwd")  # Raises ValueError (traversal blocked)
 relative = ctx.to_relative(absolute_path)     # Convert back to relative string
-```
-
-**Integration:** At startup, `cli.py:_build_services()` creates a `ProjectContext` and `MemoryManager`, then injects them into `ToolRegistry`, `ToolExecutor`, and `ChatSession` via constructor arguments. The `prepare_new_content()` utility accepts an optional `project_ctx` parameter for path resolution.
-
-### Command Registry Pattern
-
-The `commands/` package uses a class-based registry pattern for slash command handling:
-
-**Command Registration:**
-- `CommandRegistry` — Singleton registry mapping command names to `BaseCommand` instances
-- `@register_command` — Class decorator that instantiates and registers a `BaseCommand` subclass
-- Each command subclass implements `name`, `description` (properties) and `execute(args, session) -> bool`
-
-**Session Object:**
-- `SessionContext` dataclass from `core/context.py` containing `config`, `project`, `messages`, `state`, `system_prompt`
-- The enhanced prompts (with project structure macro) are passed through `SessionContext` so commands like `/plan` can use them when swapping modes
-- `handle_command()` dispatches to the correct command handler
-
-**Adding New Commands:**
-```python
-@register_command
-class MyCommand(BaseCommand):
-    @property
-    def name(self) -> str:
-        return "/mycommand"
-
-    @property
-    def description(self) -> str:
-        return "Does something useful"
-
-    def execute(self, args: str, session: SessionContext) -> bool:
-        # Implementation
-        return True
 ```
 
 ### Adding New Tools
@@ -357,66 +290,45 @@ When adding a new tool to ayder-cli, follow these steps:
    ),
    ```
 
-3. **Update `prompts.py`** — **CRITICAL**: Add the new tool to the CAPABILITIES section in `SYSTEM_PROMPT` so the LLM knows it exists:
-   ```python
-   ### CAPABILITIES:
-   You can perform these actions:
-   - **Category Name**: `my_new_tool` to do something useful, ...
-   ```
+3. **Update `prompts.py`** — **CRITICAL**: Add the new tool to the CAPABILITIES section in `SYSTEM_PROMPT` so the LLM knows it exists.
 
 4. **Add tests** in `tests/` directory:
    - Test the tool function implementation
    - Test error cases
    - Update `tests/tools/test_schemas.py` to include the new tool in `expected_tools` set
-   - Update tool count in `tests/tools/test_registry.py` (e.g., from 19 to 20)
+   - Update tool count in `tests/tools/test_registry.py`
 
 5. **Update documentation**:
    - Add to tool table in `README.md`
-   - Update tool count in `CLAUDE.md` (e.g., "19 tools" → "20 tools")
+   - Update tool count in `CLAUDE.md`
    - Update permission tables if adding a new permission category
 
 The tool will be automatically registered via the `func_ref` auto-discovery mechanism in `create_default_registry()`.
 
-### Textual TUI
-
-The TUI (`tui.py`) provides an alternative dashboard interface built with Textual:
-
-**Layout:** Header (title + clock) | Main area: ChatView (3fr) + ContextPanel (1fr) | InputBar | Footer (shortcuts)
-
-**Key Components:**
-- `AyderApp` — Main application with safe mode support, registry callbacks/middleware, async LLM workers
-- `ChatView` — Scrollable chat with typed messages (USER/ASSISTANT/TOOL_CALL/TOOL_RESULT/SYSTEM)
-- `InputBar` — Text input + Send button with enable/disable support
-- `ContextPanel` — Model info, token counter, active file tree
-- `ConfirmActionScreen` — Modal with diff preview for file-modifying tool confirmations
-- `SafeModeBlockScreen` — Modal shown when a tool is blocked in safe mode
-
-**Keybindings:** Ctrl+Q (quit), Ctrl+C (cancel operation), Ctrl+L (clear chat)
-
-**Safe Mode:** Blocks `run_shell_command`, `write_file`, `replace_string`, `insert_line`, `delete_line`, `run_background_process`, `kill_background_process` via registry middleware.
-
-**Entry Point:** `run_tui(model="default")` or `python -m ayder_cli.tui`
-
 ## Key Design Details
 
-- **Dependency Injection**: `_build_services()` is the composition root, creating all dependencies. `ChatSession` and `Agent` accept injected providers. Testing uses mocks throughout — no live LLM calls required.
+- **TUI as Default**: Running `ayder` launches the Textual TUI. The `--cli` flag falls back to the prompt-toolkit REPL. Command mode (`ayder "prompt"`) and piped input work without either interface.
 
-- **CLI with Piped Input Auto-Detection**: The CLI automatically detects piped input (e.g., `echo "text" | ayder`) by checking `sys.stdin.isatty()`. When stdin is piped and no explicit mode flags are set (`--file`, `--stdin`, `--tui`), the CLI auto-enables stdin mode, matching behavior of standard Unix tools. Explicit `--stdin` flag still supported for backwards compatibility.
+- **Dependency Injection**: Both interfaces use DI. TUI: `AyderApp.__init__()` creates its own registry with `ProcessManager`. CLI: `_build_services()` is the composition root. Testing uses mocks throughout.
 
-- **Modular Tools and Chat Loop**: The `tools/` package provides clean separation with `impl.py` (10 core tool implementations), `schemas.py` (definitions), `registry.py` (execution + middleware + callbacks + DI), `definition.py` (ToolDefinition dataclass), and `utils.py` (helpers). The `chat_loop.py` module separates iteration management, tool handling, and memory checkpoints from `client.py`. Additional modules `notes.py`, `memory.py`, `checkpoint_manager.py`, `process_manager.py`, and `tasks.py` provide specialized functionality (3 memory/note tools, 4 background process tools, 2 task management tools, checkpoint management). 20 tools total.
+- **Dual Command Systems**: TUI has its own `COMMAND_MAP` in `tui/commands.py` (13 commands including TUI-only `/permission` and `/archive-completed-tasks`). CLI REPL uses `commands/` registry (class-based `@register_command` pattern). Both share the same prompts from `prompts.py`.
 
-- **Planning Mode**: Activated via `/plan` command. Injects `PLANNING_PROMPT` as a user message to guide the LLM to act as a "Task Master" for task creation.
+- **Modular Tools**: The `tools/` package provides clean separation with `impl.py` (10 core implementations), `schemas.py`, `registry.py` (execution + middleware + callbacks + DI), `definition.py`, and `utils.py`. Additional modules provide specialized functionality: `notes.py`, `memory.py`, `process_manager.py`, `tasks.py`. 20 tools total.
 
-- **Tool Registry with Middleware**: `ToolRegistry` class supports middleware for pre-execution checks (safe mode), pre/post-execute callbacks for UI integration (TUI tool call display), and execution timing via `ToolExecutionResult`.
+- **Dual Tool Calling**: Supports standard OpenAI function calling (`msg.tool_calls`) and custom XML-like fallback parsed by `parse_custom_tool_calls()`. Both TUI and CLI support this — TUI checks for XML after standard calls fail.
 
-- **Path Security via ProjectContext**: All file tool operations are sandboxed to the project root. `ProjectContext` validates paths, blocks traversal attacks, and handles tilde expansion. Injected via DI at startup.
+- **Planning Mode**: `/plan` command injects `PLANNING_PROMPT_TEMPLATE` to guide the LLM for task creation.
 
-- **Configuration with Pydantic**: Config validation using Pydantic models with field validators. The `Config` model validates `base_url` (http/https), `num_ctx` (positive integer), `max_background_processes` (1-20, default 5), and other settings. Supports both dict and Config model formats throughout.
+- **Path Security via ProjectContext**: All file tool operations sandboxed to project root. Injected via DI at startup.
 
-- **Dual tool calling**: Supports both standard OpenAI function calling (`msg.tool_calls`) and a custom XML-like fallback parsed by `parse_custom_tool_calls()` using `<function=name><parameter=key>value</parameter></function>` syntax (plus lazy format for single-param tools). Standard calls feed results back as `tool` role messages; custom calls feed results back as `user` role messages.
+- **Configuration with Pydantic**: `Config` model validates `base_url`, `num_ctx`, `max_background_processes`, etc.
 
-- **Async LLM Support**: `call_llm_async()` wraps synchronous OpenAI calls in a `ThreadPoolExecutor` for non-blocking TUI interaction.
+- **Async LLM Support**: `call_llm_async()` wraps synchronous OpenAI calls in `ThreadPoolExecutor` for non-blocking TUI interaction.
 
-- **Shell command timeout**: `run_shell_command` has a 60-second timeout. For long-running commands (servers, watchers, builds), use `run_background_process` instead.
+- **Shell command timeout**: `run_shell_command` has a 60-second timeout. For long-running commands, use `run_background_process`.
 
-- **Background Process Management**: `ProcessManager` manages long-running processes with ring-buffer output capture (500 lines each for stdout/stderr via daemon reader threads). Enforces a configurable max running process limit (`max_background_processes` in config). Process lifecycle: SIGTERM → 5s wait → SIGKILL fallback. All running processes are cleaned up at exit via `atexit`. Injected into `ToolRegistry` via `create_default_registry(project_ctx, process_manager=pm)`.
+- **Background Process Management**: `ProcessManager` manages long-running processes with ring-buffer output capture. Injected into `ToolRegistry` via `create_default_registry(project_ctx, process_manager=pm)`.
+
+- **Memory Checkpoint Cycle**: When iteration limit reached → LLM summarizes → saved to `.ayder/memory/current_memory.md` → conversation reset → memory loaded → iteration counter resets.
+
+- **Circular Import Prevention**: `tools/__init__.py` imports from `tools/impl.py` which imports from `tasks.py`. Therefore `tasks.py`, `notes.py`, `memory.py`, and `process_manager.py` import from `core/result.py` (NOT from `tools/`).

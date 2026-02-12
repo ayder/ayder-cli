@@ -16,11 +16,11 @@ def create_parser():
         description="AI-powered CLI assistant"
     )
 
-    # Boolean flag for TUI mode
+    # Boolean flag for CLI (REPL) mode
     parser.add_argument(
-        "--tui", "-t",
+        "--cli",
         action="store_true",
-        help="Launch TUI mode"
+        help="Launch classic CLI REPL mode instead of TUI"
     )
 
     # Task-related CLI options
@@ -154,16 +154,8 @@ def main():
 
     # Auto-detect piped input: if stdin is not a TTY and no explicit input method specified,
     # automatically enable --stdin mode for better UX
-    if not sys.stdin.isatty() and not args.stdin and not args.file and not args.tui:
+    if not sys.stdin.isatty() and not args.stdin and not args.file and not args.cli:
         args.stdin = True
-
-    # Handle TUI mode
-    if args.tui:
-        if args.command:
-            parser.error("--tui cannot be used with a command argument")
-        from ayder_cli.tui import run_tui
-        run_tui()
-        return
 
     # Build granted permissions set from flags
     # Read tools are auto-approved by default (use --no-r to disable)
@@ -193,8 +185,14 @@ def main():
     if prompt:
         sys.exit(run_command(prompt, permissions=granted, iterations=iterations))
 
-    # Default: interactive CLI mode
-    run_interactive(permissions=granted, iterations=iterations)
+    # --cli flag: classic CLI REPL mode
+    if args.cli:
+        run_interactive(permissions=granted, iterations=iterations)
+        return
+
+    # Default: TUI mode
+    from ayder_cli.tui import run_tui
+    run_tui(permissions=granted)
 
 
 if __name__ == "__main__":

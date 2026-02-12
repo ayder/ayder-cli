@@ -1,14 +1,14 @@
 # ayder-cli
 
-An interactive AI agent chat client for [Ollama](https://ollama.com) models. It connects to any Ollama instance (local or cloud) and provides an autonomous coding assistant with file system tools and shell access, all from your terminal.
+An AI agent chat client for [Ollama](https://ollama.com) models. It connects to any Ollama instance (local or cloud) and provides an autonomous coding assistant with file system tools and shell access, all from your terminal.
 
 ## Why ayder-cli?
 
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
 
 - **Fully local or cloud** -- runs against any Ollama instance. Use locally for privacy, or connect to cloud-hosted Ollama. Your code never leaves your computer when using local Ollama.
-- **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 10 consecutive tool calls per user message (configurable with `-I`).
-- **Two interfaces** -- a classic prompt-toolkit CLI and an optional Textual TUI dashboard with chat view, context panel, and tool confirmation modals.
+- **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 50 consecutive tool calls per user message (configurable with `-I`).
+- **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. Falls back to a classic prompt-toolkit REPL with `--cli`.
 - **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual.
 
 
@@ -43,7 +43,7 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
   - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
-  - **Safe mode** (TUI): The Textual TUI supports a safe mode that blocks `write_file`, `replace_string`, `insert_line`, `delete_line`, `run_shell_command`, `run_background_process`, and `kill_background_process`.
+  - **Safe mode** (TUI): The TUI supports a safe mode that blocks `write_file`, `replace_string`, `insert_line`, `delete_line`, `run_shell_command`, `run_background_process`, and `kill_background_process`.
   - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
   - You may also prefer to run ayder-cli in a container for additional security.
 
@@ -90,7 +90,7 @@ model = "qwen3-coder:latest"
 num_ctx = 65536
 
 [editor]
-# Editor for /task-edit and /edit commands (vim, nano, code, etc.)
+# Editor for /task-edit command (vim, nano, code, etc.)
 editor = "vim"
 
 [ui]
@@ -106,20 +106,21 @@ Please adjust *num_ctx* context size window according to your local computer ram
 | `api_key` | `[llm]` | `ollama` | API key. Set to `"ollama"` for local Ollama. |
 | `model` | `[llm]` | `qwen3-coder:latest` | Model to use. Any Ollama model works (`ollama list`). qwen3-coder recommended for tool use. |
 | `num_ctx` | `[llm]` | `65536` | Context window size in tokens. Larger values use more VRAM. |
-| `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` and `/edit` commands. |
+| `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` command. |
 | `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
 | `max_background_processes` | `[ui]` | `5` | Maximum number of concurrent background processes (1-20). |
 
 ## Usage
 
-### Interactive Mode
-
 ```bash
-# Start interactive chat
+# Start (launches TUI by default)
 ayder
 
 # Or run as a module
 python -m ayder_cli
+
+# Classic CLI REPL mode (prompt-toolkit)
+ayder --cli
 ```
 
 ### Command Mode (Non-Interactive)
@@ -141,7 +142,7 @@ ayder --stdin < prompt.txt
 
 ### Task Commands (CLI Mode)
 
-Execute task-related commands directly without entering interactive mode:
+Execute task-related commands directly without entering the TUI:
 
 ```bash
 # List all tasks
@@ -192,93 +193,36 @@ ayder -I 200
 ayder -r -w -I 150 "implement all pending tasks"
 ```
 
-If you have memory problems decrease iteration size and /compact the LLM memory before it gets worse
+If you have memory problems decrease iteration size and /compact the LLM memory before it gets worse.
 
-### TUI Mode (Dashboard)
+### Slash Commands
 
-```bash
-# Launch Textual TUI dashboard
-ayder --tui
-```
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands and keyboard shortcuts |
+| `/tools` | List all tools and their descriptions |
+| `/model` | List available models or switch model (e.g. `/model qwen2.5-coder`) |
+| `/ask` | Ask a general question without using tools (e.g. `/ask explain REST vs GraphQL`) |
+| `/plan` | Analyze request and create implementation tasks |
+| `/tasks` | Browse and implement tasks from `.ayder/tasks/` |
+| `/task-edit N` | Open task N in an in-app editor (e.g. `/task-edit 1`) |
+| `/implement <id/name>` | Run a task by ID, name, or pattern (e.g. `/implement 1`) |
+| `/implement-all` | Implement all pending tasks sequentially |
+| `/verbose` | Toggle verbose mode (show file contents after `write_file` + LLM request details) |
+| `/compact` | Summarize conversation, save to memory, clear, and reload context |
+| `/archive-completed-tasks` | Move completed tasks to `.ayder/task_archive/` |
+| `/permission` | Toggle permission levels (r/w/x) interactively |
+| `exit` | Quit the application |
 
-### Command Examples
+### Keyboard Shortcuts
 
-```bash
-# Quick code generation
-ayder "write a fibonacci function in Python"
-
-# Multi-line piped input
-cat <<EOF | ayder
-Read the README.md file and create a summary.
-Save it to SUMMARY.md.
-EOF
-
-# Combine file input with additional command
-ayder -f requirements.txt "install these dependencies and verify"
-
-# Non-interactive automation
-echo "run all tests and show results" | ayder
-```
-
-### Example session
-
-```
-╭─────────────────┬────────────────────────────────────────╮
-│                 │                                        │
-│  ░▒▓▓▓▒░        │ ayder-cli v0.7.0                       │
-│       ▓▓        │ qwen3-coder:latest · Ollama            │
-│  ▒▓▓▓▓▓▓        │ ~/projects/my-app                      │
-│  ▓▓  ▓▓▓        │                                        │
-│  ░▓▓▓▓▒█        │                                        │
-╰─────────────────┴────────────────────────────────────────╯
- ? Tip: Use /help for available commands
-
-❯ create a pyhon script to calculate prime numbers > 10000
-
-Running...
-File prime_calculator.py will be written. Proceed? (Y/n) Y
-╭──────────────────────────────── Tool Result ─────────────────────────────────╮
-│ Successfully wrote to prime_calculator.py                                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-Command `python prime_calculator.py` will be executed. Proceed? (Y/n) Y
-╭──────────────────────────────── Tool Result ─────────────────────────────────╮
-│ Exit Code: 0                                                                 │
-│ STDOUT:                                                                      │
-│ Prime Number Calculator                                                      │
-│ ==============================                                               │
-│                                                                              │
-│ First 10 prime numbers greater than 10000:                                   │
-│  1. 10007                                                                    │
-│  2. 10009                                                                    │
-│  3. 10037                                                                    │
-│  4. 10039                                                                    │
-│  5. 10061                                                                    │
-│  6. 10067                                                                    │
-│  7. 10069                                                                    │
-│  8. 10079                                                                    │
-│  9. 10091                                                                    │
-│ 10. 10093                                                                    │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-
-❯ List the python files in this project
-
-╭───────────────────────── Tool Call ──────────────────────────────╮
-│ run_shell_command({"command": "find . -name '*.py'"})            │
-╰──────────────────────────────────────────────────────────────────╯
-Proceed? [Y/n] y
-
-╭──────────────────────── Tool Result ─────────────────────────────╮
-│ ./prime_calculator.py                                            │
-│ ./src/ayder_cli/client.py                                        │
-│ ./src/ayder_cli/cli.py                                           │
-│ ...                                                              │
-╰──────────────────────────────────────────────────────────────────╯
-
-╭──────────────────────── Assistant ───────────────────────────────╮
-│ Here are the Python files in the project: ...                    │
-╰──────────────────────────────────────────────────────────────────╯
-```
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+D` | Quit |
+| `Ctrl+X` / `Ctrl+C` | Cancel current operation |
+| `Ctrl+L` | Clear chat |
+| `Tab` | Auto-complete slash commands |
+| `Up/Down` | Navigate command history |
 
 ### Operational Modes
 
@@ -288,7 +232,7 @@ ayder-cli has three operational modes, each with a specialized system prompt and
 The standard mode for general coding and chat. Uses the **System Prompt**.
 
 ```
-❯ create a fibonacci function
+> create a fibonacci function
 # AI writes code, runs tests, etc.
 ```
 
@@ -298,36 +242,24 @@ The standard mode for general coding and chat. Uses the **System Prompt**.
 Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Master" focused solely on breaking down requirements into tasks.
 
 ```
-❯ /plan add a user authentication to the app
+> /plan add a user authentication to the app
 
 # The agent will analyze the codebase and create tasks...
-
-╭──────────────────────── Tool Result ─────────────────────────────╮
-│ Task TASK-001-add-auth-middleware.md created.                    │
-╰──────────────────────────────────────────────────────────────────╯
-
 ```
 
 **Available tools:** Read-only exploration + `create_task`.
 
-#### Task Mode (`/task`)
-Activated with `/task`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list.
+#### Task Mode (`/implement`)
+Activated with `/implement`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list.
 
 ```
+> /implement 1
 
-❯ /implement 1
-
-╭────────────────────────── Running ───────────────────────────────╮
-│ Running TASK-001: Add user authentication                        │
-╰──────────────────────────────────────────────────────────────────╯
-
+Running TASK-001: Add user authentication
 # AI implements the task, then marks it done
 ```
 
 **Available tools:** Full file system access + task management tools.
-
-**How it works:** Commands inject specialized prompts to guide the AI:
-- `/plan` -- Injects Planning Prompt for task creation focus
 
 ### Task Management
 
@@ -336,164 +268,76 @@ ayder-cli includes a built-in task system for structured development:
 1. **Plan** (`/plan`) -- Break down requirements into tasks
 2. **Implement** (`/implement`) -- Work through tasks one by one
 
-The typical workflow:
-
 Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames for readability (e.g., `TASK-001-add-auth-middleware.md`). Legacy `TASK-001.md` filenames are also supported.
 
 ```
-❯ /tasks
+> /tasks
+# Opens interactive task selector — pick a task to implement
 
-╭──────────────────────── Tasks ───────────────────────────────────╮
-│  Task ID  | Task Name                          | Status          │
-│  ---------+------------------------------------+---------        │
-│  TASK-001 | Add input validation to login form | pending         │
-╰──────────────────────────────────────────────────────────────────╯
+> /task-edit 1    # opens TASK-001 in the in-app editor
 
-❯ /task-edit 1    # opens TASK-001-add-input-validation-to.md in your editor
-
-❯ /implement 1
-
+> /implement 1
 # AI implements TASK-001 and marks it as done
 
 > /implement-all
-
 # Sequentially implements all tasks one after each other. Consider iteration size!
-...
 ```
 
 ### Code Search
 
-ayder-cli provides code search capabilities:
+ayder-cli provides code search capabilities via the `search_codebase` tool. The LLM calls it automatically when you ask it to search for patterns, function definitions, or usages across the codebase.
 
-```
-❯ Search for all function definitions in Python files
+### Webview POC (Windows/Desktop)
 
-╭───────────────────────── Tool Call ──────────────────────────────╮
-│ search_codebase({"pattern": "^def ", "file_pattern": "*.py"})     │
-╰──────────────────────────────────────────────────────────────────╯
-Proceed? [Y/n] y
+A proof-of-concept for running the TUI inside a native desktop window is available in `poc/webview_tui/`. See its [README](poc/webview_tui/README.md) for details.
 
-╭──────────────────────── Tool Result ─────────────────────────────╮
-│ === SEARCH RESULTS ===                                           │
-│ Pattern: "^def "                                                 │
-│ Matches found: 42                                                │
-│                                                                  │
-│ ──────────────────────────────────────────────────────────────── │
-│ FILE: src/ayder_cli/client.py                                    │
-│ ──────────────────────────────────────────────────────────────── │
-│ Line 45: def run_chat(openai_client=None, config=None):          │
-│ Line 123: def handle_tool_call(tool_call, config):               │
-│ ...                                                              │
-╰──────────────────────────────────────────────────────────────────╯
-```
-
-### Project Structure
-
-Quickly get an overview of your project:
-
-```
-❯ Show me the project structure
-
-╭──────────────────────────────────── Assistant ────────────────────────────────────╮
-│                                                                                   │
-│  I've analyzed the project structure for you. The project has a standard Flask    │
-│  application layout with:                                                         │
-│                                                                                   │
-│  - **app/** directory containing main application components                      │
-│  - **models/** directory for database models and authentication                   │
-│  - **templates/** directory for HTML templates                                    │
-│  - **static/** directory for static files                                         │
-│  - **tests/** directory for test files                                            │
-│  - Configuration files like config.py and requirements.txt                        │
-│  - Main application file app.py                                                   │
-│                                                                                   │
-│  The application appears to be a web application with user authentication         │
-│  (jwt_auth.py, auth.py) and database interaction (database.py, user.py).          │
-│                                                                                   │
-│  Is there anything specific about this structure you'd like me to explore or      │
-│  modify?                                                                          │
-│                                                                                   │
-╰───────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### Editing files
-
-You can open any file in your configured editor directly from the chat:
-
-```
-❯ /edit src/main.py    # opens the file in vim (or your configured editor)
-```
-
-### Slash commands
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/tools` | List all tools and their descriptions |
-| `/model` | List available models or switch model (e.g. `/model qwen2.5-coder`) |
-| `/ask` | Ask a general question without using tools (e.g. `/ask explain REST vs GraphQL`) |
-| `/plan` | Toggle Planning Mode (Task Master) for task creation |
-| `/task` | Enter Task Mode for implementing tasks |
-| `/tasks` | List saved tasks from `.ayder/tasks/` |
-| `/task-edit N` | Open task N in your configured editor (e.g. `/task-edit 1`) |
-| `/implement <id/name>` | Run a task by ID, name, or pattern (e.g. `/implement 1`) |
-| `/implement-all` | Implement all undone tasks sequentially without stopping |
-| `/edit <file>` | Open a file in your configured editor (e.g. `/edit src/main.py`) |
-| `/verbose` | Toggle verbose mode (show file contents after `write_file` + LLM request details) |
-| `/clear` | Clear conversation history and reset context |
-| `/compact` | Summarize conversation, save to memory, clear, and reload context |
-| `/summary` | Prompt AI to summarize conversation and save to `.ayder/current_memory.md` |
-| `/load` | Prompt AI to load memory from `.ayder/current_memory.md` |
-| `/undo` | Remove the last user message and assistant response |
-| `exit` | Quit the application |
-
-### Keyboard shortcuts
-
-ayder-cli uses emacs-style keybindings via prompt-toolkit:
-
-- **Ctrl+A / Ctrl+E** -- Jump to start / end of line
-- **Ctrl+K** -- Delete to end of line
-- **Ctrl+R** -- Reverse history search
-- **Ctrl+C** -- Cancel current input
-- **Ctrl+D** -- Exit
-
-## Project structure
+## Project Structure
 
 ```
 src/ayder_cli/
-  cli.py           -- Command-line interface (argparse, --tui/--file/--stdin/--tasks/--implement/--implement-all flags, piped input)
-  client.py        -- ChatSession + Agent classes, run_chat() entry point
-  parser.py        -- XML tool call parser (standard + lazy format fallback)
-  prompts.py       -- System prompts and prompt templates
-  tasks.py         -- Task creation, listing, and implementation (.ayder/tasks/)
-  notes.py         -- Note management (.ayder/notes/)
-  memory.py        -- Cross-session memory storage (.ayder/memory/)
+  cli.py             -- Entry point (argparse: --cli, -f, --stdin, -I, --tasks, --implement)
+  cli_runner.py      -- Execution logic (InteractiveRunner, CommandRunner, TaskRunner)
+  client.py          -- ChatSession + Agent classes, call_llm_async()
+  chat_loop.py       -- Core agentic loop (ChatLoop, IterationController, ToolCallHandler)
+  checkpoint_manager.py -- Memory checkpoint/restore for long-running tasks
+  parser.py          -- XML tool call parser (standard + lazy format fallback)
+  prompts.py         -- Centralized prompt templates
+  tasks.py           -- Task management (.ayder/tasks/)
+  notes.py           -- Note management (.ayder/notes/)
+  memory.py          -- Cross-session memory storage (.ayder/memory/)
   process_manager.py -- Background process management (ProcessManager + 4 tool functions)
-  ui.py            -- Rich terminal UI (boxes, message formatting, diff previews)
-  tui.py           -- Textual TUI dashboard (chat view, context panel, modals)
-  tui_helpers.py   -- TUI helper functions (safe mode checks)
-  banner.py        -- Welcome banner with version detection and tips
-  console.py       -- Centralized Rich console with custom theme
-  commands/        -- Slash command handlers with decorator-based registry
-    base.py        -- BaseCommand abstract class
-    registry.py    -- Command registry and dispatch
-    files.py       -- /edit command
-    tools.py       -- /tools command
-    tasks.py       -- /tasks, /task-edit, /implement, /implement-all commands
-    system.py      -- /help, /clear, /compact, /summary, /load, /undo, /verbose, /plan commands
-  core/            -- Core infrastructure
-    config.py      -- Configuration loading with Pydantic validation
-    context.py     -- ProjectContext for path sandboxing and security
-    result.py      -- Shared result types (ToolSuccess, ToolError)
-  services/        -- Service layer
-    llm.py         -- OpenAI-compatible LLM provider
-    tools/         -- ToolExecutor for tool confirmation and execution
-  tools/           -- Modular tools package (19 tools)
-    definition.py  -- ToolDefinition dataclass and registry
-    impl.py        -- Tool implementations (file ops, line editing, file info, shell, search)
-    schemas.py     -- OpenAI-format JSON schemas for all tools
-    registry.py    -- ToolRegistry with middleware, callbacks, and execution timing
-    utils.py       -- Tool utilities (content preparation for diffs)
+  ui.py              -- Rich terminal UI (boxes, message formatting, diff previews)
+  banner.py          -- Welcome banner with version detection and tips
+  console.py         -- Centralized Rich console with custom theme
+  tui/               -- Textual TUI package (default interface)
+    __init__.py      -- run_tui() entry point
+    app.py           -- AyderApp main application (LLM pipeline, tool execution)
+    commands.py      -- TUI slash command handlers + COMMAND_MAP dispatch
+    widgets.py       -- ChatView, ToolPanel, CLIInputBar, StatusBar
+    screens.py       -- Modal screens (confirm, permission, select, task editor)
+    types.py         -- Shared types (MessageType, ConfirmResult)
+    helpers.py       -- TUI helper functions
+    theme_manager.py -- Theme loading and CSS generation
+  themes/            -- Theme CSS definitions (claude, original)
+  commands/          -- CLI slash command handlers (used by --cli REPL mode)
+    base.py          -- BaseCommand abstract class
+    registry.py      -- Command registry and dispatch
+    tools.py         -- /tools command
+    tasks.py         -- /tasks, /task-edit, /implement, /implement-all commands
+    system.py        -- /help, /compact, /verbose, /plan, /model, /ask commands
+  core/              -- Core infrastructure
+    config.py        -- Configuration loading with Pydantic validation
+    context.py       -- ProjectContext for path sandboxing and security
+    result.py        -- Shared result types (ToolSuccess, ToolError)
+  services/          -- Service layer
+    llm.py           -- OpenAI-compatible LLM provider
+    tools/           -- ToolExecutor for tool confirmation and execution
+  tools/             -- Modular tools package (20 tools)
+    definition.py    -- ToolDefinition dataclass and registry
+    impl.py          -- Tool implementations (file ops, line editing, file info, shell, search)
+    schemas.py       -- OpenAI-format JSON schemas for all tools
+    registry.py      -- ToolRegistry with middleware, callbacks, and execution timing
+    utils.py         -- Tool utilities (content preparation for diffs)
 ```
 
 ### Prompt Organization
@@ -502,15 +346,12 @@ All prompt templates are centralized in `src/ayder_cli/prompts.py`. Each prompt 
 
 | Prompt | Used By | REASON |
 |--------|---------|--------|
-| `SYSTEM_PROMPT` | `cli_runner.py` | Define AI role, operational principles, reasoning workflow, and available capabilities |
-| `PROJECT_STRUCTURE_MACRO_TEMPLATE` | `cli_runner.py` | Provide codebase overview at startup so LLM knows what files exist |
-| `PLANNING_PROMPT_TEMPLATE` | `commands/system.py` | Transform high-level requests into actionable tasks with acceptance criteria |
-| `TASK_EXECUTION_PROMPT_TEMPLATE` | `cli_runner.py` | Instruct LLM to implement a specific task and mark it complete |
-| `TASK_EXECUTION_ALL_PROMPT_TEMPLATE` | `cli_runner.py` | Process all pending tasks sequentially without stopping between tasks |
-| `CLEAR_COMMAND_RESET_PROMPT` | `commands/system.py` | Confirm LLM understands context is fresh after `/clear` |
-| `SUMMARY_COMMAND_PROMPT_TEMPLATE` | `commands/system.py` | Extract key decisions from conversation to memory file |
-| `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` | `commands/system.py` | Restore context from saved memory to continue previous work |
-| `COMPACT_COMMAND_PROMPT_TEMPLATE` | `commands/system.py` | Combine summary/save/clear/reload to prevent context window overflow |
+| `SYSTEM_PROMPT` | `cli_runner.py`, `tui/app.py` | Define AI role, operational principles, reasoning workflow, and available capabilities |
+| `PROJECT_STRUCTURE_MACRO_TEMPLATE` | `cli_runner.py`, `tui/app.py` | Provide codebase overview at startup so LLM knows what files exist |
+| `PLANNING_PROMPT_TEMPLATE` | `commands/system.py`, `tui/commands.py` | Transform high-level requests into actionable tasks with acceptance criteria |
+| `TASK_EXECUTION_PROMPT_TEMPLATE` | `cli_runner.py`, `tui/commands.py` | Instruct LLM to implement a specific task and mark it complete |
+| `TASK_EXECUTION_ALL_PROMPT_TEMPLATE` | `cli_runner.py`, `tui/commands.py` | Process all pending tasks sequentially without stopping between tasks |
+| `COMPACT_COMMAND_PROMPT_TEMPLATE` | `commands/system.py`, `tui/commands.py` | Combine summary/save/clear/reload to prevent context window overflow |
 | `MEMORY_CHECKPOINT_PROMPT_TEMPLATE` | `checkpoint_manager.py` | Force LLM to save progress before automatic context reset at iteration limit |
 | `MEMORY_RESTORE_PROMPT_TEMPLATE` | `checkpoint_manager.py` | Instruct LLM to read saved memory after checkpoint reset |
 | `MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE` | `checkpoint_manager.py` | Include saved memory directly for immediate restoration after reset |

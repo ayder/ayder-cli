@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "0.86.0"
+version = "0.90.0"
 description = "Interactive AI agent chat client for local LLMs"
 readme = "README.md"
 requires-python = ">=3.12"

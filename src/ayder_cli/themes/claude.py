@@ -29,6 +29,11 @@ CLIConfirmScreen .prompt {
     color: #5eaff5;
 }
 
+CLIConfirmScreen .description {
+    color: #b8b8c8;
+    margin-bottom: 1;
+}
+
 CLIConfirmScreen .diff-container {
     height: 15;
     border: solid #333350;
@@ -37,13 +42,63 @@ CLIConfirmScreen .diff-container {
     overflow: auto scroll;
 }
 
-CLIConfirmScreen .buttons {
+CLIConfirmScreen .option-list {
     height: auto;
+    max-height: 10;
+    overflow-y: auto;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+CLIConfirmScreen #instruction-input {
+    display: none;
+    margin: 1 0;
+    border: solid #333350;
+    background: #0a0a18;
+    color: #e0e0e8;
+}
+
+CLIConfirmScreen .hint {
+    color: #666680;
+    text-style: dim;
     margin-top: 1;
 }
 
-CLIConfirmScreen Button {
-    margin-right: 1;
+/* CLIPermissionScreen - Permission toggle modal */
+CLIPermissionScreen {
+    align: center bottom;
+}
+
+CLIPermissionScreen > Vertical {
+    width: 100%;
+    height: auto;
+    background: #12122a;
+    border-top: solid #666680;
+    padding: 1 2;
+}
+
+CLIPermissionScreen .prompt {
+    text-style: bold;
+    color: #5eaff5;
+}
+
+CLIPermissionScreen .description {
+    color: #b8b8c8;
+    margin-bottom: 1;
+}
+
+CLIPermissionScreen .option-list {
+    height: auto;
+    max-height: 10;
+    overflow-y: auto;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+CLIPermissionScreen .hint {
+    color: #666680;
+    text-style: dim;
+    margin-top: 1;
 }
 
 /* CLISafeModeScreen - Safe mode block modal */
@@ -103,6 +158,37 @@ CLISelectScreen .hint {
     margin-top: 1;
 }
 
+/* TaskEditScreen - In-app task editor */
+TaskEditScreen {
+    align: center bottom;
+}
+
+TaskEditScreen > Vertical {
+    width: 100%;
+    height: 80%;
+    background: #12122a;
+    border-top: solid #666680;
+    padding: 1 2;
+}
+
+TaskEditScreen .prompt {
+    height: 1;
+    text-style: bold;
+    color: #5eaff5;
+    margin-bottom: 1;
+}
+
+TaskEditScreen #task-editor {
+    height: 1fr;
+}
+
+TaskEditScreen .hint {
+    height: 1;
+    color: #666680;
+    text-style: dim;
+    margin-top: 1;
+}
+
 /* Text selection highlight */
 .selection {
     background: #264f78;
@@ -129,13 +215,20 @@ ChatView .user-message {
 }
 
 ChatView .assistant-message {
-    color: #e0e0e8;
+    color: #b8b8c8;
     margin: 1 0 0 0;
 }
 
 ChatView .assistant-message-content {
     margin: 0 0 0 2;
-    color: #e0e0e8;
+    color: #b8b8c8;
+}
+
+ChatView .thinking {
+    color: #555570;
+    margin: 0;
+    padding-left: 2;
+    text-style: italic;
 }
 
 ChatView .tool-call {
@@ -212,8 +305,7 @@ AutoCompleteInput .suggestion--highlighted {
 
 /* CLIInputBar - Input bar with prompt */
 CLIInputBar {
-    height: auto;
-    min-height: 1;
+    height: 3;
     background: transparent;
     border-top: solid #333350;
     padding: 0;
@@ -225,10 +317,17 @@ CLIInputBar Static {
     padding: 0 1;
 }
 
-CLIInputBar AutoCompleteInput {
+CLIInputBar #chat-input {
     width: 1fr;
+    height: 3;
     border: none;
+    background: transparent;
+    color: #e0e0e8;
     padding: 0 1;
+}
+
+CLIInputBar #chat-input:focus {
+    border: none;
 }
 
 CLIInputBar .prompt {
@@ -254,6 +353,12 @@ StatusBar .spacer {
 
 StatusBar .key-hint {
     color: #555570;
+}
+
+/* Banner spacer - pushes banner to bottom on startup */
+#banner-spacer {
+    height: 0;
+    background: transparent;
 }
 
 /* BannerWidget - Top banner */
@@ -285,10 +390,11 @@ BannerWidget .banner-version {
 ToolPanel {
     layout: vertical;
     height: auto;
-    max-height: 20%;
+    min-height: 6;
+    max-height: 24%;
     background: #0a0a18;
     border-top: solid #333350;
-    padding: 0 1;
+    padding: 1 1;
     overflow-y: scroll;
     display: none;
 }
@@ -311,6 +417,12 @@ ToolPanel .tool-item.completed {
 Screen {
     layout: vertical;
     background: #0d0d1a;
+}
+
+/* Inline mode - runs within terminal flow, not full-screen */
+Screen:inline {
+    height: 80vh;
+    min-height: 20;
 }
 
 #chat-view {

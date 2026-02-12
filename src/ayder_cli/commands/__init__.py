@@ -5,7 +5,7 @@ from .base import BaseCommand
 from .registry import get_registry, CommandRegistry
 
 # Import modules to register commands
-from . import system, tools, tasks, files
+from . import system, tools, tasks
 
 def handle_command(cmd: str, session: SessionContext) -> bool:
     """Handle slash commands. Returns True if command was handled, False if unknown.

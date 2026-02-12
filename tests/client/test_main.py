@@ -9,15 +9,15 @@ class TestMainEntryPoint:
     """Test that __main__.py correctly calls the main CLI entry point."""
 
     def test_main_calls_cli_main(self):
-        """Test that running __main__ module calls cli.main()."""
-        with patch("ayder_cli.cli_runner.run_interactive") as mock_run_interactive, \
+        """Test that running __main__ module calls cli.main() which launches TUI."""
+        with patch("ayder_cli.tui.run_tui") as mock_run_tui, \
              patch("sys.argv", ["ayder"]), \
              patch("sys.stdin.isatty", return_value=True):
             # Run the module as __main__ using runpy
             runpy.run_module("ayder_cli", run_name="__main__")
 
-            # Verify run_interactive was called (via cli.main)
-            mock_run_interactive.assert_called_once()
+            # Verify run_tui was called (via cli.main, TUI is default)
+            mock_run_tui.assert_called_once()
 
     def test_main_module_execution(self):
         """Test that __main__.py properly guards execution with __name__ check."""

@@ -33,26 +33,6 @@ class HelpCommand(BaseCommand):
         return True
 
 
-# NOTE: /clear, /summary, and /load commands are disabled.
-# They duplicate functionality that should be handled by MemoryManager.
-# Use /compact instead for manual checkpoint/restore cycles.
-
-# @register_command
-# class ClearCommand(BaseCommand):
-#     """DISABLED: Use automatic checkpointing or /compact instead."""
-#     pass
-
-# @register_command
-# class SummaryCommand(BaseCommand):
-#     """DISABLED: Use automatic checkpointing or /compact instead."""
-#     pass
-
-# @register_command
-# class LoadCommand(BaseCommand):
-#     """DISABLED: Use automatic checkpointing or /compact instead."""
-#     pass
-
-
 @register_command
 class VerboseCommand(BaseCommand):
     @property

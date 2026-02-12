@@ -5,10 +5,6 @@ from unittest.mock import Mock, patch
 from ayder_cli.commands.system import (
     HelpCommand, CompactCommand, VerboseCommand, PlanCommand, ModelCommand, AskCommand
 )
-
-# NOTE: ClearCommand, SummaryCommand, and LoadCommand are disabled.
-# They duplicate functionality that should be handled by MemoryManager.
-# Tests for these commands are commented out below.
 from ayder_cli.core.context import SessionContext, ProjectContext
 from ayder_cli.core.config import Config
 from ayder_cli.prompts import SYSTEM_PROMPT
@@ -48,13 +44,6 @@ class TestHelpCommand:
         assert "/test" in content
         assert "Test command" in content
 
-# class TestClearCommand:
-#     """DISABLED: /clear command - use automatic checkpointing or /compact instead."""
-#     pass
-
-# class TestSummaryCommand:
-#     """DISABLED: /summary command - use automatic checkpointing or /compact instead."""
-#     pass
 
 class TestCompactCommand:
     """Test /compact command."""
@@ -97,9 +86,6 @@ class TestCompactCommand:
         mock_draw_box.assert_called_once()
 
 
-# class TestLoadCommand:
-#     """DISABLED: /load command - use automatic checkpointing or /compact instead."""
-#     pass
 
 class TestVerboseCommand:
     """Test /verbose command."""
