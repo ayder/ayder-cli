@@ -24,7 +24,7 @@ from ayder_cli.banner import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.screens import CLIConfirmScreen
-from ayder_cli.tui.widgets import ChatView, ToolPanel, CLIInputBar, StatusBar
+from ayder_cli.tui.widgets import ChatView, ToolPanel, ActivityBar, CLIInputBar, StatusBar
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
 from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
@@ -37,18 +37,14 @@ class AppCallbacks:
         self._worker = None
 
     def on_thinking_start(self) -> None:
-        chat_view = self._app.query_one("#chat-view", ChatView)
-        chat_view.show_thinking()
-        self._app._thinking_timer = self._app.set_interval(
-            0.1, self._app._animate_thinking
-        )
+        activity = self._app.query_one("#activity-bar", ActivityBar)
+        activity.set_thinking(True)
+        self._app._start_activity_timer()
 
     def on_thinking_stop(self) -> None:
-        chat_view = self._app.query_one("#chat-view", ChatView)
-        chat_view.hide_thinking()
-        if self._app._thinking_timer:
-            self._app._thinking_timer.stop()
-            self._app._thinking_timer = None
+        activity = self._app.query_one("#activity-bar", ActivityBar)
+        activity.set_thinking(False)
+        self._app._maybe_stop_activity_timer()
 
     def on_assistant_content(self, text: str) -> None:
         chat_view = self._app.query_one("#chat-view", ChatView)
@@ -65,14 +61,19 @@ class AppCallbacks:
             ).update_token_usage(t)
         )
 
+    def on_iteration_update(self, current: int, maximum: int) -> None:
+        self._app.call_later(
+            lambda c=current, m=maximum: self._app.query_one(
+                "#status-bar", StatusBar
+            ).update_iterations(c, m)
+        )
+
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
         tool_panel.add_tool(call_id, name, arguments)
-        # Start tools spinner if not already running
-        if not self._app._tools_timer:
-            self._app._tools_timer = self._app.set_interval(
-                0.1, self._app._animate_running_tools
-            )
+        activity = self._app.query_one("#activity-bar", ActivityBar)
+        activity.set_tools_working(True)
+        self._app._start_activity_timer()
 
     def on_tool_complete(self, call_id: str, result: str) -> None:
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
@@ -81,10 +82,9 @@ class AppCallbacks:
         )
 
     def on_tools_cleanup(self) -> None:
-        # Stop tools spinner
-        if self._app._tools_timer:
-            self._app._tools_timer.stop()
-            self._app._tools_timer = None
+        activity = self._app.query_one("#activity-bar", ActivityBar)
+        activity.set_tools_working(False)
+        self._app._maybe_stop_activity_timer()
         # Schedule panel cleanup after a short delay
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
         self._app.set_timer(2.0, lambda: tool_panel.clear_completed())
@@ -123,9 +123,10 @@ class AyderApp(App):
         ("ctrl+x", "cancel", "Cancel"),
         ("ctrl+c", "cancel", "Cancel"),
         ("ctrl+l", "clear", "Clear Chat"),
+        ("ctrl+o", "toggle_tools", "Toggle Tools"),
     ]
 
-    def __init__(self, model: str = "default", safe_mode: bool = False, permissions: set = None, **kwargs):
+    def __init__(self, model: str = "default", safe_mode: bool = False, permissions: set = None, iterations: int = None, **kwargs):
         """
         Initialize the TUI app.
 
@@ -133,11 +134,13 @@ class AyderApp(App):
             model: The LLM model name to use
             safe_mode: Whether to enable safe mode
             permissions: Set of granted permission levels ("r", "w", "x")
+            iterations: Max agentic iterations per message (None = use config default)
         """
         super().__init__(**kwargs)
         self.model = model
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
+        self._iterations_override = iterations
 
         self._pending_messages: list[str] = []
         self._is_processing = False
@@ -174,11 +177,24 @@ class AyderApp(App):
         self.messages: list[dict] = []
         self._init_system_prompt()
 
-        self._thinking_timer: Timer | None = None
-        self._tools_timer: Timer | None = None
+        self._activity_timer: Timer | None = None
+
+        # Create checkpoint and memory managers
+        from ayder_cli.checkpoint_manager import CheckpointManager
+        from ayder_cli.memory import MemoryManager
+
+        project_ctx = ProjectContext(".")
+        self._checkpoint_manager = CheckpointManager(project_ctx)
+        self._memory_manager = MemoryManager(
+            project_ctx,
+            checkpoint_manager=self._checkpoint_manager,
+        )
 
         # Create chat loop
         num_ctx = self.config.num_ctx if not isinstance(self.config, dict) else self.config.get("num_ctx", 65536)
+        max_iters = self._iterations_override
+        if max_iters is None:
+            max_iters = self.config.max_iterations if not isinstance(self.config, dict) else self.config.get("max_iterations", 50)
         self._callbacks = AppCallbacks(self)
         self.chat_loop = TuiChatLoop(
             llm=self.llm,
@@ -187,9 +203,12 @@ class AyderApp(App):
             config=TuiLoopConfig(
                 model=self.model,
                 num_ctx=num_ctx,
+                max_iterations=max_iters,
                 permissions=self.permissions,
             ),
             callbacks=self._callbacks,
+            checkpoint_manager=self._checkpoint_manager,
+            memory_manager=self._memory_manager,
         )
 
     def _init_system_prompt(self) -> None:
@@ -217,10 +236,25 @@ class AyderApp(App):
                 macro = ""
             self.messages[0]["content"] = SYSTEM_PROMPT.format(model_name=self.model) + macro
 
-    def _animate_running_tools(self) -> None:
-        """Animate spinner for running tools."""
+    def _animate_activity(self) -> None:
+        """Animate spinners in the activity bar and tool panel."""
+        activity = self.query_one("#activity-bar", ActivityBar)
+        activity.update_spinners()
         tool_panel = self.query_one("#tool-panel", ToolPanel)
         tool_panel.update_spinners()
+
+    def _start_activity_timer(self) -> None:
+        """Start the shared activity animation timer if not running."""
+        if not self._activity_timer:
+            self._activity_timer = self.set_interval(0.1, self._animate_activity)
+
+    def _maybe_stop_activity_timer(self) -> None:
+        """Stop the activity timer if nothing is active."""
+        activity = self.query_one("#activity-bar", ActivityBar)
+        if not activity._thinking and not activity._tools_working:
+            if self._activity_timer:
+                self._activity_timer.stop()
+                self._activity_timer = None
 
     def _setup_registry_callbacks(self) -> None:
         """Setup callbacks for tool registry.
@@ -338,6 +372,7 @@ class AyderApp(App):
         """Compose the UI layout - terminal style with scrolling content."""
         yield ChatView(id="chat-view")
         yield ToolPanel(id="tool-panel")
+        yield ActivityBar(id="activity-bar")
         yield CLIInputBar(commands=self.commands, id="input-bar")
         yield StatusBar(model=self.model, permissions=self.permissions, id="status-bar")
 
@@ -399,12 +434,10 @@ class AyderApp(App):
         self.start_llm_processing()
 
     def start_llm_processing(self, *, no_tools: bool = False) -> None:
-        """Disable input and launch the chat loop worker.
+        """Launch the chat loop worker.
 
         Called from _process_next_message and from command handlers.
         """
-        input_bar = self.query_one("#input-bar", CLIInputBar)
-        input_bar.set_enabled(False)
         self.run_worker(self._run_chat_loop(no_tools=no_tools), exclusive=True)
 
     async def _run_chat_loop(self, *, no_tools: bool = False) -> None:
@@ -420,11 +453,6 @@ class AyderApp(App):
         finally:
             if not worker.is_cancelled:
                 self.call_later(self._finish_processing)
-
-    def _animate_thinking(self) -> None:
-        """Animate the thinking indicator."""
-        chat_view = self.query_one("#chat-view", ChatView)
-        chat_view._update_thinking()
 
     def _handle_command(self, cmd: str) -> None:
         """Handle slash commands - dispatch to tui.commands handlers."""
@@ -445,20 +473,15 @@ class AyderApp(App):
             chat_view.add_system_message(f"Command error: {type(e).__name__}: {e}")
 
     def _finish_processing(self) -> None:
-        """Finish processing - hide thinking indicator and process next message."""
-        if self._thinking_timer:
-            self._thinking_timer.stop()
-            self._thinking_timer = None
+        """Finish processing - clear activity bar and process next message."""
+        if self._activity_timer:
+            self._activity_timer.stop()
+            self._activity_timer = None
 
-        if self._tools_timer:
-            self._tools_timer.stop()
-            self._tools_timer = None
-
-        chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.hide_thinking()
+        activity = self.query_one("#activity-bar", ActivityBar)
+        activity.clear()
 
         input_bar = self.query_one("#input-bar", CLIInputBar)
-        input_bar.set_enabled(True)
         input_bar.focus_input()
 
         if self._pending_messages:
@@ -466,37 +489,37 @@ class AyderApp(App):
         else:
             self._is_processing = False
 
-    def _enable_input(self) -> None:
-        """Ensure input is enabled (called from worker thread)."""
-        input_bar = self.query_one("#input-bar", CLIInputBar)
-        input_bar.set_enabled(True)
-        input_bar.focus_input()
-
     def action_cancel(self) -> None:
         """Cancel current operation."""
-        if self._thinking_timer:
-            self._thinking_timer.stop()
-            self._thinking_timer = None
-
-        if self._tools_timer:
-            self._tools_timer.stop()
-            self._tools_timer = None
+        if self._activity_timer:
+            self._activity_timer.stop()
+            self._activity_timer = None
 
         for worker in self.workers:
             worker.cancel()
 
-        chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.hide_thinking()
+        activity = self.query_one("#activity-bar", ActivityBar)
+        activity.clear()
 
         pending_count = len(self._pending_messages)
         self._pending_messages.clear()
         self._is_processing = False
 
-        self._enable_input()
+        input_bar = self.query_one("#input-bar", CLIInputBar)
+        input_bar.focus_input()
+        chat_view = self.query_one("#chat-view", ChatView)
         if pending_count > 0:
             chat_view.add_system_message(f"Operation cancelled ({pending_count} pending messages cleared).")
         else:
             chat_view.add_system_message("Operation cancelled.")
+
+    def action_toggle_tools(self) -> None:
+        """Toggle the tool context panel."""
+        tool_panel = self.query_one("#tool-panel", ToolPanel)
+        visible = tool_panel.toggle()
+        chat_view = self.query_one("#chat-view", ChatView)
+        state = "visible" if visible else "hidden"
+        chat_view.add_system_message(f"Tool panel {state} (Ctrl+O to toggle)")
 
     def action_clear(self) -> None:
         """Clear chat history."""

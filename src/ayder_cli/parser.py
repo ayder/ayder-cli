@@ -32,18 +32,68 @@ def _normalize_tool_call_markup(content: str) -> str:
 
     Some models (e.g. Ministral) wrap calls in <tool_call>...</tool_call> and
     may omit the closing </function> tag.  This normaliser:
-    1. Strips outer <tool_call> wrappers.
+    1. Strips outer <tool_call> wrappers (including namespaced like <minimax:tool_call>).
     2. Adds a missing </function> when the block ends with </tool_call>.
+    3. Converts DeepSeek <function_calls> format to standard format.
     """
-    # Unwrap <tool_call> ... </tool_call> blocks, keeping inner content
+    # Unwrap <tool_call> ... </tool_call> blocks (including namespaced variants),
+    # keeping inner content
     content = re.sub(
-        r"<tool_call>\s*(.*?)\s*</tool_call>",
-        lambda m: m.group(1) if "</function>" in m.group(1)
-        else m.group(1) + "</function>",
+        r"<(\w+:)?tool_call>\s*(.*?)\s*</(\w+:)?tool_call>",
+        lambda m: m.group(2) if "</function>" in m.group(2)
+        else m.group(2) + "</function>",
         content,
         flags=re.DOTALL,
     )
+    # Convert DeepSeek <function_calls> format to standard <function> format
+    content = _convert_deepseek_function_calls(content)
     return content
+
+
+def _convert_deepseek_function_calls(content: str) -> str:
+    """Convert DeepSeek <function_calls> format to standard <function> format.
+    
+    DeepSeek format:
+    <function_calls>
+    <invoke name="function_name">
+    <parameter name="param_name" type="...">value</parameter>
+    </invoke>
+    </function_calls>
+    
+    Converts to:
+    <function=function_name><parameter=param_name>value</parameter></function>
+    """
+    # Pattern to match <invoke> blocks within <function_calls>
+    invoke_pattern = re.compile(
+        r'<invoke\s+name="([^"]+)"\s*>(.*?)</invoke>',
+        re.DOTALL
+    )
+    # Pattern to match <parameter name="..." ...>value</parameter>
+    param_pattern = re.compile(
+        r'<parameter\s+name="([^"]+)"[^>]*>(.*?)</parameter>',
+        re.DOTALL
+    )
+    
+    def convert_invoke(match: re.Match) -> str:
+        func_name = match.group(1)
+        params_block = match.group(2)
+        
+        # Convert parameters
+        params = []
+        for param_match in param_pattern.finditer(params_block):
+            param_name = param_match.group(1)
+            param_value = param_match.group(2).strip()
+            params.append(f'<parameter={param_name}>{param_value}</parameter>')
+        
+        return f'<function={func_name}>{"".join(params)}</function>'
+    
+    # Replace all invoke blocks
+    result = invoke_pattern.sub(convert_invoke, content)
+    
+    # Strip outer <function_calls> tags if present
+    result = re.sub(r'</?function_calls\s*>', '', result, flags=re.DOTALL)
+    
+    return result
 
 
 def parse_custom_tool_calls(content: str) -> List[Dict[str, Any]]:

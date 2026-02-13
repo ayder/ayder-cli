@@ -21,7 +21,8 @@ def test_default_tui_gets_read_permissions():
          patch.object(sys.stdin, 'isatty', return_value=True):
         from ayder_cli.cli import main
         main()
-        mock_run_tui.assert_called_once_with(permissions={"r"})
+        call_kwargs = mock_run_tui.call_args[1]
+        assert call_kwargs['permissions'] == {"r"}
 
 
 def test_tui_with_write_flag_passes_rw_permissions():
@@ -31,7 +32,8 @@ def test_tui_with_write_flag_passes_rw_permissions():
          patch.object(sys.stdin, 'isatty', return_value=True):
         from ayder_cli.cli import main
         main()
-        mock_run_tui.assert_called_once_with(permissions={"r", "w"})
+        call_kwargs = mock_run_tui.call_args[1]
+        assert call_kwargs['permissions'] == {"r", "w"}
 
 
 def test_tui_with_write_and_execute_flags():
@@ -41,7 +43,8 @@ def test_tui_with_write_and_execute_flags():
          patch.object(sys.stdin, 'isatty', return_value=True):
         from ayder_cli.cli import main
         main()
-        mock_run_tui.assert_called_once_with(permissions={"r", "w", "x"})
+        call_kwargs = mock_run_tui.call_args[1]
+        assert call_kwargs['permissions'] == {"r", "w", "x"}
 
 
 def test_cli_flag_passes_permissions():

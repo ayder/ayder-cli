@@ -192,7 +192,7 @@ def main():
 
     # Default: TUI mode
     from ayder_cli.tui import run_tui
-    run_tui(permissions=granted)
+    run_tui(permissions=granted, iterations=iterations)
 
 
 if __name__ == "__main__":

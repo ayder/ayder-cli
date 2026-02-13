@@ -38,13 +38,18 @@ CLIConfirmScreen .description {
     margin-bottom: 1;
 }
 
-/* The container showing the code diff for file modifications. */
+/* The scrollable container showing the code diff for file modifications. */
 CLIConfirmScreen .diff-container {
     height: 15;
     border: solid #333350;
     margin: 1 0;
     padding: 1;
-    overflow: auto scroll;
+    background: #0a0a18;
+}
+
+CLIConfirmScreen #diff-content {
+    width: auto;
+    height: auto;
 }
 
 /* The list of options (Approve, Deny, etc.) in the confirmation dialog. */
@@ -328,12 +333,33 @@ AutoCompleteInput .suggestion--highlighted {
     background: #333350;
 }
 
+/* ActivityBar - Status bar above input showing Thinking/Tools Working spinners.
+   Targets 'ActivityBar' in widgets.py. */
+ActivityBar {
+    height: 1;
+    background: #12122a;
+    color: #d4a043;
+    padding: 0 1;
+}
+
+ActivityBar Static {
+    width: 1fr;
+    height: 1;
+}
+
+#activity-bar {
+    height: 1;
+    width: 100%;
+}
+
 /* CLIInputBar - The container at the bottom holding the prompt ">" and the input field.
    Targets 'CLIInputBar' in widgets.py. */
 CLIInputBar {
-    height: 3;
-    background: transparent; 
+    height: auto;
+    max-height: 8;
+    background: transparent;
     border-top: solid #333350;
+    border-bottom: solid #333350;
     padding: 0;
 }
 
@@ -346,10 +372,12 @@ CLIInputBar Static {
 /* The actual text area inside the input bar. */
 CLIInputBar #chat-input {
     width: 1fr;
-    height: 3;
+    height: auto;
+    min-height: 1;
+    max-height: 7;
     border: none;
-    background: transparent; 
-    color: #e0e0e8; 
+    background: transparent;
+    color: #e0e0e8;
     padding: 0 1;
 }
 

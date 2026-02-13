@@ -302,7 +302,8 @@ class TestRunTuiPermissions:
             MockApp.assert_called_once_with(
                 model="default",
                 safe_mode=False,
-                permissions={"r", "w"}
+                permissions={"r", "w"},
+                iterations=None
             )
 
     def test_run_tui_default_permissions(self):
@@ -316,7 +317,8 @@ class TestRunTuiPermissions:
             MockApp.assert_called_once_with(
                 model="default",
                 safe_mode=False,
-                permissions=None
+                permissions=None,
+                iterations=None
             )
 
 
