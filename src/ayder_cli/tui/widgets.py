@@ -1,4 +1,4 @@
-"""TUI widget classes: ChatView, ToolPanel, AutoCompleteInput, CLIInputBar, StatusBar."""
+"""TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar."""
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
@@ -25,8 +25,6 @@ class ChatView(VerticalScroll):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._message_widgets: list[Static] = []
-        self._thinking_widget: Static | None = None
-        self._thinking_spinner: Spinner | None = None
 
     def _create_text(self, content: str, msg_type: MessageType, metadata: dict = None) -> Text:
         """Create styled text for a message."""
@@ -82,16 +80,9 @@ class ChatView(VerticalScroll):
         if msg_type == MessageType.ASSISTANT:
             content = content.strip()
 
-            prefix = Text()
-            prefix.append("< ", style="bold green")
-            msg_widget = Static(prefix, classes=f"message {msg_type.value}")
-            self._message_widgets.append(msg_widget)
-            self.mount(msg_widget)
-
             content_widget = Static(
-                Markdown(content), classes=f"message {msg_type.value}-content"
+                Markdown(content), classes=f"message {msg_type.value}"
             )
-
             self._message_widgets.append(content_widget)
             self.mount(content_widget)
         else:
@@ -127,52 +118,25 @@ class ChatView(VerticalScroll):
         """Add a system message."""
         self.add_message(content, MessageType.SYSTEM)
 
-    def show_thinking(self) -> None:
-        """Show a thinking/loading indicator with a Rich spinner."""
-        if self._thinking_widget is None:
-            self._thinking_spinner = Spinner(
-                "dots2", text="Thinking...", style="bold yellow"
-            )
-            self._thinking_widget = Static(
-                self._thinking_spinner, classes="thinking-message"
-            )
-            self._message_widgets.append(self._thinking_widget)
-            self.mount(self._thinking_widget)
-            self.scroll_end(animate=False)
-
-    def _update_thinking(self) -> None:
-        """Re-render the spinner (it auto-advances based on time)."""
-        if self._thinking_widget is not None and self._thinking_spinner is not None:
-            self._thinking_widget.update(self._thinking_spinner)
-
-    def hide_thinking(self) -> None:
-        """Hide the thinking/loading indicator."""
-        if self._thinking_widget is not None:
-            self._thinking_widget.remove()
-            if self._thinking_widget in self._message_widgets:
-                self._message_widgets.remove(self._thinking_widget)
-            self._thinking_widget = None
-            self._thinking_spinner = None
-
     def clear_messages(self) -> None:
         """Clear all messages from the chat view."""
         for widget in self._message_widgets:
             widget.remove()
         self._message_widgets.clear()
-        self._thinking_widget = None
         self.messages.clear()
 
 
 class ToolPanel(Container):
     """
     A dedicated panel for displaying running/completed tools.
-    Shows at the bottom of the chat when tools are active.
+    Toggled with Ctrl+O. Content is added silently; visibility is user-controlled.
     """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # tool_call_id -> (widget, spinner, tool_name, args_str, is_done)
         self._tools: dict[str, tuple[Static, Spinner | None, str, str, bool]] = {}
+        self._user_visible = False
 
     def compose(self) -> ComposeResult:
         """Compose starts empty."""
@@ -180,12 +144,17 @@ class ToolPanel(Container):
         yield
 
     def on_mount(self) -> None:
-        """Start hidden - only show when tools are active."""
+        """Start hidden - user toggles with Ctrl+O."""
         self.display = False
+
+    def toggle(self) -> bool:
+        """Toggle panel visibility. Returns new visibility state."""
+        self._user_visible = not self._user_visible
+        self.display = self._user_visible
+        return self._user_visible
 
     def add_tool(self, tool_call_id: str, tool_name: str, arguments: dict) -> None:
         """Add a new running tool to the panel."""
-        self.display = True
         args_str = self._format_preview(str(arguments), max_len=80)
 
         tool_text = Text()
@@ -230,21 +199,87 @@ class ToolPanel(Container):
         return preview
 
     def clear_completed(self) -> None:
-        """Remove all completed tools."""
+        """Remove all completed tools (does not change visibility)."""
         to_remove = [tid for tid, (_, _, _, _, is_done) in self._tools.items() if is_done]
         for tool_id in to_remove:
             widget, _, _, _, _ = self._tools[tool_id]
             widget.remove()
             del self._tools[tool_id]
-        if not self._tools:
-            self.display = False
 
     def clear_all(self) -> None:
-        """Clear all tools from panel."""
+        """Clear all tools from panel (does not change visibility)."""
         for widget, _, _, _, _ in self._tools.values():
             widget.remove()
         self._tools.clear()
-        self.display = False
+
+
+class ActivityBar(Horizontal):
+    """
+    Static status bar above the input showing activity state.
+    Displays a spinner for 'Thinking...' and 'Tools Working...' states.
+    """
+
+    can_focus = False
+    can_focus_children = False
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._thinking = False
+        self._tools_working = False
+        self._thinking_spinner = Spinner("dots2", style="bold yellow")
+        self._tools_spinner = Spinner("aesthetic", style="bold yellow")
+        self._widget: Static | None = None
+
+    def compose(self) -> ComposeResult:
+        self._widget = Static("", id="activity-text")
+        yield self._widget
+
+    def set_thinking(self, active: bool) -> None:
+        """Show or hide the Thinking indicator."""
+        self._thinking = active
+        self._refresh_display()
+
+    def set_tools_working(self, active: bool) -> None:
+        """Show or hide the Tools Working indicator."""
+        self._tools_working = active
+        self._refresh_display()
+
+    def update_spinners(self) -> None:
+        """Re-render spinners (call on a timer)."""
+        if not self._thinking and not self._tools_working:
+            return
+        # Build a combined renderable
+        self._refresh_display()
+
+    def _refresh_display(self) -> None:
+        """Update the displayed text based on current state."""
+        if not self._widget:
+            return
+
+        if self._thinking and self._tools_working:
+            self._widget.update(self._thinking_spinner)
+            # Show both — use thinking spinner with combined text
+            self._thinking_spinner.text = Text.assemble(
+                ("Thinking... ", "bold yellow"),
+                ("| ", "dim"),
+                ("Tools Working...", "bold yellow"),
+            )
+            self._widget.update(self._thinking_spinner)
+        elif self._thinking:
+            self._thinking_spinner.text = "Thinking..."
+            self._widget.update(self._thinking_spinner)
+        elif self._tools_working:
+            self._tools_spinner.text = "Tools Working..."
+            self._widget.update(self._tools_spinner)
+        else:
+            self._widget.update("")
+
+    def clear(self) -> None:
+        """Reset all activity state."""
+        self._thinking = False
+        self._tools_working = False
+        if self._widget:
+            self._widget.update("")
 
 
 class AutoCompleteInput(Input):
@@ -270,9 +305,49 @@ class AutoCompleteInput(Input):
                 self.cursor_position = len(self.value)
 
 
+class _SubmitTextArea(TextArea):
+    """TextArea where Enter submits and Shift+Enter inserts a newline.
+
+    Also supports Tab completion for slash commands.
+    """
+
+    class Submitted(Message):
+        """Posted when the user presses Enter to submit."""
+
+        def __init__(self, value: str) -> None:
+            self.value = value
+            super().__init__()
+
+    def __init__(self, commands: list[str] | None = None, **kwargs):
+        super().__init__(soft_wrap=True, show_line_numbers=False, **kwargs)
+        self._commands = commands or []
+
+    def _on_key(self, event) -> None:
+        if event.key == "enter":
+            # Plain Enter → submit (Shift+Enter comes as "shift+enter")
+            event.prevent_default()
+            event.stop()
+            value = self.text.strip()
+            if value:
+                self.post_message(self.Submitted(value))
+                self.clear()
+            return
+
+        if event.key == "tab" and self.text.startswith("/"):
+            event.prevent_default()
+            event.stop()
+            current = self.text.strip()
+            matches = [c for c in self._commands if c.startswith(current)]
+            if len(matches) == 1:
+                self.clear()
+                self.insert(matches[0])
+            return
+
+
 class CLIInputBar(Horizontal):
     """
-    CLI-style input bar with single-line Input.
+    CLI-style input bar with word-wrapping TextArea.
+    Enter submits, Shift+Enter inserts a newline.
     """
 
     class Submitted(Message):
@@ -285,7 +360,7 @@ class CLIInputBar(Horizontal):
     def __init__(self, commands: list[str], **kwargs):
         super().__init__(**kwargs)
         self.commands = commands
-        self._input: Input | None = None
+        self._input: _SubmitTextArea | None = None
         self._history_file = Path.home() / ".ayder_chat_history"
         self._history: list[str] = self._load_history()
         self._history_index: int = len(self._history)
@@ -313,23 +388,29 @@ class CLIInputBar(Horizontal):
     def compose(self) -> ComposeResult:
         """Compose the input bar."""
         yield Static(">", classes="prompt")
-        self._input = AutoCompleteInput(
+        self._input = _SubmitTextArea(
             commands=self.commands,
-            placeholder="",
             id="chat-input",
         )
         yield self._input
 
     def on_mount(self) -> None:
         """Focus input on mount."""
-        self._input = self.query_one("#chat-input", Input)
+        self._input = self.query_one("#chat-input", _SubmitTextArea)
         self._input.focus()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter (submit)."""
+    def on__submit_text_area_submitted(self, event: _SubmitTextArea.Submitted) -> None:
+        """Handle Enter (submit) from the TextArea."""
         event.prevent_default()
         event.stop()
-        self._submit()
+        value = event.value
+        if value:
+            if not self._history or self._history[-1] != value:
+                self._history.append(value)
+                self._save_to_history(value)
+            self._history_index = len(self._history)
+            self._current_input = ""
+            self.app.post_message(self.Submitted(value))
 
     def on_key(self, event) -> None:
         """Handle history navigation."""
@@ -342,28 +423,14 @@ class CLIInputBar(Horizontal):
             event.stop()
             self._history_navigate(1)
 
-    def _submit(self) -> None:
-        """Submit the current input value."""
-        if self._input:
-            value = self._input.value.strip()
-            if value:
-                if not self._history or self._history[-1] != value:
-                    self._history.append(value)
-                    self._save_to_history(value)
-                self._history_index = len(self._history)
-                self._current_input = ""
-                self.app.post_message(self.Submitted(value))
-                self._input.value = ""
-
     def focus_input(self) -> None:
         """Focus the input field."""
         if self._input:
             self._input.focus()
 
     def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable input."""
-        if self._input:
-            self._input.disabled = not enabled
+        """Enable or disable input (no-op, input always stays enabled)."""
+        pass
 
     def _history_navigate(self, direction: int) -> None:
         """Navigate through command history.
@@ -371,11 +438,11 @@ class CLIInputBar(Horizontal):
         Args:
             direction: -1 for up (older), 1 for down (newer)
         """
-        if not self._history:
+        if not self._history or not self._input:
             return
 
         if self._history_index == len(self._history):
-            self._current_input = self._input.value
+            self._current_input = self._input.text
 
         new_index = self._history_index + direction
 
@@ -391,8 +458,8 @@ class CLIInputBar(Horizontal):
         else:
             text = self._history[self._history_index]
 
-        self._input.value = text
-        self._input.cursor_position = len(text)
+        self._input.clear()
+        self._input.insert(text)
 
 
 class StatusBar(Horizontal):
@@ -412,9 +479,10 @@ class StatusBar(Horizontal):
         yield Label(f"model: {self.model}", id="model-label")
         yield Label(f" | mode: {mode_str}", id="mode-label")
         yield Label(f" | tokens: 0", id="token-label")
+        yield Label(f" | iter: 0", id="iter-label")
         yield Label(f" | files: 0", id="files-label")
         yield Static(classes="spacer")
-        yield Label("^C:cancel ^L:clear ^Q:quit", classes="key-hint")
+        yield Label("^C:cancel ^L:clear ^O:tools ^Q:quit", classes="key-hint")
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""
@@ -427,6 +495,11 @@ class StatusBar(Horizontal):
         self.token_count = count
         label = self.query_one("#token-label", Label)
         label.update(f" | tokens: {count:,}")
+
+    def update_iterations(self, current: int, maximum: int) -> None:
+        """Update iteration counter display."""
+        label = self.query_one("#iter-label", Label)
+        label.update(f" | iter: {current}/{maximum}")
 
     def update_files(self, files: list[str]) -> None:
         """Update active files count."""

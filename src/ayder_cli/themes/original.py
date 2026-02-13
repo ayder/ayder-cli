@@ -36,7 +36,12 @@ CLIConfirmScreen .diff-container {
     border: solid $primary-darken-2;
     margin: 1 0;
     padding: 1;
-    overflow: auto scroll;
+    background: $surface-darken-1;
+}
+
+CLIConfirmScreen #diff-content {
+    width: auto;
+    height: auto;
 }
 
 CLIConfirmScreen .option-list {
@@ -300,11 +305,31 @@ AutoCompleteInput .suggestion--highlighted {
     background: $primary-darken-2;
 }
 
+/* ActivityBar - Status bar above input showing Thinking/Tools Working spinners */
+ActivityBar {
+    height: 1;
+    background: $surface;
+    color: $warning;
+    padding: 0 1;
+}
+
+ActivityBar Static {
+    width: 1fr;
+    height: 1;
+}
+
+#activity-bar {
+    height: 1;
+    width: 100%;
+}
+
 /* CLIInputBar - Input bar with prompt */
 CLIInputBar {
-    height: 3;
+    height: auto;
+    max-height: 8;
     background: $surface;
     border-top: solid $primary-darken-2;
+    border-bottom: solid $primary-darken-2;
     padding: 0;
 }
 
@@ -316,7 +341,9 @@ CLIInputBar Static {
 
 CLIInputBar #chat-input {
     width: 1fr;
-    height: 3;
+    height: auto;
+    min-height: 1;
+    max-height: 7;
     border: none;
     background: transparent;
     color: $text;

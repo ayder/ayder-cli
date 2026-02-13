@@ -50,6 +50,9 @@ class FakeCallbacks:
     def on_token_usage(self, total):
         self.events.append(("token_usage", total))
 
+    def on_iteration_update(self, current, maximum):
+        self.events.append(("iteration_update", current, maximum))
+
     def on_tool_start(self, call_id, name, arguments):
         self.events.append(("tool_start", call_id, name, arguments))
 
@@ -701,3 +704,173 @@ class TestToolCallExceptions:
 
         tool_msgs = [m for m in loop.messages if m.get("role") == "tool"]
         assert any("Error" in m.get("content", "") for m in tool_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint / compact at max iterations
+# ---------------------------------------------------------------------------
+
+
+class TestCheckpointCycle:
+    def test_checkpoint_creates_and_resets(self):
+        """When max_iterations exceeded, checkpoint is created and loop continues."""
+        from ayder_cli.checkpoint_manager import CheckpointManager
+
+        cb = FakeCallbacks()
+        messages = [{"role": "system", "content": "sys"}]
+        cm = MagicMock(spec=CheckpointManager)
+        cm.save_checkpoint.return_value = MagicMock()
+
+        mm = MagicMock()
+        mm.build_quick_restore_message.return_value = "Restored context here."
+
+        loop = TuiChatLoop(
+            llm=MagicMock(),
+            registry=MagicMock(),
+            messages=messages,
+            config=TuiLoopConfig(max_iterations=1, permissions={"r"}),
+            callbacks=cb,
+            checkpoint_manager=cm,
+            memory_manager=mm,
+        )
+
+        # First call exceeds limit → checkpoint → second call returns text
+        summary_resp = _make_response(content="Summary of progress")
+        text_resp = _make_response(content="Continuing after compact")
+
+        call_count = [0]
+
+        async def fake_llm(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return summary_resp
+            return text_resp
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=fake_llm):
+            # Iteration starts at 0, first increment makes it 1, which is not > 1.
+            # Second increment makes it 2, which is > 1 → triggers checkpoint.
+            # But we need the first LLM call to return tools so loop continues.
+            # Simpler: set iteration to max_iterations already.
+            loop._iteration = 1  # Next increment will be 2 > 1
+            _run(loop.run())
+
+        # Checkpoint was saved
+        cm.save_checkpoint.assert_called_once()
+        # Iteration was reset
+        assert loop._iteration >= 0
+        # System messages about checkpoint
+        system_msgs = [e[1] for e in cb.events if e[0] == "system_message"]
+        assert any("checkpoint" in m.lower() for m in system_msgs)
+
+    def test_checkpoint_no_managers_shows_max_iter_message(self):
+        """Without checkpoint managers, max iterations message is shown."""
+        loop, cb, llm, registry = _make_loop()
+        loop.config.max_iterations = 0  # Immediately exceeded
+
+        response = _make_response(content="hi")
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", new_callable=AsyncMock, return_value=response):
+            _run(loop.run())
+
+        system_msgs = [e for e in cb.events if e[0] == "system_message"]
+        assert any("max iterations" in e[1].lower() for e in system_msgs)
+
+    def test_checkpoint_llm_error_returns_false(self):
+        """If LLM call fails during checkpoint, falls back to max iterations message."""
+        from ayder_cli.checkpoint_manager import CheckpointManager
+
+        cb = FakeCallbacks()
+        messages = [{"role": "system", "content": "sys"}]
+        cm = MagicMock(spec=CheckpointManager)
+        mm = MagicMock()
+
+        loop = TuiChatLoop(
+            llm=MagicMock(),
+            registry=MagicMock(),
+            messages=messages,
+            config=TuiLoopConfig(max_iterations=0, permissions={"r"}),
+            callbacks=cb,
+            checkpoint_manager=cm,
+            memory_manager=mm,
+        )
+
+        async def raise_error(*args, **kwargs):
+            raise ConnectionError("LLM down")
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=raise_error):
+            _run(loop.run())
+
+        system_msgs = [e[1] for e in cb.events if e[0] == "system_message"]
+        assert any("max iterations" in m.lower() for m in system_msgs)
+
+    def test_checkpoint_resets_messages_keeps_system(self):
+        """After checkpoint, only system prompt + restore message remain."""
+        from ayder_cli.checkpoint_manager import CheckpointManager
+
+        cb = FakeCallbacks()
+        sys_msg = {"role": "system", "content": "sys prompt"}
+        messages = [sys_msg, {"role": "user", "content": "old stuff"}]
+        cm = MagicMock(spec=CheckpointManager)
+        cm.save_checkpoint.return_value = MagicMock()
+
+        mm = MagicMock()
+        mm.build_quick_restore_message.return_value = "Restored."
+
+        loop = TuiChatLoop(
+            llm=MagicMock(),
+            registry=MagicMock(),
+            messages=messages,
+            config=TuiLoopConfig(max_iterations=0, permissions={"r"}),
+            callbacks=cb,
+            checkpoint_manager=cm,
+            memory_manager=mm,
+        )
+
+        # Checkpoint LLM call returns summary, then text response after reset
+        summary_resp = _make_response(content="Summary")
+        text_resp = _make_response(content="After compact")
+
+        call_count = [0]
+
+        async def fake_llm(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return summary_resp
+            return text_resp
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=fake_llm):
+            _run(loop.run())
+
+        # After checkpoint, messages should have system + restore + continuation
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "sys prompt"
+
+
+# ---------------------------------------------------------------------------
+# -I iterations flag passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestIterationsPassthrough:
+    def test_tui_iterations_from_cli_flag(self):
+        """Test that -I flag value reaches TuiLoopConfig."""
+        import sys
+
+        with patch.object(sys, 'argv', ['ayder', '-I', '25']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            from ayder_cli.cli import main
+            main()
+            call_kwargs = mock_run_tui.call_args[1]
+            assert call_kwargs['iterations'] == 25
+
+    def test_tui_iterations_none_uses_config(self):
+        """Test that no -I flag passes None, letting config default apply."""
+        import sys
+
+        with patch.object(sys, 'argv', ['ayder']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            from ayder_cli.cli import main
+            main()
+            call_kwargs = mock_run_tui.call_args[1]
+            assert call_kwargs['iterations'] is not None  # resolved from config

@@ -10,13 +10,18 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from ayder_cli.client import call_llm_async
 from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
+
+# Import TUI parser components
+from ayder_cli.tui.parser import (
+    content_processor,
+    has_custom_tool_calls,
+)
 
 if TYPE_CHECKING:
     from ayder_cli.checkpoint_manager import CheckpointManager
@@ -44,159 +49,13 @@ class TuiCallbacks(Protocol):
     def on_assistant_content(self, text: str) -> None: ...
     def on_thinking_content(self, text: str) -> None: ...
     def on_token_usage(self, total_tokens: int) -> None: ...
+    def on_iteration_update(self, current: int, maximum: int) -> None: ...
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None: ...
     def on_tool_complete(self, call_id: str, result: str) -> None: ...
     def on_tools_cleanup(self) -> None: ...
     def on_system_message(self, text: str) -> None: ...
     async def request_confirmation(self, name: str, arguments: dict) -> object | None: ...
     def is_cancelled(self) -> bool: ...
-
-
-class ContentProcessor:
-    """Precompiled regex engine for stripping LLM output artifacts.
-
-    Why regex instead of an XML parser?  Model output is *not* valid XML —
-    tags are often unclosed, interleaved with prose, or malformed.  A small
-    set of compiled patterns is the most reliable (and fastest) approach.
-
-    All patterns are compiled once at class-body evaluation time.
-    Use the module-level ``content_processor`` singleton for zero-cost reuse.
-    """
-
-    # -- think blocks --------------------------------------------------------
-    _RE_THINK_CLOSED = re.compile(r"<think>(.*?)</think>", re.DOTALL)
-    _RE_THINK_UNCLOSED = re.compile(r"<think>(.*)", re.DOTALL)
-    _RE_THINK_STRIP = re.compile(r"<think>.*?</think>", re.DOTALL)
-    _RE_THINK_STRIP_UNCLOSED = re.compile(r"<think>.*", re.DOTALL)
-
-    # -- tool call blocks ----------------------------------------------------
-    _RE_TOOL_CALL_BLOCK = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL)
-    _RE_FUNCTION_BLOCK = re.compile(r"<function=.*?</function>", re.DOTALL)
-
-    # -- orphaned tags -------------------------------------------------------
-    _RE_ORPHAN_TOOL_CALL = re.compile(r"</?tool_call>")
-    _RE_ORPHAN_FUNCTION = re.compile(r"</?function[^>]*>")
-
-    # -- JSON tool arrays ----------------------------------------------------
-    _RE_JSON_TOOL_ARRAY = re.compile(
-        r'\[\s*\{[^}]*"function"\s*:.*?\}\s*\]', re.DOTALL
-    )
-
-    # -- whitespace cleanup --------------------------------------------------
-    _RE_BLANK_LINES = re.compile(r"\n{3,}")
-
-    # -- regex fallback for malformed JSON -----------------------------------
-    _RE_JSON_NAME = re.compile(r'"name"\s*:\s*"([^"]+)"')
-    _RE_JSON_ARGS = re.compile(
-        r'"arguments"\s*:\s*["\{](.*?)["\}](?:\s*[,}])', re.DOTALL
-    )
-    _RE_KV_PAIR = re.compile(r'"(\w+)"\s*:\s*"([^"]*)"')
-
-    # -- public API ----------------------------------------------------------
-
-    def extract_think_blocks(self, content: str) -> list[str]:
-        """Return a list of non-empty ``<think>`` block texts."""
-        blocks = self._RE_THINK_CLOSED.findall(content)
-        remaining = self._RE_THINK_CLOSED.sub("", content)
-        unclosed = self._RE_THINK_UNCLOSED.findall(remaining)
-        blocks.extend(unclosed)
-        return [b.strip() for b in blocks if b.strip()]
-
-    def strip_for_display(self, content: str) -> str:
-        """Strip all tool/think markup, returning clean display text."""
-        text = self._strip_think_blocks(content)
-        text = self._strip_tool_call_blocks(text)
-        text = self._strip_function_blocks(text)
-        text = self._strip_orphaned_tags(text)
-        text = self._strip_json_tool_arrays(text)
-        text = self._collapse_blank_lines(text)
-        return text
-
-    def parse_json_tool_calls(self, content: str) -> list[dict]:
-        """Parse tool calls from a JSON array in content (model fallback).
-
-        Falls back to regex extraction when ``json.loads`` fails.
-        Returns a list of dicts with ``name`` and ``arguments`` keys, or [].
-        """
-        content = content.strip()
-        if not content.startswith("["):
-            return []
-        try:
-            data = json.loads(content)
-        except (json.JSONDecodeError, ValueError):
-            return self._regex_extract_json_tool_calls(content)
-        if not isinstance(data, list):
-            return []
-        calls: list[dict] = []
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            func = item.get("function")
-            if not isinstance(func, dict):
-                continue
-            name = func.get("name")
-            if not name:
-                continue
-            raw_args = func.get("arguments", "{}")
-            if isinstance(raw_args, str):
-                try:
-                    args = json.loads(raw_args)
-                except (json.JSONDecodeError, ValueError):
-                    args = {}
-            elif isinstance(raw_args, dict):
-                args = raw_args
-            else:
-                args = {}
-            calls.append({"name": name, "arguments": args})
-        return calls
-
-    # -- private helpers (named for readability) -----------------------------
-
-    def _strip_think_blocks(self, text: str) -> str:
-        text = self._RE_THINK_STRIP.sub("", text)
-        text = self._RE_THINK_STRIP_UNCLOSED.sub("", text)
-        return text
-
-    def _strip_tool_call_blocks(self, text: str) -> str:
-        return self._RE_TOOL_CALL_BLOCK.sub("", text)
-
-    def _strip_function_blocks(self, text: str) -> str:
-        return self._RE_FUNCTION_BLOCK.sub("", text)
-
-    def _strip_orphaned_tags(self, text: str) -> str:
-        text = self._RE_ORPHAN_TOOL_CALL.sub("", text)
-        text = self._RE_ORPHAN_FUNCTION.sub("", text)
-        return text
-
-    def _strip_json_tool_arrays(self, text: str) -> str:
-        return self._RE_JSON_TOOL_ARRAY.sub("", text)
-
-    def _collapse_blank_lines(self, text: str) -> str:
-        return self._RE_BLANK_LINES.sub("\n\n", text).strip()
-
-    def _regex_extract_json_tool_calls(self, content: str) -> list[dict]:
-        """Regex fallback for malformed JSON tool calls."""
-        calls: list[dict] = []
-        for m in self._RE_JSON_NAME.finditer(content):
-            name = m.group(1)
-            args: dict = {}
-            start = max(0, m.start() - 200)
-            end = min(len(content), m.end() + 200)
-            chunk = content[start:end]
-            arg_match = self._RE_JSON_ARGS.search(chunk)
-            if arg_match:
-                raw = arg_match.group(1).strip()
-                try:
-                    args = json.loads("{" + raw + "}")
-                except (json.JSONDecodeError, ValueError):
-                    for kv in self._RE_KV_PAIR.finditer(raw):
-                        args[kv.group(1)] = kv.group(2)
-            calls.append({"name": name, "arguments": args})
-        return calls
-
-
-# Module-level singleton — compiled once, reused everywhere.
-content_processor = ContentProcessor()
 
 
 class TuiChatLoop:
@@ -246,8 +105,9 @@ class TuiChatLoop:
                 return
 
             self._iteration += 1
+            self.cb.on_iteration_update(self._iteration, self.config.max_iterations)
             if self._iteration > self.config.max_iterations:
-                if not self._handle_checkpoint():
+                if not await self._handle_checkpoint():
                     self.cb.on_system_message(
                         f"Reached max iterations ({self.config.max_iterations})."
                     )
@@ -317,7 +177,9 @@ class TuiChatLoop:
                 no_tools = False
                 continue
 
-            if content and ("<function=" in content or "<tool_call>" in content):
+            # Check for custom tool calls (including namespaced variants like <minimax:tool_call>
+            # and DeepSeek format like <function_calls>)
+            if content and has_custom_tool_calls(content):
                 custom_calls = parse_custom_tool_calls(content)
                 valid = [c for c in custom_calls if "error" not in c]
                 if valid:
@@ -450,14 +312,66 @@ class TuiChatLoop:
 
     # -- Checkpoint ----------------------------------------------------------
 
-    def _handle_checkpoint(self) -> bool:
-        """Attempt a memory checkpoint cycle. Returns True if handled."""
-        if self.mm:
-            if self.cm and self.cm.has_saved_checkpoint():
-                self.mm.restore_from_checkpoint_messages(self.messages)
-                self._iteration = 0
-                return True
-        return False
+    async def _handle_checkpoint(self) -> bool:
+        """Create a memory checkpoint, reset messages, restore context.
+
+        Returns True if the loop should continue with a fresh context.
+        """
+        if not self.cm:
+            return False
+
+        # 1. Build a conversation summary from recent messages
+        summary_parts = []
+        for msg in self.messages[-10:]:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if content:
+                summary_parts.append(f"[{role}] {content[:200]}")
+        conversation_summary = "\n".join(summary_parts)
+
+        # 2. Ask LLM to produce a checkpoint summary (no tools)
+        from ayder_cli.prompts import MEMORY_CHECKPOINT_PROMPT_TEMPLATE
+        from ayder_cli.checkpoint_manager import CHECKPOINT_FILE_NAME
+
+        checkpoint_prompt = MEMORY_CHECKPOINT_PROMPT_TEMPLATE.format(
+            conversation_summary=conversation_summary,
+            memory_file_name=CHECKPOINT_FILE_NAME,
+        )
+        checkpoint_messages = list(self.messages) + [
+            {"role": "user", "content": checkpoint_prompt}
+        ]
+
+        self.cb.on_system_message("Approaching iteration limit — creating memory checkpoint...")
+        self.cb.on_thinking_start()
+        try:
+            response = await call_llm_async(
+                self.llm,
+                checkpoint_messages,
+                self.config.model,
+                tools=[],
+                num_ctx=self.config.num_ctx,
+            )
+        except Exception:
+            self.cb.on_thinking_stop()
+            return False
+        finally:
+            self.cb.on_thinking_stop()
+
+        summary_content = response.choices[0].message.content or conversation_summary
+        self.cm.save_checkpoint(summary_content)
+
+        # 3. Reset messages (keep system prompt) and restore context
+        system_msg = self.messages[0] if self.messages and self.messages[0].get("role") == "system" else None
+        self.messages.clear()
+        if system_msg:
+            self.messages.append(system_msg)
+
+        restore_msg = self.mm.build_quick_restore_message() if self.mm else f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary_content}\n\nPlease continue."
+        self.messages.append({"role": "user", "content": restore_msg})
+
+        self._iteration = 0
+        self.cb.on_system_message("Checkpoint saved — context compacted. Continuing...")
+        return True
 
     # -- Helpers -------------------------------------------------------------
 

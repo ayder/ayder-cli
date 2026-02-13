@@ -26,7 +26,7 @@ from ayder_cli.tui.widgets import (
 from ayder_cli.tui.app import AyderApp
 
 
-def run_tui(model: str = "default", safe_mode: bool = False, permissions: set = None) -> None:
+def run_tui(model: str = "default", safe_mode: bool = False, permissions: set = None, iterations: int = None) -> None:
     """
     Run the CLI-style TUI application.
 
@@ -34,9 +34,22 @@ def run_tui(model: str = "default", safe_mode: bool = False, permissions: set = 
         model: The LLM model name to use
         safe_mode: Whether to enable safe mode
         permissions: Set of granted permission levels ("r", "w", "x")
+        iterations: Max agentic iterations per message (None = use config default)
     """
-    app = AyderApp(model=model, safe_mode=safe_mode, permissions=permissions)
+    import sys
+
+    app = AyderApp(model=model, safe_mode=safe_mode, permissions=permissions, iterations=iterations)
     app.run(mouse=False)
+
+    # Ensure mouse reporting is disabled after exit — Textual's driver may
+    # leave it on if the shutdown path doesn't fully complete (e.g. Ctrl+Q).
+    sys.stdout.write(
+        "\033[?1000l"  # disable mouse click tracking
+        "\033[?1002l"  # disable mouse button-event tracking
+        "\033[?1003l"  # disable all mouse tracking
+        "\033[?1006l"  # disable SGR extended mouse mode
+    )
+    sys.stdout.flush()
 
 
 __all__ = [

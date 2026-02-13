@@ -1,7 +1,7 @@
 """Modal screens for the TUI: confirm, permission, safe mode, select, task edit."""
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, Horizontal
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static, Input, Label, TextArea
 from textual.screen import ModalScreen
 from rich.text import Text
@@ -43,7 +43,8 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
 
             if self.diff_content:
                 diff_text = self._render_diff()
-                yield Static(diff_text, classes="diff-container")
+                with VerticalScroll(classes="diff-container", id="diff-scroll"):
+                    yield Static(diff_text, id="diff-content")
 
             list_content = self._render_list()
             yield Static(list_content, id="option-list", classes="option-list")
@@ -54,7 +55,7 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
             )
 
             yield Label(
-                "↑↓ navigate, Enter select, Y/N shortcut, Esc cancel",
+                "↑↓ navigate, PgUp/PgDn scroll diff, Enter select, Y/N shortcut, Esc cancel",
                 classes="hint"
             )
 
@@ -82,6 +83,7 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
         result = Text()
 
         for line in lines:
+            line = line.rstrip('\n')
             if line.startswith('@@'):
                 result.append(line + "\n", style="cyan")
             elif line.startswith('-') and not line.startswith('---'):
@@ -116,6 +118,18 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
             return
 
         key = event.key.lower()
+
+        if key in ("pageup", "pagedown"):
+            event.stop()
+            try:
+                diff_scroll = self.query_one("#diff-scroll", VerticalScroll)
+                if key == "pageup":
+                    diff_scroll.scroll_page_up(animate=False)
+                else:
+                    diff_scroll.scroll_page_down(animate=False)
+            except Exception:
+                pass
+            return
 
         if key in ("up", "k"):
             event.stop()
