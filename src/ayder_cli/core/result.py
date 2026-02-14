@@ -24,6 +24,8 @@ class ToolSuccess(str):
 class ToolError(str):
     """Error tool result with category metadata."""
 
+    _category: str
+
     def __new__(cls, value: str, category: str = "general"):
         instance = super().__new__(cls, value)
         instance._category = category
@@ -42,7 +44,7 @@ class ToolError(str):
         return True
 
     def __repr__(self) -> str:
-        return f"ToolError({super().__repr__()}, category={self._category!r})"
+        return f"ToolError({super().__repr__()}, category={self.category!r})"
 
 
 ToolResult = Union[ToolSuccess, ToolError]

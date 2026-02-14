@@ -250,3 +250,37 @@ Please acknowledge and continue the task from where we left off."""
 MEMORY_NO_MEMORY_MESSAGE = (
     """Continuing task after context reset. No previous memory was saved."""
 )
+
+
+# =============================================================================
+# SAVE/LOAD MEMORY COMMANDS (tui/commands.py)
+# =============================================================================
+# Used by: tui/commands.py::handle_save_memory()
+# REASON: Prompt LLM to create and save a memory summary without clearing
+# the conversation history.
+
+SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE = """Please create a memory summary of our conversation:
+
+{conversation_text}
+
+Save this summary to `.ayder/memory/current_memory.md` using the write_file tool.
+
+The summary should:
+- Capture key decisions, context, and progress
+- Be concise but comprehensive
+- Help future sessions understand what we've done so far
+
+Save the summary and confirm when done."""
+
+
+# Used by: tui/commands.py::handle_load_memory()
+# REASON: Prompt LLM to load and acknowledge memory from file.
+
+LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE = """Please load the previous memory from `.ayder/memory/current_memory.md` and acknowledge the context.
+
+Previous context:
+```
+{memory_content}
+```
+
+Please acknowledge this context and continue from where we left off."""

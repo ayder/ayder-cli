@@ -45,7 +45,7 @@ class LLMProvider(ABC):
 class OpenAIProvider(LLMProvider):
     """OpenAI/Ollama implementation of LLMProvider."""
 
-    def __init__(self, base_url: str = None, api_key: str = None, client: Any = None):
+    def __init__(self, base_url: str | None = None, api_key: str | None = None, client: Any | None = None):
         if client:
             self.client = client
         else:
@@ -71,7 +71,8 @@ class OpenAIProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         if options:
-            kwargs["extra_body"] = {"options": options}
+            # extra_body accepts dict but type stubs may differ
+            kwargs["extra_body"] = {"options": options}  # type: ignore[assignment]
 
         return self.client.chat.completions.create(**kwargs)
 

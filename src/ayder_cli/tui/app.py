@@ -12,6 +12,7 @@ from textual.worker import get_current_worker
 from textual.timer import Timer
 from textual import on
 from pathlib import Path
+from typing import Any
 import asyncio
 import difflib
 
@@ -39,7 +40,7 @@ class AppCallbacks:
 
     def __init__(self, app: "AyderApp") -> None:
         self._app = app
-        self._worker = None
+        self._worker: Any | None = None
 
     def on_thinking_start(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
@@ -135,8 +136,8 @@ class AyderApp(App):
         self,
         model: str = "default",
         safe_mode: bool = False,
-        permissions: set = None,
-        iterations: int = None,
+        permissions: set | None = None,
+        iterations: int | None = None,
         **kwargs,
     ):
         """
@@ -156,6 +157,7 @@ class AyderApp(App):
 
         self._pending_messages: list[str] = []
         self._is_processing = False
+        self._verbose_mode: bool = False
 
         self.config = load_config()
 

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def search_codebase(
     project_ctx: ProjectContext,
     pattern: str,
-    file_pattern: str = None,
+    file_pattern: str | None = None,
     case_sensitive: bool = True,
     context_lines: int = 0,
     max_results: int = 50,

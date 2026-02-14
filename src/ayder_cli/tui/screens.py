@@ -25,7 +25,7 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
         self,
         title: str,
         description: str,
-        diff_content: str = None,
+        diff_content: str | None = None,
         action_name: str = "Confirm",
     ):
         super().__init__()
@@ -76,6 +76,8 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
 
     def _render_diff(self) -> Text:
         """Render diff content with syntax highlighting."""
+        if self.diff_content is None:
+            return Text("No diff content available")
         lines = self.diff_content.split("\n")
         result = Text()
 

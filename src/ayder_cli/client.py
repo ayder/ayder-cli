@@ -8,6 +8,7 @@ This module provides:
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from ayder_cli.services.llm import LLMProvider
 from ayder_cli.services.tools.executor import ToolExecutor
 from ayder_cli.checkpoint_manager import CheckpointManager
@@ -22,9 +23,9 @@ async def call_llm_async(
     llm: LLMProvider,
     messages: list,
     model: str,
-    tools: list = None,
+    tools: list | None = None,
     num_ctx: int = 65536,
-) -> dict:
+) -> Any:
     """
     Async wrapper for LLM calls.
 
@@ -56,10 +57,10 @@ class ChatSession:
         self,
         config,
         system_prompt: str,
-        permissions: set = None,
+        permissions: set | None = None,
         iterations: int = 50,
-        checkpoint_manager: CheckpointManager = None,
-        memory_manager: MemoryManager = None,
+        checkpoint_manager: CheckpointManager | None = None,
+        memory_manager: MemoryManager | None = None,
     ):
         """Initialize chat session.
 
@@ -73,8 +74,8 @@ class ChatSession:
         """
         self.config = config
         self.system_prompt = system_prompt
-        self.messages = []
-        self.state = {
+        self.messages: list[dict[str, Any]] = []
+        self.state: dict[str, Any] = {
             "verbose": config.verbose if hasattr(config, "verbose") else False,
             "permissions": permissions or set(),
             "iterations": iterations,

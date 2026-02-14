@@ -11,20 +11,26 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Fully local or cloud** -- runs against any Ollama instance. Use locally for privacy, or connect to cloud-hosted Ollama. Your code never leaves your computer when using local Ollama.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 50 consecutive tool calls per user message (configurable with `-I`).
 - **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. Falls back to a classic prompt-toolkit REPL with `--cli`.
-- **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), prompt-toolkit, Rich, and Textual.
+- **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), Rich, and Textual.
 
 
 ### Tested Models with tool support (+ OpenAI Compatible Tools)
 
-| Provider      | Location | Model                      |
-|---------------|----------|----------------------------|
-| ollama        | Cloud    | gemini-3-pro-preview:latest|
-| ollama        | Cloud    | glm-4.7-flash:latest       |
-| ollama        | Cloud    | glm-4.7:cloud              |
-| ollama        | Cloud    | kimi-k2.5:cloud            |
-| ollama        | Local    | ministral-3:14b            |
-| ollama        | Local    | translategemma:4b          |
-| ollama        | Local    | qwen3-coder:latest         |
+| Provider | Location | Model                              |
+|----------|----------|------------------------------------|
+| ollama   | Cloud    | deepseek-v3.2:cloud                |
+| ollama   | Cloud    | gemini-3-pro-preview:latest        |
+| ollama   | Cloud    | glm-4.7-flash:latest               |
+| ollama   | Cloud    | glm-4.7:cloud                      |
+| ollama   | Cloud    | glm-5:cloud                        |
+| ollama   | Cloud    | glm-ocr:latest                     |
+| ollama   | Cloud    | gpt-oss:120b-cloud                 |
+| ollama   | Cloud    | kimi-k2.5:cloud                    |
+| ollama   | Cloud    | minimax-m2.5:cloud                 |
+| ollama   | Local    | ministral-3:14b                    |
+| ollama   | Cloud    | qwen3-coder-next:cloud             |
+| ollama   | Cloud    | qwen3-coder:480b-cloud             |
+| ollama   | Local    | qwen3-coder:latest                 |
 
 
 ### Tools
@@ -132,10 +138,8 @@ Please adjust *num_ctx* context size window according to your local computer ram
 ayder
 
 # Or run as a module
-python -m ayder_cli
+python3 -m ayder_cli
 
-# Classic CLI REPL mode (prompt-toolkit)
-ayder --cli
 ```
 
 ### Command Mode (Non-Interactive)
@@ -196,9 +200,26 @@ ayder -r -w "refactor the login module"
 echo "fix the bug" | ayder -r -w -x
 ```
 
-### Agentic Iterations (-I)
+### Memory Management & Iteration Control
 
-The agent can make up to 50 consecutive tool calls per user message (default). Use `-I` to adjust:
+The agent can perform multiple consecutive tool calls per user message. However, as the conversation grows, LLM performance can degrade due to **context bloat** (context rot).
+
+To solve this, `ayder` features an intelligent memory management system that summarizes conversation history based on a configurable iteration threshold.
+
+#### Adjusting Iteration Threshold
+
+You can tune how often the agent "compresses" its memory using the `-I` (Iteration) flag.
+
+* **Small Models:** Use a lower value (e.g., `-I 50`) to keep the context lean and avoid logic errors.
+* **Large/Powerful Models:** Use a higher value (e.g., `-I 200`) to maximize the model's reasoning capabilities before summarization.
+
+#### Transferring Memory Between Models
+
+If you switch models mid-session, you can carry over your "knowledge" by manually triggering the memory system:
+
+1. **Save current state:** `/save-memory`
+2. **Switch to a new model:** `/model qwen3-coder:480b-cloud`
+3. **Restore context to new model:** `/load-memory`
 
 ```bash
 # Allow up to 200 iterations for complex tasks
@@ -207,7 +228,6 @@ ayder -I 200
 # Combine with permissions
 ayder -r -w -I 150 "implement all pending tasks"
 ```
-
 If you have memory problems decrease iteration size and /compact the LLM memory before it gets worse.
 
 ### Slash Commands
@@ -225,6 +245,8 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 | `/implement-all` | Implement all pending tasks sequentially |
 | `/verbose` | Toggle verbose mode (show file contents after `write_file` + LLM request details) |
 | `/compact` | Summarize conversation, save to memory, clear, and reload context |
+| `/save-memory` | Summarize conversation and save to `.ayder/memory/current_memory.md` (no clear) |
+| `/load-memory` | Load memory from `.ayder/memory/current_memory.md` and restore context |
 | `/archive-completed-tasks` | Move completed tasks to `.ayder/task_archive/` |
 | `/permission` | Toggle permission levels (r/w/x) interactively |
 | `exit` | Quit the application |
@@ -326,57 +348,6 @@ Current tool categories (25 tools total):
 - **Tasks**: list_tasks, show_task
 - **Environment**: manage_environment_vars
 - **Virtual Environments**: create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
-
-## Project Structure
-
-```
-src/ayder_cli/
-  cli.py             -- Entry point (argparse: --cli, -f, --stdin, -I, --tasks, --implement)
-  cli_runner.py      -- Command execution logic (CommandRunner, TaskRunner)
-  client.py          -- ChatSession + Agent classes, call_llm_async()
-  chat_loop.py       -- Core agentic loop (ChatLoop, IterationController, ToolCallHandler)
-  checkpoint_manager.py -- Memory checkpoint/restore for long-running tasks
-  parser.py          -- XML tool call parser (standard + lazy format fallback)
-  prompts.py         -- Centralized prompt templates
-  tasks.py           -- Task management (.ayder/tasks/)
-  notes.py           -- Note management (.ayder/notes/)
-  memory.py          -- Cross-session memory storage (.ayder/memory/)
-  process_manager.py -- Background process management (ProcessManager + 4 tool functions)
-  ui.py              -- Rich terminal UI (boxes, message formatting, diff previews)
-  tui/helpers.py      -- TUI helper functions including banner creation
-  ui.py              -- Rich terminal UI (boxes, message formatting, diff previews)
-  console.py         -- Centralized Rich console with custom theme
-  tui/               -- Textual TUI package (default interface)
-    __init__.py      -- run_tui() entry point
-    app.py           -- AyderApp main application (LLM pipeline, tool execution)
-    commands.py      -- TUI slash command handlers + COMMAND_MAP dispatch
-    widgets.py       -- ChatView, ToolPanel, CLIInputBar, StatusBar
-    screens.py       -- Modal screens (confirm, permission, select, task editor)
-    types.py         -- Shared types (MessageType, ConfirmResult)
-    helpers.py       -- TUI helper functions
-    theme_manager.py -- Theme loading and CSS generation
-  themes/            -- Theme CSS definitions (claude, original)
-  commands/          -- CLI slash command handlers (used by --cli REPL mode)
-    base.py          -- BaseCommand abstract class
-    registry.py      -- Command registry and dispatch
-    tools.py         -- /tools command
-    tasks.py         -- /tasks, /task-edit, /implement, /implement-all commands
-    system.py        -- /help, /compact, /verbose, /plan, /model, /ask commands
-  core/              -- Core infrastructure
-    config.py        -- Configuration loading with Pydantic validation
-    context.py       -- ProjectContext for path sandboxing and security
-    result.py        -- Shared result types (ToolSuccess, ToolError)
-  services/          -- Service layer
-    llm.py           -- OpenAI-compatible LLM provider
-    tools/           -- ToolExecutor for tool confirmation and execution
-  tools/             -- Modular tools package (25 tools with auto-discovery)
-    definition.py    -- ToolDefinition base class + auto-discovery system
-    *_definitions.py -- Distributed tool definitions (filesystem, search, shell, etc.)
-    impl.py          -- Tool implementations (file ops, line editing, file info, shell, search)
-    schemas.py       -- OpenAI-format JSON schemas for all tools
-    registry.py      -- ToolRegistry with middleware, callbacks, and execution timing
-    utils.py         -- Tool utilities (content preparation for diffs)
-```
 
 ## License
 

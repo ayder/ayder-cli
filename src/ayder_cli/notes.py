@@ -30,7 +30,7 @@ def _title_to_slug(title: str) -> str:
 
 
 def create_note(
-    project_ctx: ProjectContext, title: str, content: str, tags: str = None
+    project_ctx: ProjectContext, title: str, content: str, tags: str | None = None
 ) -> str:
     """Create a markdown note in .ayder/notes/.
 

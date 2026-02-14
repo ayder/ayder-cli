@@ -212,6 +212,60 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.start_llm_processing()
 
 
+def handle_save_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /save-memory command."""
+    from ayder_cli.prompts import SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE
+
+    if len(app.messages) <= 1:
+        chat_view.add_system_message("No conversation to save.")
+        return
+
+    conversation_text = ""
+    for msg in app.messages:
+        if msg.get("role") in ("user", "assistant"):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            conversation_text += f"[{role}] {content}\n\n"
+
+    save_prompt = SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE.format(
+        conversation_text=conversation_text
+    )
+    app.messages.append({"role": "user", "content": save_prompt})
+    chat_view.add_system_message("Saving memory summary...")
+
+    app.start_llm_processing()
+
+
+def handle_load_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /load-memory command."""
+    from ayder_cli.prompts import LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE
+    from ayder_cli.checkpoint_manager import CHECKPOINT_FILE_NAME
+
+    project_ctx = ProjectContext(".")
+    memory_file = project_ctx.root / ".ayder" / "memory" / CHECKPOINT_FILE_NAME
+
+    if not memory_file.exists():
+        chat_view.add_system_message(
+            f"No memory file found at `.ayder/memory/{CHECKPOINT_FILE_NAME}`. "
+            "Use `/save-memory` to create one first."
+        )
+        return
+
+    try:
+        memory_content = memory_file.read_text(encoding="utf-8")
+    except Exception as e:
+        chat_view.add_system_message(f"Error reading memory file: {e}")
+        return
+
+    load_prompt = LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE.format(
+        memory_content=memory_content
+    )
+    app.messages.append({"role": "user", "content": load_prompt})
+    chat_view.add_system_message("Loading memory...")
+
+    app.start_llm_processing()
+
+
 def handle_plan(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /plan command."""
     from ayder_cli.prompts import PLANNING_PROMPT_TEMPLATE
@@ -555,6 +609,8 @@ COMMAND_MAP: dict[str, Callable] = {
     "/tools": handle_tools,
     "/verbose": handle_verbose,
     "/compact": handle_compact,
+    "/save-memory": handle_save_memory,
+    "/load-memory": handle_load_memory,
     "/plan": handle_plan,
     "/ask": handle_ask,
     "/implement": handle_implement,

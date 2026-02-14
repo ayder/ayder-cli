@@ -26,7 +26,7 @@ class ToolExecutor:
     and interaction with the ToolRegistry.
     """
 
-    def __init__(self, tool_registry: ToolRegistry, terminal_tools: Set[str] = None):
+    def __init__(self, tool_registry: ToolRegistry, terminal_tools: Set[str] | None = None):
         """
         Initialize the ToolExecutor.
 
@@ -44,7 +44,7 @@ class ToolExecutor:
         self,
         tool_calls: List[Any],
         session: Any,
-        granted_permissions: Set[str] = None,
+        granted_permissions: Set[str] | None = None,
         verbose: bool = False,
     ) -> bool:
         """
@@ -80,7 +80,7 @@ class ToolExecutor:
         self,
         custom_calls: List[Dict[str, Any]],
         session: Any,
-        granted_permissions: Set[str] = None,
+        granted_permissions: Set[str] | None = None,
         verbose: bool = False,
     ) -> bool:
         """

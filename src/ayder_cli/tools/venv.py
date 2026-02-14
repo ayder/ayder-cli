@@ -2,7 +2,6 @@
 Virtual environment management tools for ayder-cli.
 """
 
-import pathlib
 import platform
 import shutil
 import subprocess

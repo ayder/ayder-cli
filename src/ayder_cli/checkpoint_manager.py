@@ -101,7 +101,7 @@ class CheckpointManager:
         except Exception:
             return None
 
-    def save_checkpoint(self, content: str) -> ToolSuccess:
+    def save_checkpoint(self, content: str) -> ToolSuccess | ToolError:
         """Save checkpoint content directly to the checkpoint file.
 
         Args:
@@ -132,7 +132,7 @@ Generated: {datetime.now().isoformat()}
         except Exception as e:
             return ToolError(f"Failed to save checkpoint: {str(e)}", "execution")
 
-    def clear_checkpoint(self) -> ToolSuccess:
+    def clear_checkpoint(self) -> ToolSuccess | ToolError:
         """Clear the checkpoint file.
 
         Returns:

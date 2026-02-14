@@ -153,7 +153,7 @@ Poe the Poet is the preferred task runner. It automatically uses the `.venv`:
 
 ```bash
 # Run tests (excludes slow TUI tests) - uses pytest-timeout, instafail, sugar
-uv run poe test
+uv run --active poe test
 
 # Run tests in parallel (fastest - uses pytest-xdist)
 uv run poe test-fast

@@ -105,7 +105,7 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
                 logger.error(f"Error loading definitions from {name}: {e}")
     
     # Validate: Detect duplicate tool names
-    seen = {}
+    seen: dict[str, str] = {}
     for td in definitions:
         if td.name in seen:
             raise ValueError(

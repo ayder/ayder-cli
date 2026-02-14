@@ -13,7 +13,7 @@ from ayder_cli.console import console
 
 
 def print_markdown(
-    text: str, title: str = None, width: int = None, color_code: str = None
+    text: str, title: str | None = None, width: int | None = None, color_code: str | None = None
 ) -> None:
     """Print markdown text in a styled box.
 
@@ -23,7 +23,7 @@ def print_markdown(
         width: Optional width for the panel
         color_code: Optional ANSI color code for border (36=cyan, 32=green, etc.)
     """
-    border_style = None
+    border_style: str = "white"
     if color_code:
         color_map = {
             "36": "cyan",
@@ -57,7 +57,7 @@ def print_assistant_message(text: str) -> None:
     console.print(Panel(text, title="Assistant", border_style="green"))
 
 
-def print_code_block(code: str, language: str = "text", title: str = None) -> None:
+def print_code_block(code: str, language: str = "text", title: str | None = None) -> None:
     """Print a code block with syntax highlighting.
 
     Args:
@@ -203,7 +203,7 @@ def print_file_content(file_path):
         )
 
 
-def print_file_content_rich(file_path: str, content: str = None) -> None:
+def print_file_content_rich(file_path: str, content: str | None = None) -> None:
     """Read a file and print its contents in a styled box with the filename as the title.
 
     Args:

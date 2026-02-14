@@ -31,7 +31,7 @@ def _gradient_at(position: float, stops: list[str]) -> str:
     return _lerp_color(stops[i], stops[min(i + 1, len(stops) - 1)], t)
 
 
-def create_tui_banner(model: str = "default", ver: str = None) -> Text:
+def create_tui_banner(model: str = "default", ver: str | None = None) -> Text:
     """
     Create a colorful futuristic banner for the TUI.
 

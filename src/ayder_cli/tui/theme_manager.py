@@ -29,6 +29,7 @@ class ThemeManager:
 
     _instance: Optional["ThemeManager"] = None
     _current_theme: Optional[Theme] = None
+    _initialized: bool = False
 
     def __new__(cls, config: Optional[Config] = None) -> "ThemeManager":
         """Singleton pattern to ensure consistent theme state."""

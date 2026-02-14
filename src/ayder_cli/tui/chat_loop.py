@@ -216,7 +216,7 @@ class TuiChatLoop:
             args = _parse_arguments(tc.function.arguments)
             self.cb.on_tool_start(tc.id, tc.function.name, args)
 
-        tool_results: list[dict | Exception] = []
+        tool_results: list[dict | BaseException] = []
 
         # Auto-approved in parallel
         if auto_approved:
@@ -268,7 +268,21 @@ class TuiChatLoop:
 
         # Process results → append tool messages
         for i, rd in enumerate(tool_results):
-            if isinstance(rd, Exception):
+            if isinstance(rd, dict):
+                tid = rd["tool_call_id"]
+                name = rd["name"]
+                result = rd["result"]
+                self.cb.on_tool_complete(tid, str(result))
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tid,
+                        "name": name,
+                        "content": str(result),
+                    }
+                )
+            else:
+                # rd is BaseException (includes Exception)
                 if i < len(auto_approved):
                     err_tc = auto_approved[i]
                     err_id, err_name = err_tc.id, err_tc.function.name
@@ -281,19 +295,6 @@ class TuiChatLoop:
                         "tool_call_id": err_id,
                         "name": err_name,
                         "content": error_msg,
-                    }
-                )
-            else:
-                tid = rd["tool_call_id"]
-                name = rd["name"]
-                result = rd["result"]
-                self.cb.on_tool_complete(tid, str(result))
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tid,
-                        "name": name,
-                        "content": str(result),
                     }
                 )
 

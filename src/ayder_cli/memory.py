@@ -36,7 +36,7 @@ def _get_memory_file(project_ctx: ProjectContext) -> Path:
 
 
 def save_memory(
-    project_ctx: ProjectContext, content: str, category: str = None, tags: str = None
+    project_ctx: ProjectContext, content: str, category: str | None = None, tags: str | None = None
 ) -> str:
     """Save a piece of context to persistent cross-session memory.
 
@@ -71,7 +71,7 @@ def save_memory(
         with open(memory_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        return ToolSuccess(f"Memory saved (id: {entry['id'][:8]}...)")
+        return ToolSuccess(f"Memory saved (id: {str(entry['id'])[:8]}...)")
 
     except Exception as e:
         return ToolError(f"Error saving memory: {str(e)}", "execution")
@@ -79,8 +79,8 @@ def save_memory(
 
 def load_memory(
     project_ctx: ProjectContext,
-    category: str = None,
-    query: str = None,
+    category: str | None = None,
+    query: str | None = None,
     limit: int = 10,
 ) -> str:
     """Load saved memories from persistent cross-session storage.

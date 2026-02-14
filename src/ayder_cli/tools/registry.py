@@ -44,7 +44,7 @@ class ToolExecutionResult:
 
 # Type aliases for callbacks
 PreExecuteCallback = Callable[[str, Dict[str, Any]], None]
-PostExecuteCallback = Callable[["ToolExecutionResult"], None]
+PostExecuteCallback = Callable[[ToolExecutionResult], None]
 
 
 # --- Parameter Normalization & Validation ---
@@ -155,7 +155,7 @@ def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
 def _execute_tool_with_hooks(
     tool_name: str,
     arguments,
-    tool_func_getter: Callable[[str], Callable],
+    tool_func_getter: Callable[[str], Optional[Callable]],
     middlewares: List[MiddlewareFunc],
     pre_execute_callbacks: List[PreExecuteCallback],
     post_execute_callbacks: List[PostExecuteCallback],
@@ -242,9 +242,9 @@ def _execute_tool_with_hooks(
         duration_ms=duration_ms,
     )
 
-    for callback in post_execute_callbacks:
+    for post_callback in post_execute_callbacks:
         try:
-            callback(execution_result)
+            post_callback(execution_result)
         except Exception:
             pass
 

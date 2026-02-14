@@ -5,10 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "ayder-cli"
 version = "0.92.0"
-description = "Interactive AI agent chat client for local LLMs"
+description = "AI agent for any LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
+license = { text = "MIT" }
+authors = [
+    { name = "Sinan Alyuruk", email = "sinan.alyuruk@gmail.com" }
+]
+keywords = ["ai", "agent", "llm", "tui", "cli", "ayder"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+]
 dependencies = [
     "openai",
     "rich>=13.0.0",
@@ -16,30 +26,60 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/ayder/ayder-cli"
+Repository = "https://github.com/ayder/ayder-cli.git"
+Issues = "https://github.com/ayder/ayder-cli/issues"
+
 [project.scripts]
 ayder = "ayder_cli.cli:main"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/ayder_cli"]
+
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "pytest-xdist>=3.5.0",      # Parallel execution
-    "pytest-timeout>=2.2.0",     # Prevent hangs
-    "pytest-instafail>=0.5.0",   # Fast feedback
-    "pytest-sugar>=1.0.0",       # Better UI (optional)
-    "uv>=0.10.0",                # Fast Python package manager
-    "poethepoet>=0.24.0",        # Task runner
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "pytest-xdist>=3.5.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-instafail>=0.5.0",
+    "poethepoet>=0.24.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
 ]
 
 [tool.poe.tasks]
+# Base Testing
 test = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py"
 test-all = "pytest tests/ -x --timeout=30"
-test-verbose = "pytest tests/ -x --timeout=30 -v"
+test-tiny = "pytest -q --tb=short --no-header --no-summary tests/"
 test-fast = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py -n auto"
 test-cov = "pytest tests/ --cov=src/ayder_cli --cov-report=term-missing --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py"
-clean = "rm -rf .pytest_cache .mypy_cache .ruff_cache"
+
+# Quality Control
 lint = "ruff check src/"
 lint-fix = "ruff check src/ --fix"
 typecheck = "mypy src/"
 format = "ruff format src/"
-check-all = ["lint", "typecheck", "test"]
+check-all = ["lint", "typecheck", "test-tiny"]
+
+[tool.poe.tasks.clean]
+help = "Deep clean cache and build artifacts"
+sequence = [
+    { shell = "find . -type d -name '__pycache__' -exec rm -rf {} +" },
+    { shell = "rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov dist build *.egg-info" }
+]
+
+# Publishing Tasks (Defined individually)
+[tool.poe.tasks.build]
+shell = "uv build"
+help = "Build the project distribution (wheel and sdist)"
+
+[tool.poe.tasks.publish-test]
+shell = "uv publish --publish-url https://test.pypi.org/legacy/"
+help = "Upload the package to TestPyPI"
+
+[tool.poe.tasks.publish]
+shell = "uv publish"
+help = "Upload the package to the real PyPI"

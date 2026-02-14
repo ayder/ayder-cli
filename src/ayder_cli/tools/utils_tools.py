@@ -94,7 +94,7 @@ def _generate_manual_tree(project_ctx: ProjectContext, max_depth: int = 3) -> st
 
 
 def manage_environment_vars(
-    project_ctx: ProjectContext, mode: str, variable_name: str = None, value: str = None
+    project_ctx: ProjectContext, mode: str, variable_name: str | None = None, value: str | None = None
 ) -> str:
     """
     Manage .env files with four modes:
@@ -151,6 +151,12 @@ def manage_environment_vars(
 
             if variable_name in env_vars:
                 value = env_vars[variable_name]
+                # Handle None value (empty variable like FOO=)
+                if value is None:
+                    return ToolSuccess(
+                        f"✓ Variable '{variable_name}' exists in .env\n"
+                        f"Value: (empty)"
+                    )
                 # Mask sensitive values (don't show full secrets)
                 if len(value) > 10:
                     masked_value = f"{value[:4]}...{value[-4:]}"
@@ -210,6 +216,9 @@ def manage_environment_vars(
 
         # GENERATE MODE: Create secure random value
         elif mode == "generate":
+            # variable_name is validated to be non-None above, but mypy needs help
+            assert variable_name is not None
+
             # Generate 16-byte (128-bit) secure random hex value
             generated_value = secrets.token_hex(16)
 
@@ -251,6 +260,9 @@ def manage_environment_vars(
 
         # SET MODE: Set variable to specific value
         elif mode == "set":
+            # variable_name and value are validated to be non-None above, but mypy needs help
+            assert variable_name is not None and value is not None
+
             # Check if file exists and if variable already exists
             file_exists = env_path.exists()
             variable_existed = False
@@ -279,10 +291,10 @@ def manage_environment_vars(
             action = "updated" if variable_existed else "created"
 
             # Mask long values in success message
-            if len(value) > 20:
+            if value and len(value) > 20:
                 masked_value = f"{value[:8]}...{value[-8:]}"
             else:
-                masked_value = value
+                masked_value = value or "(empty)"
 
             return ToolSuccess(
                 f"✓ Variable '{variable_name}' {action}\n"
@@ -294,3 +306,6 @@ def manage_environment_vars(
         return ToolError(f"Security Error: {str(e)}", "security")
     except Exception as e:
         return ToolError(f"Error managing environment variables: {str(e)}", "execution")
+
+    # Fallback return to satisfy type checker
+    return ToolError("Error: Unknown mode or unexpected error", "validation")

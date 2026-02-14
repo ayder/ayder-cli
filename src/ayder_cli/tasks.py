@@ -136,8 +136,8 @@ def list_tasks(
     if not files:
         return ToolSuccess("No tasks found.")
 
-    # Collect task data
-    tasks = []
+    # Collect task data (uniform 3-tuples: id, name, status)
+    tasks: list[tuple[int, str, str]] = []
     for path in files:
         task_id = _extract_id(path.name)
         if task_id is not None:
@@ -150,7 +150,7 @@ def list_tasks(
             if format == "list":
                 # Return relative path from project root
                 rel_path = path.relative_to(project_ctx.root)
-                tasks.append((task_id, str(rel_path)))
+                tasks.append((task_id, str(rel_path), ""))
             else:
                 title = _parse_title(path)
                 tasks.append((task_id, title, task_status))

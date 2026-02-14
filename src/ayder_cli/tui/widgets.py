@@ -27,8 +27,8 @@ class ChatView(VerticalScroll):
         self._message_widgets: list[Static] = []
 
     def _create_text(
-        self, content: str, msg_type: MessageType, metadata: dict = None
-    ) -> Text:
+        self, content: str, msg_type: MessageType, metadata: dict | None = None
+    ) -> Text | None:
         """Create styled text for a message."""
         if msg_type == MessageType.USER:
             text = Text()
@@ -76,7 +76,7 @@ class ChatView(VerticalScroll):
             return text
 
     def add_message(
-        self, content: str, msg_type: MessageType, metadata: dict = None
+        self, content: str, msg_type: MessageType, metadata: dict | None = None
     ) -> None:
         """Add a message to the chat view."""
         self.messages.append(
@@ -310,7 +310,7 @@ class AutoCompleteInput(Input):
 
     def on_key(self, event) -> None:
         """Handle tab to accept suggestion."""
-        if event.key == "tab" and self.value.startswith("/"):
+        if event.key == "tab" and self.value.startswith("/"):  # type: ignore[has-type]
             event.prevent_default()
             event.stop()
             suggestion = self._suggestion
@@ -336,7 +336,7 @@ class _SubmitTextArea(TextArea):
         super().__init__(soft_wrap=True, show_line_numbers=False, **kwargs)
         self._commands = commands or []
 
-    def _on_key(self, event) -> None:
+    def _on_key(self, event) -> None:  # type: ignore[override]
         if event.key == "enter":
             # Plain Enter → submit (Shift+Enter comes as "shift+enter")
             event.prevent_default()
@@ -481,7 +481,7 @@ class StatusBar(Horizontal):
     CLI-style status bar showing context info.
     """
 
-    def __init__(self, model: str = "default", permissions: set = None, **kwargs):
+    def __init__(self, model: str = "default", permissions: set | None = None, **kwargs):
         super().__init__(**kwargs)
         self.model = model
         self.token_count = 0

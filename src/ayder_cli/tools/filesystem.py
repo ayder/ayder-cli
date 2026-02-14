@@ -5,7 +5,6 @@ Filesystem tools for ayder-cli.
 import json
 import logging
 import os
-from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -39,8 +38,8 @@ def list_files(project_ctx: ProjectContext, directory: str = ".") -> str:
 def read_file(
     project_ctx: ProjectContext,
     file_path: str,
-    start_line: int = None,
-    end_line: int = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
 ) -> str:
     """
     Reads the content of a file.

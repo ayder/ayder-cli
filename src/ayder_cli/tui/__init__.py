@@ -29,8 +29,8 @@ from ayder_cli.tui.app import AyderApp
 def run_tui(
     model: str = "default",
     safe_mode: bool = False,
-    permissions: set = None,
-    iterations: int = None,
+    permissions: set | None = None,
+    iterations: int | None = None,
 ) -> None:
     """
     Run the CLI-style TUI application.
