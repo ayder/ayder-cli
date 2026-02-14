@@ -5,16 +5,50 @@ import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch, Mock
-from ayder_cli.tools import impl
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.tools import search, filesystem, shell, utils_tools, venv
+
+# Create a namespace object that mimicks the old 'impl' module
+class ImplNamespace:
+    pass
+
+impl = ImplNamespace()
+impl.search_codebase = search.search_codebase
+impl._search_with_ripgrep = search._search_with_ripgrep
+impl._search_with_grep = search._search_with_grep
+impl._format_search_results = search._format_search_results
+impl._format_grep_results = search._format_grep_results
+impl._format_files_only = search._format_files_only
+impl._format_count_results = search._format_count_results
+
+impl.get_project_structure = utils_tools.get_project_structure
+impl._generate_manual_tree = utils_tools._generate_manual_tree
+impl.manage_environment_vars = utils_tools.manage_environment_vars
+
+impl.read_file = filesystem.read_file
+impl.write_file = filesystem.write_file
+impl.replace_string = filesystem.replace_string
+impl.list_files = filesystem.list_files
+impl.insert_line = filesystem.insert_line
+impl.delete_line = filesystem.delete_line
+impl.get_file_info = filesystem.get_file_info
+impl.MAX_FILE_SIZE = filesystem.MAX_FILE_SIZE
+
+impl.run_shell_command = shell.run_shell_command
+
+impl.create_virtualenv = venv.create_virtualenv
+impl.install_requirements = venv.install_requirements
+impl.list_virtualenvs = venv.list_virtualenvs
+impl.activate_virtualenv = venv.activate_virtualenv
+impl.remove_virtualenv = venv.remove_virtualenv
 
 
 class TestSearchCodebaseNoMatches:
     """Test search_codebase() with no matches found."""
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_search_no_matches_ripgrep(self, mock_run, mock_which, tmp_path):
         """Test search with no matches using ripgrep."""
         mock_which.return_value = "/usr/bin/rg"
@@ -29,8 +63,8 @@ class TestSearchCodebaseNoMatches:
         assert "No matches found" in result
         assert "nonexistent_pattern_xyz" in result
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_search_no_matches_grep(self, mock_run, mock_which, tmp_path):
         """Test search with no matches using grep fallback."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -47,8 +81,8 @@ class TestSearchCodebaseNoMatches:
 class TestSearchCodebaseFilePatterns:
     """Test search_codebase() with various file pattern filters."""
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_search_with_file_pattern(self, mock_run, mock_which, tmp_path):
         """Test search with file pattern filter."""
         mock_which.return_value = "/usr/bin/rg"
@@ -69,8 +103,8 @@ class TestSearchCodebaseFilePatterns:
         assert "*.py" in call_args
         assert "Matches found" in result
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_search_case_insensitive(self, mock_run, mock_which, tmp_path):
         """Test search with case insensitive flag."""
         mock_which.return_value = "/usr/bin/rg"
@@ -88,8 +122,8 @@ class TestSearchCodebaseFilePatterns:
 class TestSearchCodebaseContextLines:
     """Test search_codebase() context lines functionality."""
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_search_with_context_lines(self, mock_run, mock_which, tmp_path):
         """Test search with context lines."""
         mock_which.return_value = "/usr/bin/rg"
@@ -112,8 +146,8 @@ class TestSearchCodebaseContextLines:
 class TestSearchCodebaseErrorHandling:
     """Test search_codebase() error handling paths."""
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_ripgrep_error_exit_code(self, mock_run, mock_which, tmp_path):
         """Test ripgrep failing with error exit code."""
         mock_which.return_value = "/usr/bin/rg"
@@ -129,8 +163,8 @@ class TestSearchCodebaseErrorHandling:
         assert "Error: ripgrep failed" in result
         assert "some error" in result
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_ripgrep_timeout(self, mock_run, mock_which, tmp_path):
         """Test ripgrep timeout handling."""
         mock_which.return_value = "/usr/bin/rg"
@@ -143,7 +177,7 @@ class TestSearchCodebaseErrorHandling:
 
         assert "Error executing ripgrep" in result or "Error during search" in result
 
-    @patch("ayder_cli.tools.impl.shutil.which")
+    @patch("ayder_cli.tools.search.shutil.which")
     def test_search_codebase_exception(self, mock_which, tmp_path):
         """Test search_codebase outer exception handler."""
         mock_which.side_effect = Exception("Unexpected error")
@@ -161,8 +195,8 @@ class TestSearchCodebaseErrorHandling:
 class TestSearchWithGrepFallback:
     """Test _search_with_grep() fallback implementation."""
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_grep_search_success(self, mock_run, mock_which, tmp_path):
         """Test successful grep search."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -180,8 +214,8 @@ class TestSearchWithGrepFallback:
         assert "SEARCH RESULTS" in result
         assert "Matches found" in result
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_grep_case_insensitive(self, mock_run, mock_which, tmp_path):
         """Test grep with case insensitive flag."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -195,8 +229,8 @@ class TestSearchWithGrepFallback:
         call_args = mock_run.call_args[0][0]
         assert "-i" in call_args
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_grep_with_context_lines(self, mock_run, mock_which, tmp_path):
         """Test grep with context lines."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -211,8 +245,8 @@ class TestSearchWithGrepFallback:
         assert "-C" in call_args
         assert "3" in call_args
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_grep_with_file_pattern(self, mock_run, mock_which, tmp_path):
         """Test grep with file pattern."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -227,8 +261,8 @@ class TestSearchWithGrepFallback:
         assert "--include" in call_args
         assert "*.py" in call_args
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_grep_error_exit_code(self, mock_run, mock_which, tmp_path):
         """Test grep failing with error exit code."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -244,8 +278,8 @@ class TestSearchWithGrepFallback:
         assert "Error: grep failed" in result
         assert "grep error" in result
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.search.shutil.which")
+    @patch("ayder_cli.tools.search.subprocess.run")
     def test_grep_timeout(self, mock_run, mock_which, tmp_path):
         """Test grep timeout handling."""
         mock_which.side_effect = lambda cmd: None if cmd == "rg" else "/usr/bin/grep"
@@ -296,8 +330,8 @@ class TestFormatGrepResults:
 class TestGetProjectStructureEdgeCases:
     """Test get_project_structure() edge cases."""
 
-    @patch("ayder_cli.tools.impl.shutil.which")
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.utils_tools.shutil.which")
+    @patch("ayder_cli.tools.utils_tools.subprocess.run")
     def test_tree_fallback_on_error(self, mock_run, mock_which, tmp_path):
         """Test fallback to manual tree when tree command fails."""
         mock_which.return_value = "/usr/bin/tree"
@@ -310,7 +344,7 @@ class TestGetProjectStructureEdgeCases:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    @patch("ayder_cli.tools.impl.shutil.which")
+    @patch("ayder_cli.tools.utils_tools.shutil.which")
     def test_manual_tree_no_tree_command(self, mock_which, tmp_path):
         """Test manual tree generation when tree not available."""
         mock_which.return_value = None
@@ -475,7 +509,7 @@ class TestListFilesSymlinks:
 class TestRunShellCommandTimeout:
     """Test run_shell_command() timeout handling."""
 
-    @patch("ayder_cli.tools.impl.subprocess.run")
+    @patch("ayder_cli.tools.shell.subprocess.run")
     def test_run_shell_command_timeout(self, mock_run, tmp_path):
         """Test run_shell_command timeout handling."""
         import subprocess

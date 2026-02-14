@@ -6,7 +6,6 @@ import os
 import json
 from unittest.mock import patch, MagicMock
 
-from ayder_cli.tools import impl as impl_module
 from ayder_cli.tools import registry
 from ayder_cli.core.context import ProjectContext
 

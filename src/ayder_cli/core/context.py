@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from ayder_cli.core.config import Config
-from ayder_cli.services.llm import LLMProvider
+
+if TYPE_CHECKING:
+    from ayder_cli.services.llm import LLMProvider
 
 
 class ProjectContext:
@@ -74,5 +77,5 @@ class SessionContext:
     project: ProjectContext
     messages: list
     state: dict
-    llm: LLMProvider
+    llm: "LLMProvider"
     system_prompt: str = ""  # Enhanced system prompt with project structure

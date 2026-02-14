@@ -4,9 +4,23 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from ayder_cli.tools import impl
+from ayder_cli.tools import filesystem, search
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError
+
+# Create a namespace object that mimicks the old 'impl' module
+class ImplNamespace:
+    pass
+
+impl = ImplNamespace()
+impl.list_files = filesystem.list_files
+impl.read_file = filesystem.read_file
+impl.write_file = filesystem.write_file
+impl.replace_string = filesystem.replace_string
+impl.insert_line = filesystem.insert_line
+impl.delete_line = filesystem.delete_line
+impl.get_file_info = filesystem.get_file_info
+impl.search_codebase = search.search_codebase
 
 
 class TestToolPathSecurity:

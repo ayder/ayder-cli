@@ -63,7 +63,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="list_files",
         description="List files in a directory",
         description_template="Directory {directory} will be listed",
-        func_ref="ayder_cli.tools.impl:list_files",
+        func_ref="ayder_cli.tools.filesystem:list_files",
         parameters={
             "type": "object",
             "properties": {
@@ -86,7 +86,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="read_file",
         description="Read the contents of a file, optionally specifying a line range.",
         description_template="File {file_path} will be read",
-        func_ref="ayder_cli.tools.impl:read_file",
+        func_ref="ayder_cli.tools.filesystem:read_file",
         parameters={
             "type": "object",
             "properties": {
@@ -115,7 +115,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="write_file",
         description="Write content to a file (overwrites entire file).",
         description_template="File {file_path} will be written",
-        func_ref="ayder_cli.tools.impl:write_file",
+        func_ref="ayder_cli.tools.filesystem:write_file",
         parameters={
             "type": "object",
             "properties": {
@@ -140,7 +140,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="replace_string",
         description="Replace a specific string in a file with a new string.",
         description_template="File {file_path} will be modified",
-        func_ref="ayder_cli.tools.impl:replace_string",
+        func_ref="ayder_cli.tools.filesystem:replace_string",
         parameters={
             "type": "object",
             "properties": {
@@ -167,7 +167,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     # ---- Search ----
     ToolDefinition(
         name="search_codebase",
-        func_ref="ayder_cli.tools.impl:search_codebase",
+        func_ref="ayder_cli.tools.search:search_codebase",
         description=(
             "Search for a regex pattern across the codebase. Returns matching "
             "lines with file paths and line numbers. Use this to locate code "
@@ -225,7 +225,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="get_project_structure",
         description="Generate a tree-style project structure summary.",
         description_template="Project structure will be displayed",
-        func_ref="ayder_cli.tools.impl:get_project_structure",
+        func_ref="ayder_cli.tools.utils_tools:get_project_structure",
         parameters={
             "type": "object",
             "properties": {
@@ -243,7 +243,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="insert_line",
         description="Insert content at a specific line number in a file.",
         description_template="File {file_path} will be modified (insert at line {line_number})",
-        func_ref="ayder_cli.tools.impl:insert_line",
+        func_ref="ayder_cli.tools.filesystem:insert_line",
         parameters={
             "type": "object",
             "properties": {
@@ -272,7 +272,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="delete_line",
         description="Delete a specific line from a file.",
         description_template="File {file_path} will be modified (delete line {line_number})",
-        func_ref="ayder_cli.tools.impl:delete_line",
+        func_ref="ayder_cli.tools.filesystem:delete_line",
         parameters={
             "type": "object",
             "properties": {
@@ -297,7 +297,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="get_file_info",
         description="Get metadata about a file (size, line count, type).",
         description_template="File info for {file_path} will be retrieved",
-        func_ref="ayder_cli.tools.impl:get_file_info",
+        func_ref="ayder_cli.tools.filesystem:get_file_info",
         parameters={
             "type": "object",
             "properties": {
@@ -396,7 +396,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="run_shell_command",
         description="Execute a shell command.",
         description_template="Command `{command}` will be executed",
-        func_ref="ayder_cli.tools.impl:run_shell_command",
+        func_ref="ayder_cli.tools.shell:run_shell_command",
         parameters={
             "type": "object",
             "properties": {
@@ -521,7 +521,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="manage_environment_vars",
         description="Manage .env files: load, validate, generate secure values, and set environment variables.",
         description_template="Environment variables will be {mode}d",
-        func_ref="ayder_cli.tools.impl:manage_environment_vars",
+        func_ref="ayder_cli.tools.utils_tools:manage_environment_vars",
         parameters={
             "type": "object",
             "properties": {
@@ -550,7 +550,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="create_virtualenv",
         description="Create a new Python virtual environment in the project directory",
         description_template="Virtual environment {env_name} will be created",
-        func_ref="ayder_cli.tools.impl:create_virtualenv",
+        func_ref="ayder_cli.tools.venv:create_virtualenv",
         parameters={
             "type": "object",
             "properties": {
@@ -580,7 +580,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="install_requirements",
         description="Install project dependencies from requirements.txt or pyproject.toml into the virtual environment",
         description_template="Dependencies will be installed from {requirements_file} into {env_name}",
-        func_ref="ayder_cli.tools.impl:install_requirements",
+        func_ref="ayder_cli.tools.venv:install_requirements",
         parameters={
             "type": "object",
             "properties": {
@@ -610,7 +610,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="list_virtualenvs",
         description="List all virtual environments in the project directory",
         description_template="Virtual environments will be listed",
-        func_ref="ayder_cli.tools.impl:list_virtualenvs",
+        func_ref="ayder_cli.tools.venv:list_virtualenvs",
         parameters={
             "type": "object",
             "properties": {},
@@ -623,7 +623,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="activate_virtualenv",
         description="Get activation instructions for a virtual environment",
         description_template="Activation instructions for {env_name} will be provided",
-        func_ref="ayder_cli.tools.impl:activate_virtualenv",
+        func_ref="ayder_cli.tools.venv:activate_virtualenv",
         parameters={
             "type": "object",
             "properties": {
@@ -645,7 +645,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="remove_virtualenv",
         description="Remove/uninstall a virtual environment",
         description_template="Virtual environment {env_name} will be removed",
-        func_ref="ayder_cli.tools.impl:remove_virtualenv",
+        func_ref="ayder_cli.tools.venv:remove_virtualenv",
         parameters={
             "type": "object",
             "properties": {

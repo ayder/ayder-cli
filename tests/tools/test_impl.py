@@ -7,9 +7,42 @@ import shutil
 from unittest.mock import patch, MagicMock
 import pytest
 from pathlib import Path
-from ayder_cli.tools import impl
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.tools import filesystem, search, shell, utils_tools, venv
+
+# Create a namespace object that mimicks the old 'impl' module
+class ImplNamespace:
+    pass
+
+impl = ImplNamespace()
+impl.list_files = filesystem.list_files
+impl.read_file = filesystem.read_file
+impl.write_file = filesystem.write_file
+impl.replace_string = filesystem.replace_string
+impl.insert_line = filesystem.insert_line
+impl.delete_line = filesystem.delete_line
+impl.get_file_info = filesystem.get_file_info
+impl.MAX_FILE_SIZE = filesystem.MAX_FILE_SIZE
+
+impl.search_codebase = search.search_codebase
+impl._search_with_ripgrep = search._search_with_ripgrep
+impl._search_with_grep = search._search_with_grep
+impl._format_search_results = search._format_search_results
+impl._format_grep_results = search._format_grep_results
+impl._format_files_only = search._format_files_only
+impl._format_count_results = search._format_count_results
+
+impl.run_shell_command = shell.run_shell_command
+
+impl.get_project_structure = utils_tools.get_project_structure
+impl.manage_environment_vars = utils_tools.manage_environment_vars
+
+impl.create_virtualenv = venv.create_virtualenv
+impl.install_requirements = venv.install_requirements
+impl.list_virtualenvs = venv.list_virtualenvs
+impl.activate_virtualenv = venv.activate_virtualenv
+impl.remove_virtualenv = venv.remove_virtualenv
 
 
 @pytest.fixture
@@ -281,7 +314,7 @@ class TestReadFileSizeLimit:
     def test_read_file_rejects_oversized_file(self, tmp_path, project_context, monkeypatch):
         """Test that files exceeding MAX_FILE_SIZE are rejected with descriptive error."""
         # Temporarily set a small max size for testing
-        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 100)  # 100 bytes limit
+        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
 
         test_file = tmp_path / "large_file.txt"
         # Create content larger than the limit
@@ -300,7 +333,7 @@ class TestReadFileSizeLimit:
     def test_read_file_accepts_normal_size_file(self, tmp_path, project_context, monkeypatch):
         """Test that normal-sized files are read successfully."""
         # Temporarily set a small max size for testing
-        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 1024)  # 1KB limit
+        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 1024)  # 1KB limit
         
         test_file = tmp_path / "normal_file.txt"
         normal_content = "This is a normal file content."
@@ -315,7 +348,7 @@ class TestReadFileSizeLimit:
     def test_read_file_size_limit_exact_boundary(self, tmp_path, project_context, monkeypatch):
         """Test that files exactly at the size limit are accepted."""
         # Set a small max size for testing
-        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 100)  # 100 bytes limit
+        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
         
         test_file = tmp_path / "boundary_file.txt"
         # Create content exactly at the limit
@@ -331,7 +364,7 @@ class TestReadFileSizeLimit:
     def test_read_file_size_limit_one_byte_over(self, tmp_path, project_context, monkeypatch):
         """Test that files one byte over the limit are rejected."""
         # Set a small max size for testing
-        monkeypatch.setattr(impl, "MAX_FILE_SIZE", 100)  # 100 bytes limit
+        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
         
         test_file = tmp_path / "over_limit_file.txt"
         # Create content one byte over the limit

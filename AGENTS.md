@@ -67,7 +67,11 @@ ayder-cli/
 │   │
 │   ├── tools/                  # Tool implementations
 │   │   ├── definition.py       # Tool definitions/schemas
-│   │   ├── impl.py             # Tool implementations (file ops, shell, etc.)
+│   │   ├── filesystem.py       # File system tools
+│   │   ├── search.py           # Search tools
+│   │   ├── shell.py            # Shell tools
+│   │   ├── venv.py             # Virtualenv tools
+│   │   ├── utils_tools.py      # Utility tools
 │   │   ├── registry.py         # Tool registry with middleware
 │   │   ├── schemas.py          # OpenAI-format JSON schemas
 │   │   └── utils.py            # Tool utilities
@@ -126,7 +130,8 @@ ayder-cli/
 | `tui/commands.py` | Slash command handlers (/help, /model, etc.) |
 | `tui/chat_loop.py` | LLM interaction loop for TUI |
 | `client.py` | ChatSession and Agent classes |
-| `tools/impl.py` | Tool implementations (20+ tools) |
+| `tools/filesystem.py` | File system tool implementations |
+| `tools/search.py` | Search tool implementations |
 | `core/config.py` | Configuration with Pydantic validation |
 | `core/context.py` | ProjectContext for path sandboxing |
 

@@ -135,8 +135,8 @@ class TestResolveFuncRef:
 
     def test_resolves_valid_reference(self):
         """Test resolving a valid module:function reference."""
-        func = registry._resolve_func_ref("ayder_cli.tools.impl:read_file")
-        from ayder_cli.tools.impl import read_file
+        func = registry._resolve_func_ref("ayder_cli.tools.filesystem:read_file")
+        from ayder_cli.tools.filesystem import read_file
         assert func is read_file
 
     def test_resolves_external_module(self):
@@ -153,12 +153,12 @@ class TestResolveFuncRef:
     def test_invalid_function_raises_attribute_error(self):
         """Test that a nonexistent function raises AttributeError."""
         with pytest.raises(AttributeError):
-            registry._resolve_func_ref("ayder_cli.tools.impl:nonexistent_func")
+            registry._resolve_func_ref("ayder_cli.tools.filesystem:nonexistent_func")
 
     def test_missing_colon_raises_value_error(self):
         """Test that a reference without colon raises ValueError."""
         with pytest.raises(ValueError):
-            registry._resolve_func_ref("ayder_cli.tools.impl.read_file")
+            registry._resolve_func_ref("ayder_cli.tools.filesystem.read_file")
 
 
 class TestCreateDefaultRegistryAutoDiscovery:
