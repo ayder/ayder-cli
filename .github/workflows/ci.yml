@@ -27,7 +27,7 @@ jobs:
         run: uv sync --all-groups
 
       - name: Run Quality Checks
-        # This uses your check-all task (lint, typecheck, test-tiny)
+        # Runs lint, typecheck, and tests (excludes slow TUI tests)
         run: uv run poe check-all
 
       - name: Build Check

@@ -62,7 +62,7 @@ lint = "ruff check src/"
 lint-fix = "ruff check src/ --fix"
 typecheck = "mypy src/"
 format = "ruff format src/"
-check-all = ["lint", "typecheck", "test-tiny"]
+check-all = ["lint", "typecheck", "test"]
 
 [tool.poe.tasks.clean]
 help = "Deep clean cache and build artifacts"
