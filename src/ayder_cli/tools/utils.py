@@ -4,7 +4,6 @@ Utility functions for tool operations.
 
 import json
 import logging
-from pathlib import Path
 from ayder_cli.core.context import ProjectContext
 
 logger = logging.getLogger(__name__)

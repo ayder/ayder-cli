@@ -6,8 +6,8 @@ Themes can be configured via the config file under [ui] section.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Callable
-from pathlib import Path
+from typing import Dict, Optional
+from pathlib import Path  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -56,8 +56,8 @@ def get_theme_names() -> list[str]:
 # Import and register built-in themes
 def _load_builtin_themes():
     """Load all built-in themes."""
-    from . import original
-    from . import claude
+    from . import original  # noqa: F401
+    from . import claude  # noqa: F401
 
 
 # Auto-load themes on import

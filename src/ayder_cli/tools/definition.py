@@ -7,8 +7,8 @@ constants (tools_schema, TOOL_PERMISSIONS, PARAMETER_ALIASES, PATH_PARAMETERS,
 TERMINAL_TOOLS) are generated from TOOL_DEFINITIONS at import time.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)

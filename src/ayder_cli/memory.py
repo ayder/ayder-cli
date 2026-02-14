@@ -12,7 +12,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError

@@ -15,7 +15,7 @@ from pathlib import Path
 import asyncio
 import difflib
 
-from ayder_cli.tools.registry import ToolRegistry, create_default_registry
+from ayder_cli.tools.registry import create_default_registry
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.config import load_config
 from ayder_cli.services.llm import OpenAIProvider

@@ -132,40 +132,6 @@ class TestConfirmWithDiffWarning:
         assert result is False
 
 
-class TestDrawBoxEdgeCases:
-    """Additional edge case tests for draw_box() with Rich."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_draw_box_very_long_text(self, mock_print):
-        """Test draw_box with very long text that wraps extensively."""
-        from rich.panel import Panel
-        very_long_text = "word " * 200  # Very long text
-        ui.draw_box(very_long_text, width=40)
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-
-    @patch("ayder_cli.ui.console.print")
-    def test_draw_box_narrow_width(self, mock_print):
-        """Test draw_box with narrow width."""
-        from rich.panel import Panel
-        text = "This is some text that needs wrapping"
-        ui.draw_box(text, width=10)
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-
-    @patch("ayder_cli.ui.console.print")
-    def test_draw_box_empty_lines_preserved(self, mock_print):
-        """Test that empty lines are preserved in output."""
-        from rich.panel import Panel
-        text = "Line1\n\n\nLine2"
-        ui.draw_box(text, width=20)
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-
-
 class TestColorizeDiffEdgeCases:
     """Additional edge case tests for colorize_diff()."""
 
@@ -303,25 +269,6 @@ class TestPrintToolCall:
         panel = mock_print.call_args[0][0]
         assert isinstance(panel, Panel)
         assert panel.title == "Tool Call"
-
-
-class TestDrawBoxRich:
-    """Tests for draw_box() function with Rich."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_basic_draw_box(self, mock_print):
-        """Test basic draw_box functionality."""
-        ui.draw_box("Hello", width=20)
-        mock_print.assert_called_once()
-
-    @patch("ayder_cli.ui.console.print")
-    def test_draw_box_color_mapping(self, mock_print):
-        """Test different color codes map to Rich styles."""
-        from rich.panel import Panel
-        for code in ["36", "32", "33", "35", "31"]:
-            ui.draw_box("Test", color_code=code)
-            panel = mock_print.call_args[0][0]
-            assert isinstance(panel, Panel)
 
 
 class TestPrintFileContentRich:

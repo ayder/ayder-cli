@@ -6,7 +6,6 @@ Imports from core/result.py (NOT from tools/) to avoid circular imports.
 """
 
 import atexit
-import signal
 import subprocess
 import threading
 import time

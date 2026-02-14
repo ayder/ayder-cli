@@ -9,32 +9,7 @@ from rich.syntax import Syntax
 from rich.markdown import Markdown
 from rich.status import Status
 from rich.text import Text
-from ayder_cli.console import console, get_language_from_path
-
-
-def draw_box(
-    text: str, title: str = None, width: int = None, color_code: str = None
-) -> None:
-    """Draw a box around text using Rich Panel.
-
-    Args:
-        text: The text to display in the box
-        title: Optional title for the panel
-        width: Optional width for the panel
-        color_code: Optional ANSI color code for border (36=cyan, 32=green, etc.)
-    """
-    border_style = None
-    if color_code:
-        color_map = {
-            "36": "cyan",
-            "32": "green",
-            "33": "yellow",
-            "35": "magenta",
-            "31": "red",
-        }
-        border_style = color_map.get(color_code, "white")
-
-    console.print(Panel(text, title=title, width=width, border_style=border_style))
+from ayder_cli.console import console
 
 
 def print_markdown(
@@ -119,7 +94,6 @@ def print_llm_request_debug(messages, model, tools=None, options=None):
         tools: List of tool schemas (optional)
         options: Model options dict (optional)
     """
-    from typing import List, Dict, Any, Optional
 
     # Format summary line
     num_messages = len(messages) if messages else 0
@@ -207,7 +181,7 @@ def print_tool_result(result: str) -> None:
 
 def print_tool_skipped(tool_name: str = "", reason: str = "declined by user") -> None:
     """Print when a tool call is skipped, typically because user declined it."""
-    console.print(f"✗ Tool call skipped by user")
+    console.print("✗ Tool call skipped by user")
 
 
 def print_file_content(file_path):

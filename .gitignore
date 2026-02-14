@@ -11,6 +11,7 @@ wheels/
 .venv
 TODO
 .env
+uv.lock
 
 # Project Spesific
 .ayder

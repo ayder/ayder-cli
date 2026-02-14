@@ -659,7 +659,7 @@ def _format_grep_results(raw_output, pattern, max_results, project_ctx):
 
 def _format_files_only(raw_output, pattern, project_ctx):
     """Format file-list output (one path per line) for LLM consumption."""
-    lines = [l for l in raw_output.strip().split("\n") if l]
+    lines = [line for line in raw_output.strip().split("\n") if line]
     formatted = [
         "=== SEARCH RESULTS ===",
         f'Pattern: "{pattern}"',
@@ -678,7 +678,7 @@ def _format_files_only(raw_output, pattern, project_ctx):
 
 def _format_count_results(raw_output, pattern, project_ctx):
     """Format count output (file:count per line) for LLM consumption."""
-    lines = [l for l in raw_output.strip().split("\n") if l]
+    lines = [line for line in raw_output.strip().split("\n") if line]
     formatted = ["=== SEARCH RESULTS ===", f'Pattern: "{pattern}"', ""]
     total = 0
     for line in lines:
@@ -715,7 +715,7 @@ def manage_environment_vars(
     try:
         # Import python-dotenv here to handle missing dependency gracefully
         try:
-            from dotenv import dotenv_values, set_key, find_dotenv
+            from dotenv import dotenv_values, set_key
         except ImportError:
             return ToolError(
                 "Error: python-dotenv library not installed. Run: pip install python-dotenv",
@@ -1014,14 +1014,11 @@ def install_requirements(
 
         # Find pip executable in virtual environment
         import platform
-        import shutil
 
         if platform.system() == "Windows":
             pip_path = abs_env_path / "Scripts" / "pip.exe"
-            python_path = abs_env_path / "Scripts" / "python.exe"
         else:
             pip_path = abs_env_path / "bin" / "pip"
-            python_path = abs_env_path / "bin" / "python"
 
         if not pip_path.exists() and not pip_path.with_suffix(".exe").exists():
             return ToolError(
@@ -1121,7 +1118,6 @@ def list_virtualenvs(project_ctx: ProjectContext) -> str:
         output_lines = ["Available Virtual Environments:"]
         output_lines.append("-" * 50)
 
-        import subprocess
 
         for venv_dir in venv_dirs:
             # Get Python version from pyvenv.cfg if available

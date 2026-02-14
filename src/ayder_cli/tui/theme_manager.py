@@ -8,7 +8,6 @@ Themes can be configured in ~/.ayder/config.toml under [ui] section:
 theme = "claude"  # or "original", or another theme name
 """
 
-from pathlib import Path
 from typing import Optional
 
 from ayder_cli.themes import (

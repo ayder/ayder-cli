@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 CONFIG_DIR = Path("~/.ayder").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"

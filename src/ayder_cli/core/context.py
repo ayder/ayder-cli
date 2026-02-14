@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Optional
 from ayder_cli.core.config import Config
 from ayder_cli.services.llm import LLMProvider
 

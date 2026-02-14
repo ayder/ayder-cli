@@ -28,4 +28,19 @@ dev = [
     "pytest-timeout>=2.2.0",     # Prevent hangs
     "pytest-instafail>=0.5.0",   # Fast feedback
     "pytest-sugar>=1.0.0",       # Better UI (optional)
+    "uv>=0.10.0",                # Fast Python package manager
+    "poethepoet>=0.24.0",        # Task runner
 ]
+
+[tool.poe.tasks]
+test = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py"
+test-all = "pytest tests/ -x --timeout=30"
+test-verbose = "pytest tests/ -x --timeout=30 -v"
+test-fast = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py -n auto"
+test-cov = "pytest tests/ --cov=src/ayder_cli --cov-report=term-missing --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py"
+clean = "rm -rf .pytest_cache .mypy_cache .ruff_cache"
+lint = "ruff check src/"
+lint-fix = "ruff check src/ --fix"
+typecheck = "mypy src/"
+format = "ruff format src/"
+check-all = ["lint", "typecheck", "test"]

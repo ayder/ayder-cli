@@ -115,40 +115,17 @@ class InteractiveRunner:
             user_input: The command string starting with '/'
 
         Returns:
-            True if command was handled, False otherwise
+            True to continue loop
         """
-        from ayder_cli.core.context import SessionContext
-        from ayder_cli.ui import print_running, print_assistant_message
+        from rich.panel import Panel
+        from ayder_cli.console import console
 
-        session_ctx = SessionContext(
-            config=self.cfg,
-            project=self.project_ctx,
-            messages=self.chat_session.messages,
-            state=self.chat_session.state,
-            llm=self.llm_provider,
-            system_prompt=self.enhanced_system,
-        )
-
-        # Track message count to detect if command added messages for agent
-        msg_count_before = len(self.chat_session.messages)
-        handle_command(user_input, session_ctx)
-        msg_count_after = len(self.chat_session.messages)
-
-        # If command added messages (e.g., /implement), process them through agent
-        if msg_count_after > msg_count_before:
-            try:
-                print_running()
-                # Get the last added message content
-                last_msg = self.chat_session.messages[-1]
-                if last_msg.get("role") == "user":
-                    # Remove the message we just added (agent.chat will re-add it)
-                    self.chat_session.messages.pop()
-                    response = self.agent.chat(last_msg["content"])
-                    if response is not None:
-                        print_assistant_message(response)
-            except Exception as e:
-                draw_box(f"Error: {str(e)}", title="Error", width=80, color_code="31")
-
+        console.print(Panel(
+            "Slash commands are not supported in CLI mode.\n"
+            "Run without --cli flag to use the TUI with full command support.",
+            title="Info",
+            border_style="yellow"
+        ))
         return True
 
     def _process_input(self, user_input: str) -> bool:
@@ -160,7 +137,9 @@ class InteractiveRunner:
         Returns:
             True to continue loop, False to exit
         """
-        from ayder_cli.ui import draw_box, print_running, print_assistant_message
+        from ayder_cli.ui import print_running, print_assistant_message
+        from rich.panel import Panel
+        from ayder_cli.console import console
 
         if not user_input:
             return True
@@ -175,7 +154,7 @@ class InteractiveRunner:
             if response is not None:
                 print_assistant_message(response)
         except Exception as e:
-            draw_box(f"Error: {str(e)}", title="Error", width=80, color_code="31")
+            console.print(Panel(f"Error: {str(e)}", title="Error", width=80, border_style="red"))
 
         return True
 
@@ -299,9 +278,7 @@ class TaskRunner:
             Exit code (0 for success, 1 for error/not found)
         """
         try:
-            from ayder_cli.client import ChatSession, Agent
             from ayder_cli.core.context import ProjectContext
-            from ayder_cli.prompts import TASK_EXECUTION_PROMPT_TEMPLATE
             from ayder_cli.tasks import (
                 _get_tasks_dir,
                 _get_task_path_by_id,

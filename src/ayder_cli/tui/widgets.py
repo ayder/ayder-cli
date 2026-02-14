@@ -492,9 +492,9 @@ class StatusBar(Horizontal):
         mode_str = "".join(sorted(self._permissions))
         yield Label(f"model: {self.model}", id="model-label")
         yield Label(f" | mode: {mode_str}", id="mode-label")
-        yield Label(f" | tokens: 0", id="token-label")
-        yield Label(f" | iter: 0", id="iter-label")
-        yield Label(f" | files: 0", id="files-label")
+        yield Label(" | tokens: 0", id="token-label")
+        yield Label(" | iter: 0", id="iter-label")
+        yield Label(" | files: 0", id="files-label")
         yield Static(classes="spacer")
         yield Label("^C:cancel ^L:clear ^O:tools ^Q:quit", classes="key-hint")
 

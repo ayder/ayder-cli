@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ayder_cli.client import call_llm_async
 from ayder_cli.parser import parse_custom_tool_calls

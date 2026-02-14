@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEditScreen
-from ayder_cli.tui.widgets import ChatView, StatusBar, CLIInputBar
+from ayder_cli.tui.widgets import ChatView, StatusBar
 
 if TYPE_CHECKING:
     from ayder_cli.tui.app import AyderApp
@@ -80,7 +80,6 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /tasks command."""
     from ayder_cli.tasks import (
         _get_tasks_dir,
-        _get_task_path_by_id,
         _parse_title,
         _extract_id,
     )

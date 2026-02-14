@@ -7,14 +7,13 @@ Provides a registry pattern for tool execution, replacing the if/elif dispatch b
 import json
 import inspect
 import logging
-from pathlib import Path
-from typing import Callable, Dict, Tuple, List, Any, Optional
+from typing import Callable, Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
 from ayder_cli.tools.definition import TOOL_DEFINITIONS, TOOL_DEFINITIONS_BY_NAME
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolSuccess, ToolError, ToolResult
+from ayder_cli.core.result import ToolError, ToolResult
 
 logger = logging.getLogger(__name__)
 
