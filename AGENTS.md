@@ -65,8 +65,9 @@ ayder-cli/
 │   │   └── tools/
 │   │       └── executor.py     # Tool execution with confirmation
 │   │
-│   ├── tools/                  # Tool implementations
-│   │   ├── definition.py       # Tool definitions/schemas
+│   ├── tools/                  # Tool implementations (25 tools)
+│   │   ├── definition.py       # ToolDefinition base + auto-discovery
+│   │   ├── *_definitions.py    # Distributed tool definitions (9 files)
 │   │   ├── filesystem.py       # File system tools
 │   │   ├── search.py           # Search tools
 │   │   ├── shell.py            # Shell tools
@@ -561,6 +562,49 @@ source .venv/bin/activate && python3 -m pytest tests/test_failing.py -vvs && dea
 - **Tools**: `src/ayder_cli/tools/` - Tool implementations and registry
 - **TUI**: `src/ayder_cli/tui/` - Textual-based terminal UI
 - **Services**: `src/ayder_cli/services/` - LLM providers, tool executor
+
+### Pluggable Tool System
+
+ayder-cli features a **pluggable tool architecture** with dynamic auto-discovery:
+
+**Adding a New Tool:**
+1. Create `src/ayder_cli/tools/mytool_definitions.py` with `TOOL_DEFINITIONS` tuple
+2. Implement the tool function
+3. **Auto-discovery handles the rest** - no manual registration needed
+
+**Tool Definition Pattern:**
+```python
+# src/ayder_cli/tools/mytool_definitions.py
+from ayder_cli.tools.definition import ToolDefinition
+
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        name="my_tool",
+        description="What it does",
+        func_ref="ayder_cli.tools.mytool:my_function",
+        parameters={...},
+        permission="r",
+    ),
+)
+```
+
+**Current Tools (25 total):**
+- **Filesystem** (7): list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
+- **Search** (2): search_codebase, get_project_structure
+- **Shell** (1): run_shell_command
+- **Memory** (2): save_memory, load_memory
+- **Notes** (1): create_note
+- **Background Processes** (4): run_background_process, get_background_output, kill_background_process, list_background_processes
+- **Tasks** (2): list_tasks, show_task
+- **Environment** (1): manage_environment_vars
+- **Virtual Environments** (6): create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
+
+**Discovery Features:**
+- Automatic detection of `*_definitions.py` files
+- Duplicate tool name validation
+- Required tools validation
+- Graceful error handling
+- Zero maintenance overhead
 
 ### Key Patterns
 

@@ -302,6 +302,31 @@ Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames
 
 ayder-cli provides code search capabilities via the `search_codebase` tool. The LLM calls it automatically when you ask it to search for patterns, function definitions, or usages across the codebase.
 
+### Pluggable Tool Architecture
+
+ayder-cli features a **pluggable tool system** with dynamic auto-discovery. Adding a new tool is as simple as:
+
+1. **Create a definition file**: `src/ayder_cli/tools/mytool_definitions.py`
+2. **Implement the tool function**: Add your logic
+3. **Done!** Auto-discovery automatically registers the tool
+
+The tool system automatically:
+- Discovers all `*_definitions.py` files
+- Validates for duplicates and required tools
+- Registers tools with the LLM
+- Handles imports and exports
+
+Current tool categories (25 tools total):
+- **Filesystem**: list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
+- **Search**: search_codebase, get_project_structure
+- **Shell**: run_shell_command
+- **Memory**: save_memory, load_memory
+- **Notes**: create_note
+- **Background Processes**: run_background_process, get_background_output, kill_background_process, list_background_processes
+- **Tasks**: list_tasks, show_task
+- **Environment**: manage_environment_vars
+- **Virtual Environments**: create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
+
 ## Project Structure
 
 ```
@@ -344,8 +369,9 @@ src/ayder_cli/
   services/          -- Service layer
     llm.py           -- OpenAI-compatible LLM provider
     tools/           -- ToolExecutor for tool confirmation and execution
-  tools/             -- Modular tools package (20 tools)
-    definition.py    -- ToolDefinition dataclass and registry
+  tools/             -- Modular tools package (25 tools with auto-discovery)
+    definition.py    -- ToolDefinition base class + auto-discovery system
+    *_definitions.py -- Distributed tool definitions (filesystem, search, shell, etc.)
     impl.py          -- Tool implementations (file ops, line editing, file info, shell, search)
     schemas.py       -- OpenAI-format JSON schemas for all tools
     registry.py      -- ToolRegistry with middleware, callbacks, and execution timing
