@@ -16,7 +16,6 @@ uv.lock
 # Project Spesific
 .ayder
 .claude
-.github
 .coverage
 .crush
 .gemini
