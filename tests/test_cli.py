@@ -116,64 +116,7 @@ class TestBuildServices:
             mock_project_ctx_class.assert_called_once_with("/custom/path")
 
 
-class TestReadInput:
-    """Test read_input function."""
 
-    def test_read_input_file_not_found(self):
-        """Test file not found error exits with code 1."""
-        from ayder_cli.cli import read_input
-
-        args = MagicMock()
-        args.file = "/nonexistent/file.txt"
-        args.stdin = False
-        args.command = None
-
-        with patch('sys.exit') as mock_exit:
-            with patch('sys.stderr', new=StringIO()):
-                read_input(args)
-            mock_exit.assert_called_once_with(1)
-
-    def test_read_input_file_read_error(self):
-        """Test error reading file exits with code 1."""
-        from ayder_cli.cli import read_input
-
-        args = MagicMock()
-        args.file = "/some/file.txt"
-        args.stdin = False
-        args.command = None
-
-        with patch('pathlib.Path.read_text', side_effect=PermissionError("Permission denied")):
-            with patch('sys.exit') as mock_exit:
-                with patch('sys.stderr', new=StringIO()):
-                    read_input(args)
-                mock_exit.assert_called_once_with(1)
-
-    def test_read_input_stdin_not_piped(self):
-        """Test --stdin without piped input exits with code 1."""
-        from ayder_cli.cli import read_input
-
-        args = MagicMock()
-        args.file = None
-        args.stdin = True
-        args.command = None
-
-        with patch('sys.stdin.isatty', return_value=True):
-            with pytest.raises(SystemExit) as exc_info:
-                with patch('sys.stderr', new=StringIO()):
-                    read_input(args)
-            assert exc_info.value.code == 1
-
-    def test_read_input_returns_none_when_no_input(self):
-        """Test read_input returns None when no input provided."""
-        from ayder_cli.cli import read_input
-
-        args = MagicMock()
-        args.file = None
-        args.stdin = False
-        args.command = None
-
-        result = read_input(args)
-        assert result is None
 
 
 class TestRunCommand:
@@ -401,219 +344,6 @@ class TestRunImplementAllCLI:
             assert "Build error" in mock_stderr.getvalue()
 
 
-class TestRunInteractive:
-    """Test run_interactive function."""
-
-    def test_run_interactive_basic_input(self):
-        """Test basic input handling in interactive mode."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = ["hello", None]  # One input then exit
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = "Hello response"
-
-        mock_config = MagicMock()
-        mock_config.iterations = 10
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.ui.print_running'), \
-             patch('ayder_cli.ui.print_assistant_message') as mock_print_response:
-
-            run_interactive(permissions={"r"}, iterations=10)
-
-            mock_agent.chat.assert_called_once_with("hello")
-            mock_print_response.assert_called_once_with("Hello response")
-
-    def test_run_interactive_handles_slash_commands(self):
-        """Test that slash commands are dispatched correctly."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = ["/help", None]
-        mock_session.messages = []
-        mock_session.state = MagicMock()
-        
-        mock_agent = MagicMock()
-        mock_config = MagicMock()
-        mock_project_ctx = MagicMock()
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), mock_project_ctx, "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.commands.handle_command') as mock_handle_command:
-
-            run_interactive()
-
-            # Agent.chat should NOT be called for slash commands
-            mock_agent.chat.assert_not_called()
-            # handle_command should be called
-            mock_handle_command.assert_called_once()
-            args = mock_handle_command.call_args[0]
-            assert args[0] == "/help"
-
-    def test_run_interactive_slash_command_adds_message(self):
-        """Test that slash command adding message triggers agent processing."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = ["/implement 1", None]
-        mock_session.messages = []
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = "Task result"
-        mock_config = MagicMock()
-
-        def mock_handle_command(cmd, session_ctx):
-            # Simulate command adding a message
-            mock_session.messages.append({"role": "user", "content": "Implement task"})
-            return True
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.commands.handle_command', side_effect=mock_handle_command), \
-             patch('ayder_cli.ui.print_running'), \
-             patch('ayder_cli.ui.print_assistant_message') as mock_print:
-
-            run_interactive()
-
-            # Agent should be called to process the added message
-            mock_agent.chat.assert_called_once_with("Implement task")
-            mock_print.assert_called_once_with("Task result")
-
-    def test_run_interactive_slash_command_error(self):
-        """Test error handling when processing slash command message."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = ["/implement 1", None]
-        mock_session.messages = []
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.side_effect = Exception("Agent error")
-        mock_config = MagicMock()
-
-        def mock_handle_command(cmd, session_ctx):
-            mock_session.messages.append({"role": "user", "content": "Implement task"})
-            return True
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.commands.handle_command', side_effect=mock_handle_command), \
-             patch('ayder_cli.ui.print_running'), \
-             patch('ayder_cli.ui.draw_box') as mock_draw_box:
-
-            run_interactive()
-
-            mock_draw_box.assert_called_once()
-            assert "Error: Agent error" in mock_draw_box.call_args[0][0]
-
-    def test_run_interactive_empty_input_continues(self):
-        """Test that empty input continues the loop."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        # Empty string should be skipped, then exit
-        mock_session.get_input.side_effect = ["", None]
-        
-        mock_agent = MagicMock()
-        mock_config = MagicMock()
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.ui.print_running'):
-
-            run_interactive()
-
-            # Agent.chat should NOT be called for empty input
-            mock_agent.chat.assert_not_called()
-
-    def test_run_interactive_error_handling(self):
-        """Test error handling in interactive mode."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = ["trigger error", None]
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.side_effect = Exception("Test error")
-
-        mock_config = MagicMock()
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.ui.print_running'), \
-             patch('ayder_cli.ui.draw_box') as mock_draw_box:
-
-            run_interactive()
-
-            mock_draw_box.assert_called_once()
-            args = mock_draw_box.call_args
-            assert "Error: Test error" in args[0][0]
-
-    def test_run_interactive_multiple_messages(self):
-        """Test multiple messages in interactive session."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = ["msg1", "msg2", None]
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.side_effect = ["resp1", "resp2"]
-
-        mock_config = MagicMock()
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent', return_value=mock_agent), \
-             patch('ayder_cli.ui.print_running'), \
-             patch('ayder_cli.ui.print_assistant_message') as mock_print_response:
-
-            run_interactive()
-
-            assert mock_agent.chat.call_count == 2
-            assert mock_print_response.call_count == 2
-
-    def test_run_interactive_session_start_called(self):
-        """Test that session.start() is called on initialization."""
-        from ayder_cli.cli_runner import run_interactive
-
-        mock_session = MagicMock()
-        mock_session.get_input.side_effect = [None]
-        mock_session.start = MagicMock()
-
-        mock_config = MagicMock()
-
-        with patch('ayder_cli.cli_runner._build_services', return_value=(
-            mock_config, MagicMock(), MagicMock(), MagicMock(), "system prompt", MagicMock(), MagicMock()
-        )), \
-             patch('ayder_cli.client.ChatSession', return_value=mock_session), \
-             patch('ayder_cli.client.Agent'):
-
-            run_interactive()
-
-            mock_session.start.assert_called_once()
 
 
 class TestMainFunction:
@@ -823,7 +553,7 @@ class TestMainTaskOptions:
 
 
 class TestMainTUIAndInteractive:
-    """Test main() function TUI and interactive modes."""
+    """Test main() function TUI mode."""
 
     def test_main_default_tui_mode(self):
         """Test default (no flags) launches TUI mode."""
@@ -836,66 +566,6 @@ class TestMainTUIAndInteractive:
             main()
 
             mock_run_tui.assert_called_once()
-
-    def test_main_cli_flag_launches_repl(self):
-        """Test --cli flag launches interactive REPL."""
-        from ayder_cli.cli import main
-
-        with patch.object(sys, 'argv', ['ayder', '--cli']), \
-             patch.object(sys.stdin, 'isatty', return_value=True), \
-             patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive:
-
-            main()
-
-            mock_run_interactive.assert_called_once()
-
-    def test_main_auto_detect_piped_input(self):
-        """Test auto-detection of piped input."""
-        from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False
-        )
-
-        with patch.object(sys, 'argv', ['ayder']), \
-             patch.object(sys.stdin, 'isatty', return_value=False), \
-             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('sys.stdin.read', return_value="Piped input"), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
-
-            with pytest.raises(SystemExit):
-                main()
-
-            # Should call run_command with piped input
-            mock_run.assert_called_once()
-            assert "Piped input" in mock_run.call_args[0][0]
-
-    def test_main_interactive_mode_with_cli_flag(self):
-        """Test --cli flag launches interactive REPL mode."""
-        from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False
-        )
-
-        with patch.object(sys, 'argv', ['ayder', '--cli']), \
-             patch.object(sys.stdin, 'isatty', return_value=True), \
-             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_interactive') as mock_run_interactive:
-
-            main()
-
-            mock_run_interactive.assert_called_once()
 
 
 class TestModuleEntryPoint:
@@ -918,7 +588,7 @@ class TestCreateParser:
     def test_parser_version_flag(self):
         """Test --version flag is configured."""
         from ayder_cli.cli import create_parser
-        from ayder_cli.banner import get_app_version
+        from ayder_cli.version import get_app_version
 
         parser = create_parser()
         
@@ -931,14 +601,6 @@ class TestCreateParser:
         
         assert version_action is not None
         assert version_action.version == get_app_version()
-
-    def test_parser_cli_flag(self):
-        """Test --cli flag is configured."""
-        from ayder_cli.cli import create_parser
-
-        parser = create_parser()
-        args = parser.parse_args(['--cli'])
-        assert args.cli is True
 
     def test_parser_file_flag(self):
         """Test --file flag is configured."""
@@ -1050,49 +712,3 @@ class TestCreateParser:
         args = parser.parse_args([])
         assert args.command is None
 
-    def test_parser_file_and_stdin_mutually_exclusive(self):
-        """Test that --file and --stdin are mutually exclusive."""
-        from ayder_cli.cli import create_parser
-
-        parser = create_parser()
-        
-        # Both should raise error
-        with pytest.raises(SystemExit):
-            parser.parse_args(['--file', 'test.txt', '--stdin'])
-
-
-class TestReadInputAdditional:
-    """Additional tests for read_input function."""
-
-    def test_read_input_stdin_with_command(self):
-        """Test reading from stdin combined with command."""
-        from ayder_cli.cli import read_input
-
-        args = MagicMock()
-        args.file = None
-        args.stdin = True
-        args.command = "Explain this"
-        
-        with patch('sys.stdin') as mock_stdin:
-            mock_stdin.isatty.return_value = False
-            mock_stdin.read.return_value = "Some context from stdin"
-            
-            result = read_input(args)
-            assert "Context:\nSome context from stdin" in result
-            assert "Question: Explain this" in result
-
-    def test_read_input_context_only_no_command(self):
-        """Test reading only context (no command)."""
-        from ayder_cli.cli import read_input
-
-        args = MagicMock()
-        args.file = None
-        args.stdin = True
-        args.command = None
-        
-        with patch('sys.stdin') as mock_stdin:
-            mock_stdin.isatty.return_value = False
-            mock_stdin.read.return_value = "Just context"
-            
-            result = read_input(args)
-            assert result == "Just context"

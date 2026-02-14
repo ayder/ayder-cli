@@ -9,7 +9,7 @@ This module provides:
 import asyncio
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from ayder_cli.banner import print_welcome_banner
+from ayder_cli.ui import print_welcome_banner
 from ayder_cli.services.llm import LLMProvider
 from ayder_cli.services.tools.executor import ToolExecutor
 from ayder_cli.checkpoint_manager import CheckpointManager
@@ -28,7 +28,7 @@ async def call_llm_async(
     messages: list,
     model: str,
     tools: list = None,
-    num_ctx: int = 65536
+    num_ctx: int = 65536,
 ) -> dict:
     """
     Async wrapper for LLM calls.
@@ -57,10 +57,15 @@ async def call_llm_async(
 class ChatSession:
     """Manage conversation state, history, and user input."""
 
-    def __init__(self, config, system_prompt: str,
-                 permissions: set = None, iterations: int = 50,
-                 checkpoint_manager: CheckpointManager = None,
-                 memory_manager: MemoryManager = None):
+    def __init__(
+        self,
+        config,
+        system_prompt: str,
+        permissions: set = None,
+        iterations: int = 50,
+        checkpoint_manager: CheckpointManager = None,
+        memory_manager: MemoryManager = None,
+    ):
         """Initialize chat session.
 
         Args:
@@ -96,11 +101,13 @@ class ChatSession:
             history=FileHistory(history_file),
             enable_history_search=True,
             multiline=False,
-            vi_mode=False  # Emacs mode is default
+            vi_mode=False,  # Emacs mode is default
         )
 
         # Print welcome banner
-        model_name = self.config.model if hasattr(self.config, "model") else "qwen3-coder:latest"
+        model_name = (
+            self.config.model if hasattr(self.config, "model") else "qwen3-coder:latest"
+        )
         print_welcome_banner(model_name, str(Path.cwd()))
 
     def add_message(self, role: str, content: str, **kwargs):
@@ -177,7 +184,9 @@ class ChatSession:
 class Agent:
     """Handle OpenAI/Ollama API interaction and tool execution."""
 
-    def __init__(self, llm_provider: LLMProvider, tools: ToolExecutor, session: ChatSession):
+    def __init__(
+        self, llm_provider: LLMProvider, tools: ToolExecutor, session: ChatSession
+    ):
         """Initialize agent.
 
         Args:
@@ -205,16 +214,16 @@ class Agent:
         # Get config from session
         cfg = self.session.config
         model = self.session.state.get("model", cfg.model)
-        
+
         # Build loop configuration
         loop_config = LoopConfig(
             max_iterations=self.session.state.get("iterations", 50),
             model=model,
             num_ctx=cfg.num_ctx,
             verbose=self.session.state.get("verbose", False),
-            permissions=self.session.state.get("permissions", set())
+            permissions=self.session.state.get("permissions", set()),
         )
-        
+
         # Create and run chat loop
         chat_loop = ChatLoop(
             llm_provider=self.llm,
@@ -222,7 +231,7 @@ class Agent:
             session=self.session,
             config=loop_config,
             checkpoint_manager=self.session.checkpoint_manager,
-            memory_manager=self.session.memory_manager
+            memory_manager=self.session.memory_manager,
         )
-        
+
         return chat_loop.run(user_input)

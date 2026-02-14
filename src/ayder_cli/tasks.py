@@ -83,7 +83,7 @@ def create_task(project_ctx: ProjectContext, title: str, description: str = ""):
 
 ## Description
 
-{description if description else 'No description provided.'}
+{description if description else "No description provided."}
 """
 
     path.write_text(content, encoding="utf-8")
@@ -116,7 +116,9 @@ def _parse_title(filepath):
     return Path(filepath).name
 
 
-def list_tasks(project_ctx: ProjectContext, format: str = "list", status: str = "pending"):
+def list_tasks(
+    project_ctx: ProjectContext, format: str = "list", status: str = "pending"
+):
     """List tasks in .ayder/tasks/ (current directory), filtered by status.
 
     Args:
@@ -181,9 +183,11 @@ def list_tasks(project_ctx: ProjectContext, format: str = "list", status: str = 
 
     lines = [header, sep]
     for tid, title, status in tasks:
-        truncated = title if len(title) <= name_w else title[:name_w - 2] + ".."
+        truncated = title if len(title) <= name_w else title[: name_w - 2] + ".."
         task_label = f"TASK-{tid:03d}"
-        lines.append(f"  {task_label:<{id_w}} | {truncated:<{name_w}} | {status:<{stat_w}}")
+        lines.append(
+            f"  {task_label:<{id_w}} | {truncated:<{name_w}} | {status:<{stat_w}}"
+        )
 
     return ToolSuccess("\n".join(lines))
 
@@ -261,9 +265,7 @@ def _update_task_status(project_ctx: ProjectContext, task_id, status):
 
         # Replace the status line
         updated_content = re.sub(
-            r"(-\s+\*\*Status:\*\*\s+)(.+)",
-            rf"\1{status}",
-            content
+            r"(-\s+\*\*Status:\*\*\s+)(.+)", rf"\1{status}", content
         )
 
         path.write_text(updated_content, encoding="utf-8")

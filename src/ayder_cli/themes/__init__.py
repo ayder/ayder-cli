@@ -13,11 +13,11 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Theme:
     """A TUI theme containing CSS styles and metadata."""
-    
+
     name: str
     description: str
     css: str
-    
+
     def __post_init__(self):
         # Validate that CSS is not empty
         if not self.css or not self.css.strip():

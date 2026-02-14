@@ -34,10 +34,12 @@ def prepare_new_content(fname, args, project_ctx=None):
                 return ""
 
             try:
-                project = project_ctx if project_ctx is not None else ProjectContext(".")
+                project = (
+                    project_ctx if project_ctx is not None else ProjectContext(".")
+                )
                 abs_path = project.validate_path(file_path)
 
-                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
                 return content.replace(old_string, new_string)
             except ValueError as e:
@@ -57,15 +59,17 @@ def prepare_new_content(fname, args, project_ctx=None):
                 return ""
 
             try:
-                project = project_ctx if project_ctx is not None else ProjectContext(".")
+                project = (
+                    project_ctx if project_ctx is not None else ProjectContext(".")
+                )
                 abs_path = project.validate_path(file_path)
 
-                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
 
                 idx = min(max(int(line_number) - 1, 0), len(lines))
-                if content and not content.endswith('\n'):
-                    content += '\n'
+                if content and not content.endswith("\n"):
+                    content += "\n"
                 lines.insert(idx, content)
                 return "".join(lines)
             except (ValueError, IOError, OSError) as e:
@@ -80,10 +84,12 @@ def prepare_new_content(fname, args, project_ctx=None):
                 return ""
 
             try:
-                project = project_ctx if project_ctx is not None else ProjectContext(".")
+                project = (
+                    project_ctx if project_ctx is not None else ProjectContext(".")
+                )
                 abs_path = project.validate_path(file_path)
 
-                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
 
                 idx = int(line_number) - 1

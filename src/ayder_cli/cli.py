@@ -6,55 +6,44 @@ This module handles argument parsing and delegates to cli_runner.py for executio
 import argparse
 import sys
 from pathlib import Path
-from ayder_cli.banner import get_app_version
+from ayder_cli.version import get_app_version
 
 
 def create_parser():
     """Create and configure the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="ayder",
-        description="AI-powered CLI assistant"
-    )
-
-    # Boolean flag for CLI (REPL) mode
-    parser.add_argument(
-        "--cli",
-        action="store_true",
-        help="Launch classic CLI REPL mode instead of TUI"
+        prog="ayder", description="AI-powered CLI assistant"
     )
 
     # Task-related CLI options
     parser.add_argument(
-        "--tasks",
-        action="store_true",
-        help="List all saved tasks and exit"
+        "--tasks", action="store_true", help="List all saved tasks and exit"
     )
     parser.add_argument(
         "--implement",
         type=str,
         metavar="TASK",
         default=None,
-        help="Implement a task by ID or name and exit (e.g., --implement 1 or --implement auth)"
+        help="Implement a task by ID or name and exit (e.g., --implement 1 or --implement auth)",
     )
     parser.add_argument(
         "--implement-all",
         action="store_true",
-        help="Implement all pending tasks sequentially and exit"
+        help="Implement all pending tasks sequentially and exit",
     )
 
     # Mutually exclusive group for file and stdin
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument(
-        "--file", "-f",
+        "--file",
+        "-f",
         type=str,
         default=None,
         metavar="FILE",
-        help="Read prompt from file"
+        help="Read prompt from file",
     )
     input_group.add_argument(
-        "--stdin",
-        action="store_true",
-        help="Read prompt from stdin"
+        "--stdin", action="store_true", help="Read prompt from stdin"
     )
 
     # Permission flags (Unix-style: r=read, w=write, x=execute)
@@ -62,58 +51,78 @@ def create_parser():
         "-r",
         action="store_true",
         default=True,
-        help="Auto-approve read tools (default: enabled)"
+        help="Auto-approve read tools (default: enabled)",
     )
     parser.add_argument(
         "-w",
         action="store_true",
-        help="Auto-approve write tools (write_file, replace_string, create_task, etc.)"
+        help="Auto-approve write tools (write_file, replace_string, create_task, etc.)",
     )
     parser.add_argument(
-        "-x",
-        action="store_true",
-        help="Auto-approve execute tools (run_shell_command)"
+        "-x", action="store_true", help="Auto-approve execute tools (run_shell_command)"
     )
 
     # Max agentic iterations (overrides config.max_iterations)
     parser.add_argument(
-        "-I", "--iterations",
+        "-I",
+        "--iterations",
         type=int,
         default=None,
-        help="Max agentic iterations per message (default: from config, 50)"
+        help="Max agentic iterations per message (default: from config, 50)",
     )
 
     # Version flag
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=get_app_version()
-    )
+    parser.add_argument("--version", action="version", version=get_app_version())
 
     # Positional command argument
     parser.add_argument(
-        "command",
-        nargs="?",
-        default=None,
-        help="Command to execute directly"
+        "command", nargs="?", default=None, help="Command to execute directly"
     )
 
     return parser
 
 
-def read_input(args) -> str:
-    """Build prompt from file/stdin/command combinations.
+def main():
+    """Main entry point for the CLI."""
+    from ayder_cli.cli_runner import (
+        run_command,
+        _run_tasks_cli,
+        _run_implement_cli,
+        _run_implement_all_cli,
+    )
 
-    Args:
-        args: Parsed command-line arguments
+    parser = create_parser()
+    args = parser.parse_args()
 
-    Returns:
-        Constructed prompt string or None if no input provided
+    # Build granted permissions set from flags
+    # Read tools are auto-approved by default (use --no-r to disable)
+    granted = {"r"}
+    if args.w:
+        granted.add("w")
+    if args.x:
+        granted.add("x")
 
-    Exits:
-        - Exit code 1 if file not found
-        - Exit code 1 if --stdin used without piped input
-    """
+    # Resolve iterations: CLI flag overrides config value
+    if args.iterations is None:
+        from ayder_cli.core.config import load_config
+
+        iterations = load_config().max_iterations
+    else:
+        iterations = args.iterations
+
+    # Handle task-related CLI options
+    if args.tasks:
+        sys.exit(_run_tasks_cli())
+    if args.implement:
+        sys.exit(
+            _run_implement_cli(
+                args.implement, permissions=granted, iterations=iterations
+            )
+        )
+    if args.implement_all:
+        sys.exit(_run_implement_all_cli(permissions=granted, iterations=iterations))
+
+    # Handle file/stdin input
     context = None
     question = args.command
 
@@ -133,66 +142,19 @@ def read_input(args) -> str:
         context = sys.stdin.read()
 
     if context is not None and question:
-        return f"Context:\n{context}\n\nQuestion: {question}"
+        prompt = f"Context:\n{context}\n\nQuestion: {question}"
     elif context is not None:
-        return context
+        prompt = context
     elif question:
-        return question
+        prompt = question
     else:
-        return None
+        # Default: TUI mode
+        from ayder_cli.tui import run_tui
 
-
-def main():
-    """Main entry point for the CLI."""
-    from ayder_cli.cli_runner import (
-        run_interactive, run_command,
-        _run_tasks_cli, _run_implement_cli, _run_implement_all_cli
-    )
-
-    parser = create_parser()
-    args = parser.parse_args()
-
-    # Auto-detect piped input: if stdin is not a TTY and no explicit input method specified,
-    # automatically enable --stdin mode for better UX
-    if not sys.stdin.isatty() and not args.stdin and not args.file and not args.cli:
-        args.stdin = True
-
-    # Build granted permissions set from flags
-    # Read tools are auto-approved by default (use --no-r to disable)
-    granted = {"r"}
-    if args.w:
-        granted.add("w")
-    if args.x:
-        granted.add("x")
-
-    # Resolve iterations: CLI flag overrides config value
-    if args.iterations is None:
-        from ayder_cli.core.config import load_config
-        iterations = load_config().max_iterations
-    else:
-        iterations = args.iterations
-
-    # Handle task-related CLI options
-    if args.tasks:
-        sys.exit(_run_tasks_cli())
-    if args.implement:
-        sys.exit(_run_implement_cli(args.implement, permissions=granted, iterations=iterations))
-    if args.implement_all:
-        sys.exit(_run_implement_all_cli(permissions=granted, iterations=iterations))
-
-    # Handle file/stdin input
-    prompt = read_input(args)
-    if prompt:
-        sys.exit(run_command(prompt, permissions=granted, iterations=iterations))
-
-    # --cli flag: classic CLI REPL mode
-    if args.cli:
-        run_interactive(permissions=granted, iterations=iterations)
+        run_tui(permissions=granted, iterations=iterations)
         return
 
-    # Default: TUI mode
-    from ayder_cli.tui import run_tui
-    run_tui(permissions=granted, iterations=iterations)
+    sys.exit(run_command(prompt, permissions=granted, iterations=iterations))
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
         title: str,
         description: str,
         diff_content: str = None,
-        action_name: str = "Confirm"
+        action_name: str = "Confirm",
     ):
         super().__init__()
         self.title_text = title
@@ -49,14 +49,11 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
             list_content = self._render_list()
             yield Static(list_content, id="option-list", classes="option-list")
 
-            yield Input(
-                placeholder="Type your instructions...",
-                id="instruction-input"
-            )
+            yield Input(placeholder="Type your instructions...", id="instruction-input")
 
             yield Label(
                 "↑↓ navigate, PgUp/PgDn scroll diff, Enter select, Y/N shortcut, Esc cancel",
-                classes="hint"
+                classes="hint",
             )
 
     def _render_list(self) -> Text:
@@ -79,16 +76,16 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
 
     def _render_diff(self) -> Text:
         """Render diff content with syntax highlighting."""
-        lines = self.diff_content.split('\n')
+        lines = self.diff_content.split("\n")
         result = Text()
 
         for line in lines:
-            line = line.rstrip('\n')
-            if line.startswith('@@'):
+            line = line.rstrip("\n")
+            if line.startswith("@@"):
                 result.append(line + "\n", style="cyan")
-            elif line.startswith('-') and not line.startswith('---'):
+            elif line.startswith("-") and not line.startswith("---"):
                 result.append(line + "\n", style="red")
-            elif line.startswith('+') and not line.startswith('+++'):
+            elif line.startswith("+") and not line.startswith("+++"):
                 result.append(line + "\n", style="green")
             else:
                 result.append(line + "\n", style="dim")
@@ -174,18 +171,23 @@ class CLIPermissionScreen(ModalScreen[set | None]):
         self.selected_index = 0
         self._items = [
             ("r", "Read", "Auto-approve read tools (always enabled)"),
-            ("w", "Write", "Auto-approve write tools (write_file, replace_string, ...)"),
+            (
+                "w",
+                "Write",
+                "Auto-approve write tools (write_file, replace_string, ...)",
+            ),
             ("x", "Execute", "Auto-approve execute tools (run_shell_command, ...)"),
         ]
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("? Permissions", classes="prompt")
-            yield Label("Toggle which tool categories are auto-approved", classes="description")
+            yield Label(
+                "Toggle which tool categories are auto-approved", classes="description"
+            )
             yield Static(self._render_list(), id="perm-list", classes="option-list")
             yield Label(
-                "↑↓ navigate, Space/Enter toggle, Esc apply & close",
-                classes="hint"
+                "↑↓ navigate, Space/Enter toggle, Esc apply & close", classes="hint"
             )
 
     def _render_list(self) -> Text:
@@ -204,7 +206,9 @@ class CLIPermissionScreen(ModalScreen[set | None]):
             # Arrow indicator
             if is_selected:
                 result.append(" → ", style="bold cyan")
-                result.append(f"{checkbox} ", style="bold green" if is_enabled else "bold dim")
+                result.append(
+                    f"{checkbox} ", style="bold green" if is_enabled else "bold dim"
+                )
                 result.append(f"{label}", style="bold white")
                 result.append(f"  {desc}", style="dim")
             else:
@@ -279,7 +283,7 @@ class CLISelectScreen(ModalScreen[str | None]):
         title: str,
         items: list[tuple[str, str]],
         current: str = "",
-        description: str = ""
+        description: str = "",
     ):
         """
         Initialize the select screen.
@@ -315,7 +319,9 @@ class CLISelectScreen(ModalScreen[str | None]):
             list_content = self._render_list()
             yield Static(list_content, id="select-list", classes="select-list")
 
-            yield Label("↑↓ to navigate, Enter to select, Esc to cancel", classes="hint")
+            yield Label(
+                "↑↓ to navigate, Enter to select, Esc to cancel", classes="hint"
+            )
 
     def _render_list(self) -> Text:
         """Render the selectable list with current highlight."""

@@ -247,4 +247,6 @@ Please acknowledge and continue the task from where we left off."""
 # REASON: Fallback when no memory was saved before the checkpoint reset.
 # Informs the user that the context was reset but no previous state exists.
 
-MEMORY_NO_MEMORY_MESSAGE = """Continuing task after context reset. No previous memory was saved."""
+MEMORY_NO_MEMORY_MESSAGE = (
+    """Continuing task after context reset. No previous memory was saved."""
+)

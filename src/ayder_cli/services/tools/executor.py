@@ -11,8 +11,9 @@ from ayder_cli.ui import (
     describe_tool_action,
     print_tool_result,
     print_file_content,
+    print_tool_call,
     confirm_with_diff,
-    print_tool_skipped
+    print_tool_skipped,
 )
 
 # Tools that end the agentic loop after execution (generated from ToolDefinitions)
@@ -35,9 +36,17 @@ class ToolExecutor:
                             Defaults to TERMINAL_TOOLS if None.
         """
         self.tool_registry = tool_registry
-        self.terminal_tools = terminal_tools if terminal_tools is not None else TERMINAL_TOOLS
+        self.terminal_tools = (
+            terminal_tools if terminal_tools is not None else TERMINAL_TOOLS
+        )
 
-    def execute_tool_calls(self, tool_calls: List[Any], session: Any, granted_permissions: Set[str] = None, verbose: bool = False) -> bool:
+    def execute_tool_calls(
+        self,
+        tool_calls: List[Any],
+        session: Any,
+        granted_permissions: Set[str] = None,
+        verbose: bool = False,
+    ) -> bool:
         """
         Execute a list of OpenAI tool calls.
 
@@ -58,16 +67,22 @@ class ToolExecutor:
             if result_msg is None:
                 # Tool was declined
                 return True
-            
+
             session.append_raw(result_msg)
-            
+
             # Check if terminal tool
             if tc.function.name in self.terminal_tools:
                 return True
-        
+
         return False
 
-    def execute_custom_calls(self, custom_calls: List[Dict[str, Any]], session: Any, granted_permissions: Set[str] = None, verbose: bool = False) -> bool:
+    def execute_custom_calls(
+        self,
+        custom_calls: List[Dict[str, Any]],
+        session: Any,
+        granted_permissions: Set[str] = None,
+        verbose: bool = False,
+    ) -> bool:
         """
         Execute a list of custom parsed tool calls (XML).
 
@@ -84,13 +99,17 @@ class ToolExecutor:
             granted_permissions = set()
 
         for call in custom_calls:
-            fname = call['name']
-            fargs = call['arguments']
+            fname = call["name"]
+            fargs = call["arguments"]
 
-            outcome, value = self._execute_single_call(fname, fargs, granted_permissions, verbose)
+            outcome, value = self._execute_single_call(
+                fname, fargs, granted_permissions, verbose
+            )
 
             if outcome == "error":
-                session.add_message("user", f"Validation Error for tool '{fname}': {value}")
+                session.add_message(
+                    "user", f"Validation Error for tool '{fname}': {value}"
+                )
                 return True
             if outcome == "declined":
                 return True
@@ -102,8 +121,11 @@ class ToolExecutor:
         return False
 
     def _execute_single_call(
-        self, tool_name: str, raw_args: dict,
-        granted_permissions: Set[str], verbose: bool
+        self,
+        tool_name: str,
+        raw_args: dict,
+        granted_permissions: Set[str],
+        verbose: bool,
     ) -> Tuple[str, Optional[str]]:
         """
         Unified tool execution: normalize → validate → confirm → execute.
@@ -123,6 +145,10 @@ class ToolExecutor:
         if not is_valid:
             return ("error", error_msg)
 
+        # Print the tool call before confirmation
+        args_json = json.dumps(normalized, indent=2)
+        print_tool_call(tool_name, args_json)
+
         description = describe_tool_action(tool_name, normalized)
 
         # Check if tool is auto-approved by permission flags
@@ -131,9 +157,16 @@ class ToolExecutor:
 
         if auto_approved:
             confirmed = True
-        elif tool_name in ("write_file", "replace_string", "insert_line", "delete_line"):
+        elif tool_name in (
+            "write_file",
+            "replace_string",
+            "insert_line",
+            "delete_line",
+        ):
             file_path = normalized.get("file_path", "")
-            new_content = prepare_new_content(tool_name, normalized, self.tool_registry.project_ctx)
+            new_content = prepare_new_content(
+                tool_name, normalized, self.tool_registry.project_ctx
+            )
             confirmed = confirm_with_diff(file_path, new_content, description)
         else:
             confirmed = confirm_tool_call(description)
@@ -150,7 +183,9 @@ class ToolExecutor:
 
         return ("success", str(result))
 
-    def _handle_tool_call(self, tool_call: Any, granted_permissions: Set[str], verbose: bool) -> Optional[Dict[str, Any]]:
+    def _handle_tool_call(
+        self, tool_call: Any, granted_permissions: Set[str], verbose: bool
+    ) -> Optional[Dict[str, Any]]:
         """
         Handle a single OpenAI-format tool call. Thin wrapper around _execute_single_call.
 
@@ -161,7 +196,9 @@ class ToolExecutor:
         fargs = tool_call.function.arguments
         parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
 
-        outcome, value = self._execute_single_call(fname, parsed, granted_permissions, verbose)
+        outcome, value = self._execute_single_call(
+            fname, parsed, granted_permissions, verbose
+        )
 
         if outcome == "declined":
             return None

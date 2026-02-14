@@ -146,7 +146,6 @@ tests/
 │   ├── test_tasks.py               # Task tool tests (43)
 │   └── test_utils.py               # Tool utils tests (19)
 └── ui/
-    ├── test_cli_tui.py             # CLI TUI tests (8)
     ├── test_diff_preview.py        # Diff preview tests (23)
     ├── test_tui_helpers.py         # TUI helpers tests (8) - NEW
     ├── test_ui.py                  # UI tests (44)

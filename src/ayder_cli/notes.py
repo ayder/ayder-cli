@@ -29,7 +29,9 @@ def _title_to_slug(title: str) -> str:
     return slug or "untitled"
 
 
-def create_note(project_ctx: ProjectContext, title: str, content: str, tags: str = None) -> str:
+def create_note(
+    project_ctx: ProjectContext, title: str, content: str, tags: str = None
+) -> str:
     """Create a markdown note in .ayder/notes/.
 
     Args:
@@ -59,7 +61,7 @@ def create_note(project_ctx: ProjectContext, title: str, content: str, tags: str
         # Build YAML frontmatter
         frontmatter_lines = [
             "---",
-            f"title: \"{title}\"",
+            f'title: "{title}"',
             f"date: {now}",
         ]
         if tag_list:

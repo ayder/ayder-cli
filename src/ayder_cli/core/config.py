@@ -38,10 +38,12 @@ verbose = {verbose_str}
 max_iterations = {max_iterations}
 """
 
+
 class Config(BaseModel):
     """Unified configuration model with validation."""
+
     model_config = ConfigDict(frozen=True, populate_by_name=True)
-    
+
     base_url: str = Field(default="http://localhost:11434/v1")
     api_key: str = Field(default="ollama")
     model: str = Field(default="qwen3-coder:latest")
@@ -51,20 +53,20 @@ class Config(BaseModel):
     max_background_processes: int = Field(default=5)
     max_iterations: int = Field(default=50)
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def flatten_nested_sections(cls, data: Any) -> Any:
         """Flatten nested TOML sections ([llm], [editor], [ui]) into flat fields."""
         if not isinstance(data, dict):
             return data
-        
+
         new_data = data.copy()
         # Pull values from known sections
-        for section in ['llm', 'editor', 'ui', 'agent']:
+        for section in ["llm", "editor", "ui", "agent"]:
             if section in data and isinstance(data[section], dict):
                 section_data = new_data.pop(section)
                 new_data.update(section_data)
-        
+
         return new_data
 
     @field_validator("num_ctx")

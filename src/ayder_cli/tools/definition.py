@@ -25,7 +25,6 @@ class ToolDefinition:
     is_terminal: bool = False
     safe_mode_blocked: bool = False
 
-
     # ---- UI ----
     description_template: Optional[str] = None
 
@@ -76,7 +75,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             },
         },
         permission="r",
-
         parameter_aliases=(
             ("dir", "directory"),
             ("path", "directory"),
@@ -108,7 +106,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["file_path"],
         },
         permission="r",
-
         parameter_aliases=_FILE_PATH_ALIASES,
         path_parameters=("file_path",),
     ),
@@ -134,7 +131,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["file_path", "content"],
         },
         permission="w",
-
         safe_mode_blocked=True,
         parameter_aliases=_FILE_PATH_ALIASES,
         path_parameters=("file_path",),
@@ -164,7 +160,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["file_path", "old_string", "new_string"],
         },
         permission="w",
-
         safe_mode_blocked=True,
         parameter_aliases=_FILE_PATH_ALIASES,
         path_parameters=("file_path",),
@@ -223,7 +218,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["pattern"],
         },
         permission="r",
-
         path_parameters=("directory",),
     ),
     # get_project_structure
@@ -416,7 +410,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["command"],
         },
         permission="x",
-
         safe_mode_blocked=True,
     ),
     # ---- Background Processes ----
@@ -551,8 +544,132 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         permission="w",
         safe_mode_blocked=False,
     ),
-
+    # ---- Virtual Environment Management ----
+    # create_virtualenv
+    ToolDefinition(
+        name="create_virtualenv",
+        description="Create a new Python virtual environment in the project directory",
+        description_template="Virtual environment {env_name} will be created",
+        func_ref="ayder_cli.tools.impl:create_virtualenv",
+        parameters={
+            "type": "object",
+            "properties": {
+                "env_name": {
+                    "type": "string",
+                    "description": "Name of the virtual environment directory (default: .venv)",
+                    "default": ".venv",
+                },
+                "python_version": {
+                    "type": "string",
+                    "description": "Python version to use (default: 3.12)",
+                    "default": "3.12",
+                },
+            },
+            "required": [],
+        },
+        permission="x",
+        safe_mode_blocked=False,
+        parameter_aliases=(
+            ("name", "env_name"),
+            ("venv_name", "env_name"),
+        ),
+        path_parameters=("env_name",),
+    ),
+    # install_requirements
+    ToolDefinition(
+        name="install_requirements",
+        description="Install project dependencies from requirements.txt or pyproject.toml into the virtual environment",
+        description_template="Dependencies will be installed from {requirements_file} into {env_name}",
+        func_ref="ayder_cli.tools.impl:install_requirements",
+        parameters={
+            "type": "object",
+            "properties": {
+                "requirements_file": {
+                    "type": "string",
+                    "description": "Path to requirements file (default: requirements.txt)",
+                    "default": "requirements.txt",
+                },
+                "env_name": {
+                    "type": "string",
+                    "description": "Name of the virtual environment (default: .venv)",
+                    "default": ".venv",
+                },
+            },
+            "required": [],
+        },
+        permission="x",
+        safe_mode_blocked=False,
+        parameter_aliases=(
+            ("req_file", "requirements_file"),
+            ("reqs", "requirements_file"),
+        ),
+        path_parameters=("requirements_file", "env_name"),
+    ),
+    # list_virtualenvs
+    ToolDefinition(
+        name="list_virtualenvs",
+        description="List all virtual environments in the project directory",
+        description_template="Virtual environments will be listed",
+        func_ref="ayder_cli.tools.impl:list_virtualenvs",
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+        permission="r",
+        safe_mode_blocked=False,
+    ),
+    # activate_virtualenv
+    ToolDefinition(
+        name="activate_virtualenv",
+        description="Get activation instructions for a virtual environment",
+        description_template="Activation instructions for {env_name} will be provided",
+        func_ref="ayder_cli.tools.impl:activate_virtualenv",
+        parameters={
+            "type": "object",
+            "properties": {
+                "env_name": {
+                    "type": "string",
+                    "description": "Name of the virtual environment (default: .venv)",
+                    "default": ".venv",
+                },
+            },
+            "required": [],
+        },
+        permission="r",
+        safe_mode_blocked=False,
+        parameter_aliases=(("name", "env_name"),),
+        path_parameters=("env_name",),
+    ),
+    # remove_virtualenv
+    ToolDefinition(
+        name="remove_virtualenv",
+        description="Remove/uninstall a virtual environment",
+        description_template="Virtual environment {env_name} will be removed",
+        func_ref="ayder_cli.tools.impl:remove_virtualenv",
+        parameters={
+            "type": "object",
+            "properties": {
+                "env_name": {
+                    "type": "string",
+                    "description": "Name of the virtual environment to remove (default: .venv)",
+                    "default": ".venv",
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Skip confirmation prompt and remove directly (default: false)",
+                    "default": False,
+                },
+            },
+            "required": [],
+        },
+        permission="x",
+        safe_mode_blocked=False,
+        parameter_aliases=(("name", "env_name"),),
+        path_parameters=("env_name",),
+    ),
 )
 
 # Lookup by name
-TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {td.name: td for td in TOOL_DEFINITIONS}
+TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {
+    td.name: td for td in TOOL_DEFINITIONS
+}

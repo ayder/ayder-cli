@@ -11,7 +11,13 @@ theme = "claude"  # or "original", or another theme name
 from pathlib import Path
 from typing import Optional
 
-from ayder_cli.themes import Theme, get_theme, get_default_theme, list_themes, get_theme_names
+from ayder_cli.themes import (
+    Theme,
+    get_theme,
+    get_default_theme,
+    list_themes,
+    get_theme_names,
+)
 from ayder_cli.core.config import Config, load_config
 
 
@@ -74,8 +80,10 @@ class ThemeManager:
             available = get_theme_names()
             if theme_name != "claude":
                 # Only warn for non-default themes
-                print(f"[ThemeManager] Warning: Theme '{theme_name}' not found. "
-                      f"Available: {', '.join(available)}. Using default.")
+                print(
+                    f"[ThemeManager] Warning: Theme '{theme_name}' not found. "
+                    f"Available: {', '.join(available)}. Using default."
+                )
             theme = get_default_theme()
 
         self._current_theme = theme

@@ -57,6 +57,8 @@ class TestToolDefinitions:
             "kill_background_process", "list_background_processes",
             "list_tasks", "show_task",
             "manage_environment_vars",
+            "create_virtualenv", "install_requirements",
+            "list_virtualenvs", "activate_virtualenv", "remove_virtualenv",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
         assert names == expected_tools

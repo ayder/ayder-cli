@@ -54,7 +54,9 @@ class TuiCallbacks(Protocol):
     def on_tool_complete(self, call_id: str, result: str) -> None: ...
     def on_tools_cleanup(self) -> None: ...
     def on_system_message(self, text: str) -> None: ...
-    async def request_confirmation(self, name: str, arguments: dict) -> object | None: ...
+    async def request_confirmation(
+        self, name: str, arguments: dict
+    ) -> object | None: ...
     def is_cancelled(self) -> bool: ...
 
 
@@ -237,7 +239,11 @@ class TuiChatLoop:
                 )
             elif confirm is not None and getattr(confirm, "action", None) == "instruct":
                 tool_results.append(
-                    {"tool_call_id": tc.id, "name": name, "result": "Tool call denied by user."}
+                    {
+                        "tool_call_id": tc.id,
+                        "name": name,
+                        "result": "Tool call denied by user.",
+                    }
                 )
                 custom_instructions = getattr(confirm, "instructions", None)
                 # Skip remaining
@@ -253,7 +259,11 @@ class TuiChatLoop:
                 break
             else:
                 tool_results.append(
-                    {"tool_call_id": tc.id, "name": name, "result": "Tool call denied by user."}
+                    {
+                        "tool_call_id": tc.id,
+                        "name": name,
+                        "result": "Tool call denied by user.",
+                    }
                 )
 
         # Process results → append tool messages
@@ -266,7 +276,12 @@ class TuiChatLoop:
                     err_id, err_name = "error", "unknown"
                 error_msg = f"Error: {rd}"
                 self.messages.append(
-                    {"role": "tool", "tool_call_id": err_id, "name": err_name, "content": error_msg}
+                    {
+                        "role": "tool",
+                        "tool_call_id": err_id,
+                        "name": err_name,
+                        "content": error_msg,
+                    }
                 )
             else:
                 tid = rd["tool_call_id"]
@@ -274,7 +289,12 @@ class TuiChatLoop:
                 result = rd["result"]
                 self.cb.on_tool_complete(tid, str(result))
                 self.messages.append(
-                    {"role": "tool", "tool_call_id": tid, "name": name, "content": str(result)}
+                    {
+                        "role": "tool",
+                        "tool_call_id": tid,
+                        "name": name,
+                        "content": str(result),
+                    }
                 )
 
         if custom_instructions:
@@ -341,7 +361,9 @@ class TuiChatLoop:
             {"role": "user", "content": checkpoint_prompt}
         ]
 
-        self.cb.on_system_message("Approaching iteration limit — creating memory checkpoint...")
+        self.cb.on_system_message(
+            "Approaching iteration limit — creating memory checkpoint..."
+        )
         self.cb.on_thinking_start()
         try:
             response = await call_llm_async(
@@ -361,12 +383,20 @@ class TuiChatLoop:
         self.cm.save_checkpoint(summary_content)
 
         # 3. Reset messages (keep system prompt) and restore context
-        system_msg = self.messages[0] if self.messages and self.messages[0].get("role") == "system" else None
+        system_msg = (
+            self.messages[0]
+            if self.messages and self.messages[0].get("role") == "system"
+            else None
+        )
         self.messages.clear()
         if system_msg:
             self.messages.append(system_msg)
 
-        restore_msg = self.mm.build_quick_restore_message() if self.mm else f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary_content}\n\nPlease continue."
+        restore_msg = (
+            self.mm.build_quick_restore_message()
+            if self.mm
+            else f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary_content}\n\nPlease continue."
+        )
         self.messages.append({"role": "user", "content": restore_msg})
 
         self._iteration = 0

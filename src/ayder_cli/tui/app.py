@@ -19,12 +19,17 @@ from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.config import load_config
 from ayder_cli.services.llm import OpenAIProvider
-from ayder_cli.commands.registry import get_registry
-from ayder_cli.banner import create_tui_banner
+from ayder_cli.tui.helpers import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.screens import CLIConfirmScreen
-from ayder_cli.tui.widgets import ChatView, ToolPanel, ActivityBar, CLIInputBar, StatusBar
+from ayder_cli.tui.widgets import (
+    ChatView,
+    ToolPanel,
+    ActivityBar,
+    CLIInputBar,
+    StatusBar,
+)
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
 from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
 
@@ -126,7 +131,14 @@ class AyderApp(App):
         ("ctrl+o", "toggle_tools", "Toggle Tools"),
     ]
 
-    def __init__(self, model: str = "default", safe_mode: bool = False, permissions: set = None, iterations: int = None, **kwargs):
+    def __init__(
+        self,
+        model: str = "default",
+        safe_mode: bool = False,
+        permissions: set = None,
+        iterations: int = None,
+        **kwargs,
+    ):
         """
         Initialize the TUI app.
 
@@ -159,23 +171,29 @@ class AyderApp(App):
         self.model = actual_model if actual_model != "default" else model
         self.llm = OpenAIProvider(base_url=base_url, api_key=api_key)
 
-        registry = get_registry()
-        self.commands = registry.get_command_names()
-        # Add TUI-only commands to autocomplete
-        if "/permission" not in self.commands:
-            self.commands.append("/permission")
-
         from ayder_cli.process_manager import ProcessManager
 
-        max_procs = self.config.max_background_processes if not isinstance(self.config, dict) else self.config.get("max_background_processes", 5)
+        max_procs = (
+            self.config.max_background_processes
+            if not isinstance(self.config, dict)
+            else self.config.get("max_background_processes", 5)
+        )
         self._process_manager = ProcessManager(max_processes=max_procs)
-        self.registry = create_default_registry(ProjectContext("."), process_manager=self._process_manager)
+        self.registry = create_default_registry(
+            ProjectContext("."), process_manager=self._process_manager
+        )
         self._setup_registry_callbacks()
         self._setup_registry_middleware()
 
         # Build system prompt (same as CLI runner)
         self.messages: list[dict] = []
         self._init_system_prompt()
+
+        # Initialize command list from tui.commands
+        self.commands = sorted(COMMAND_MAP.keys())
+        # Add TUI-only commands to autocomplete
+        if "/permission" not in self.commands:
+            self.commands.append("/permission")
 
         self._activity_timer: Timer | None = None
 
@@ -191,10 +209,18 @@ class AyderApp(App):
         )
 
         # Create chat loop
-        num_ctx = self.config.num_ctx if not isinstance(self.config, dict) else self.config.get("num_ctx", 65536)
+        num_ctx = (
+            self.config.num_ctx
+            if not isinstance(self.config, dict)
+            else self.config.get("num_ctx", 65536)
+        )
         max_iters = self._iterations_override
         if max_iters is None:
-            max_iters = self.config.max_iterations if not isinstance(self.config, dict) else self.config.get("max_iterations", 50)
+            max_iters = (
+                self.config.max_iterations
+                if not isinstance(self.config, dict)
+                else self.config.get("max_iterations", 50)
+            )
         self._callbacks = AppCallbacks(self)
         self.chat_loop = TuiChatLoop(
             llm=self.llm,
@@ -230,11 +256,17 @@ class AyderApp(App):
 
         if self.messages and self.messages[0].get("role") == "system":
             try:
-                structure = self.registry.execute("get_project_structure", {"max_depth": 3})
-                macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
+                structure = self.registry.execute(
+                    "get_project_structure", {"max_depth": 3}
+                )
+                macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(
+                    project_structure=structure
+                )
             except Exception:
                 macro = ""
-            self.messages[0]["content"] = SYSTEM_PROMPT.format(model_name=self.model) + macro
+            self.messages[0]["content"] = (
+                SYSTEM_PROMPT.format(model_name=self.model) + macro
+            )
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel."""
@@ -268,6 +300,7 @@ class AyderApp(App):
 
     def _setup_registry_middleware(self) -> None:
         """Setup middleware for safe mode."""
+
         def safe_mode_check(tool_name: str, arguments: dict):
             if self._is_tool_blocked_in_safe_mode(tool_name):
                 raise PermissionError(f"Tool '{tool_name}' blocked in safe mode")
@@ -284,7 +317,12 @@ class AyderApp(App):
 
     def _generate_diff(self, tool_name: str, arguments: dict) -> str | None:
         """Generate a diff preview for file-modifying tools."""
-        file_modifying_tools = {"write_file", "replace_string", "insert_line", "delete_line"}
+        file_modifying_tools = {
+            "write_file",
+            "replace_string",
+            "insert_line",
+            "delete_line",
+        }
         if tool_name not in file_modifying_tools:
             return None
 
@@ -294,9 +332,7 @@ class AyderApp(App):
             if not path.exists():
                 if tool_name == "write_file":
                     new_content = arguments.get("content", "")
-                    return "\n".join(
-                        f"+{line}" for line in new_content.split("\n")
-                    )
+                    return "\n".join(f"+{line}" for line in new_content.split("\n"))
                 return None
 
             original = path.read_text(encoding="utf-8")
@@ -328,16 +364,20 @@ class AyderApp(App):
                 return None
 
             diff = difflib.unified_diff(
-                original_lines, new_lines,
-                fromfile=f"a/{path.name}", tofile=f"b/{path.name}",
-                lineterm=""
+                original_lines,
+                new_lines,
+                fromfile=f"a/{path.name}",
+                tofile=f"b/{path.name}",
+                lineterm="",
             )
             return "\n".join(diff) or None
 
         except Exception:
             return None
 
-    async def _request_confirmation(self, tool_name: str, arguments: dict) -> ConfirmResult | None:
+    async def _request_confirmation(
+        self, tool_name: str, arguments: dict
+    ) -> ConfirmResult | None:
         """Push CLIConfirmScreen and await the user's response.
 
         Since async workers run in the app's event loop (same thread),
@@ -360,9 +400,9 @@ class AyderApp(App):
                 title=tool_name,
                 description=description,
                 diff_content=diff_content,
-                action_name=description
+                action_name=description,
             ),
-            on_result
+            on_result,
         )
 
         await event.wait()
@@ -396,7 +436,8 @@ class AyderApp(App):
         viewport_h = chat_view.size.height
         # Sum the height of all children except the spacer
         content_h = sum(
-            child.size.height for child in chat_view.children
+            child.size.height
+            for child in chat_view.children
             if child.id != "banner-spacer"
         )
         spacer_h = max(0, viewport_h - content_h)
@@ -468,7 +509,9 @@ class AyderApp(App):
             if handler:
                 handler(self, cmd_args, chat_view)
             else:
-                chat_view.add_system_message(f"Unknown command: {cmd_name}. Type /help for available commands.")
+                chat_view.add_system_message(
+                    f"Unknown command: {cmd_name}. Type /help for available commands."
+                )
         except Exception as e:
             chat_view.add_system_message(f"Command error: {type(e).__name__}: {e}")
 
@@ -509,7 +552,9 @@ class AyderApp(App):
         input_bar.focus_input()
         chat_view = self.query_one("#chat-view", ChatView)
         if pending_count > 0:
-            chat_view.add_system_message(f"Operation cancelled ({pending_count} pending messages cleared).")
+            chat_view.add_system_message(
+                f"Operation cancelled ({pending_count} pending messages cleared)."
+            )
         else:
             chat_view.add_system_message("Operation cancelled.")
 

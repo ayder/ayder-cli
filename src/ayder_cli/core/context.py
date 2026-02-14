@@ -66,13 +66,14 @@ class ProjectContext:
 @dataclass
 class SessionContext:
     """Unified context for a chat session.
-    
+
     Holds configuration, project-specific path context, chat history, runtime state,
     and enhanced system prompt.
     """
+
     config: Config
     project: ProjectContext
     messages: list
     state: dict
     llm: LLMProvider
-    system_prompt: str = ""           # Enhanced system prompt with project structure
+    system_prompt: str = ""  # Enhanced system prompt with project structure

@@ -175,7 +175,8 @@ The application has two interfaces: a **Textual TUI** (default) and a **prompt-t
 
 - **`src/ayder_cli/core/result.py`** — Shared result types: `ToolSuccess(str)` and `ToolError(str)` — str subclasses. `ToolError` has `.category` property. Re-exported from `tools/__init__.py`.
 
-- **`src/ayder_cli/banner.py`** — Welcome banner with version detection, ASCII art, model/path display, tips. `create_tui_banner()` for TUI, `print_welcome_banner()` for CLI.
+- **`src/ayder_cli/tui/helpers.py`** — TUI helper functions including banner creation with ASCII art and gradients. `create_tui_banner()` for TUI.
+- **`src/ayder_cli/ui.py`** — Rich terminal UI components. `print_welcome_banner()` for CLI.
 
 - **`src/ayder_cli/console.py`** — Centralized Rich console with custom theme and file extension mapping.
 

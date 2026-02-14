@@ -25,6 +25,7 @@ MiddlewareFunc = Callable[[str, Dict[str, Any]], None]
 
 class ToolExecutionStatus(Enum):
     """Status of tool execution for callbacks."""
+
     STARTED = "started"
     SUCCESS = "success"
     ERROR = "error"
@@ -33,6 +34,7 @@ class ToolExecutionStatus(Enum):
 @dataclass
 class ToolExecutionResult:
     """Result object passed to callbacks."""
+
     tool_name: str
     arguments: Dict[str, Any]
     status: ToolExecutionStatus
@@ -57,13 +59,13 @@ PARAMETER_ALIASES = {
 
 # Parameters that should be resolved to absolute paths (generated from ToolDefinitions)
 PATH_PARAMETERS = {
-    td.name: list(td.path_parameters)
-    for td in TOOL_DEFINITIONS
-    if td.path_parameters
+    td.name: list(td.path_parameters) for td in TOOL_DEFINITIONS if td.path_parameters
 }
 
 
-def normalize_tool_arguments(tool_name: str, arguments: dict, project_ctx: ProjectContext) -> dict:
+def normalize_tool_arguments(
+    tool_name: str, arguments: dict, project_ctx: ProjectContext
+) -> dict:
     """
     Normalize arguments by:
     1. Applying parameter aliases (path → file_path)
@@ -94,7 +96,11 @@ def normalize_tool_arguments(tool_name: str, arguments: dict, project_ctx: Proje
     if tool_def:
         props = tool_def.parameters.get("properties", {})
         for key, schema in props.items():
-            if schema.get("type") == "integer" and key in normalized and isinstance(normalized[key], str):
+            if (
+                schema.get("type") == "integer"
+                and key in normalized
+                and isinstance(normalized[key], str)
+            ):
                 try:
                     normalized[key] = int(normalized[key])
                 except ValueError:
@@ -131,14 +137,21 @@ def validate_tool_call(tool_name: str, arguments: dict) -> tuple:
 
         expected_type = properties[param_name].get("type")
         if expected_type == "integer" and not isinstance(value, int):
-            return False, f"Parameter '{param_name}' must be an integer, got {type(value).__name__}"
+            return (
+                False,
+                f"Parameter '{param_name}' must be an integer, got {type(value).__name__}",
+            )
         if expected_type == "string" and not isinstance(value, str):
-            return False, f"Parameter '{param_name}' must be a string, got {type(value).__name__}"
+            return (
+                False,
+                f"Parameter '{param_name}' must be a string, got {type(value).__name__}",
+            )
 
     return True, ""
 
 
 # --- Shared Execution Logic ---
+
 
 def _execute_tool_with_hooks(
     tool_name: str,
@@ -154,13 +167,15 @@ def _execute_tool_with_hooks(
     Execute a tool with the full execution pipeline (normalization, validation, callbacks).
     """
     import time
-    
+
     # Handle arguments being passed as a string (JSON) or a dict
     if isinstance(arguments, str):
         try:
             args = json.loads(arguments)
         except json.JSONDecodeError:
-            return ToolError(f"Error: Invalid JSON arguments for {tool_name}", "validation")
+            return ToolError(
+                f"Error: Invalid JSON arguments for {tool_name}", "validation"
+            )
     else:
         args = arguments
 
@@ -206,7 +221,7 @@ def _execute_tool_with_hooks(
 
     # Execute the tool with timing
     start_time = time.time()
-    
+
     try:
         result = tool_func(**call_args)
         status = ToolExecutionStatus.SUCCESS
@@ -215,7 +230,7 @@ def _execute_tool_with_hooks(
         result = ToolError(f"Error executing {tool_name}: {str(e)}", "execution")
         status = ToolExecutionStatus.ERROR
         error = str(e)
-    
+
     duration_ms = (time.time() - start_time) * 1000
 
     # Run post-execute callbacks
@@ -225,9 +240,9 @@ def _execute_tool_with_hooks(
         status=status,
         result=result,
         error=error,
-        duration_ms=duration_ms
+        duration_ms=duration_ms,
     )
-    
+
     for callback in post_execute_callbacks:
         try:
             callback(execution_result)
@@ -280,7 +295,7 @@ class ToolRegistry:
     def remove_post_execute_callback(self, callback: PostExecuteCallback) -> None:
         if callback in self._post_execute_callbacks:
             self._post_execute_callbacks.remove(callback)
-    
+
     def get_schemas(self) -> List[Dict[str, Any]]:
         """Return all tool schemas."""
         return [td.to_openai_schema() for td in TOOL_DEFINITIONS]
@@ -315,12 +330,15 @@ class ToolRegistry:
 def _resolve_func_ref(func_ref: str) -> Callable:
     """Import and return a function from a 'module.path:function_name' reference."""
     import importlib
+
     module_path, func_name = func_ref.split(":")
     module = importlib.import_module(module_path)
     return getattr(module, func_name)
 
 
-def create_default_registry(project_ctx: ProjectContext, process_manager=None) -> ToolRegistry:
+def create_default_registry(
+    project_ctx: ProjectContext, process_manager=None
+) -> ToolRegistry:
     """
     Create and configure a ToolRegistry with all available tools.
 

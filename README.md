@@ -318,7 +318,8 @@ src/ayder_cli/
   memory.py          -- Cross-session memory storage (.ayder/memory/)
   process_manager.py -- Background process management (ProcessManager + 4 tool functions)
   ui.py              -- Rich terminal UI (boxes, message formatting, diff previews)
-  banner.py          -- Welcome banner with version detection and tips
+  tui/helpers.py      -- TUI helper functions including banner creation
+  ui.py              -- Rich terminal UI (boxes, message formatting, diff previews)
   console.py         -- Centralized Rich console with custom theme
   tui/               -- Textual TUI package (default interface)
     __init__.py      -- run_tui() entry point

@@ -483,7 +483,7 @@ Screen:inline {
 original_theme = Theme(
     name="original",
     description="Classic ayder theme with default terminal styling",
-    css=ORIGINAL_CSS
+    css=ORIGINAL_CSS,
 )
 
 register_theme(original_theme)

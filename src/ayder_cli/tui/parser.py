@@ -32,10 +32,14 @@ class ContentProcessor:
 
     # -- tool call blocks ----------------------------------------------------
     # Support namespaced tool calls like <minimax:tool_call>...</minimax:tool_call>
-    _RE_TOOL_CALL_BLOCK = re.compile(r"<(\w+:)?tool_call>.*?</(\w+:)?tool_call>", re.DOTALL)
+    _RE_TOOL_CALL_BLOCK = re.compile(
+        r"<(\w+:)?tool_call>.*?</(\w+:)?tool_call>", re.DOTALL
+    )
     _RE_FUNCTION_BLOCK = re.compile(r"<function=.*?</function>", re.DOTALL)
     # DeepSeek format: <function_calls><invoke>...</invoke></function_calls>
-    _RE_FUNCTION_CALLS_BLOCK = re.compile(r"<function_calls>.*?</function_calls>", re.DOTALL)
+    _RE_FUNCTION_CALLS_BLOCK = re.compile(
+        r"<function_calls>.*?</function_calls>", re.DOTALL
+    )
     _RE_INVOKE_BLOCK = re.compile(r"<invoke.*?</invoke>", re.DOTALL)
 
     # -- orphaned tags -------------------------------------------------------
@@ -48,9 +52,7 @@ class ContentProcessor:
     _RE_ORPHAN_PARAMETER = re.compile(r"</?parameter[^>]*>")
 
     # -- JSON tool arrays ----------------------------------------------------
-    _RE_JSON_TOOL_ARRAY = re.compile(
-        r'\[\s*\{[^}]*"function"\s*:.*?\}\s*\]', re.DOTALL
-    )
+    _RE_JSON_TOOL_ARRAY = re.compile(r'\[\s*\{[^}]*"function"\s*:.*?\}\s*\]', re.DOTALL)
 
     # -- whitespace cleanup --------------------------------------------------
     _RE_BLANK_LINES = re.compile(r"\n{3,}")
@@ -182,6 +184,7 @@ content_processor = ContentProcessor()
 
 # -- Convenience functions for backward compat -------------------------------
 
+
 def extract_think_blocks(content: str) -> list[str]:
     """Extract <think> blocks from content."""
     return content_processor.extract_think_blocks(content)
@@ -199,7 +202,7 @@ def parse_json_tool_calls(content: str) -> list[dict]:
 
 def has_custom_tool_calls(content: str) -> bool:
     """Check if content contains custom tool call markers.
-    
+
     Detects:
     - Standard: <function=...>
     - Wrapped: <tool_call> (including namespaced like <minimax:tool_call>)

@@ -164,10 +164,10 @@ class TestResolveFuncRef:
 class TestCreateDefaultRegistryAutoDiscovery:
     """Tests for auto-discovery via func_ref in create_default_registry."""
 
-    def test_registers_all_20_tools(self, project_context):
-        """Test that all 20 TOOL_DEFINITIONS are registered."""
+    def test_registers_all_25_tools(self, project_context):
+        """Test that all 25 TOOL_DEFINITIONS are registered."""
         reg = registry.create_default_registry(project_context)
-        assert len(reg.get_registered_tools()) == 20
+        assert len(reg.get_registered_tools()) == 25
 
     def test_registered_names_match_definitions(self, project_context):
         """Test that registered tool names match TOOL_DEFINITIONS names."""

@@ -6,6 +6,7 @@ from enum import Enum
 
 class MessageType(Enum):
     """Types of chat messages."""
+
     USER = "user"
     ASSISTANT = "assistant"
     THINKING = "thinking"
@@ -17,5 +18,6 @@ class MessageType(Enum):
 @dataclass
 class ConfirmResult:
     """Result from a tool confirmation screen."""
+
     action: str  # "approve", "deny", "instruct"
     instructions: str | None = None

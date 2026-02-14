@@ -81,7 +81,7 @@ All Textual widgets, screens, and layout elements with ASCII mockups.
 
 ## Banner (on startup)
 
-**Function:** `create_tui_banner(model, ver)` — `banner.py`
+**Function:** `create_tui_banner(model, ver)` — `tui/helpers.py`
 **Gradient:** cyan → blue → indigo → purple → magenta → pink
 
 ```

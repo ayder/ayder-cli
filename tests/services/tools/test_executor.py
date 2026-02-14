@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 from ayder_cli.services.tools.executor import ToolExecutor, TERMINAL_TOOLS
-from ayder_cli.client import ChatSession
 from ayder_cli.core.config import Config
 from ayder_cli.core.result import ToolSuccess
 

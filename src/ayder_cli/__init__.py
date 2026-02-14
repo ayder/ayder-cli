@@ -1,4 +1,5 @@
 """ayder-cli: Interactive AI agent chat client for local LLMs."""
+
 from importlib.metadata import version, PackageNotFoundError
 
 try:

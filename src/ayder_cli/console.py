@@ -10,16 +10,18 @@ from rich.console import Console
 from rich.theme import Theme
 
 # Custom theme for ayder-cli
-CUSTOM_THEME = Theme({
-    "info": "cyan",
-    "success": "green",
-    "warning": "yellow",
-    "error": "bold red",
-    "tool_call": "yellow",
-    "user": "cyan",
-    "assistant": "green",
-    "border": "bright_black",
-})
+CUSTOM_THEME = Theme(
+    {
+        "info": "cyan",
+        "success": "green",
+        "warning": "yellow",
+        "error": "bold red",
+        "tool_call": "yellow",
+        "user": "cyan",
+        "assistant": "green",
+        "border": "bright_black",
+    }
+)
 
 # Global console instance
 console = Console(theme=CUSTOM_THEME)

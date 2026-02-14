@@ -26,7 +26,12 @@ from ayder_cli.tui.widgets import (
 from ayder_cli.tui.app import AyderApp
 
 
-def run_tui(model: str = "default", safe_mode: bool = False, permissions: set = None, iterations: int = None) -> None:
+def run_tui(
+    model: str = "default",
+    safe_mode: bool = False,
+    permissions: set = None,
+    iterations: int = None,
+) -> None:
     """
     Run the CLI-style TUI application.
 
@@ -38,7 +43,9 @@ def run_tui(model: str = "default", safe_mode: bool = False, permissions: set = 
     """
     import sys
 
-    app = AyderApp(model=model, safe_mode=safe_mode, permissions=permissions, iterations=iterations)
+    app = AyderApp(
+        model=model, safe_mode=safe_mode, permissions=permissions, iterations=iterations
+    )
     app.run(mouse=False)
 
     # Ensure mouse reporting is disabled after exit — Textual's driver may

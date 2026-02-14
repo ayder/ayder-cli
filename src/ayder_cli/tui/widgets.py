@@ -26,7 +26,9 @@ class ChatView(VerticalScroll):
         super().__init__(**kwargs)
         self._message_widgets: list[Static] = []
 
-    def _create_text(self, content: str, msg_type: MessageType, metadata: dict = None) -> Text:
+    def _create_text(
+        self, content: str, msg_type: MessageType, metadata: dict = None
+    ) -> Text:
         """Create styled text for a message."""
         if msg_type == MessageType.USER:
             text = Text()
@@ -73,9 +75,13 @@ class ChatView(VerticalScroll):
             text.append(content, style="dim italic")
             return text
 
-    def add_message(self, content: str, msg_type: MessageType, metadata: dict = None) -> None:
+    def add_message(
+        self, content: str, msg_type: MessageType, metadata: dict = None
+    ) -> None:
         """Add a message to the chat view."""
-        self.messages.append({"content": content, "type": msg_type, "metadata": metadata})
+        self.messages.append(
+            {"content": content, "type": msg_type, "metadata": metadata}
+        )
 
         if msg_type == MessageType.ASSISTANT:
             content = content.strip()
@@ -187,7 +193,13 @@ class ToolPanel(Container):
 
     def update_spinners(self) -> None:
         """Re-render running tool spinners (they auto-advance based on time)."""
-        for tool_id, (widget, spinner, tool_name, args_str, is_done) in self._tools.items():
+        for tool_id, (
+            widget,
+            spinner,
+            tool_name,
+            args_str,
+            is_done,
+        ) in self._tools.items():
             if not is_done and spinner is not None:
                 widget.update(spinner)
 
@@ -195,12 +207,14 @@ class ToolPanel(Container):
         """Format text to be a short preview."""
         preview = text.replace("\n", " ").replace("  ", " ").strip()
         if len(preview) > max_len:
-            preview = preview[:max_len - 3] + "..."
+            preview = preview[: max_len - 3] + "..."
         return preview
 
     def clear_completed(self) -> None:
         """Remove all completed tools (does not change visibility)."""
-        to_remove = [tid for tid, (_, _, _, _, is_done) in self._tools.items() if is_done]
+        to_remove = [
+            tid for tid, (_, _, _, _, is_done) in self._tools.items() if is_done
+        ]
         for tool_id in to_remove:
             widget, _, _, _, _ = self._tools[tool_id]
             widget.remove()
