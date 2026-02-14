@@ -7,6 +7,16 @@ wheels/
 *.egg-info
 *.swp
 
+# Tool-specific caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.ipynb_checkpoints/
+
+# macOS files
+.DS_Store
+
 # Virtual environments
 .venv
 TODO
