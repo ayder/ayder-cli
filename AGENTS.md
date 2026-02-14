@@ -88,7 +88,7 @@ ayder-cli/
 │   │   ├── claude.py           # Claude theme CSS
 │   │   └── original.py         # Original theme CSS
 │   │
-│   ├── chat_loop.py            # Core agentic loop (deprecated CLI)
+│   ├── chat_loop.py            # Core agentic loop
 │   ├── checkpoint_manager.py   # Memory checkpoint/restore
 │   ├── memory.py               # Cross-session memory storage
 │   ├── notes.py                # Note management (.ayder/notes/)
@@ -98,7 +98,7 @@ ayder-cli/
 │   ├── tasks.py                # Task management (.ayder/tasks/)
 │   ├── tui_helpers.py          # TUI helper re-exports
 │   ├── tui_theme_manager.py    # Theme manager re-exports
-│   └── ui.py                   # Rich terminal UI (deprecated CLI)
+│   └── ui.py                   # Rich terminal UI
 │
 ├── tests/                      # Test suite
 │   ├── client/                 # Client tests
@@ -564,13 +564,7 @@ source .venv/bin/activate && python3 -m pytest tests/test_failing.py -vvs && dea
 3. **Config**: Use `load_config()` for configuration access
 4. **Console Output**: Use `console` from `ayder_cli.console` for Rich output
 
-### Deprecated Code
 
-The CLI mode (`--cli` flag) is deprecated. Do not add new features to:
-- `cli_runner.py` interactive mode
-- `ui.py` legacy CLI UI functions
-
-Focus new development on the TUI (`tui/` package).
 
 ## Resources
 

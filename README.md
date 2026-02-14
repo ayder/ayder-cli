@@ -307,7 +307,7 @@ ayder-cli provides code search capabilities via the `search_codebase` tool. The 
 ```
 src/ayder_cli/
   cli.py             -- Entry point (argparse: --cli, -f, --stdin, -I, --tasks, --implement)
-  cli_runner.py      -- Execution logic (InteractiveRunner, CommandRunner, TaskRunner)
+  cli_runner.py      -- Command execution logic (CommandRunner, TaskRunner)
   client.py          -- ChatSession + Agent classes, call_llm_async()
   chat_loop.py       -- Core agentic loop (ChatLoop, IterationController, ToolCallHandler)
   checkpoint_manager.py -- Memory checkpoint/restore for long-running tasks

@@ -1,7 +1,6 @@
-"""CLI command runners for interactive and single-command execution modes.
+"""CLI command runners for single-command execution and task management.
 
 This module contains the logic for running the CLI in different modes:
-- Interactive REPL mode (run_interactive)
 - Single command execution (run_command)
 - Task management commands (_run_tasks_cli, _run_implement_cli, _run_implement_all_cli)
 """
@@ -66,119 +65,7 @@ def _build_services(config=None, project_root="."):
     )
 
 
-class InteractiveRunner:
-    """Runner for interactive REPL mode."""
 
-    def __init__(self, permissions=None, iterations=50):
-        self.permissions = permissions
-        self.iterations = iterations
-        self.cfg = None
-        self.llm_provider = None
-        self.tool_executor = None
-        self.project_ctx = None
-        self.enhanced_system = None
-        self.checkpoint_manager = None
-        self.memory_manager = None
-        self.chat_session = None
-        self.agent = None
-
-    def _initialize(self):
-        """Initialize services and session."""
-        from ayder_cli.client import ChatSession, Agent
-
-        services = _build_services()
-        (
-            self.cfg,
-            self.llm_provider,
-            self.tool_executor,
-            self.project_ctx,
-            self.enhanced_system,
-            self.checkpoint_manager,
-            self.memory_manager,
-        ) = services
-
-        self.chat_session = ChatSession(
-            self.cfg,
-            self.enhanced_system,
-            permissions=self.permissions,
-            iterations=self.iterations,
-            checkpoint_manager=self.checkpoint_manager,
-            memory_manager=self.memory_manager,
-        )
-        self.chat_session.start()
-        self.agent = Agent(self.llm_provider, self.tool_executor, self.chat_session)
-
-    def _handle_command(self, user_input: str) -> bool:
-        """Handle a slash command. Returns True if command was processed.
-
-        Args:
-            user_input: The command string starting with '/'
-
-        Returns:
-            True to continue loop
-        """
-        from rich.panel import Panel
-        from ayder_cli.console import console
-
-        console.print(Panel(
-            "Slash commands are not supported in CLI mode.\n"
-            "Run without --cli flag to use the TUI with full command support.",
-            title="Info",
-            border_style="yellow"
-        ))
-        return True
-
-    def _process_input(self, user_input: str) -> bool:
-        """Process user input (command or regular message).
-
-        Args:
-            user_input: The input string from user
-
-        Returns:
-            True to continue loop, False to exit
-        """
-        from ayder_cli.ui import print_running, print_assistant_message
-        from rich.panel import Panel
-        from ayder_cli.console import console
-
-        if not user_input:
-            return True
-
-        if user_input.startswith("/"):
-            self._handle_command(user_input)
-            return True
-
-        try:
-            print_running()
-            response = self.agent.chat(user_input)
-            if response is not None:
-                print_assistant_message(response)
-        except Exception as e:
-            console.print(Panel(f"Error: {str(e)}", title="Error", width=80, border_style="red"))
-
-        return True
-
-    def run(self):
-        """Run the interactive REPL loop."""
-        self._initialize()
-
-        while True:
-            user_input = self.chat_session.get_input()
-            if user_input is None:
-                break
-            if not self._process_input(user_input):
-                break
-
-
-def run_interactive(permissions=None, iterations=50):
-    """Run interactive chat mode (REPL).
-
-    Args:
-        permissions: Set of granted permission categories (e.g. {"r", "w", "x"})
-        iterations: Max agentic iterations per message
-    """
-    runner = InteractiveRunner(permissions=permissions, iterations=iterations)
-    runner.run()
 
 
 class CommandRunner:
