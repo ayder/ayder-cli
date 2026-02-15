@@ -8,7 +8,7 @@ A multi-provider AI agent chat client for your terminal. It connects to [Ollama]
 
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
 
-- **Multi-provider** -- switch between Ollama (local/cloud), Anthropic Claude, or any OpenAI-compatible API with a single `/provider` command. Each provider has its own config section.
+- **Multi-provider** -- switch between Ollama (local/cloud), Anthropic Claude, Gemini or any OpenAI-compatible API with a single `/provider` command. Each provider has its own config section.
 - **Fully local or cloud** -- run locally with Ollama for privacy (your code never leaves your machine), or connect to Anthropic, OpenAI, or cloud-hosted Ollama.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own for configurable consecutive tool calls per user message (configurable with `-I`).
 - **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. 
@@ -68,8 +68,17 @@ Each tool has an OpenAI-compatible JSON schema so models that support function c
 ## Installation
 
 Requires Python 3.12+.
+Works best with uv tool. if you don't have uv in your path get it from 
+ [Astral uv](https://docs.astral.sh/uv/#highlights) 
 
 ```
+# Install it to user environemnt
+
+uv tool install ayder-cli
+
+# or if no uv then create a a virtual environment first,
+# activate it and install from PYPI
+
 pip install ayder-cli
 
 # For the nightly-builds:
@@ -79,10 +88,17 @@ git clone https://github.com/ayder/ayder-cli.git
 cd ayder-cli
 
 # Install in development mode
+python3.12 -m venv .venv
+source .venv/bin/activate
+.venv/bin/pip install uv 
+
+uv pip install -e .
+
+# or (6 times slower)
 pip install -e .
 
-# Or best as a uv tool (always on the path)
-uv tool install .
+# Or works best as a uv tool (always on the path)
+uv tool install -e .
 ```
 
 ### Ollama setup (default provider)
