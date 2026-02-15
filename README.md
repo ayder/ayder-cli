@@ -10,9 +10,9 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 
 - **Multi-provider** -- switch between Ollama (local/cloud), Anthropic Claude, or any OpenAI-compatible API with a single `/provider` command. Each provider has its own config section.
 - **Fully local or cloud** -- run locally with Ollama for privacy (your code never leaves your machine), or connect to Anthropic, OpenAI, or cloud-hosted Ollama.
-- **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 50 consecutive tool calls per user message (configurable with `-I`).
-- **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. Falls back to a classic prompt-toolkit REPL with `--cli`.
-- **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Anthropic SDK optional for native Claude support.
+- **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own for configurable consecutive tool calls per user message (configurable with `-I`).
+- **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. 
+- **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Gemini genai and for Gemini and Anthropic SDK optional for native  support.
 
 
 ### Supported Providers
@@ -58,29 +58,6 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 LLMs on their own can only generate text. To be a useful coding assistant, the model needs to *act* on your codebase. ayder-cli provides a modular `tools/` package that gives the model a set of real tools it can call:
 
 
-| Tool | What it does |
-|------|-------------|
-| `list_files` | List files in a directory |
-| `read_file` | Read a file (supports line ranges for large files) |
-| `write_file` | Write content to a file |
-| `replace_string` | Find and replace a specific string in a file |
-| `insert_line` | Insert content at a specific line number |
-| `delete_line` | Delete a specific line from a file |
-| `get_file_info` | Get file metadata (size, line count, type, symlink status) |
-| `run_shell_command` | Execute a shell command (60s timeout, use for quick commands) |
-| `search_codebase` | Search for patterns across the codebase (supports `full`, `files_only`, `count` output formats) |
-| `get_project_structure` | Generate a tree-style project structure summary (configurable depth) |
-| `create_note` | Create a markdown note in `.ayder/notes/` with YAML frontmatter and tags |
-| `save_memory` | Save context or insights to persistent cross-session memory |
-| `load_memory` | Load saved memories, filterable by category or search query |
-| `run_background_process` | Start a long-running command in the background (servers, watchers, builds) |
-| `get_background_output` | Get recent stdout/stderr output from a background process |
-| `kill_background_process` | Kill a running background process (SIGTERM, then SIGKILL) |
-| `list_background_processes` | List all background processes and their status |
-| `list_tasks` | List pending task files in `.ayder/tasks/` (default: pending only, use status parameter for all/done) |
-| `show_task` | Show task contents by path, filename, task ID, or slug |
-| `manage_environment_vars` | Manage .env files: validate, load, generate secure values, and set environment variables |
-
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
   - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
@@ -92,7 +69,11 @@ Each tool has an OpenAI-compatible JSON schema so models that support function c
 
 Requires Python 3.12+.
 
-```bash
+```
+pip install ayder-cli
+
+# For the nightly-builds:
+
 # Clone the repo
 git clone https://github.com/ayder/ayder-cli.git
 cd ayder-cli
