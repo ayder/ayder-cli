@@ -426,7 +426,9 @@ class GeminiProvider(LLMProvider):
         try:
             models = []
             for m in self.client.models.list():
-                if "generateContent" in getattr(m, "supported_generation_methods", []):
+                # In google-genai SDK, use supported_actions
+                actions = getattr(m, "supported_actions", []) or []
+                if "generateContent" in actions:
                     name = m.name.replace("models/", "")
                     models.append(name)
             return models
@@ -477,6 +479,8 @@ class GeminiProvider(LLMProvider):
                 # Try to parse content as JSON if possible, otherwise use as is
                 try:
                     response_content = json.loads(content) if content else {}
+                    if not isinstance(response_content, dict):
+                        response_content = {"result": response_content}
                 except (json.JSONDecodeError, TypeError):
                     response_content = {"result": content}
 
@@ -639,7 +643,15 @@ class GeminiProvider(LLMProvider):
         usage = getattr(response, "usage_metadata", None)
         total_tokens = 0
         if usage:
-            total_tokens = usage.prompt_token_count + usage.candidates_token_count
+            prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            
+            # Try candidates_token_count (old SDK), if missing or None, try response_token_count (new SDK)
+            completion_tokens = getattr(usage, "candidates_token_count", None)
+            if completion_tokens is None:
+                completion_tokens = getattr(usage, "response_token_count", 0)
+            
+            completion_tokens = completion_tokens or 0
+            total_tokens = prompt_tokens + completion_tokens
             
         return _Response(
             choices=[_Choice(message=message)],

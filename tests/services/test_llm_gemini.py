@@ -115,7 +115,10 @@ class TestGeminiProvider:
         mock_part.function_call = None
         mock_candidate.content.parts = [mock_part]
         mock_response.candidates = [mock_candidate]
-        mock_response.usage_metadata = Mock(prompt_token_count=10, candidates_token_count=20)
+        # Updated to use response_token_count for new SDK
+        mock_response.usage_metadata.prompt_token_count = 10
+        mock_response.usage_metadata.response_token_count = 20 
+        mock_response.usage_metadata.candidates_token_count = None # Mock absence or older SDK compatibility check
 
         wrapped = GeminiProvider._wrap_response(mock_response)
         
@@ -149,8 +152,10 @@ class TestGeminiProvider:
         mock_client = Mock()
         mock_response = Mock()
         mock_response.candidates = [Mock(content=Mock(parts=[Mock(text="response", function_call=None)]))]
+        # Updated usage tokens
         mock_response.usage_metadata.prompt_token_count = 10
-        mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.usage_metadata.response_token_count = 20
+        mock_response.usage_metadata.candidates_token_count = None
         mock_client.models.generate_content.return_value = mock_response
 
         provider = GeminiProvider(client=mock_client)
@@ -170,10 +175,10 @@ class TestGeminiProvider:
         mock_client = Mock()
         m1 = Mock()
         m1.name = "models/gemini-3-pro"
-        m1.supported_generation_methods = ["generateContent"]
+        m1.supported_actions = ["generateContent"]
         m2 = Mock()
         m2.name = "models/embedding-001"
-        m2.supported_generation_methods = ["embedContent"]
+        m2.supported_actions = ["embedContent"]
         
         mock_client.models.list.return_value = [m1, m2]
         
