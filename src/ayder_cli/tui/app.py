@@ -19,7 +19,7 @@ import difflib
 from ayder_cli.tools.registry import create_default_registry
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.config import load_config
-from ayder_cli.services.llm import OpenAIProvider
+from ayder_cli.services.llm import create_llm_provider
 from ayder_cli.tui.helpers import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
@@ -162,16 +162,12 @@ class AyderApp(App):
         self.config = load_config()
 
         if isinstance(self.config, dict):
-            base_url = self.config.get("base_url", "http://localhost:11434/v1")
-            api_key = self.config.get("api_key", "ollama")
             actual_model = self.config.get("model", model)
         else:
-            base_url = self.config.base_url
-            api_key = self.config.api_key
             actual_model = self.config.model
 
         self.model = actual_model if actual_model != "default" else model
-        self.llm = OpenAIProvider(base_url=base_url, api_key=api_key)
+        self.llm = create_llm_provider(self.config)
 
         from ayder_cli.process_manager import ProcessManager
 

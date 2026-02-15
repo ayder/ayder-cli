@@ -34,6 +34,80 @@ def handle_help(app: AyderApp, args: str, chat_view: ChatView) -> None:
     chat_view.add_assistant_message(help_text)
 
 
+def handle_provider(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Switch active LLM provider (openai, anthropic, gemini)."""
+    from ayder_cli.core.config import _PROVIDER_SECTIONS
+
+    providers = list(_PROVIDER_SECTIONS)
+
+    if args.strip():
+        selected = args.strip().lower()
+        if selected not in providers:
+            chat_view.add_system_message(
+                f"Unknown provider: {selected}. Choose from: {', '.join(providers)}"
+            )
+            return
+    else:
+        # Show interactive select screen
+        current_provider = app.config.provider
+        items = [(p, p) for p in providers]
+
+        def on_provider_selected(selected: str | None) -> None:
+            if selected:
+                _apply_provider_switch(app, selected, chat_view)
+
+        app.push_screen(
+            CLISelectScreen(
+                title="Select provider",
+                items=items,
+                current=current_provider,
+                description=f"Currently using: {current_provider}",
+            ),
+            on_provider_selected,
+        )
+        return
+
+    _apply_provider_switch(app, selected, chat_view)
+
+
+def _apply_provider_switch(
+    app: AyderApp, provider: str, chat_view: ChatView
+) -> None:
+    """Apply provider switch: reload config from config.toml for the chosen provider."""
+    from ayder_cli.core.config import load_config_for_provider
+    from ayder_cli.services.llm import create_llm_provider
+
+    # Save old config for rollback on error
+    old_config = app.config
+
+    # Re-read config.toml with the new provider active (picks up real api_key etc.)
+    new_config = load_config_for_provider(provider)
+    app.config = new_config
+
+    # Recreate the LLM provider
+    try:
+        app.llm = create_llm_provider(new_config)
+    except (ModuleNotFoundError, ImportError) as e:
+        # SDK not installed or provider not yet supported — revert and inform
+        app.config = old_config
+        chat_view.add_system_message(f"Cannot switch to {provider}: {e}")
+        return
+    app.chat_loop.llm = app.llm
+
+    # Update model and UI
+    app.model = new_config.model
+    app.chat_loop.config.model = new_config.model
+    app.chat_loop.config.num_ctx = new_config.num_ctx
+    app.update_system_prompt_model()
+
+    status_bar = app.query_one("#status-bar", StatusBar)
+    status_bar.set_model(new_config.model)
+
+    chat_view.add_system_message(
+        f"Switched to provider: {provider} (model: {new_config.model})"
+    )
+
+
 def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /model command."""
     if not args.strip():
@@ -604,6 +678,7 @@ def _run_implement_task(
 # All handlers have signature (app, args, chat_view) -> None
 COMMAND_MAP: dict[str, Callable] = {
     "/help": handle_help,
+    "/provider": handle_provider,
     "/model": handle_model,
     "/tasks": handle_tasks,
     "/tools": handle_tools,

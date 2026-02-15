@@ -18,7 +18,7 @@ def _build_services(config=None, project_root="."):
     """
     from ayder_cli.core.config import load_config
     from ayder_cli.core.context import ProjectContext
-    from ayder_cli.services.llm import OpenAIProvider
+    from ayder_cli.services.llm import create_llm_provider
     from ayder_cli.services.tools.executor import ToolExecutor
     from ayder_cli.tools.registry import create_default_registry
     from ayder_cli.process_manager import ProcessManager
@@ -27,7 +27,7 @@ def _build_services(config=None, project_root="."):
     from ayder_cli.memory import MemoryManager
 
     cfg = config or load_config()
-    llm_provider = OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key)
+    llm_provider = create_llm_provider(cfg)
     project_ctx = ProjectContext(project_root)
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
     tool_registry = create_default_registry(
