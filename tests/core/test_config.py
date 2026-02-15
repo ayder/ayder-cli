@@ -27,7 +27,7 @@ class TestDefaultValues:
         assert DEFAULTS["openai"]["model"] == "qwen3-coder:latest"
         assert DEFAULTS["openai"]["num_ctx"] == 65536
         assert DEFAULTS["anthropic"]["model"] == "claude-sonnet-4-5-20250929"
-        assert DEFAULTS["gemini"]["model"] == "gemini-2.0-flash"
+        assert DEFAULTS["gemini"]["model"] == "gemini-3-flash"
         assert DEFAULTS["editor"] == "vim"
         assert DEFAULTS["verbose"] is False
 
@@ -151,7 +151,7 @@ class TestLoadConfigFirstRun:
         # Verify anthropic section values
         assert 'model = "claude-sonnet-4-5-20250929"' in content
         # Verify gemini section values
-        assert 'model = "gemini-2.0-flash"' in content
+        assert 'model = "gemini-3-flash"' in content
         # Verify utility sections
         assert 'editor = "vim"' in content
         assert "verbose = false" in content

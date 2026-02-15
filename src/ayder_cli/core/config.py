@@ -22,7 +22,7 @@ DEFAULTS: Dict[str, Any] = {
     },
     "gemini": {
         "api_key": "",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-3-flash",
         "num_ctx": 65536,
     },
     "editor": "vim",

@@ -438,13 +438,26 @@ class TestCreateLLMProvider:
         assert isinstance(provider, AnthropicProvider)
         mock_init.assert_called_once_with(api_key="sk-ant-test")
 
-    def test_gemini_raises_module_not_found(self):
-        """Factory raises ModuleNotFoundError for gemini (not yet supported)."""
+    @patch("ayder_cli.services.llm.GeminiProvider.__init__", return_value=None)
+    def test_returns_gemini_for_gemini_provider(self, mock_init):
+        """Factory returns GeminiProvider when config.provider is 'gemini'."""
         config = Mock()
         config.provider = "gemini"
+        config.api_key = "gemini-key"
 
-        with pytest.raises(ModuleNotFoundError, match="Gemini provider is not yet supported"):
-            create_llm_provider(config)
+        # Mock ImportError if google-generativeai is not installed, 
+        # or just assume it works if we mock the class.
+        # Since we are mocking GeminiProvider, we can assume success.
+        
+        provider = create_llm_provider(config)
+        
+        # We need to import GeminiProvider to check isinstance if it wasn't mocked out completely
+        # But we mocked __init__. The class itself is still the real class or a mock?
+        # The patch decorator patches the class's __init__ method.
+        # So provider is an instance of GeminiProvider.
+        from ayder_cli.services.llm import GeminiProvider
+        assert isinstance(provider, GeminiProvider)
+        mock_init.assert_called_once_with(api_key="gemini-key")
 
     @patch("ayder_cli.services.llm.OpenAI")
     def test_defaults_to_openai_when_no_provider(self, mock_openai_cls):

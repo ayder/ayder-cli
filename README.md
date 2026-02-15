@@ -1,6 +1,6 @@
 # ayder-cli
 
-An AI agent chat client for [Ollama](https://ollama.com) models. It connects to any Ollama instance (local or cloud) and provides an autonomous coding assistant with file system tools and shell access, all from your terminal.
+A multi-provider AI agent chat client for your terminal. It connects to [Ollama](https://ollama.com), [Anthropic Claude](https://www.anthropic.com), or any OpenAI-compatible API and provides an autonomous coding assistant with file system tools and shell access.
 
 ![ayder](docs/cc.png)
 
@@ -8,13 +8,23 @@ An AI agent chat client for [Ollama](https://ollama.com) models. It connects to 
 
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
 
-- **Fully local or cloud** -- runs against any Ollama instance. Use locally for privacy, or connect to cloud-hosted Ollama. Your code never leaves your computer when using local Ollama.
+- **Multi-provider** -- switch between Ollama (local/cloud), Anthropic Claude, or any OpenAI-compatible API with a single `/provider` command. Each provider has its own config section.
+- **Fully local or cloud** -- run locally with Ollama for privacy (your code never leaves your machine), or connect to Anthropic, OpenAI, or cloud-hosted Ollama.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own, up to 50 consecutive tool calls per user message (configurable with `-I`).
 - **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. Falls back to a classic prompt-toolkit REPL with `--cli`.
-- **Minimal dependencies** -- OpenAI SDK (for Ollama's compatible API), Rich, and Textual.
+- **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Anthropic SDK optional for native Claude support.
 
 
-### Tested Models with tool support (+ OpenAI Compatible Tools)
+### Supported Providers
+
+| Provider | Setup | Models |
+|----------|-------|--------|
+| **Ollama** (use with openai) | Local or cloud Ollama instance | Any Ollama model with tool support |
+| **Openai** (default) | Local or cloud Ollama instance | Any Ollama model with tool support |
+| **Anthropic** | `pip install anthropic` + API key | Claude Opus 4.6, Sonnet 4.5, Haiku 4.5, and all legacy models |
+| **Gemini** | `pip install google-generativeai` + API key | Gemini 3 Deep Think, Gemini 3 Pro, Gemini 3 Flash |
+
+### Tested Providers with Models 
 
 | Provider | Location | Model                              |
 |----------|----------|------------------------------------|
@@ -31,6 +41,16 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 | ollama   | Cloud    | qwen3-coder-next:cloud             |
 | ollama   | Cloud    | qwen3-coder:480b-cloud             |
 | ollama   | Local    | qwen3-coder:latest                 |
+| anthropic| Cloud    | claude-opus-4-6                    |
+| anthropic| Cloud    | claude-sonnet-4-5-20250929         |
+| anthropic| Cloud    | claude-haiku-4-5-20251001          |
+| openai   | Cloud    | GPT-5.3-Codex                      |
+| openai   | Cloud    | GPT-5.3-Codex-Spark                |
+| openai   | Cloud    | GPT-5.2                            |
+| openai   | Cloud    | GPT-5                              |
+| gemini   | Cloud    | gemini-3-deep-think                |
+| gemini   | Cloud    | gemini-3-pro                       |
+| gemini   | Cloud    | gemini-3-flash                     |
 
 
 ### Tools
@@ -70,7 +90,7 @@ Each tool has an OpenAI-compatible JSON schema so models that support function c
 
 ## Installation
 
-Requires Python 3.12+ and a running Ollama instance.
+Requires Python 3.12+.
 
 ```bash
 # Clone the repo
@@ -82,17 +102,41 @@ pip install -e .
 
 # Or best as a uv tool (always on the path)
 uv tool install .
+```
 
+### Ollama setup (default provider)
+
+```bash
 # Make sure Ollama is running with a model
-# You can use any Ollama model - qwen3-coder is recommended for best results
 ollama pull qwen3-coder
+ollama serve
 
 # Optional: optimize ollama for your model
 export OLLAMA_CONTEXT_LENGTH=65536
 export OLLAMA_FLASH_ATTENTION=true
 export OLLAMA_MAX_LOADED_MODELS=1
+```
 
-ollama serve
+### Anthropic setup (optional)
+
+```bash
+# Install the Anthropic SDK
+pip install anthropic
+
+# Set your API key in ~/.ayder/config.toml (see Configuration below)
+# Then switch provider:
+#   /provider anthropic
+```
+
+### Gemini setup (optional)
+
+```bash
+# Install the Google Generative AI SDK
+pip install google-generativeai
+
+# Set your API key in ~/.ayder/config.toml
+# Then switch provider:
+#   /provider gemini
 ```
 
 ## Configuration
@@ -100,36 +144,50 @@ ollama serve
 On first run, ayder-cli creates a config file at `~/.ayder/config.toml`:
 
 ```toml
-[llm]
-# Ollama API endpoint (or any OpenAI-compatible server)
+# Active provider: "openai", "anthropic", or "gemini"
+provider = "openai"
+
+[openai]
 base_url = "http://localhost:11434/v1"
-# API key (use "ollama" for local Ollama)
 api_key = "ollama"
-# Model name as shown in `ollama list`
 model = "qwen3-coder:latest"
-# Context window size in tokens
+num_ctx = 65536
+
+[anthropic]
+api_key = ""
+model = "claude-sonnet-4-5-20250929"
+num_ctx = 8192
+
+[gemini]
+api_key = ""
+model = "gemini-2.0-flash"
 num_ctx = 65536
 
 [editor]
-# Editor for /task-edit command (vim, nano, code, etc.)
 editor = "vim"
 
 [ui]
-# Show written file contents after write_file tool calls and LLM request details
 verbose = false
+
+[agent]
+max_iterations = 50
 ```
+
+Each provider has its own section. The top-level `provider` key selects which one is active. Use `/provider` in the TUI to switch at runtime.
 
 Please adjust *num_ctx* context size window according to your local computer ram. If your ollama gets crash, decrease this 65536 value to a proper context size.
 
 | Option | Section | Default | Description |
 |--------|---------|---------|-------------|
-| `base_url` | `[llm]` | `http://localhost:11434/v1` | API endpoint. Works with any OpenAI-compatible server. |
-| `api_key` | `[llm]` | `ollama` | API key. Set to `"ollama"` for local Ollama. |
-| `model` | `[llm]` | `qwen3-coder:latest` | Model to use. Any Ollama model works (`ollama list`). qwen3-coder recommended for tool use. |
-| `num_ctx` | `[llm]` | `65536` | Context window size in tokens. Larger values use more VRAM. |
+| `provider` | top-level | `openai` | Active provider: `openai`, `anthropic`, or `gemini`. |
+| `base_url` | `[openai]` | `http://localhost:11434/v1` | API endpoint. Works with any OpenAI-compatible server (Ollama, OpenAI, etc.). |
+| `api_key` | per provider | `ollama` | API key. Set to `"ollama"` for local Ollama, or your Anthropic/OpenAI key. |
+| `model` | per provider | varies | Model to use. Each provider section has its own default. |
+| `num_ctx` | per provider | varies | Context window size in tokens. |
 | `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` command. |
 | `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
-| `max_background_processes` | `[ui]` | `5` | Maximum number of concurrent background processes (1-20). |
+| `max_iterations` | `[agent]` | `50` | Maximum agentic iterations (tool calls) per user message (1-100). |
+| `max_background_processes` | -- | `5` | Maximum number of concurrent background processes (1-20). |
 
 ## Usage
 
@@ -215,11 +273,11 @@ You can tune how often the agent "compresses" its memory using the `-I` (Iterati
 
 #### Transferring Memory Between Models
 
-If you switch models mid-session, you can carry over your "knowledge" by manually triggering the memory system:
+If you switch models or providers mid-session, you can carry over your "knowledge" by manually triggering the memory system:
 
 1. **Save current state:** `/save-memory`
-2. **Switch to a new model:** `/model qwen3-coder:480b-cloud`
-3. **Restore context to new model:** `/load-memory`
+2. **Switch provider or model:** `/provider anthropic` or `/model qwen3-coder:480b-cloud`
+3. **Restore context:** `/load-memory`
 
 ```bash
 # Allow up to 200 iterations for complex tasks
@@ -236,6 +294,7 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 |---------|-------------|
 | `/help` | Show available commands and keyboard shortcuts |
 | `/tools` | List all tools and their descriptions |
+| `/provider` | Switch LLM provider (openai, anthropic, gemini) with interactive selector |
 | `/model` | List available models or switch model (e.g. `/model qwen2.5-coder`) |
 | `/ask` | Ask a general question without using tools (e.g. `/ask explain REST vs GraphQL`) |
 | `/plan` | Analyze request and create implementation tasks |

@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict
@@ -363,6 +364,290 @@ class AnthropicProvider(LLMProvider):
 
 
 # ---------------------------------------------------------------------------
+# Gemini provider
+# ---------------------------------------------------------------------------
+
+
+class GeminiProvider(LLMProvider):
+    """Google Gemini provider via google-genai package."""
+
+    def __init__(self, api_key: str | None = None, client: Any | None = None):
+        if client:
+            self.client = client
+        else:
+            from google import genai
+
+            self.client = genai.Client(api_key=api_key)
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        options: Optional[Dict[str, Any]] = None,
+        verbose: bool = False,
+    ) -> Any:
+        if verbose:
+            self._print_llm_request(messages, model, tools, options)
+
+        from google.genai import types
+
+        system_instruction, contents = self._convert_messages(messages)
+        
+        # Convert options
+        config_args = {}
+        if options:
+            if "num_ctx" in options:
+                config_args["max_output_tokens"] = options["num_ctx"]
+            # Add other options as needed
+
+        if system_instruction:
+            config_args["system_instruction"] = system_instruction
+            
+        if tools:
+            config_args["tools"] = self._convert_tools(tools)
+
+        config = types.GenerateContentConfig(**config_args)
+
+        try:
+            # We use models.generate_content. contents expects list of Content objects or dicts.
+            response = self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+            return self._wrap_response(response)
+        except Exception as e:
+            logger.error(f"Gemini generation failed: {e}")
+            raise
+
+    def list_models(self) -> List[str]:
+        """List available models."""
+        try:
+            models = []
+            for m in self.client.models.list():
+                if "generateContent" in getattr(m, "supported_generation_methods", []):
+                    name = m.name.replace("models/", "")
+                    models.append(name)
+            return models
+        except Exception as e:
+            logger.error(f"Failed to list models from Gemini API: {e}")
+            return ["gemini-3-deep-think", "gemini-3-pro", "gemini-3-flash"]
+
+    def _print_llm_request(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        options: Optional[Dict[str, Any]],
+    ) -> None:
+        from ayder_cli.ui import print_llm_request_debug
+
+        print_llm_request_debug(messages, model, tools, options)
+
+    # -- message translation ------------------------------------------------
+
+    @staticmethod
+    def _convert_messages(
+        messages: List[Dict[str, Any]],
+    ) -> tuple[str | None, List[Dict[str, Any]]]:
+        """Convert OpenAI-style messages to Gemini format.
+
+        Returns (system_instruction, contents).
+        """
+        system_parts: list[str] = []
+        converted: list[Dict[str, Any]] = []
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            # System messages
+            if role == "system":
+                if content:
+                    system_parts.append(content)
+                continue
+
+            # Tool result messages
+            if role == "tool":
+                # OpenAI sends tool outputs as separate messages.
+                # Gemini expects function_response parts.
+                # We map role='tool' to role='function'.
+                
+                # Try to parse content as JSON if possible, otherwise use as is
+                try:
+                    response_content = json.loads(content) if content else {}
+                except (json.JSONDecodeError, TypeError):
+                    response_content = {"result": content}
+
+                fn_name = msg.get("name", "unknown_tool")
+                
+                # If name is missing, we try to find it in the last assistant message's tool_calls
+                # matching the tool_call_id.
+                if fn_name == "unknown_tool" and converted:
+                    pass
+                
+                part = {
+                    "function_response": {
+                        "name": fn_name,
+                        "response": response_content,
+                    }
+                }
+                # To provide result of function call send a message with role='user' 
+                # and a part containing function_response.
+                converted.append({"role": "user", "parts": [part]})
+                continue
+
+            # Assistant messages
+            if role == "assistant":
+                parts = []
+                if content:
+                    parts.append({"text": content})
+                
+                for tc in msg.get("tool_calls", []):
+                    fn = tc.get("function", {})
+                    args_str = fn.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_str)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    
+                    parts.append({
+                        "function_call": {
+                            "name": fn.get("name", ""),
+                            "args": args,
+                        }
+                    })
+                
+                if parts:
+                    converted.append({"role": "model", "parts": parts})
+                continue
+
+            # User messages
+            if role == "user":
+                converted.append({"role": "user", "parts": [{"text": content}]})
+
+        # Merge consecutive messages
+        merged = GeminiProvider._merge_consecutive(converted)
+        
+        return "\n\n".join(system_parts) if system_parts else None, merged
+
+    @staticmethod
+    def _merge_consecutive(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not messages:
+            return []
+        
+        result = [messages[0]]
+        for msg in messages[1:]:
+            last = result[-1]
+            if msg["role"] == last["role"]:
+                # Merge parts
+                last["parts"].extend(msg["parts"])
+            else:
+                result.append(msg)
+        return result
+
+    @staticmethod
+    def _convert_tools(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Gemini tools format:
+        # tools = [ { "function_declarations": [ ... ] } ]
+        # Each declaration similar to OpenAI but wrapped.
+        
+        funcs = []
+        for tool in tools:
+            fn = tool.get("function", {})
+            parameters = fn.get("parameters", {})
+            # Sanitize parameters to remove unsupported fields like "default"
+            sanitized_params = GeminiProvider._sanitize_schema(parameters)
+            
+            funcs.append({
+                "name": fn.get("name", ""),
+                "description": fn.get("description", ""),
+                "parameters": sanitized_params,
+            })
+            
+        return [{"function_declarations": funcs}]
+
+    @staticmethod
+    def _sanitize_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Recursively sanitize schema to remove unsupported fields for Gemini (e.g. default)."""
+        if not isinstance(schema, dict):
+            return schema
+            
+        new_schema: Dict[str, Any] = {}
+        for k, v in schema.items():
+            # Special handling for "properties" to preserve keys (arg names) that might match forbidden fields
+            if k == "properties" and isinstance(v, dict):
+                new_props = {}
+                for prop_name, prop_schema in v.items():
+                    new_props[prop_name] = GeminiProvider._sanitize_schema(prop_schema)
+                new_schema[k] = new_props
+                continue
+
+            # Filter out known unsupported fields in Gemini's Schema protobuf
+            if k in ("default", "additionalProperties", "title"):
+                continue
+                
+            if isinstance(v, dict):
+                new_schema[k] = GeminiProvider._sanitize_schema(v)
+            elif isinstance(v, list):
+                new_schema[k] = [
+                    GeminiProvider._sanitize_schema(i) if isinstance(i, dict) else i 
+                    for i in v
+                ]
+            else:
+                new_schema[k] = v
+                
+        return new_schema
+
+    @staticmethod
+    def _wrap_response(response: Any) -> _Response:
+        """Wrap Gemini response."""
+        # response.candidates[0].content.parts
+        # We need to handle safety blocks or empty responses
+        if not response.candidates:
+            return _Response(
+                choices=[_Choice(message=_Message(content="Error: No candidates returned (safety filter?)"))],
+                usage=_Usage(total_tokens=0),
+            )
+            
+        candidate = response.candidates[0]
+        text_parts = []
+        tool_calls = []
+        
+        for part in candidate.content.parts:
+            if part.text:
+                text_parts.append(part.text)
+            if part.function_call:
+                # Generate a random ID as Gemini doesn't provide one
+                call_id = f"call_{uuid.uuid4().hex[:8]}"
+                tool_calls.append(
+                    _ToolCall(
+                        id=call_id,
+                        type="function",
+                        function=_FunctionCall(
+                            name=part.function_call.name,
+                            arguments=json.dumps(dict(part.function_call.args)),
+                        ),
+                    )
+                )
+
+        content = "\n".join(text_parts) if text_parts else None
+        message = _Message(content=content, tool_calls=tool_calls)
+        
+        # Usage metadata
+        usage = getattr(response, "usage_metadata", None)
+        total_tokens = 0
+        if usage:
+            total_tokens = usage.prompt_token_count + usage.candidates_token_count
+            
+        return _Response(
+            choices=[_Choice(message=message)],
+            usage=_Usage(total_tokens=total_tokens),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -386,8 +671,11 @@ def create_llm_provider(config: Any) -> LLMProvider:
                 "Install it with: pip install anthropic"
             )
     if provider == "gemini":
-        raise ModuleNotFoundError(
-            "Gemini provider is not yet supported. "
-            "Configure it in config.toml for future use."
-        )
+        try:
+            return GeminiProvider(api_key=config.api_key)
+        except ImportError:
+            raise ImportError(
+                "Gemini provider requires the 'google-genai' package. "
+                "Install it with: pip install google-genai"
+            )
     return OpenAIProvider(base_url=config.base_url, api_key=config.api_key)
