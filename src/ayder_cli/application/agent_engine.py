@@ -20,6 +20,7 @@ class EngineConfig:
     num_ctx: int = 65536
     max_iterations: int = 50
     permissions: set = field(default_factory=lambda: {"r"})
+    initial_iteration: int = 0
 
 
 class AgentEngine:
@@ -68,7 +69,7 @@ class AgentEngine:
             except Exception:
                 pass
 
-        iteration = 0
+        iteration = self.config.initial_iteration
         # Track processed tool_call_ids to avoid re-executing in stuck loops
         _processed_tool_ids: set[str] = set()
 
@@ -84,25 +85,22 @@ class AgentEngine:
             # Max iterations: try checkpoint, otherwise terminate
             if iteration > self.config.max_iterations:
                 checkpoint_continued = await self._handle_checkpoint(messages)
-                if checkpoint_continued:
-                    iteration = 0
-                    continue
-                if self.cb is not None:
-                    self.cb.on_system_message(
-                        f"Reached max iterations ({self.config.max_iterations})."
-                    )
-                return None
+                if not checkpoint_continued:
+                    if self.cb is not None:
+                        self.cb.on_system_message(
+                            f"Reached max iterations ({self.config.max_iterations})."
+                        )
+                    return None
+                # Checkpoint succeeded: reset iteration and fall through to LLM call
+                iteration = 0
 
             # Call LLM
             if self.cb is not None:
                 self.cb.on_thinking_start()
             try:
                 tool_schemas = self.registry.get_schemas() if hasattr(self.registry, "get_schemas") else []
-                response = await self.llm.chat(
-                    messages,
-                    model=self.config.model,
-                    tools=tool_schemas,
-                    options={"num_ctx": self.config.num_ctx},
+                response = await self._call_llm(
+                    messages, self.config.model, tool_schemas, self.config.num_ctx
                 )
             except Exception as e:
                 if self.cb is not None:
@@ -129,14 +127,21 @@ class AgentEngine:
                 msg_dict["tool_calls"] = _serialize_tool_calls(tool_calls)
             messages.append(msg_dict)
 
-            # Text-only response → done
+            # Notify content (think blocks, display text)
+            await self._on_response_content(content, tool_calls)
+
+            # Text-only → check XML/JSON custom tool call fallback, then done
             if not tool_calls:
-                if self.cb is not None and content:
-                    self.cb.on_assistant_content(content)
+                custom_calls = await self._parse_custom_tool_calls(content)
+                if custom_calls:
+                    await self._execute_custom_tool_calls(custom_calls, messages)
+                    await self._after_tool_batch()
+                    continue
                 return content or None
 
             # Route tool calls
             await self._execute_tool_calls(tool_calls, messages, _processed_tool_ids)
+            await self._after_tool_batch()
 
     # -- Tool execution -------------------------------------------------------
 
@@ -171,11 +176,16 @@ class AgentEngine:
                         self.cb.on_tool_complete(call_id, result)
                     processed_ids.add(call_id)
                     messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": result})
+                    stop, inject = await self._on_deny(confirm, tool_calls, tc, processed_ids, messages)
+                    if inject is not None:
+                        messages.append({"role": "user", "content": inject})
+                    if stop:
+                        return
                     continue
 
             # Execute
             try:
-                result = self.registry.execute(name, args)
+                result = await self._execute_single_tool(name, args)
             except Exception as e:
                 result = f"Error: {e}"
 
@@ -193,6 +203,43 @@ class AgentEngine:
     def _needs_confirmation(self, tool_name: str) -> bool:
         perm = TOOL_PERMISSIONS.get(tool_name, "r")
         return perm not in self.config.permissions
+
+    # -- Hooks (override in subclasses) ---------------------------------------
+
+    async def _call_llm(self, messages: list, model: str, tools: list, num_ctx: int) -> Any:
+        """Hook: perform the actual LLM call. Override to use a different call path."""
+        return await self.llm.chat(
+            messages, model=model, tools=tools, options={"num_ctx": num_ctx}
+        )
+
+    async def _execute_single_tool(self, name: str, args: dict) -> Any:
+        """Hook: execute one tool call. Override to run in a thread pool, etc."""
+        return self.registry.execute(name, args)
+
+    async def _on_response_content(self, content: str, tool_calls: Optional[list]) -> None:
+        """Hook: called after LLM response parsed. Override for content post-processing."""
+        if not tool_calls and self.cb is not None and content:
+            self.cb.on_assistant_content(content)
+
+    async def _after_tool_batch(self) -> None:
+        """Hook: called after a batch of tool calls completes. Override for cleanup."""
+
+    async def _on_deny(
+        self, confirm: Any, tool_calls: list, current_tc: Any, processed_ids: set, messages: list
+    ) -> tuple[bool, Optional[str]]:
+        """Hook: called when a tool is denied. Return (stop_loop, inject_message).
+
+        Default: do nothing (continue processing remaining tools).
+        Override to handle 'instruct' action (TUI) or similar.
+        """
+        return False, None
+
+    async def _parse_custom_tool_calls(self, content: str) -> Optional[list]:
+        """Hook: parse XML/JSON tool calls from text content. Returns None by default."""
+        return None
+
+    async def _execute_custom_tool_calls(self, calls: list, messages: list) -> None:
+        """Hook: execute custom (XML/JSON) tool calls. No-op by default."""
 
     # -- Checkpoint -----------------------------------------------------------
 

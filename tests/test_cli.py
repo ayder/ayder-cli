@@ -123,27 +123,26 @@ class TestRunCommand:
     """Test run_command function."""
 
     @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
-    def test_run_command_success(self, mock_agent_class, mock_session_class, mock_build_services):
-        """Test successful command execution."""
+    @patch('ayder_cli.cli_runner.asyncio.run')
+    def test_run_command_success(self, mock_asyncio_run, mock_build_services):
+        """Test successful command execution via AgentEngine."""
         from ayder_cli.cli_runner import run_command
 
-        mock_config = MagicMock()
-        mock_llm = MagicMock()
         mock_executor = MagicMock()
-        mock_system = "system prompt"
+        mock_executor.tool_registry = MagicMock()
+        mock_config = MagicMock()
+        mock_config.model = "test-model"
+        mock_config.num_ctx = 4096
 
-        mock_build_services.return_value = (mock_config, mock_llm, mock_executor, MagicMock(), mock_system, MagicMock(), MagicMock())
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = "Response text"
-        mock_agent_class.return_value = mock_agent
+        mock_build_services.return_value = (
+            mock_config, MagicMock(), mock_executor, MagicMock(), "system prompt", MagicMock(), MagicMock()
+        )
+        mock_asyncio_run.return_value = "Response text"
 
         result = run_command("test prompt", permissions={"r"}, iterations=5)
 
         assert result == 0
-        mock_agent.chat.assert_called_once_with("test prompt")
+        mock_asyncio_run.assert_called_once()
 
     @patch('ayder_cli.cli_runner._build_services')
     def test_run_command_error(self, mock_build_services):
@@ -158,17 +157,21 @@ class TestRunCommand:
             assert "Build error" in mock_stderr.getvalue()
 
     @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
-    def test_run_command_no_response(self, mock_agent_class, mock_session_class, mock_build_services):
+    @patch('ayder_cli.cli_runner.asyncio.run')
+    def test_run_command_no_response(self, mock_asyncio_run, mock_build_services):
         """Test command execution with no response."""
         from ayder_cli.cli_runner import run_command
 
-        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = None
-        mock_agent_class.return_value = mock_agent
+        mock_executor = MagicMock()
+        mock_executor.tool_registry = MagicMock()
+        mock_config = MagicMock()
+        mock_config.model = "test-model"
+        mock_config.num_ctx = 4096
+
+        mock_build_services.return_value = (
+            mock_config, MagicMock(), mock_executor, MagicMock(), "system", MagicMock(), MagicMock()
+        )
+        mock_asyncio_run.return_value = None
 
         result = run_command("test prompt")
 
@@ -712,3 +715,51 @@ class TestCreateParser:
         args = parser.parse_args([])
         assert args.command is None
 
+
+
+class TestPhase04RuntimeWiring:
+    """S3: Assert real runtime wiring for CLI and TUI shared-engine usage."""
+
+    @patch('ayder_cli.cli_runner._build_services')
+    @patch('ayder_cli.cli_runner.asyncio.run')
+    def test_command_runner_uses_agent_engine(self, mock_asyncio_run, mock_build_services):
+        """CommandRunner.run() must invoke AgentEngine via asyncio.run (not Agent.chat)."""
+        from ayder_cli.cli_runner import CommandRunner
+        from ayder_cli.application.agent_engine import AgentEngine
+
+        mock_executor = MagicMock()
+        mock_executor.tool_registry = MagicMock()
+        mock_config = MagicMock()
+        mock_config.model = "test-model"
+        mock_config.num_ctx = 4096
+
+        mock_build_services.return_value = (
+            mock_config, MagicMock(), mock_executor, MagicMock(), "sys", MagicMock(), MagicMock()
+        )
+        mock_asyncio_run.return_value = "response"
+
+        runner = CommandRunner("test prompt", permissions={"r"}, iterations=10)
+        runner.run()
+
+        # asyncio.run must be called with a coroutine (engine.run)
+        mock_asyncio_run.assert_called_once()
+        coro_arg = mock_asyncio_run.call_args[0][0]
+        # Coroutine must be from AgentEngine.run
+        assert hasattr(coro_arg, '__qualname__') and 'AgentEngine.run' in coro_arg.__qualname__
+        coro_arg.close()  # prevent ResourceWarning
+
+    def test_tui_chat_loop_delegates_to_engine(self):
+        """TuiChatLoop.run() must not have its own while-loop; it delegates to _TuiCompatEngine."""
+        import inspect
+        from ayder_cli.tui.chat_loop import TuiChatLoop, _TuiCompatEngine
+        from ayder_cli.application.agent_engine import AgentEngine
+
+        # _TuiCompatEngine must be a subclass of AgentEngine
+        assert issubclass(_TuiCompatEngine, AgentEngine), "_TuiCompatEngine must extend AgentEngine"
+
+        # TuiChatLoop.run() source must not contain its own while True loop
+        src = inspect.getsource(TuiChatLoop.run)
+        assert "while True" not in src, "TuiChatLoop.run() must not have its own while-loop"
+
+        # TuiChatLoop.run() source must reference _TuiCompatEngine
+        assert "_TuiCompatEngine" in src, "TuiChatLoop.run() must delegate to _TuiCompatEngine"

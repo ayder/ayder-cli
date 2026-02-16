@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from ayder_cli.application.agent_engine import AgentEngine, EngineConfig  # noqa: F401
+from ayder_cli.application.agent_engine import AgentEngine, EngineConfig, _tc_id, _tc_name
 from ayder_cli.client import call_llm_async
 from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
@@ -39,6 +39,135 @@ class TuiLoopConfig:
     num_ctx: int = 65536
     max_iterations: int = 50
     permissions: set = field(default_factory=lambda: {"r"})
+
+
+class _TuiCompatEngine(AgentEngine):
+    """AgentEngine subclass wired for TUI: uses call_llm_async and asyncio.to_thread.
+
+    Defined here so patches to ``ayder_cli.tui.chat_loop.call_llm_async`` and
+    ``ayder_cli.tui.chat_loop.asyncio.to_thread`` are intercepted correctly in tests.
+    """
+
+    async def _call_llm(self, messages: list, model: str, tools: list, num_ctx: int):
+        return await call_llm_async(self.llm, messages, model, tools=tools, num_ctx=num_ctx)
+
+    async def _execute_single_tool(self, name: str, args: dict):
+        return await asyncio.to_thread(self.registry.execute, name, args)
+
+    async def _on_response_content(self, content: str, tool_calls) -> None:
+        think_blocks = content_processor.extract_think_blocks(content)
+        for text in think_blocks:
+            self.cb.on_thinking_content(text)
+        display = content_processor.strip_for_display(content)
+        if display:
+            self.cb.on_assistant_content(display)
+
+    async def _after_tool_batch(self) -> None:
+        self.cb.on_tools_cleanup()
+
+    async def _parse_custom_tool_calls(self, content: str):
+        if content and has_custom_tool_calls(content):
+            calls = parse_custom_tool_calls(content)
+            valid = [c for c in calls if "error" not in c]
+            if valid:
+                return valid
+        json_calls = content_processor.parse_json_tool_calls(content)
+        if json_calls:
+            return json_calls
+        return None
+
+    async def _handle_checkpoint(self, messages: list) -> bool:
+        """TUI checkpoint: generate LLM summary, save via checkpoint_manager, reset context."""
+        if not self.cm:
+            return False
+
+        from ayder_cli.application.message_contract import (
+            get_message_role,
+            get_message_content,
+        )
+        from ayder_cli.prompts import MEMORY_CHECKPOINT_PROMPT_TEMPLATE
+        from ayder_cli.checkpoint_manager import CHECKPOINT_FILE_NAME
+
+        summary_parts = []
+        for msg in messages[-10:]:
+            role = get_message_role(msg)
+            content = get_message_content(msg)
+            if content:
+                summary_parts.append(f"[{role}] {content[:200]}")
+        conversation_summary = "\n".join(summary_parts)
+
+        checkpoint_prompt = MEMORY_CHECKPOINT_PROMPT_TEMPLATE.format(
+            conversation_summary=conversation_summary,
+            memory_file_name=CHECKPOINT_FILE_NAME,
+        )
+        checkpoint_messages = list(messages) + [{"role": "user", "content": checkpoint_prompt}]
+
+        self.cb.on_system_message("Approaching iteration limit — creating memory checkpoint...")
+        self.cb.on_thinking_start()
+        try:
+            response = await call_llm_async(
+                self.llm, checkpoint_messages, self.config.model, tools=[], num_ctx=self.config.num_ctx
+            )
+        except Exception:
+            self.cb.on_thinking_stop()
+            return False
+        finally:
+            self.cb.on_thinking_stop()
+
+        summary_content = response.choices[0].message.content or conversation_summary
+        self.cm.save_checkpoint(summary_content)
+
+        system_msg = (
+            messages[0] if messages and messages[0].get("role") == "system" else None
+        )
+        messages.clear()
+        if system_msg:
+            messages.append(system_msg)
+
+        restore_msg = (
+            self.mm.build_quick_restore_message()
+            if self.mm
+            else f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary_content}\n\nPlease continue."
+        )
+        messages.append({"role": "user", "content": restore_msg})
+        self.cb.on_system_message("Checkpoint saved — context compacted. Continuing...")
+        return True
+
+    async def _on_deny(self, confirm, tool_calls, current_tc, processed_ids, messages):
+        """Handle TUI 'instruct' action: skip remaining tools, inject custom instructions."""
+        action = getattr(confirm, "action", None)
+        if action == "instruct":
+            instructions = getattr(confirm, "instructions", None)
+            idx = tool_calls.index(current_tc)
+            for remaining in tool_calls[idx + 1:]:
+                rem_id = _tc_id(remaining)
+                rem_name = _tc_name(remaining)
+                if rem_id not in processed_ids:
+                    processed_ids.add(rem_id)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": rem_id,
+                        "name": rem_name,
+                        "content": "Tool call skipped (user provided instructions).",
+                    })
+            return True, instructions
+        return False, None
+
+    async def _execute_custom_tool_calls(self, calls: list, messages: list) -> None:
+        results_text = []
+        for call in calls:
+            name = call.get("name", "unknown")
+            args = call.get("arguments", {})
+            call_id = f"xml-{name}-{id(call)}"
+            self.cb.on_tool_start(call_id, name, args)
+            try:
+                result = await asyncio.to_thread(self.registry.execute, name, args)
+                results_text.append(f"[{name}] {result}")
+                self.cb.on_tool_complete(call_id, str(result))
+            except Exception as e:
+                results_text.append(f"[{name}] Error: {e}")
+                self.cb.on_tool_complete(call_id, f"Error: {e}")
+        messages.append({"role": "user", "content": "\n".join(results_text)})
 
 
 @runtime_checkable
@@ -102,103 +231,52 @@ class TuiChatLoop:
         self._iteration = 0
 
     async def run(self, *, no_tools: bool = False) -> None:
-        """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
-        while True:
-            if self.cb.is_cancelled():
-                return
+        """Delegate orchestration to the shared AgentEngine via _TuiCompatEngine."""
+        loop_ref = self
 
-            self._iteration += 1
-            self.cb.on_iteration_update(self._iteration, self.config.max_iterations)
-            if self._iteration > self.config.max_iterations:
-                if not await self._handle_checkpoint():
-                    self.cb.on_system_message(
-                        f"Reached max iterations ({self.config.max_iterations})."
-                    )
-                    return
+        class _TrackingProxy:
+            """Wraps TUI callbacks and updates TuiChatLoop iteration/token state."""
 
-            # 1. Call LLM
-            self.cb.on_thinking_start()
-            try:
-                tool_schemas = [] if no_tools else self.registry.get_schemas()
-                response = await call_llm_async(
-                    self.llm,
-                    self.messages,
-                    self.config.model,
-                    tools=tool_schemas,
-                    num_ctx=self.config.num_ctx,
-                )
-            except Exception as e:
-                self.cb.on_thinking_stop()
-                self.cb.on_system_message(f"Error: {e}")
-                return
-            finally:
-                self.cb.on_thinking_stop()
+            def __init__(self, inner):
+                self._inner = inner
 
-            if self.cb.is_cancelled():
-                return
+            def on_token_usage(self, total_tokens: int) -> None:
+                # Accumulate across multiple run() calls (engine reports per-response tokens)
+                loop_ref._total_tokens += total_tokens
+                self._inner.on_token_usage(loop_ref._total_tokens)
 
-            # 2. Process response metadata
-            usage = getattr(response, "usage", None)
-            if usage:
-                tokens = getattr(usage, "total_tokens", 0) or 0
-                self._total_tokens += tokens
-                self.cb.on_token_usage(self._total_tokens)
+            def on_iteration_update(self, current: int, maximum: int) -> None:
+                loop_ref._iteration = current
+                self._inner.on_iteration_update(current, maximum)
 
-            message = response.choices[0].message
-            content = message.content or ""
-            tool_calls = message.tool_calls
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
 
-            # 3. Build and append assistant message dict
-            msg_dict: dict = {"role": "assistant", "content": content}
-            if tool_calls:
-                msg_dict["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ]
-            self.messages.append(msg_dict)
+        class _NoToolsRegistry:
+            def get_schemas(self):
+                return []
 
-            # 4. Extract <think> blocks
-            think_blocks = content_processor.extract_think_blocks(content)
-            for text in think_blocks:
-                self.cb.on_thinking_content(text)
+            def execute(self, name, args):
+                return ""
 
-            # 5. Strip tool markup and display content
-            display = content_processor.strip_for_display(content)
-            if display:
-                self.cb.on_assistant_content(display)
+        effective_registry = _NoToolsRegistry() if no_tools else self.registry
 
-            # 6. Route: OpenAI tool_calls → XML fallback → JSON fallback → done
-            if tool_calls:
-                await self._execute_openai_tool_calls(tool_calls)
-                no_tools = False
-                continue
-
-            # Check for custom tool calls (including namespaced variants like <minimax:tool_call>
-            # and DeepSeek format like <function_calls>)
-            if content and has_custom_tool_calls(content):
-                custom_calls = parse_custom_tool_calls(content)
-                valid = [c for c in custom_calls if "error" not in c]
-                if valid:
-                    await self._execute_custom_tool_calls(valid)
-                    no_tools = False
-                    continue
-
-            # JSON fallback: model outputs tool calls as a JSON array in content
-            json_calls = content_processor.parse_json_tool_calls(content)
-            if json_calls:
-                await self._execute_custom_tool_calls(json_calls)
-                no_tools = False
-                continue
-
-            # Text-only response — done
-            return
+        engine_config = EngineConfig(
+            model=self.config.model,
+            num_ctx=self.config.num_ctx,
+            max_iterations=self.config.max_iterations,
+            permissions=self.config.permissions,
+            initial_iteration=self._iteration,
+        )
+        engine = _TuiCompatEngine(
+            llm_provider=self.llm,
+            tool_registry=effective_registry,
+            config=engine_config,
+            callbacks=_TrackingProxy(self.cb),
+            checkpoint_manager=self.cm,
+            memory_manager=self.mm,
+        )
+        await engine.run(self.messages)
 
     # -- OpenAI tool calls ---------------------------------------------------
 

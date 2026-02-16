@@ -49,9 +49,8 @@ class CommandRunner:
             Exit code (0 for success, 1 for error)
         """
         try:
-            from ayder_cli.client import ChatSession, Agent
+            from ayder_cli.application.agent_engine import AgentEngine, EngineConfig
 
-            services = _build_services()
             (
                 cfg,
                 llm_provider,
@@ -60,19 +59,23 @@ class CommandRunner:
                 enhanced_system,
                 checkpoint_manager,
                 memory_manager,
-            ) = services
+            ) = _build_services()
 
-            session = ChatSession(
-                config=cfg,
-                system_prompt=enhanced_system,
-                permissions=self.permissions,
-                iterations=self.iterations,
+            messages = [{"role": "system", "content": enhanced_system}]
+            engine_config = EngineConfig(
+                model=cfg.model,
+                num_ctx=cfg.num_ctx,
+                max_iterations=self.iterations,
+                permissions=self.permissions or {"r"},
+            )
+            engine = AgentEngine(
+                llm_provider=llm_provider,
+                tool_registry=tool_executor.tool_registry,
+                config=engine_config,
                 checkpoint_manager=checkpoint_manager,
                 memory_manager=memory_manager,
             )
-            agent = Agent(llm_provider, tool_executor, session)
-
-            response = agent.chat(self.prompt)
+            response = asyncio.run(engine.run(messages, user_input=self.prompt))
             if response:
                 print(response)
 

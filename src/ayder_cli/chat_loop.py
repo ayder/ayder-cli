@@ -7,6 +7,7 @@ This module separates the concerns of:
 - Memory checkpoint/restore cycles (delegated to MemoryManager)
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 from ayder_cli.checkpoint_manager import CheckpointManager
@@ -171,7 +172,7 @@ class ChatLoop:
         )
 
     def run(self, user_input: str) -> Optional[str]:
-        """Run the chat loop for a single user input.
+        """Run the chat loop via the shared AgentEngine.
 
         Args:
             user_input: The user's input message
@@ -179,37 +180,23 @@ class ChatLoop:
         Returns:
             The assistant's text response, or None if only tools ran
         """
-        self.session.add_message("user", user_input)
+        from ayder_cli.application.agent_engine import AgentEngine, EngineConfig
 
-        while True:
-            self.iteration_ctrl.increment()
-
-            # Check if we need a memory checkpoint
-            if self.iteration_ctrl.should_trigger_checkpoint():
-                if self._handle_checkpoint():
-                    continue
-                else:
-                    # Max iterations reached, no checkpoint possible
-                    return None
-
-            # Get tool schemas
-            schemas = self._get_tool_schemas()
-
-            # Call LLM
-            response = self.llm.chat(
-                model=self.config.model,
-                messages=self.session.get_messages(),
-                tools=schemas,
-                options={"num_ctx": self.config.num_ctx},
-                verbose=self.config.verbose,
-            )
-
-            # Process response
-            result, should_exit = self._process_response(response)
-
-            if should_exit:
-                return result
-            # Otherwise, continue loop (non-terminal tools were executed)
+        engine_config = EngineConfig(
+            model=self.config.model,
+            num_ctx=self.config.num_ctx,
+            max_iterations=self.config.max_iterations,
+            permissions=self.config.permissions,
+        )
+        engine = AgentEngine(
+            llm_provider=self.llm,
+            tool_registry=self.tools.tool_registry,
+            config=engine_config,
+            checkpoint_manager=self.cm,
+            memory_manager=self.mm,
+        )
+        messages = self.session.get_messages()
+        return asyncio.run(engine.run(messages, user_input=user_input))
 
     def _handle_checkpoint(self) -> bool:
         """Handle iteration limit checkpoint.
