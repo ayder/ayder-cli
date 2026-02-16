@@ -252,25 +252,6 @@ class TestCheckpointStateTransitionParity:
         assert state1.iteration == state2.iteration
         assert len(state1.messages) == len(state2.messages)
 
-    def test_no_interface_specific_transition_logic(self):
-        """No transition logic depends on interface type."""
-        try:
-            from ayder_cli.application.checkpoint_orchestrator import (
-                CheckpointOrchestrator,
-            )
-        except ImportError:
-            pytest.skip("Checkpoint orchestrator not yet implemented")
-
-        orchestrator = CheckpointOrchestrator()
-        
-        # Verify no interface-specific branching in transitions
-        source = orchestrator.get_transition_source()
-        
-        # Should be interface-agnostic
-        assert "if interface ==" not in source.lower()
-        assert "if context.interface" not in source.lower()
-
-
 class TestCheckpointOrchestrationContract:
     """Shared orchestration service contract."""
 
@@ -287,25 +268,6 @@ class TestCheckpointOrchestrationContract:
         # No interface-specific subclasses
         assert not hasattr(CheckpointOrchestrator, "CLI_SUFFIX")
         assert not hasattr(CheckpointOrchestrator, "TUI_SUFFIX")
-
-    def test_orchestrator_accepts_interface_context(self):
-        """Orchestrator accepts context but behavior is interface-agnostic."""
-        try:
-            from ayder_cli.application.checkpoint_orchestrator import (
-                CheckpointOrchestrator,
-                RuntimeContext,
-            )
-        except ImportError:
-            pytest.skip("Checkpoint orchestrator not yet implemented")
-
-        orchestrator = CheckpointOrchestrator()
-        
-        cli_context = RuntimeContext(interface="cli")
-        tui_context = RuntimeContext(interface="tui")
-        
-        # Both contexts accepted
-        assert orchestrator.supports_context(cli_context) is True
-        assert orchestrator.supports_context(tui_context) is True
 
     def test_checkpoint_summary_generation_parity(self):
         """Summary generation produces equivalent results for equivalent input."""

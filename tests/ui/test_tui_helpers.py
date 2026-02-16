@@ -1,6 +1,6 @@
 """Tests for tui_helpers.py — is_tool_blocked_in_safe_mode."""
 import pytest
-from ayder_cli.tui_helpers import is_tool_blocked_in_safe_mode
+from ayder_cli.tui.helpers import is_tool_blocked_in_safe_mode
 
 
 class TestIsToolBlockedInSafeMode:
