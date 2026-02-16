@@ -16,10 +16,7 @@ from typing import Any
 import asyncio
 import difflib
 
-from ayder_cli.tools.registry import create_default_registry
-from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.config import load_config
-from ayder_cli.services.llm import create_llm_provider
+from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.tui.helpers import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
@@ -150,7 +147,6 @@ class AyderApp(App):
             iterations: Max agentic iterations per message (None = use config default)
         """
         super().__init__(**kwargs)
-        self.model = model
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
         self._iterations_override = iterations
@@ -159,31 +155,25 @@ class AyderApp(App):
         self._is_processing = False
         self._verbose_mode: bool = False
 
-        self.config = load_config()
+        # Build all shared runtime components via the factory
+        rt = create_runtime()
+        self.config = rt.config
 
         if isinstance(self.config, dict):
             actual_model = self.config.get("model", model)
         else:
             actual_model = self.config.model
-
         self.model = actual_model if actual_model != "default" else model
-        self.llm = create_llm_provider(self.config)
 
-        from ayder_cli.process_manager import ProcessManager
+        self.llm = rt.llm_provider
+        self._process_manager = rt.process_manager
+        self.registry = rt.tool_registry
+        self._checkpoint_manager = rt.checkpoint_manager
+        self._memory_manager = rt.memory_manager
 
-        max_procs = (
-            self.config.max_background_processes
-            if not isinstance(self.config, dict)
-            else self.config.get("max_background_processes", 5)
-        )
-        self._process_manager = ProcessManager(max_processes=max_procs)
-        self.registry = create_default_registry(
-            ProjectContext("."), process_manager=self._process_manager
-        )
         self._setup_registry_callbacks()
         self._setup_registry_middleware()
 
-        # Build system prompt (same as CLI runner)
         self.messages: list[dict] = []
         self._init_system_prompt()
 
@@ -194,17 +184,6 @@ class AyderApp(App):
             self.commands.append("/permission")
 
         self._activity_timer: Timer | None = None
-
-        # Create checkpoint and memory managers
-        from ayder_cli.checkpoint_manager import CheckpointManager
-        from ayder_cli.memory import MemoryManager
-
-        project_ctx = ProjectContext(".")
-        self._checkpoint_manager = CheckpointManager(project_ctx)
-        self._memory_manager = MemoryManager(
-            project_ctx,
-            checkpoint_manager=self._checkpoint_manager,
-        )
 
         # Create chat loop
         num_ctx = (
