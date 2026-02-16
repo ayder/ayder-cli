@@ -38,12 +38,17 @@ def get_message_content(message: dict | object) -> str:
 def get_message_tool_calls(message: dict | object) -> list:
     """Return the tool_calls list from a message (dict or object).
 
+    Always returns a list. Returns empty list if tool_calls is absent or None.
+    Handles both dict messages and provider object messages safely.
+
     Returns:
         List of tool call objects/dicts, or [] when absent.
     """
     if isinstance(message, dict):
-        return message.get("tool_calls") or []
-    return getattr(message, "tool_calls", None) or []
+        tool_calls = message.get("tool_calls")
+        return tool_calls if isinstance(tool_calls, list) else []
+    tool_calls = getattr(message, "tool_calls", None)
+    return tool_calls if isinstance(tool_calls, list) else []
 
 
 def to_message_dict(message: dict | object) -> dict[str, object]:
