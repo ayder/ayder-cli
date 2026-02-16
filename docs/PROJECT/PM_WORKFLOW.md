@@ -1,16 +1,8 @@
 # Project Manager Workflow — ayder-cli Refactor Program
 
 **Program:** ayder-cli Refactor  
-**Status:** Phase 02 CLOSED ✅ — **AWAITING INSPECTION BEFORE PHASE 03**  
+**Status:** Phase 03 IN PROGRESS 🚀 — **TEST-FIRST DEVELOPMENT**  
 **Last Updated:** 2026-02-16
-
----
-
-## ⚠️ INSPECTION HOLD
-
-**Phase 03 is NOT unlocked pending user inspection.**
-
-Phase 02 has received **PASS** from Architect. Please review the completion summary below and confirm to proceed to Phase 03.
 
 ---
 
@@ -20,10 +12,41 @@ Phase 02 has received **PASS** from Architect. Please review the completion summ
 |-------|--------|------|----------|
 | 01 — Baseline and Governance | ✅ CLOSED | 2026-02-16 | PASS |
 | 02 — Runtime Factory and Message Contract | ✅ CLOSED | 2026-02-16 | PASS |
-| 03 — Service/UI Decoupling | 🔒 **LOCKED** | — | Awaiting inspection |
+| 03 — Service/UI Decoupling | 🚀 **IN PROGRESS** | 2026-02-16 | **UNLOCKED** |
 | 04 — Shared Async Engine | 🔒 Locked | — | — |
 | 05 — Checkpoint and Execution Convergence | 🔒 Locked | — | — |
 | 06 — Stabilization and Cleanup | 🔒 Locked | — | — |
+
+---
+
+## Phase 03: Service/UI Decoupling 🚀
+
+### Process Change: Test-First Development
+
+**This phase uses a TEST-FIRST approach:**
+
+1. **Testers create tests FIRST** in branch `qa/03/service-ui-decoupling`
+2. Tests define the expected interface contracts
+3. **Developers pull tests** from test branch before implementing
+4. Developers implement to make tests pass
+
+### Branch Strategy
+
+| Branch | Purpose | Owner |
+|--------|---------|-------|
+| `arch/03/service-ui-gate` | Architect gate branch | Architect |
+| `qa/03/service-ui-decoupling` | **Test definitions** | Tester |
+| `dev/03/service-ui-decoupling` | Implementation | Developer |
+
+### 📢 Notice to Developers
+
+> **TESTS ARE AVAILABLE IN:** `qa/03/service-ui-decoupling`
+>
+> Before writing implementation code:
+> 1. Checkout or pull from `qa/03/service-ui-decoupling`
+> 2. Review test files to understand expected interfaces
+> 3. Implement against the test contracts
+> 4. All tests must pass for gate acceptance
 
 ---
 
@@ -52,79 +75,39 @@ uv run poe typecheck   # PASS ✅
 uv run poe test        # PASS (798 passed, 5 skipped) ✅
 ```
 
-### Key Deliverables
+---
 
-| Component | Location | Status |
-|-----------|----------|--------|
-| Runtime Factory | `src/ayder_cli/application/runtime_factory.py` | ✅ Merged to main |
-| Message Contract | `src/ayder_cli/application/message_contract.py` | ✅ Merged to main |
-| CLI Factory Wiring | `src/ayder_cli/cli_runner.py` | ✅ Merged to main |
-| TUI Factory Wiring | `src/ayder_cli/tui/app.py` | ✅ Merged to main |
-| Contract Integration | `memory.py`, `tui/chat_loop.py`, `tui/commands.py` | ✅ Merged to main |
-| Developer Unit Tests | `tests/test_*.py` (21 tests) | ✅ Merged to main |
-| Tester Acceptance Tests | `tests/application/test_*.py` (44 tests) | ✅ Merged to main |
+## Phase 03 Deliverables (Planned)
 
-### Test Suite Consolidation
-
-**Decision:** Option A — Keep Both
-- Developer unit tests: 21 tests (quick feedback)
-- Tester acceptance tests: 44 tests (comprehensive coverage)
-- Total: 798 passing tests
-
-### Rework Summary
-
-| Item | Owner | Issue | Fix |
-|------|-------|-------|-----|
-| 1 | Tester | Test path/patch alignment | Fixed import paths and patch targets |
-| 2 | Tester | Strict identity assertion | Changed `is` to `==` |
-| 3 | Developer | `get_message_tool_calls` non-list | Added `isinstance(list)` guard |
-
-All 3 rework items resolved.
+| Component | Description | Test Location |
+|-----------|-------------|---------------|
+| Service Layer Interface | Abstract service contracts | `tests/services/test_interfaces.py` |
+| UI Adapter Pattern | UI-side adapters for services | `tests/ui/test_adapters.py` |
+| Dependency Injection | Service injection mechanism | `tests/application/test_di.py` |
+| Event Bus | Decoupled communication | `tests/application/test_event_bus.py` |
 
 ---
 
 ## Artifacts Summary
 
-### Decision Documents
+### Phase 02 Decision Documents
 - `docs/REFACTOR/PHASES/02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT_ARCHITECT_DECISION.md`
 
-### Design Documents
-- `docs/PROJECT/architect/02_PHASE/02_ARCHITECTURE_DESIGN.md`
-- `docs/PROJECT/architect/02_PHASE/02_RISK_REGISTER.md`
-
-### Rework Tracking
-- `docs/PROJECT/PM_REWORK_PHASE02.md`
-- `.ayder/tester_to_PM_phase02_rework.md`
-- `.ayder/developer_to_PM_phase02_rework.md`
-- `.ayder/architect_to_PM_phase_02_GATE.md`
+### Phase 03 Design Documents
+- `docs/PROJECT/architect/03_PHASE/03_ARCHITECTURE_DESIGN.md` (TBD)
+- `docs/PROJECT/architect/03_PHASE/03_RISK_REGISTER.md` (TBD)
 
 ---
 
-## Next Phase Preview (Phase 03)
+## Next Actions
 
-**Phase 03:** Service/UI Decoupling  
-**Status:** 🔒 Locked pending your inspection
-
-**Focus:**
-- Decouple service layer from UI layer
-- No direct service → UI imports
-- Interface/adapter pattern for boundaries
-
-**Ready to unlock on your command.**
+| Step | Action | Owner | Status |
+|------|--------|-------|--------|
+| 03-A | Architect Kickoff | Architect | Pending |
+| 03-B | Create test definitions | Tester | **Ready to start** |
+| 03-C | Implement to pass tests | Developer | **Waiting for tests** |
+| 03-D | Architect Gate | Architect | Locked |
 
 ---
 
-## Inspection Checklist
-
-Please review:
-
-- [ ] Phase 02 deliverables meet expectations
-- [ ] 798 tests passing is acceptable (was targeting 862, but 5 skipped tests may be configuration-related)
-- [ ] Rework process was handled appropriately
-- [ ] Ready to proceed to Phase 03
-
-**To unlock Phase 03:** Confirm "Proceed to Phase 03"
-
----
-
-*Phase 02 of ayder-cli refactor program — COMPLETE — Awaiting user inspection*
+*Phase 03 of ayder-cli refactor program — **UNLOCKED** — Test-first development in progress*
