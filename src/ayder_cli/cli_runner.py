@@ -10,58 +10,23 @@ from pathlib import Path
 
 
 def _build_services(config=None, project_root="."):
-    """Build the service dependency graph (Composition Root).
+    """Build the service dependency graph via the shared runtime factory.
 
     Returns:
         Tuple of (config, llm_provider, tool_executor, project_ctx,
                   enhanced_system, checkpoint_manager, memory_manager)
     """
-    from ayder_cli.core.config import load_config
-    from ayder_cli.core.context import ProjectContext
-    from ayder_cli.services.llm import create_llm_provider
-    from ayder_cli.services.tools.executor import ToolExecutor
-    from ayder_cli.tools.registry import create_default_registry
-    from ayder_cli.process_manager import ProcessManager
-    from ayder_cli.prompts import SYSTEM_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE
-    from ayder_cli.checkpoint_manager import CheckpointManager
-    from ayder_cli.memory import MemoryManager
+    from ayder_cli.application.runtime_factory import create_runtime
 
-    cfg = config or load_config()
-    llm_provider = create_llm_provider(cfg)
-    project_ctx = ProjectContext(project_root)
-    process_manager = ProcessManager(max_processes=cfg.max_background_processes)
-    tool_registry = create_default_registry(
-        project_ctx, process_manager=process_manager
-    )
-    tool_executor = ToolExecutor(tool_registry)
-    checkpoint_manager = CheckpointManager(project_ctx)
-
-    # MemoryManager handles LLM-based checkpoint operations
-    # It requires llm_provider and tool_executor for checkpoint creation
-    memory_manager = MemoryManager(
-        project_ctx,
-        llm_provider=llm_provider,
-        tool_executor=tool_executor,
-        checkpoint_manager=checkpoint_manager,
-    )
-
-    # Build enhanced prompt with project structure
-    try:
-        structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
-        macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
-    except Exception:
-        macro = ""
-
-    enhanced_system = SYSTEM_PROMPT.format(model_name=cfg.model) + macro
-
+    rt = create_runtime(config=config, project_root=project_root)
     return (
-        cfg,
-        llm_provider,
-        tool_executor,
-        project_ctx,
-        enhanced_system,
-        checkpoint_manager,
-        memory_manager,
+        rt.config,
+        rt.llm_provider,
+        rt.tool_executor,
+        rt.project_ctx,
+        rt.system_prompt,
+        rt.checkpoint_manager,
+        rt.memory_manager,
     )
 
 

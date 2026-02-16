@@ -262,15 +262,17 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message("No conversation to compact.")
         return
 
+    from ayder_cli.application.message_contract import get_message_role, get_message_content
+
     conversation_text = ""
     for msg in app.messages:
-        if msg.get("role") in ("user", "assistant"):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
+        role = get_message_role(msg)
+        if role in ("user", "assistant"):
+            content = get_message_content(msg)
             conversation_text += f"[{role}] {content}\n\n"
 
     system_msg = None
-    if app.messages and app.messages[0].get("role") == "system":
+    if app.messages and get_message_role(app.messages[0]) == "system":
         system_msg = app.messages[0]
     app.messages.clear()
     if system_msg:
@@ -289,6 +291,7 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
 def handle_save_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /save-memory command."""
     from ayder_cli.prompts import SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE
+    from ayder_cli.application.message_contract import get_message_role, get_message_content
 
     if len(app.messages) <= 1:
         chat_view.add_system_message("No conversation to save.")
@@ -296,9 +299,9 @@ def handle_save_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     conversation_text = ""
     for msg in app.messages:
-        if msg.get("role") in ("user", "assistant"):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
+        role = get_message_role(msg)
+        if role in ("user", "assistant"):
+            content = get_message_content(msg)
             conversation_text += f"[{role}] {content}\n\n"
 
     save_prompt = SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE.format(
@@ -639,8 +642,10 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def do_clear(app: AyderApp, chat_view: ChatView) -> None:
     """Clear conversation history."""
+    from ayder_cli.application.message_contract import get_message_role
+
     if app.messages:
-        if app.messages[0].get("role") == "system":
+        if get_message_role(app.messages[0]) == "system":
             system_msg = app.messages[0]
             app.messages.clear()
             app.messages.append(system_msg)

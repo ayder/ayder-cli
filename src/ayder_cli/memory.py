@@ -313,10 +313,15 @@ class MemoryManager:
         Returns:
             String summary of last 10 messages
         """
+        from ayder_cli.application.message_contract import (
+            get_message_role,
+            get_message_content,
+        )
+
         summary = ""
-        for msg in session.get_messages()[-10:]:  # Last 10 messages
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")[:200]  # Truncate long content
+        for msg in session.get_messages()[-10:]:
+            role = get_message_role(msg)
+            content = get_message_content(msg)[:200]
             if content:
                 summary += f"[{role}] {content[:100]}...\n"
         return summary

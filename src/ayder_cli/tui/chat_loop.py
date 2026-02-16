@@ -342,10 +342,15 @@ class TuiChatLoop:
             return False
 
         # 1. Build a conversation summary from recent messages
+        from ayder_cli.application.message_contract import (
+            get_message_role,
+            get_message_content,
+        )
+
         summary_parts = []
         for msg in self.messages[-10:]:
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
+            role = get_message_role(msg)
+            content = get_message_content(msg)
             if content:
                 summary_parts.append(f"[{role}] {content[:200]}")
         conversation_summary = "\n".join(summary_parts)

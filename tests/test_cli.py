@@ -25,8 +25,8 @@ class TestBuildServices:
         mock_registry = MagicMock()
         mock_registry.execute.side_effect = Exception("Structure error")
 
-        with patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
+        with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
+             patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
             cfg, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
@@ -52,12 +52,12 @@ class TestBuildServices:
             num_ctx=4096,
             verbose=False
         )
-        
+
         mock_registry = MagicMock()
         mock_registry.execute.return_value = "src/\n  main.py\n  utils.py"
 
-        with patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
+        with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
+             patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
             cfg, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
@@ -84,7 +84,7 @@ class TestBuildServices:
         mock_registry = MagicMock()
         mock_registry.execute.return_value = "project/"
 
-        with patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
+        with patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services(config=mock_config)
             cfg = services[0]
@@ -107,12 +107,12 @@ class TestBuildServices:
         
         mock_registry = MagicMock()
 
-        with patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.core.context.ProjectContext') as mock_project_ctx_class, \
-             patch('ayder_cli.tools.registry.create_default_registry', return_value=mock_registry), \
+        with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
+             patch('ayder_cli.application.runtime_factory.ProjectContext') as mock_project_ctx_class, \
+             patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             _build_services(project_root="/custom/path")
-            
+
             mock_project_ctx_class.assert_called_once_with("/custom/path")
 
 
