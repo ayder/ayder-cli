@@ -5,6 +5,7 @@ This module contains the logic for running the CLI in different modes:
 - Task management commands (_run_tasks_cli, _run_implement_cli, _run_implement_all_cli)
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -79,6 +80,55 @@ class CommandRunner:
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+
+
+async def _run_engine_async(
+    llm_provider,
+    tool_registry,
+    config,
+    messages: list,
+    user_input: str | None = None,
+    callbacks=None,
+    checkpoint_manager=None,
+    memory_manager=None,
+):
+    """Async helper that delegates to shared AgentEngine (Phase 04)."""
+    from ayder_cli.application.agent_engine import AgentEngine
+
+    engine = AgentEngine(
+        llm_provider=llm_provider,
+        tool_registry=tool_registry,
+        config=config,
+        callbacks=callbacks,
+        checkpoint_manager=checkpoint_manager,
+        memory_manager=memory_manager,
+    )
+    return await engine.run(messages, user_input=user_input)
+
+
+def run_engine(
+    llm_provider,
+    tool_registry,
+    config,
+    messages: list,
+    user_input: str | None = None,
+    callbacks=None,
+    checkpoint_manager=None,
+    memory_manager=None,
+):
+    """Synchronous entry point: calls shared AgentEngine via asyncio.run()."""
+    return asyncio.run(
+        _run_engine_async(
+            llm_provider=llm_provider,
+            tool_registry=tool_registry,
+            config=config,
+            messages=messages,
+            user_input=user_input,
+            callbacks=callbacks,
+            checkpoint_manager=checkpoint_manager,
+            memory_manager=memory_manager,
+        )
+    )
 
 
 def run_command(prompt: str, permissions=None, iterations=50) -> int:
