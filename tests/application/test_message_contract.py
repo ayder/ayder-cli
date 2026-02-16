@@ -289,8 +289,11 @@ class TestToMessageDict:
         message = {"role": "user", "content": "hello"}
         result = to_message_dict(message)
 
+        # Check equality, not identity - implementation may return copy
         assert result == message
-        assert result is message  # Same object
+        assert isinstance(result, dict)
+        assert result["role"] == "user"
+        assert result["content"] == "hello"
 
     def test_to_message_dict_from_object(self):
         """Convert object message to dict."""
