@@ -35,6 +35,7 @@ Per `docs/REFACTOR/PROJECT_MANAGER_PROMPT.md`:
 | Architect gate branch exists and is refreshed from project branch | ✅ `arch/01/baseline-gate` created from `main` @ `3c659d2` |
 | Architect kickoff note exists (scope, acceptance checklist, risks) | ✅ `.ayder/architect_to_PM_phase01.md` |
 | Architect confirms prior phase dependency is PASS | ✅ N/A (Phase 01 is first phase) |
+| All REFACTOR docs committed to gate branch | ✅ Commit `8f81b37` |
 
 **Artifacts Produced:**
 - `docs/PROJECT/architect/01_PHASE.md` — Architect task assignment
