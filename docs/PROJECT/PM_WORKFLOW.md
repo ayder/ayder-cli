@@ -1,218 +1,73 @@
-# Project Manager Workflow — Phase 02 Runtime Factory and Message Contract
+# Project Manager Workflow — ayder-cli Refactor Program
 
 **Program:** ayder-cli Refactor  
-**Current Phase:** 02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT  
+**Current Phase:** 03_PHASE_SERVICE_UI_DECOUPLING (Unlocked)  
 **Last Updated:** 2026-02-16
 
 ---
 
-## Phase Context
+## Phase Status Overview
 
-| Field | Value |
-|-------|-------|
-| PHASE_ID | `02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT` |
-| PROJECT_BRANCH | `main` |
-| ARCH_GATE_BRANCH | `arch/02/runtime-factory-gate` |
-| Prior Phase | 01_PHASE_BASELINE_AND_GOVERNANCE ✅ PASS |
-
----
-
-## ⚠️ Workflow Issue Status: RESOLVED
-
-### Issue: Developer/Tester Test Ownership Ambiguity
-
-**Status:** ✅ **RESOLVED** — Both teams coordinated successfully
-
-**Resolution:**
-- Developer wrote tests at `tests/test_*.py`
-- Tester wrote tests at `tests/application/test_*.py` (per their spec)
-- **No conflict:** Tester's tests are comprehensive (44 tests vs developer's 21)
-- **Architect decision:** Will review both test suites at gate and decide on consolidation
+| Phase | Status | Date |
+|-------|--------|------|
+| 01 — Baseline and Governance | ✅ CLOSED | 2026-02-16 |
+| 02 — Runtime Factory and Message Contract | ✅ CLOSED | 2026-02-16 |
+| 03 — Service/UI Decoupling | 🔓 UNLOCKED | — |
+| 04 — Shared Async Engine | 🔒 Locked | — |
+| 05 — Checkpoint and Execution Convergence | 🔒 Locked | — |
+| 06 — Stabilization and Cleanup | 🔒 Locked | — |
 
 ---
 
-## Workflow Progress Tracker
+## Phase 01: CLOSED ✅
 
-### Phase 01 Status: CLOSED ✅
+**Decision:** PASS (see `01_PHASE_BASELINE_AND_GOVERNANCE_ARCHITECT_DECISION.md`)
 
-**Phase 01 merged to `main` at:** `d67b11f`
+**Key Deliverables:**
+- Baseline inventory (CLI/TUI flows documented)
+- Application scaffolding (`src/ayder_cli/application/`)
+- Risk register (R01-R03 identified)
+- Test inventory (211 tests mapped)
 
----
-
-### Phase 02 Status: IN PROGRESS — Steps B and C COMPLETE
-
-Per `docs/REFACTOR/PROJECT_MANAGER_PROMPT.md`:
-
-#### Step A — Architect Kickoff Assignment ✅ COMPLETE
-
-| Checkpoint | Status |
-|------------|--------|
-| Architecture Design | ✅ `02_ARCHITECTURE_DESIGN.md` |
-| Risk Register | ✅ `02_RISK_REGISTER.md` |
-| Validation | ✅ lint, typecheck, test PASS |
+**Merged to `main` at:** `d67b11f`
 
 ---
 
-#### Step B — Developer Assignment ✅ COMPLETE
+## Phase 02: CLOSED ✅
 
-**Developer Report:** `.ayder/developer_to_PM_phase02.md`
+**Decision:** PASS (see `02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT_ARCHITECT_DECISION.md`)
 
-| Deliverable | Status | Evidence |
-|-------------|--------|----------|
-| DEV-02.1 Runtime Factory | ✅ | `application/runtime_factory.py` (9 components) |
-| DEV-02.2 Wire CLI | ✅ | `cli_runner.py` uses factory |
-| DEV-02.3 Wire TUI | ✅ | `tui/app.py` uses factory |
-| DEV-02.4 Message Contract | ✅ | `application/message_contract.py` + integrations |
-| Developer Tests | ✅ | 21 tests added |
+**Key Deliverables:**
+- Runtime Factory (`application/runtime_factory.py`) — 9 components
+- Message Contract (`application/message_contract.py`) — dict/object safe
+- CLI wired to factory (`cli_runner.py`)
+- TUI wired to factory (`tui/app.py`)
+- Contract integrated in memory, chat_loop, commands
+- 65 new tests (21 dev + 44 tester)
 
-**Gate Commands:**
-```bash
-uv run poe lint      # PASS
-uv run poe typecheck # PASS
-uv run poe test      # PASS (818 passed, 5 skipped)
-```
+**Test Consolidation Decision:** Option A — Keep Both
 
-**Control Check B:** ✅ ALL PASS
-- [x] Developer branch exists: `dev/02/runtime-factory`
-- [x] Developer confirmed DEV-* tasks in scope
-- [x] Developer posted implementation plan
-- [x] No scope drift
+**Merged to `main` at:** `c7d9e2f`
 
 ---
 
-#### Step C — Tester Assignment ✅ COMPLETE
+## Phase 03: Service/UI Decoupling 🔓 UNLOCKED
 
-**Tester Report:** `.ayder/tester_to_PM_phase02.md` (in `qa/02/factory-contract-tests`)
+**Status:** Ready for Step A (Architect Kickoff)
 
-| Deliverable | Status | Evidence |
-|-------------|--------|----------|
-| QA-02.1 Obsolete Tests | ✅ | Identified 4 tests, mapped replacements |
-| QA-02.2 Factory Tests | ✅ | 13 tests in `tests/application/test_runtime_factory.py` |
-| QA-02.3 Message Contract Tests | ✅ | 31 tests in `tests/application/test_message_contract.py` |
-| Test Migration Map | ✅ | `02_TEST_MIGRATION_MAPPING.md` |
+**Phase Doc:** `docs/REFACTOR/PHASES/03_PHASE_SERVICE_UI_DECOUPLING.md`
 
-**Gate Commands:**
-```bash
-uv run poe lint      # PASS
-uv run poe test      # PASS (733 passed, 49 skipped)
-```
+**Dependencies:** Phase 02 PASS ✅
 
-*Note: 49 skipped includes 44 new tests that will activate when DEV modules present*
+### Prerequisites
+- [x] Phase 02 merged to `main`
+- [ ] Create `arch/03/service-ui-gate` branch from `main`
+- [ ] Assign Architect for Step A
 
-**Control Check C:** ✅ ALL PASS
-- [x] Tester branch exists: `qa/02/factory-contract-tests`
-- [x] Tester posted remove→replace test migration mapping
-- [x] Tester listed acceptance-criteria tests for phase
-
----
-
-#### Step D — Architect Gate Assignment 📋 READY
-
-**Trigger:** Steps B and C both complete ✅
-
-**Inputs for Architect Gate:**
-
-| Input | Value |
-|-------|-------|
-| `PHASE_ID` | `02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT` |
-| `PHASE_DOC` | `docs/REFACTOR/PHASES/02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT.md` |
-| `ARCH_GATE_BRANCH` | `arch/02/runtime-factory-gate` |
-| Developer MR | `dev/02/runtime-factory` → `arch/02/runtime-factory-gate` |
-| Tester MR | `qa/02/factory-contract-tests` → `arch/02/runtime-factory-gate` |
-
-**Acceptance Criteria:**
-- [ ] One shared runtime factory used by both CLI and TUI
-- [ ] Message normalization prevents dict/object shape regressions
-- [ ] Required tests for factory and message contract exist and pass
-- [ ] Architect PASS with no open S1/S2 issues
-
-**Architect Tasks (Step D):**
-1. **ARC-02.1** — Architecture Review
-   - Verify duplicated composition roots removed/reduced
-   - Confirm factory is single source of dependency assembly
-2. **ARC-02.2** — Command Gate
-   - Run `lint`, `typecheck`, `test`
-3. **ARC-02.3** — Acceptance Review
-   - Validate test migration mapping
-   - Review both test suites (developer + tester)
-   - Decide on test consolidation if needed
-
-**Control Check D (Phase Closure Gate):**
-- [ ] Architect reviewed all MRs
-- [ ] Architect ran required commands
-- [ ] Architect published PASS or REWORK_REQUIRED decision
-
----
-
-## Branch/MR Matrix
-
-| Role | Branch | Target | MR Status |
-|------|--------|--------|-----------|
-| Architect | `arch/02/runtime-factory-gate` | `main` | Created ✅ |
-| Developer | `dev/02/runtime-factory` | `arch/02/runtime-factory-gate` | Ready ✅ |
-| Tester | `qa/02/factory-contract-tests` | `arch/02/runtime-factory-gate` | Ready ✅ |
-| Architect (final) | `arch/02/runtime-factory-gate` | `main` | Pending |
-
----
-
-## Deliverables Summary
-
-### Developer Deliverables
-| Artifact | Location | Tests |
-|----------|----------|-------|
-| Runtime Factory | `src/ayder_cli/application/runtime_factory.py` | `tests/test_runtime_factory.py` (21) |
-| Message Contract | `src/ayder_cli/application/message_contract.py` | `tests/test_message_contract.py` |
-| CLI Wiring | `src/ayder_cli/cli_runner.py` | Updated |
-| TUI Wiring | `src/ayder_cli/tui/app.py` | Updated |
-| Memory Integration | `src/ayder_cli/memory.py` | Uses contract |
-| Chat Loop Integration | `src/ayder_cli/tui/chat_loop.py` | Uses contract |
-| Commands Integration | `src/ayder_cli/tui/commands.py` | Uses contract |
-
-### Tester Deliverables
-| Artifact | Location | Count |
-|----------|----------|-------|
-| Test Migration Map | `docs/PROJECT/tester/02_PHASE/02_TEST_MIGRATION_MAPPING.md` | — |
-| Factory Tests | `tests/application/test_runtime_factory.py` | 13 tests |
-| Message Contract Tests | `tests/application/test_message_contract.py` | 31 tests |
-
-**Total New Tests:** 65 (21 dev + 44 tester)
-
----
-
-## Test Migration Summary
-
-| Action | Count | Details |
-|--------|-------|---------|
-| Tests to Update | 4 | `TestBuildServices::*` (obsolete) |
-| Tests Added (Dev) | 21 | Basic unit tests |
-| Tests Added (QA) | 44 | Comprehensive acceptance tests |
-| **Net Change** | **+61** | Significant coverage increase |
-
----
-
-## Next Actions for PM
-
-1. ✅ **ASSIGN ARCHITECT GATE AGENT** for Step D
-2. Provide: `docs/PROJECT/architect/02_PHASE_GATE.md` (create if needed)
-3. Inputs: Developer MR + Tester MR → `arch/02/runtime-factory-gate`
-4. Monitor Control Check D for PASS/REWORK_REQUIRED
-
----
-
-## Key Design Decisions (Validated)
-
-### Runtime Factory
-- ✅ Module: `src/ayder_cli/application/runtime_factory.py`
-- ✅ Container: `RuntimeComponents` (9 fields)
-- ✅ Function: `create_runtime(*, config, project_root, model_name)`
-- ✅ CLI: `_build_services()` delegates to factory
-- ✅ TUI: `AyderApp.__init__()` uses factory
-
-### Message Contract
-- ✅ Module: `src/ayder_cli/application/message_contract.py`
-- ✅ Helpers: `get_message_role`, `get_message_content`, `get_message_tool_calls`, `to_message_dict`
-- ✅ Integration: `memory.py`, `tui/chat_loop.py`, `tui/commands.py`
-- ✅ Rule: Handle both dict and object messages safely
+### Phase 03 Focus
+- Decouple service layer from UI layer
+- No direct service → UI imports
+- Interface/adapter pattern for boundaries
 
 ---
 
@@ -220,8 +75,17 @@ uv run poe test      # PASS (733 passed, 49 skipped)
 
 | Phase | Issue | Resolution |
 |-------|-------|------------|
-| 02 | Developer/Tester test boundary ambiguity | Both teams delivered; Architect will consolidate at gate |
+| 02 | Developer/Tester test boundary ambiguity | Added explicit "Test Ownership Boundary" to developer tasks; resolved with Option A (Keep Both) at gate |
 
 ---
 
-*Phase 02 of ayder-cli refactor program — Steps A, B, C complete; Ready for Step D (Architect Gate)*
+## Next Actions
+
+1. **Create Phase 03 gate branch:** `arch/03/service-ui-gate` from `main`
+2. **Create Architect task:** `docs/PROJECT/architect/03_PHASE.md`
+3. **Assign Architect Agent** for Step A kickoff
+4. Read Phase 03 spec: `docs/REFACTOR/PHASES/03_PHASE_SERVICE_UI_DECOUPLING.md`
+
+---
+
+*ayder-cli refactor program — Phases 01-02 complete; Phase 03 unlocked*
