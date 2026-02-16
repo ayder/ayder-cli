@@ -9,11 +9,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from ayder_cli.tui.chat_loop import (
     TuiChatLoop,
     TuiLoopConfig,
-    _extract_think_blocks,
-    _strip_tool_markup,
     _parse_arguments,
-    _parse_json_tool_calls,
-    _regex_extract_json_tool_calls,
+)
+from ayder_cli.tui.parser import (
+    extract_think_blocks,
+    strip_for_display,
+    parse_json_tool_calls,
+    content_processor,
 )
 
 
@@ -160,69 +162,69 @@ class TestTuiLoopConfig:
 
 class TestExtractThinkBlocks:
     def test_no_think_blocks(self):
-        assert _extract_think_blocks("Hello world") == []
+        assert extract_think_blocks("Hello world") == []
 
     def test_single_block(self):
-        assert _extract_think_blocks("<think>reasoning</think>rest") == ["reasoning"]
+        assert extract_think_blocks("<think>reasoning</think>rest") == ["reasoning"]
 
     def test_multiple_blocks(self):
         content = "<think>first</think> middle <think>second</think>"
-        assert _extract_think_blocks(content) == ["first", "second"]
+        assert extract_think_blocks(content) == ["first", "second"]
 
     def test_unclosed_block(self):
         content = "prefix <think>unclosed reasoning"
-        result = _extract_think_blocks(content)
+        result = extract_think_blocks(content)
         assert "unclosed reasoning" in result
 
     def test_empty_block_ignored(self):
-        assert _extract_think_blocks("<think>  </think>") == []
+        assert extract_think_blocks("<think>  </think>") == []
 
 
 class TestStripToolMarkup:
     def test_no_markup(self):
-        assert _strip_tool_markup("Hello world") == "Hello world"
+        assert strip_for_display("Hello world") == "Hello world"
 
     def test_strips_think_blocks(self):
-        assert _strip_tool_markup("<think>stuff</think>Hello") == "Hello"
+        assert strip_for_display("<think>stuff</think>Hello") == "Hello"
 
     def test_strips_tool_call_tags(self):
         content = "text<tool_call>stuff</tool_call>more"
-        assert _strip_tool_markup(content) == "textmore"
+        assert strip_for_display(content) == "textmore"
 
     def test_strips_function_tags(self):
         content = "text<function=read_file>stuff</function>more"
-        assert _strip_tool_markup(content) == "textmore"
+        assert strip_for_display(content) == "textmore"
 
     def test_collapses_blank_lines(self):
         content = "line1\n\n\n\n\nline2"
-        assert _strip_tool_markup(content) == "line1\n\nline2"
+        assert strip_for_display(content) == "line1\n\nline2"
 
     def test_strips_unclosed_think(self):
         content = "Hello <think>unclosed reasoning"
-        result = _strip_tool_markup(content)
+        result = strip_for_display(content)
         assert "unclosed" not in result
         assert result.strip() == "Hello"
 
     def test_strips_orphaned_closing_tool_call(self):
-        assert _strip_tool_markup("text\n</tool_call>\nmore") == "text\n\nmore"
+        assert strip_for_display("text\n</tool_call>\nmore") == "text\n\nmore"
 
     def test_strips_orphaned_opening_tool_call(self):
-        assert _strip_tool_markup("<tool_call>\ntext") == "text"
+        assert strip_for_display("<tool_call>\ntext") == "text"
 
     def test_strips_orphaned_function_tags(self):
-        assert _strip_tool_markup("text</function>more") == "textmore"
+        assert strip_for_display("text</function>more") == "textmore"
 
     def test_strips_only_closing_tool_call(self):
-        result = _strip_tool_markup("\n</tool_call>\n")
+        result = strip_for_display("\n</tool_call>\n")
         assert result == ""
 
     def test_strips_json_tool_call_array(self):
         content = '[{"id":"call_1","function":{"name":"list_files","arguments":"{}"},"type":"function"}]'
-        assert _strip_tool_markup(content) == ""
+        assert strip_for_display(content) == ""
 
     def test_strips_json_tool_call_with_surrounding_text(self):
         content = 'I will list files\n[{"id":"c1","function":{"name":"list_files","arguments":"{}"},"type":"function"}]\nDone'
-        result = _strip_tool_markup(content)
+        result = strip_for_display(content)
         assert "function" not in result
         assert "list_files" not in result
 
@@ -445,16 +447,16 @@ class TestRunXMLFallback:
 
 class TestParseJsonToolCalls:
     def test_empty_content(self):
-        assert _parse_json_tool_calls("") == []
+        assert parse_json_tool_calls("") == []
 
     def test_plain_text(self):
-        assert _parse_json_tool_calls("Hello world") == []
+        assert parse_json_tool_calls("Hello world") == []
 
     def test_valid_json_tool_calls(self):
         content = json.dumps([
             {"id": "call_1", "function": {"name": "list_files", "arguments": '{"directory":"."}'}, "type": "function"}
         ])
-        result = _parse_json_tool_calls(content)
+        result = parse_json_tool_calls(content)
         assert len(result) == 1
         assert result[0]["name"] == "list_files"
         assert result[0]["arguments"] == {"directory": "."}
@@ -464,7 +466,7 @@ class TestParseJsonToolCalls:
             {"id": "1", "function": {"name": "read_file", "arguments": '{"file_path":"a.py"}'}, "type": "function"},
             {"id": "2", "function": {"name": "list_files", "arguments": '{"directory":"."}'}, "type": "function"},
         ])
-        result = _parse_json_tool_calls(content)
+        result = parse_json_tool_calls(content)
         assert len(result) == 2
         assert result[0]["name"] == "read_file"
         assert result[1]["name"] == "list_files"
@@ -473,23 +475,23 @@ class TestParseJsonToolCalls:
         content = json.dumps([
             {"function": {"name": "read_file", "arguments": {"file_path": "test.py"}}}
         ])
-        result = _parse_json_tool_calls(content)
+        result = parse_json_tool_calls(content)
         assert len(result) == 1
         assert result[0]["arguments"] == {"file_path": "test.py"}
 
     def test_invalid_json(self):
-        assert _parse_json_tool_calls("[{broken json}]") == []
+        assert parse_json_tool_calls("[{broken json}]") == []
 
     def test_no_function_key(self):
-        assert _parse_json_tool_calls('[{"id": "1", "type": "function"}]') == []
+        assert parse_json_tool_calls('[{"id": "1", "type": "function"}]') == []
 
     def test_missing_name(self):
-        assert _parse_json_tool_calls('[{"function": {"arguments": "{}"}}]') == []
+        assert parse_json_tool_calls('[{"function": {"arguments": "{}"}}]') == []
 
     def test_with_extra_usage_field(self):
         """Models like qwen3-coder include usage inside tool call objects."""
         content = '[{"id":"call_1","function":{"arguments":"{\\"directory\\": \\".\\"}","name":"list_files"},"type":"function","usage":{"prompt_tokens":84,"completion_tokens":168,"total_tokens":252}}]'
-        result = _parse_json_tool_calls(content)
+        result = parse_json_tool_calls(content)
         assert len(result) == 1
         assert result[0]["name"] == "list_files"
         assert result[0]["arguments"] == {"directory": "."}
@@ -499,16 +501,16 @@ class TestRegexExtractJsonToolCalls:
     def test_extracts_tool_name_from_malformed(self):
         """Regex fallback extracts name even when JSON is broken."""
         content = '[{"function":{"arguments":"{bad json}","name":"list_files"},"type":"function"}]'
-        result = _regex_extract_json_tool_calls(content)
+        result = content_processor._regex_extract_json_tool_calls(content)
         assert len(result) == 1
         assert result[0]["name"] == "list_files"
 
     def test_no_match(self):
-        assert _regex_extract_json_tool_calls("no tool calls here") == []
+        assert content_processor._regex_extract_json_tool_calls("no tool calls here") == []
 
     def test_multiple_names(self):
         content = '"name":"read_file" ... "name":"list_files"'
-        result = _regex_extract_json_tool_calls(content)
+        result = content_processor._regex_extract_json_tool_calls(content)
         assert len(result) == 2
 
 
