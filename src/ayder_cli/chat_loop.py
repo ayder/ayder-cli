@@ -224,39 +224,37 @@ class ChatLoop:
         Returns:
             True if checkpoint handled and loop should continue, False otherwise
         """
+        if not self.mm:
+            return False
+
         orchestrator = CheckpointOrchestrator()
 
-        # Try to restore from existing memory first
-        if self.mm:
-            if self.cm and self.cm.has_saved_checkpoint():
-                self.mm.restore_from_checkpoint(self.session)
-                state = EngineState(
-                    iteration=self.iteration_ctrl.iteration,
-                    messages=list(self.session.get_messages()),
-                )
-                orchestrator.reset_state(state)
-                orchestrator.restore_from_checkpoint(state, {"cycle": 0, "summary": ""})
-                self.iteration_ctrl.reset()
-                return True
-
-            # No existing memory — create a checkpoint then reset via orchestrator
-            if self.mm.create_checkpoint(
+        # Pre-step: surface-specific summary generation + session reset (LLM-driven)
+        if self.cm and self.cm.has_saved_checkpoint():
+            # Existing checkpoint — restore session contents (surface-specific)
+            self.mm.restore_from_checkpoint(self.session)
+        else:
+            # No checkpoint yet — create one (LLM summary + save + session reset)
+            if not self.mm.create_checkpoint(
                 self.session,
                 self.config.model,
                 self.config.num_ctx,
                 self.config.permissions,
                 self.config.verbose,
             ):
-                state = EngineState(
-                    iteration=self.iteration_ctrl.iteration,
-                    messages=list(self.session.get_messages()),
-                )
-                orchestrator.reset_state(state)
-                orchestrator.restore_from_checkpoint(state, {"cycle": 0, "summary": ""})
-                self.iteration_ctrl.reset()
-                return True
+                return False
 
-        return False
+        # Read real summary from persisted checkpoint (not a placeholder)
+        summary = (self.cm.read_checkpoint() if self.cm else None) or ""
+
+        # Delegate state transition to shared orchestrator with real data
+        state = EngineState(
+            iteration=self.iteration_ctrl.iteration,
+            messages=list(self.session.get_messages()),
+        )
+        orchestrator.orchestrate_checkpoint(state, summary, self.cm, memory_manager=None, save=False)
+        self.iteration_ctrl.reset()
+        return True
 
     def _get_tool_schemas(self) -> list:
         """Get tool schemas, respecting no_tools flag."""

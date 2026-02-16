@@ -262,28 +262,31 @@ class TestToolExecutorExecutionFlow:
 
     def test_verbose_mode_triggers_file_preview(self):
         """In verbose mode, write_file should trigger file preview."""
+        from unittest.mock import patch
         executor, registry, sink, policy = self._create_mock_executor()
         if executor is None:
             pytest.skip("Implementation not ready")
-        
-        registry.validate_args.return_value = (True, None)
+
         registry.normalize_args.return_value = {
             "file_path": "/test/output.txt",
             "content": "data"
         }
         policy.confirm_file_diff.return_value = True
-        
-        # Simulate ToolSuccess result
-        from ayder_cli.core.result import ToolSuccess
-        registry.execute.return_value = ToolSuccess("File written")
-        
-        executor._execute_single_call(
-            "write_file",
-            {"file_path": "/test/output.txt", "content": "data"},
-            set(),
-            verbose=True
-        )
-        
+
+        from ayder_cli.application.execution_policy import ExecutionResult
+        fake_result = ExecutionResult(success=True, result="File written")
+
+        with patch(
+            "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+            return_value=fake_result,
+        ):
+            executor._execute_single_call(
+                "write_file",
+                {"file_path": "/test/output.txt", "content": "data"},
+                {"w"},
+                verbose=True,
+            )
+
         # Verify file preview was triggered
         sink.on_file_preview.assert_called_once_with("/test/output.txt")
 
@@ -366,27 +369,27 @@ class TestToolExecutorEdgeCases:
         try:
             from ayder_cli.services.tools.executor import ToolExecutor
             from ayder_cli.tools.registry import ToolRegistry
-            
+
             registry = Mock(spec=ToolRegistry)
             sink = Mock(spec=InteractionSink)
             policy = Mock(spec=ConfirmationPolicy)
-            
-            registry.validate_args.return_value = (False, "Invalid argument")
-            
+
+            registry.normalize_args.return_value = {"bad": "args"}
+
             executor = ToolExecutor(
                 tool_registry=registry,
                 interaction_sink=sink,
                 confirmation_policy=policy
             )
-            
-            # Should handle validation error without crashing
+
+            # "invalid_tool" is not in _KNOWN_TOOLS — ValidationAuthority returns error
             result = executor._execute_single_call(
                 "invalid_tool",
                 {"bad": "args"},
-                set(),
+                {"r", "w", "x"},
                 False
             )
-            
+
             # Result should indicate error
             assert result[0] == "error"
             

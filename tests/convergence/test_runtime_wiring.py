@@ -35,8 +35,7 @@ class TestCheckpointOrchestrationWiring:
         source = inspect.getsource(TuiChatLoop._handle_checkpoint)
 
         assert "CheckpointOrchestrator" in source
-        assert "orchestrator.reset_state" in source
-        assert "orchestrator.restore_from_checkpoint" in source
+        assert "orchestrate_checkpoint" in source
 
     def test_cli_handle_checkpoint_uses_orchestrator(self):
         """ChatLoop._handle_checkpoint delegates to CheckpointOrchestrator."""
@@ -45,8 +44,7 @@ class TestCheckpointOrchestrationWiring:
         source = inspect.getsource(ChatLoop._handle_checkpoint)
 
         assert "CheckpointOrchestrator" in source
-        assert "orchestrator.reset_state" in source
-        assert "orchestrator.restore_from_checkpoint" in source
+        assert "orchestrate_checkpoint" in source
 
     def test_tui_trigger_uses_checkpoint_trigger(self):
         """TuiChatLoop.run uses CheckpointTrigger for iteration trigger."""
@@ -102,13 +100,14 @@ class TestExecutionPolicyWiring:
         assert "execute_with_registry" in source
 
     def test_cli_executor_uses_execution_policy(self):
-        """ToolExecutor._execute_single_call uses ExecutionPolicy for permission check."""
+        """ToolExecutor._execute_single_call routes post-confirm through execute_with_registry."""
         from ayder_cli.services.tools.executor import ToolExecutor
 
         source = inspect.getsource(ToolExecutor._execute_single_call)
 
         assert "ExecutionPolicy" in source
-        assert "check_permission" in source
+        assert "execute_with_registry" in source
+        assert "self.tool_registry.execute" not in source  # No direct bypass post-confirm
 
     def test_execute_with_registry_is_single_call_site(self):
         """ExecutionPolicy.execute_with_registry is the only place registry.execute is called."""
@@ -181,28 +180,28 @@ class TestExecutionPolicyCalledAtRuntime:
 
         mock_exec.assert_called_once()
 
-    def test_cli_executor_calls_execution_policy_check_permission(self):
-        """ToolExecutor._execute_single_call calls ExecutionPolicy.check_permission."""
+    def test_cli_executor_calls_execute_with_registry(self):
+        """ToolExecutor._execute_single_call routes post-confirm through execute_with_registry."""
         from ayder_cli.services.tools.executor import ToolExecutor
-        from ayder_cli.core.result import ToolSuccess
+        from ayder_cli.application.execution_policy import ExecutionResult
 
         registry = MagicMock()
         registry.normalize_args.return_value = {"file_path": "/tmp/t.txt"}
-        registry.validate_args.return_value = (True, None)
-        registry.execute.return_value = ToolSuccess("ok")
 
         executor = ToolExecutor(tool_registry=registry)
+        fake_result = ExecutionResult(success=True, result="ok")
 
         with patch(
-            "ayder_cli.application.execution_policy.ExecutionPolicy.check_permission",
-            return_value=None,  # None = permitted
-        ) as mock_check:
-            outcome, _ = executor._execute_single_call(
+            "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+            return_value=fake_result,
+        ) as mock_exec:
+            outcome, value = executor._execute_single_call(
                 "read_file", {"file_path": "/tmp/t.txt"}, granted_permissions={"r"}, verbose=False
             )
 
-        mock_check.assert_called_once()
+        mock_exec.assert_called_once()
         assert outcome == "success"
+        assert value == "ok"
 
 
 class TestCheckpointOrchestrationCalledAtRuntime:
@@ -338,3 +337,71 @@ class TestConvergenceIntegration:
 
         assert type(cli_result) is type(tui_result)
         assert str(cli_result) == str(tui_result)
+
+    def test_known_tools_in_sync_with_registry(self):
+        """_KNOWN_TOOLS in ValidationAuthority must match actual registry tool names exactly."""
+        from ayder_cli.application.validation import _KNOWN_TOOLS
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS
+
+        registry_tools = {td.name for td in TOOL_DEFINITIONS}
+        known_tools = set(_KNOWN_TOOLS.keys())
+
+        missing = registry_tools - known_tools
+        extra = known_tools - registry_tools
+
+        assert not missing, f"Tools in registry missing from _KNOWN_TOOLS: {missing}"
+        assert not extra, f"Tools in _KNOWN_TOOLS not in registry: {extra}"
+
+
+class TestCheckpointOrchestrateMethod:
+    """orchestrate_checkpoint delegates both loops to a single shared transition path."""
+
+    def test_orchestrate_checkpoint_calls_save_reset_restore(self):
+        """orchestrate_checkpoint calls save_checkpoint, reset_state, restore_from_checkpoint."""
+        from ayder_cli.application.checkpoint_orchestrator import (
+            CheckpointOrchestrator,
+            EngineState,
+        )
+
+        cm = MagicMock()
+        orchestrator = CheckpointOrchestrator()
+        state = EngineState(
+            iteration=10,
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+        )
+
+        restore_msg = orchestrator.orchestrate_checkpoint(state, "real summary", cm)
+
+        cm.save_checkpoint.assert_called_once_with("real summary")
+        assert state.iteration == 0
+        assert "real summary" in restore_msg or state.restored_cycle >= 0
+
+    def test_orchestrate_checkpoint_skip_save(self):
+        """orchestrate_checkpoint with save=False skips save_checkpoint call."""
+        from ayder_cli.application.checkpoint_orchestrator import (
+            CheckpointOrchestrator,
+            EngineState,
+        )
+
+        cm = MagicMock()
+        orchestrator = CheckpointOrchestrator()
+        state = EngineState(iteration=5, messages=[{"role": "system", "content": "sys"}])
+
+        orchestrator.orchestrate_checkpoint(state, "cli summary", cm, save=False)
+
+        cm.save_checkpoint.assert_not_called()
+        assert state.iteration == 0
+
+    def test_tui_checkpoint_uses_orchestrate_checkpoint(self):
+        """TuiChatLoop._handle_checkpoint delegates to orchestrator.orchestrate_checkpoint."""
+        from ayder_cli.tui.chat_loop import TuiChatLoop
+
+        source = inspect.getsource(TuiChatLoop._handle_checkpoint)
+        assert "orchestrate_checkpoint" in source
+
+    def test_cli_checkpoint_uses_orchestrate_checkpoint(self):
+        """ChatLoop._handle_checkpoint delegates to orchestrator.orchestrate_checkpoint."""
+        from ayder_cli.chat_loop import ChatLoop
+
+        source = inspect.getsource(ChatLoop._handle_checkpoint)
+        assert "orchestrate_checkpoint" in source

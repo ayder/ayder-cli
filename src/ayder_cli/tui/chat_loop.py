@@ -405,23 +405,17 @@ class TuiChatLoop:
             self.cb.on_thinking_stop()
 
         summary_content = response.choices[0].message.content or conversation_summary
-        self.cm.save_checkpoint(summary_content)
 
-        # 3. Reset + restore via shared CheckpointOrchestrator
+        # 3. Delegate reset/restore to shared orchestrator — no per-loop transition logic
         orchestrator = CheckpointOrchestrator()
         state = EngineState(iteration=self._iteration, messages=list(self.messages))
-        orchestrator.reset_state(state)
-        saved_data = {"cycle": 0, "summary": summary_content}
-        orchestrator.restore_from_checkpoint(state, saved_data)
-        # Apply state: reset messages to system-only then append the restored context
+        restore_msg = orchestrator.orchestrate_checkpoint(
+            state, summary_content, self.cm, self.mm
+        )
+
+        # Apply state back to live message list
         self.messages.clear()
         self.messages.extend(m for m in state.messages if m.get("role") == "system")
-
-        restore_msg = (
-            self.mm.build_quick_restore_message()
-            if self.mm
-            else f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary_content}\n\nPlease continue."
-        )
         self.messages.append({"role": "user", "content": restore_msg})
 
         self._iteration = 0
