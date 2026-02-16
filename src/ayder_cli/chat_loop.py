@@ -9,6 +9,12 @@ This module separates the concerns of:
 
 from dataclasses import dataclass, field
 from typing import Optional, Callable
+
+from ayder_cli.application.checkpoint_orchestrator import (
+    CheckpointOrchestrator,
+    CheckpointTrigger,
+    EngineState,
+)
 from ayder_cli.checkpoint_manager import CheckpointManager
 from ayder_cli.memory import MemoryManager
 from ayder_cli.parser import parse_custom_tool_calls
@@ -60,8 +66,9 @@ class IterationController:
         self._iteration = 0
 
     def should_trigger_checkpoint(self) -> bool:
-        """Check if we've exceeded the iteration limit."""
-        return self._iteration > self.max_iterations
+        """Check if we've exceeded the iteration limit via shared CheckpointTrigger."""
+        trigger = CheckpointTrigger(max_iterations=self.max_iterations)
+        return trigger.should_trigger(self._iteration)
 
     def handle_checkpoint(self, clear_and_restore_fn: Callable[[], None]) -> bool:
         """Handle memory checkpoint if available.
@@ -212,30 +219,42 @@ class ChatLoop:
             # Otherwise, continue loop (non-terminal tools were executed)
 
     def _handle_checkpoint(self) -> bool:
-        """Handle iteration limit checkpoint.
+        """Handle iteration limit checkpoint via shared CheckpointOrchestrator.
 
         Returns:
             True if checkpoint handled and loop should continue, False otherwise
         """
-        # Try to restore from existing memory first
-        if self.mm:
-            if self.cm and self.cm.has_saved_checkpoint():
-                self.mm.restore_from_checkpoint(self.session)
-                self.iteration_ctrl.reset()
-                return True
+        if not self.mm:
+            return False
 
-            # No existing memory - try to create a checkpoint
-            if self.mm.create_checkpoint(
+        orchestrator = CheckpointOrchestrator()
+
+        # Pre-step: surface-specific summary generation + session reset (LLM-driven)
+        if self.cm and self.cm.has_saved_checkpoint():
+            # Existing checkpoint — restore session contents (surface-specific)
+            self.mm.restore_from_checkpoint(self.session)
+        else:
+            # No checkpoint yet — create one (LLM summary + save + session reset)
+            if not self.mm.create_checkpoint(
                 self.session,
                 self.config.model,
                 self.config.num_ctx,
                 self.config.permissions,
                 self.config.verbose,
             ):
-                self.iteration_ctrl.reset()
-                return True
+                return False
 
-        return False
+        # Read real summary from persisted checkpoint (not a placeholder)
+        summary = (self.cm.read_checkpoint() if self.cm else None) or ""
+
+        # Delegate state transition to shared orchestrator with real data
+        state = EngineState(
+            iteration=self.iteration_ctrl.iteration,
+            messages=list(self.session.get_messages()),
+        )
+        orchestrator.orchestrate_checkpoint(state, summary, self.cm, memory_manager=None, save=False)
+        self.iteration_ctrl.reset()
+        return True
 
     def _get_tool_schemas(self) -> list:
         """Get tool schemas, respecting no_tools flag."""

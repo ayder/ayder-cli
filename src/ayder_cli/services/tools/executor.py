@@ -1,11 +1,10 @@
 import json
 from typing import List, Set, Dict, Any, Optional, Tuple
 
+from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.tools.registry import ToolRegistry
-from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.tools import prepare_new_content
-from ayder_cli.core.result import ToolSuccess
 from ayder_cli.services.interactions import InteractionSink, ConfirmationPolicy
 
 # Tools that end the agentic loop after execution (generated from ToolDefinitions)
@@ -131,18 +130,14 @@ class ToolExecutor:
         except ValueError as e:
             return ("error", str(e))
 
-        is_valid, error_msg = self.tool_registry.validate_args(tool_name, normalized)
-        if not is_valid:
-            return ("error", error_msg)
-
         # Notify sink of tool call
         args_json = json.dumps(normalized, indent=2)
         if self.interaction_sink is not None:
             self.interaction_sink.on_tool_call(tool_name, args_json)
 
-        # Check if tool is auto-approved by permission flags
-        tool_perm = TOOL_PERMISSIONS.get(tool_name, "x")
-        auto_approved = tool_perm in granted_permissions
+        # Check if tool is auto-approved via shared ExecutionPolicy
+        policy = ExecutionPolicy(granted_permissions)
+        auto_approved = policy.check_permission(tool_name) is None
 
         if auto_approved:
             confirmed = True
@@ -171,17 +166,24 @@ class ToolExecutor:
                 self.interaction_sink.on_tool_skipped()
             return ("declined", None)
 
-        result = self.tool_registry.execute(tool_name, normalized)
+        # Route through shared execution policy — single call site for validate+permission+execute
+        exec_result = policy.execute_with_registry(
+            ToolRequest(tool_name, normalized), self.tool_registry
+        )
+        result_str = (exec_result.result or "") if exec_result.success else str(exec_result.error)
 
         if self.interaction_sink is not None:
-            self.interaction_sink.on_tool_result(str(result))
+            self.interaction_sink.on_tool_result(result_str)
 
-        if verbose and tool_name == "write_file" and isinstance(result, ToolSuccess):
+        if verbose and tool_name == "write_file" and exec_result.success:
             file_path = normalized.get("file_path", "")
             if self.interaction_sink is not None:
                 self.interaction_sink.on_file_preview(file_path)
 
-        return ("success", str(result))
+        if not exec_result.success:
+            return ("error", result_str)
+
+        return ("success", result_str)
 
     def _handle_tool_call(
         self, tool_call: Any, granted_permissions: Set[str], verbose: bool

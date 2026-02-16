@@ -13,9 +13,14 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ayder_cli.application.checkpoint_orchestrator import (
+    CheckpointOrchestrator,
+    CheckpointTrigger,
+    EngineState,
+)
+from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.client import call_llm_async
 from ayder_cli.parser import parse_custom_tool_calls
-from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 # Import TUI parser components
 from ayder_cli.tui.parser import (
@@ -108,7 +113,8 @@ class TuiChatLoop:
 
             self._iteration += 1
             self.cb.on_iteration_update(self._iteration, self.config.max_iterations)
-            if self._iteration > self.config.max_iterations:
+            trigger = CheckpointTrigger(max_iterations=self.config.max_iterations)
+            if trigger.should_trigger(self._iteration):
                 if not await self._handle_checkpoint():
                     self.cb.on_system_message(
                         f"Reached max iterations ({self.config.max_iterations})."
@@ -233,7 +239,11 @@ class TuiChatLoop:
             confirm = await self.cb.request_confirmation(name, args)
 
             if confirm is not None and getattr(confirm, "action", None) == "approve":
-                result = await asyncio.to_thread(self.registry.execute, name, args)
+                policy = ExecutionPolicy(self.config.permissions)
+                exec_result = await asyncio.to_thread(
+                    policy.execute_with_registry, ToolRequest(name, args), self.registry
+                )
+                result = _unwrap_exec_result(exec_result)
                 tool_results.append(
                     {"tool_call_id": tc.id, "name": name, "result": result}
                 )
@@ -304,16 +314,21 @@ class TuiChatLoop:
         self.cb.on_tools_cleanup()
 
     async def _exec_tool_async(self, tc) -> dict:
-        """Execute a single tool call asynchronously."""
+        """Execute a single tool call through the shared execution policy path."""
         name = tc.function.name
         args = _parse_arguments(tc.function.arguments)
-        result = await asyncio.to_thread(self.registry.execute, name, args)
+        policy = ExecutionPolicy(self.config.permissions)
+        exec_result = await asyncio.to_thread(
+            policy.execute_with_registry, ToolRequest(name, args), self.registry
+        )
+        result = _unwrap_exec_result(exec_result)
         return {"tool_call_id": tc.id, "name": name, "result": result}
 
     # -- Custom XML tool calls -----------------------------------------------
 
     async def _execute_custom_tool_calls(self, calls: list[dict]) -> None:
-        """Execute XML-parsed tool calls and append user-role results."""
+        """Execute XML-parsed tool calls through the shared execution policy path."""
+        policy = ExecutionPolicy(self.config.permissions)
         results_text = []
         for call in calls:
             name = call.get("name", "unknown")
@@ -321,9 +336,13 @@ class TuiChatLoop:
             call_id = f"xml-{name}-{id(call)}"
             self.cb.on_tool_start(call_id, name, args)
             try:
-                result = await asyncio.to_thread(self.registry.execute, name, args)
+                exec_result = await asyncio.to_thread(
+                    policy.execute_with_registry, ToolRequest(name, args), self.registry
+                )
+                result = exec_result.result if exec_result.success else str(exec_result.error)
+                result = result or ""
                 results_text.append(f"[{name}] {result}")
-                self.cb.on_tool_complete(call_id, str(result))
+                self.cb.on_tool_complete(call_id, result)
             except Exception as e:
                 results_text.append(f"[{name}] Error: {e}")
                 self.cb.on_tool_complete(call_id, f"Error: {e}")
@@ -386,23 +405,17 @@ class TuiChatLoop:
             self.cb.on_thinking_stop()
 
         summary_content = response.choices[0].message.content or conversation_summary
-        self.cm.save_checkpoint(summary_content)
 
-        # 3. Reset messages (keep system prompt) and restore context
-        system_msg = (
-            self.messages[0]
-            if self.messages and self.messages[0].get("role") == "system"
-            else None
+        # 3. Delegate reset/restore to shared orchestrator — no per-loop transition logic
+        orchestrator = CheckpointOrchestrator()
+        state = EngineState(iteration=self._iteration, messages=list(self.messages))
+        restore_msg = orchestrator.orchestrate_checkpoint(
+            state, summary_content, self.cm, self.mm
         )
+
+        # Apply state back to live message list
         self.messages.clear()
-        if system_msg:
-            self.messages.append(system_msg)
-
-        restore_msg = (
-            self.mm.build_quick_restore_message()
-            if self.mm
-            else f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary_content}\n\nPlease continue."
-        )
+        self.messages.extend(m for m in state.messages if m.get("role") == "system")
         self.messages.append({"role": "user", "content": restore_msg})
 
         self._iteration = 0
@@ -412,8 +425,9 @@ class TuiChatLoop:
     # -- Helpers -------------------------------------------------------------
 
     def _tool_needs_confirmation(self, tool_name: str) -> bool:
-        perm = TOOL_PERMISSIONS.get(tool_name, "r")
-        return perm not in self.config.permissions
+        """Delegate to shared ExecutionPolicy — same check for CLI and TUI."""
+        policy = ExecutionPolicy(self.config.permissions)
+        return policy.get_confirmation_requirement(tool_name).requires_confirmation
 
 
 # -- Backward-compat wrappers (keep test imports working) -------------------
@@ -445,3 +459,10 @@ def _parse_arguments(arguments) -> dict:
         except (json.JSONDecodeError, ValueError):
             return {}
     return {}
+
+
+def _unwrap_exec_result(exec_result) -> str:
+    """Unwrap ExecutionResult or raw string (test mocks may return str)."""
+    if hasattr(exec_result, "success"):
+        return exec_result.result if exec_result.success else str(exec_result.error)
+    return str(exec_result)
