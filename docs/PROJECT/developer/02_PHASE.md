@@ -41,6 +41,12 @@ Implement Phase 02 behavior changes: shared runtime factory and message normaliz
 - No output/UX regression in normal flows
 - No Phase 04 async changes yet
 
+**Test Ownership Boundary:**
+- Developer writes basic unit tests for their implementation only (to verify the code works)
+- **All acceptance criteria tests, integration tests, and test migration mapping are owned by the Tester team**
+- Review `docs/PROJECT/tester/02_PHASE.md` to avoid test overlap
+- Do not write tests that duplicate QA-02.2 and QA-02.3 scope
+
 ---
 
 ## 4. Pre-Flight Checklist (Blockers)
@@ -110,7 +116,7 @@ def create_runtime(
 - memory manager: `MemoryManager(project_ctx, llm_provider=..., tool_executor=..., checkpoint_manager=...)`
 - system prompt: `SYSTEM_PROMPT + PROJECT_STRUCTURE_MACRO_TEMPLATE`
 
-**Deliverable:** Working `runtime_factory.py` with tests
+**Deliverable:** Working `runtime_factory.py` with basic unit tests (acceptance/integration tests are Tester scope — see QA-02.2)
 
 ### DEV-02.2 Wire CLI to Factory
 

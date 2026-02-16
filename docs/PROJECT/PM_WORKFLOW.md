@@ -17,6 +17,32 @@
 
 ---
 
+## ⚠️ Workflow Issue Identified and Resolved
+
+### Issue: Developer/Tester Test Ownership Ambiguity
+
+**Discovered:** During Developer Step B execution  
+**Severity:** Medium  
+**Status:** Resolved with process fix
+
+**Problem:**
+- Developer task said "Deliverable: Working `runtime_factory.py` with tests"
+- Developer wrote `tests/test_runtime_factory.py` and `tests/test_message_contract.py`
+- Tester task specifies `tests/application/test_runtime_factory.py` and `tests/application/test_message_contract.py`
+- Result: Overlapping scope, duplicate test risk
+
+**Root Cause:** Developer task template lacked explicit test ownership boundary statement.
+
+**Immediate Fix (Phase 02):**
+- Developer to choose: Move tests to `tests/application/` OR remove and let Tester own
+- Documented in: `.ayder/PM_to_developer_fix_test_issues.md`
+
+**Process Fix (Future Phases):**
+All developer tasks now include:
+> **Test Ownership Boundary:** Developer writes basic unit tests only. Acceptance-criteria and integration tests are owned by Tester team. Review `docs/PROJECT/tester/NN_PHASE.md` to avoid overlap.
+
+---
+
 ## Workflow Progress Tracker
 
 ### Phase 01 Status: CLOSED ✅
@@ -58,57 +84,54 @@ uv run poe test      # PASS (733 passed, 5 skipped)
 
 ---
 
-#### Step B — Developer Assignment 📋 READY
+#### Step B — Developer Assignment 🔄 IN PROGRESS (Issue Resolution)
 
-**Prerequisites Met:**
-- Gate branch exists ✅
-- Architect kickoff complete ✅
-- Phase doc available ✅
+**Developer Report:** `.ayder/developer_to_PM_phase02.md`
 
-**Assignment Delivered:**
-- `docs/PROJECT/developer/02_PHASE.md` — Developer task assignment
+**Deliverables:**
+| Task | Status | Evidence |
+|------|--------|----------|
+| DEV-02.1 Runtime Factory | ✅ | `application/runtime_factory.py` |
+| DEV-02.2 Wire CLI | ✅ | `cli_runner.py` modified |
+| DEV-02.3 Wire TUI | ✅ | `tui/app.py` modified |
+| DEV-02.4 Message Contract | ✅ | `application/message_contract.py` |
 
-**Next Actions:**
-1. Assign Developer Agent with:
-   - `PHASE_ID`: `02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT`
-   - `PHASE_DOC`: `docs/REFACTOR/PHASES/02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT.md`
-   - `ARCH_GATE_BRANCH`: `arch/02/runtime-factory-gate`
-   - `DEV_TASK_SCOPE`: `runtime-factory`
+**Gate Commands:**
+```bash
+uv run poe lint      # PASS
+uv run poe typecheck # PASS
+uv run poe test      # PASS (818 passed, 5 skipped — +21 from baseline)
+```
 
-**Developer Tasks:**
-- DEV-02.1: Shared Runtime Factory (`application/runtime_factory.py`)
-- DEV-02.2: Wire CLI to Factory (`cli_runner.py`)
-- DEV-02.3: Wire TUI to Factory (`tui/app.py`)
-- DEV-02.4: Message Normalization Contract (`application/message_contract.py`)
+**Issue Resolution:**
+- ⚠️ Test ownership conflict identified (see "Workflow Issue" section above)
+- 🔄 Awaiting developer response: Move tests OR remove tests
+- 📍 Response sent: `.ayder/PM_to_developer_fix_test_issues.md`
 
-**Control Check B (Required before Step C):**
-- [ ] Developer branch exists: `dev/02/runtime-factory`
-- [ ] Developer confirmed DEV-* tasks in scope
-- [ ] Developer posted implementation plan and expected changed files
+**Control Check B:**
+- [x] Developer branch exists: `dev/02/runtime-factory`
+- [x] Developer confirmed DEV-* tasks in scope
+- [x] Developer posted implementation plan
+- [ ] ⚠️ Test location fix pending (issue resolution)
 
 ---
 
-#### Step C — Tester Assignment 📋 READY
-
-**Prerequisites Met:**
-- Gate branch exists ✅
-- Architect kickoff complete ✅
-- Phase doc available ✅
+#### Step C — Tester Assignment 📋 READY (Blocked on B)
 
 **Assignment Delivered:**
 - `docs/PROJECT/tester/02_PHASE.md` — Tester task assignment
 
-**Next Actions:**
-1. Assign Tester Agent (parallel to Developer) with:
-   - `PHASE_ID`: `02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT`
-   - `PHASE_DOC`: `docs/REFACTOR/PHASES/02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT.md`
-   - `ARCH_GATE_BRANCH`: `arch/02/runtime-factory-gate`
-   - `QA_TEST_SCOPE`: `factory-contract-tests`
+**Note:** Step C was planned to run parallel to Step B, but due to the test ownership issue, it is temporarily blocked pending developer resolution.
 
 **Tester Tasks:**
 - QA-02.1: Remove Obsolete Wiring Tests
-- QA-02.2: Add Runtime Factory Tests
-- QA-02.3: Add Message Contract Tests
+- QA-02.2: Add Runtime Factory Tests (may extend/replace developer tests)
+- QA-02.3: Add Message Contract Tests (may extend/replace developer tests)
+
+**Next Actions:**
+1. ✅ Await developer test fix (Option 1: move to `tests/application/` OR Option 2: remove)
+2. ✅ PM completes Control Check B
+3. ✅ Assign Tester Agent to `docs/PROJECT/tester/02_PHASE.md`
 
 **Control Check C (Required before Step D):**
 - [ ] Tester branch exists: `qa/02/factory-contract-tests`
@@ -138,8 +161,8 @@ uv run poe test      # PASS (733 passed, 5 skipped)
 | Role | Branch | Target | MR Status |
 |------|--------|--------|-----------|
 | Architect | `arch/02/runtime-factory-gate` | `main` | Created ✅ |
-| Developer | `dev/02/runtime-factory` | `arch/02/runtime-factory-gate` | Pending |
-| Tester | `qa/02/factory-contract-tests` | `arch/02/runtime-factory-gate` | Pending |
+| Developer | `dev/02/runtime-factory` | `arch/02/runtime-factory-gate` | In Progress 🔄 |
+| Tester | `qa/02/factory-contract-tests` | `arch/02/runtime-factory-gate` | Ready 📋 (Blocked) |
 | Architect (final) | `arch/02/runtime-factory-gate` | `main` | Pending |
 
 ---
@@ -153,20 +176,24 @@ uv run poe test      # PASS (733 passed, 5 skipped)
 | Risk Register | `docs/PROJECT/architect/02_PHASE/02_RISK_REGISTER.md` | ✅ |
 | Kickoff Task | `docs/PROJECT/architect/02_PHASE.md` | ✅ |
 
-### Developer Deliverables (Pending)
+### Developer Deliverables (Complete, Test Fix Pending)
 | Artifact | Location | Status |
 |----------|----------|--------|
-| Runtime Factory | `src/ayder_cli/application/runtime_factory.py` | 📋 |
-| Message Contract | `src/ayder_cli/application/message_contract.py` | 📋 |
-| CLI Wiring | `src/ayder_cli/cli_runner.py` | 📋 |
-| TUI Wiring | `src/ayder_cli/tui/app.py` | 📋 |
+| Runtime Factory | `src/ayder_cli/application/runtime_factory.py` | ✅ |
+| Message Contract | `src/ayder_cli/application/message_contract.py` | ✅ |
+| CLI Wiring | `src/ayder_cli/cli_runner.py` | ✅ |
+| TUI Wiring | `src/ayder_cli/tui/app.py` | ✅ |
+| Memory Integration | `src/ayder_cli/memory.py` | ✅ |
+| Chat Loop Integration | `src/ayder_cli/tui/chat_loop.py` | ✅ |
+| Commands Integration | `src/ayder_cli/tui/commands.py` | ✅ |
+| Developer Tests | `tests/test_*.py` | 🔄 Fix pending |
 
 ### Tester Deliverables (Pending)
 | Artifact | Location | Status |
 |----------|----------|--------|
 | Test Migration Map | `docs/PROJECT/tester/02_PHASE/02_TEST_MIGRATION_MAPPING.md` | 📋 |
-| Factory Tests | `tests/application/test_runtime_factory.py` | 📋 |
-| Message Contract Tests | `tests/application/test_message_contract.py` | 📋 |
+| Factory Tests | `tests/application/test_runtime_factory.py` | 📋 (may use dev tests) |
+| Message Contract Tests | `tests/application/test_message_contract.py` | 📋 (may use dev tests) |
 
 ---
 
@@ -191,11 +218,20 @@ uv run poe test      # PASS (733 passed, 5 skipped)
 
 ## Next Actions for PM
 
-1. **Assign Developer Agent** → `docs/PROJECT/developer/02_PHASE.md`
-2. **Assign Tester Agent** (parallel) → `docs/PROJECT/tester/02_PHASE.md`
-3. **Monitor Control Checks** B and C
-4. **Prepare Step D** when B and C complete
+1. ✅ **AWAITING:** Developer response on test fix (Option 1 or 2)
+2. ✅ Complete Control Check B after fix confirmed
+3. ✅ Assign Tester Agent → `docs/PROJECT/tester/02_PHASE.md`
+4. 🔄 Steps B and C proceed in parallel (after unblock)
+5. ⏳ Prepare Step D when B and C complete
 
 ---
 
-*Phase 02 of ayder-cli refactor program — Step A complete; Steps B and C ready*
+## Process Improvement Log
+
+| Phase | Issue | Resolution |
+|-------|-------|------------|
+| 02 | Developer/Tester test boundary ambiguity | Added explicit "Test Ownership Boundary" statement to all future developer tasks |
+
+---
+
+*Phase 02 of ayder-cli refactor program — Step A complete; Step B resolving issue; Step C ready*
