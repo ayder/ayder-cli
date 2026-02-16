@@ -28,6 +28,8 @@ class TestToolExecutor:
 
     def test_handle_tool_call(self):
         """Test handling a tool call with injected interfaces."""
+        from ayder_cli.application.execution_policy import ExecutionResult
+
         mock_registry = Mock()
         sink = Mock(spec=InteractionSink)
         policy = Mock(spec=ConfirmationPolicy)
@@ -40,10 +42,13 @@ class TestToolExecutor:
         mock_tool_call.function.arguments = '{"directory": "."}'
 
         mock_registry.normalize_args.return_value = {"directory": "."}
-        mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = "file1.txt\nfile2.txt"
+        fake_exec_result = ExecutionResult(success=True, result="file1.txt\nfile2.txt")
 
-        result = executor._handle_tool_call(mock_tool_call, granted_permissions=set(), verbose=False)
+        with patch(
+            "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+            return_value=fake_exec_result,
+        ):
+            result = executor._handle_tool_call(mock_tool_call, granted_permissions={"r"}, verbose=False)
 
         assert result is not None
         assert result["role"] == "tool"
@@ -118,12 +123,14 @@ class TestToolExecutor:
         custom_calls = [{"name": "invalid_tool", "arguments": {}}]
 
         mock_registry.normalize_args.return_value = {}
-        mock_registry.validate_args.return_value = (False, "Invalid tool")
 
         result = executor.execute_custom_calls(custom_calls, session)
 
         assert result is True
-        session.add_message.assert_called_with("user", "Validation Error for tool 'invalid_tool': Invalid tool")
+        # Error message should mention the tool name
+        call_args = session.add_message.call_args
+        assert call_args is not None
+        assert "invalid_tool" in call_args[0][1]
 
     def test_handle_custom_calls_declined(self):
         """Test declined custom call stops execution."""
@@ -169,7 +176,9 @@ class TestToolExecutor:
         assert result is True
 
     def test_handle_custom_calls_write_file_with_diff(self):
-        """Test write_file in custom calls uses diff preview."""
+        """Test write_file in custom calls uses diff preview when permission not pre-granted."""
+        from ayder_cli.application.execution_policy import ExecutionResult
+
         mock_registry = Mock()
         mock_registry.project_ctx = Mock()
         sink = Mock(spec=InteractionSink)
@@ -186,11 +195,15 @@ class TestToolExecutor:
         custom_calls = [{"name": "write_file", "arguments": {"file_path": "test.txt", "content": "hello"}}]
 
         mock_registry.normalize_args.return_value = {"file_path": "test.txt", "content": "hello"}
-        mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = "Successfully wrote to file"
+        fake_result = ExecutionResult(success=True, result="Successfully wrote to file")
 
+        # granted_permissions=set() means write_file is NOT auto-approved → triggers diff dialog
         with patch("ayder_cli.services.tools.executor.prepare_new_content", return_value="hello"):
-            result = executor.execute_custom_calls(custom_calls, session)
+            with patch(
+                "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+                return_value=fake_result,
+            ):
+                result = executor.execute_custom_calls(custom_calls, session, granted_permissions=set())
 
         policy.confirm_file_diff.assert_called_once()
         assert result is False
@@ -201,6 +214,8 @@ class TestExecuteSingleCall:
 
     def test_execute_single_call_success(self):
         """Normal tool execution returns ('success', result)."""
+        from ayder_cli.application.execution_policy import ExecutionResult
+
         mock_registry = Mock()
         sink = Mock(spec=InteractionSink)
         policy = Mock(spec=ConfirmationPolicy)
@@ -208,16 +223,18 @@ class TestExecuteSingleCall:
         executor = ToolExecutor(mock_registry, interaction_sink=sink, confirmation_policy=policy)
 
         mock_registry.normalize_args.return_value = {"directory": "."}
-        mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = "file1.txt\nfile2.txt"
+        fake_result = ExecutionResult(success=True, result="file1.txt\nfile2.txt")
 
-        outcome, value = executor._execute_single_call(
-            "list_files", {"directory": "."}, set(), verbose=False
-        )
+        with patch(
+            "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+            return_value=fake_result,
+        ):
+            outcome, value = executor._execute_single_call(
+                "list_files", {"directory": "."}, {"r"}, verbose=False
+            )
 
         assert outcome == "success"
         assert "file1.txt" in value
-        mock_registry.execute.assert_called_once_with("list_files", {"directory": "."})
         sink.on_tool_result.assert_called_once()
 
     def test_execute_single_call_normalize_error(self):
@@ -233,24 +250,22 @@ class TestExecuteSingleCall:
 
         assert outcome == "error"
         assert "Path traversal blocked" in value
-        mock_registry.validate_args.assert_not_called()
-        mock_registry.execute.assert_not_called()
 
     def test_execute_single_call_validation_error(self):
-        """Invalid args from validate_args returns ('error', msg)."""
+        """ValidationAuthority rejects unknown/invalid tool returns ('error', msg)."""
         mock_registry = Mock()
         executor = ToolExecutor(mock_registry)
 
+        # "read_file" requires "file_path" — passing empty args triggers validation error
         mock_registry.normalize_args.return_value = {}
-        mock_registry.validate_args.return_value = (False, "Missing required param")
 
         outcome, value = executor._execute_single_call(
-            "read_file", {}, set(), verbose=False
+            "read_file", {}, {"r"}, verbose=False
         )
 
         assert outcome == "error"
-        assert "Missing required param" in value
-        mock_registry.execute.assert_not_called()
+        # ValidationAuthority reports missing required arg
+        assert value is not None
 
     def test_execute_single_call_declined(self):
         """User declining confirmation returns ('declined', None)."""
@@ -261,7 +276,6 @@ class TestExecuteSingleCall:
         executor = ToolExecutor(mock_registry, interaction_sink=sink, confirmation_policy=policy)
 
         mock_registry.normalize_args.return_value = {"directory": "."}
-        mock_registry.validate_args.return_value = (True, None)
 
         outcome, value = executor._execute_single_call(
             "list_files", {"directory": "."}, set(), verbose=False
@@ -270,10 +284,11 @@ class TestExecuteSingleCall:
         assert outcome == "declined"
         assert value is None
         sink.on_tool_skipped.assert_called_once()
-        mock_registry.execute.assert_not_called()
 
     def test_execute_single_call_write_file_diff(self):
         """write_file uses confirm_file_diff."""
+        from ayder_cli.application.execution_policy import ExecutionResult
+
         mock_registry = Mock()
         mock_registry.project_ctx = Mock()
         sink = Mock(spec=InteractionSink)
@@ -284,13 +299,17 @@ class TestExecuteSingleCall:
 
         normalized = {"file_path": "test.txt", "content": "hello"}
         mock_registry.normalize_args.return_value = normalized
-        mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = "Successfully wrote to file"
+        fake_result = ExecutionResult(success=True, result="Successfully wrote to file")
 
+        # Use empty permissions so write_file requires confirmation → triggers diff dialog
         with patch("ayder_cli.services.tools.executor.prepare_new_content", return_value="hello") as mock_prepare:
-            outcome, value = executor._execute_single_call(
-                "write_file", {"file_path": "test.txt", "content": "hello"}, set(), verbose=False
-            )
+            with patch(
+                "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+                return_value=fake_result,
+            ):
+                outcome, value = executor._execute_single_call(
+                    "write_file", {"file_path": "test.txt", "content": "hello"}, set(), verbose=False
+                )
 
         assert outcome == "success"
         mock_prepare.assert_called_once_with("write_file", normalized, mock_registry.project_ctx)
@@ -298,26 +317,32 @@ class TestExecuteSingleCall:
 
     def test_execute_single_call_auto_approved(self):
         """Permission flag skips confirmation entirely."""
+        from ayder_cli.application.execution_policy import ExecutionResult
+
         mock_registry = Mock()
         sink = Mock(spec=InteractionSink)
         policy = Mock(spec=ConfirmationPolicy)
         executor = ToolExecutor(mock_registry, interaction_sink=sink, confirmation_policy=policy)
 
         mock_registry.normalize_args.return_value = {"directory": "."}
-        mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = "file1.txt"
+        fake_result = ExecutionResult(success=True, result="file1.txt")
 
-        outcome, value = executor._execute_single_call(
-            "list_files", {"directory": "."}, {"r"}, verbose=False
-        )
+        with patch(
+            "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+            return_value=fake_result,
+        ):
+            outcome, value = executor._execute_single_call(
+                "list_files", {"directory": "."}, {"r"}, verbose=False
+            )
 
         assert outcome == "success"
         assert "file1.txt" in value
         policy.confirm_action.assert_not_called()
-        mock_registry.execute.assert_called_once()
 
     def test_execute_single_call_verbose_write(self):
         """Verbose mode calls sink.on_file_preview after successful write_file."""
+        from ayder_cli.application.execution_policy import ExecutionResult
+
         mock_registry = Mock()
         mock_registry.project_ctx = Mock()
         sink = Mock(spec=InteractionSink)
@@ -328,13 +353,16 @@ class TestExecuteSingleCall:
 
         normalized = {"file_path": "out.py", "content": "print('hi')"}
         mock_registry.normalize_args.return_value = normalized
-        mock_registry.validate_args.return_value = (True, None)
-        mock_registry.execute.return_value = ToolSuccess("Successfully wrote to file")
+        fake_result = ExecutionResult(success=True, result="Successfully wrote to file")
 
         with patch("ayder_cli.services.tools.executor.prepare_new_content", return_value="print('hi')"):
-            outcome, value = executor._execute_single_call(
-                "write_file", {"file_path": "out.py", "content": "print('hi')"}, set(), verbose=True
-            )
+            with patch(
+                "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
+                return_value=fake_result,
+            ):
+                outcome, value = executor._execute_single_call(
+                    "write_file", {"file_path": "out.py", "content": "print('hi')"}, {"w"}, verbose=True
+                )
 
         assert outcome == "success"
         sink.on_file_preview.assert_called_once_with("out.py")

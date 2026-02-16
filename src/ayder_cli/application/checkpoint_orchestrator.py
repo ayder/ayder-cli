@@ -8,7 +8,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -102,3 +102,34 @@ class CheckpointOrchestrator:
     def supports_context(self, context: RuntimeContext) -> bool:
         """Orchestrator supports any interface context."""
         return True
+
+    def orchestrate_checkpoint(
+        self,
+        state: EngineState,
+        summary: str,
+        checkpoint_manager: Any,
+        memory_manager: Any = None,
+        save: bool = True,
+    ) -> str:
+        """Save checkpoint, reset state, restore with real summary data.
+
+        Single shared transition path for both CLI and TUI.
+
+        Args:
+            state: Mutable engine state to reset.
+            summary: Real checkpoint summary content (not a placeholder).
+            checkpoint_manager: Used to persist summary (skipped if save=False).
+            memory_manager: Optional — used to build restore message.
+            save: Set False when caller has already persisted the summary.
+
+        Returns:
+            The restore message to inject into the conversation.
+        """
+        if save:
+            checkpoint_manager.save_checkpoint(summary)
+        self.reset_state(state)
+        saved_data = {"cycle": state.checkpoint_cycle, "summary": summary}
+        self.restore_from_checkpoint(state, saved_data)
+        if memory_manager is not None and hasattr(memory_manager, "build_quick_restore_message"):
+            return memory_manager.build_quick_restore_message()
+        return f"[SYSTEM: Context reset. Previous summary saved.]\n\n{summary}\n\nPlease continue."
