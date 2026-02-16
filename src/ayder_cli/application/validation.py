@@ -52,7 +52,6 @@ class ValidationError:
 
 class ValidationStage(Enum):
     SCHEMA = "schema"
-    PERMISSION = "permission"
 
 
 # ---------------------------------------------------------------------------
@@ -111,13 +110,6 @@ class SchemaValidator:
         return True, None
 
 
-class PermissionValidator:
-    """Validates that required permissions are present (stub — policy layer owns this)."""
-
-    def validate(self, request: ToolRequest) -> tuple[bool, Any]:
-        return True, None
-
-
 # ---------------------------------------------------------------------------
 # Authority
 # ---------------------------------------------------------------------------
@@ -129,12 +121,11 @@ class ValidationAuthority:
     Does not branch on interface type; context is accepted but ignored.
     """
 
-    _DEFAULT_ORDER = [ValidationStage.SCHEMA, ValidationStage.PERMISSION]
+    _DEFAULT_ORDER = [ValidationStage.SCHEMA]
 
     def __init__(self) -> None:
         self._registry: dict[str, Any] = {
             "schema": SchemaValidator(),
-            "permission": PermissionValidator(),
         }
         self._ordered_stages: list[tuple[str, Any]] = []
 

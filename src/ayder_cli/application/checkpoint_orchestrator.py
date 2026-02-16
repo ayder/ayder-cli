@@ -5,7 +5,6 @@ Single policy path for both CLI and TUI checkpoint behavior.
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
@@ -94,14 +93,6 @@ class CheckpointOrchestrator:
         """Apply a state transition — deterministic, no interface branching."""
         if transition is CheckpointTransition.TRIGGER_AND_RESET:
             self.reset_state(state)
-
-    def get_transition_source(self) -> str:
-        """Return source of apply_transition for introspection."""
-        return inspect.getsource(self.apply_transition)
-
-    def supports_context(self, context: RuntimeContext) -> bool:
-        """Orchestrator supports any interface context."""
-        return True
 
     def orchestrate_checkpoint(
         self,

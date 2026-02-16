@@ -430,25 +430,6 @@ class TuiChatLoop:
         return policy.get_confirmation_requirement(tool_name).requires_confirmation
 
 
-# -- Backward-compat wrappers (keep test imports working) -------------------
-
-
-def _extract_think_blocks(content: str) -> list[str]:
-    return content_processor.extract_think_blocks(content)
-
-
-def _strip_tool_markup(content: str) -> str:
-    return content_processor.strip_for_display(content)
-
-
-def _parse_json_tool_calls(content: str) -> list[dict]:
-    return content_processor.parse_json_tool_calls(content)
-
-
-def _regex_extract_json_tool_calls(content: str) -> list[dict]:
-    return content_processor._regex_extract_json_tool_calls(content)
-
-
 def _parse_arguments(arguments) -> dict:
     """Safely parse tool call arguments (str or dict)."""
     if isinstance(arguments, dict):

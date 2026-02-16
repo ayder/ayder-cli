@@ -18,20 +18,17 @@ class TestNoRedundantValidation:
             from ayder_cli.application.validation import (
                 ValidationAuthority,
                 SchemaValidator,
-                PermissionValidator,
             )
         except ImportError:
             pytest.skip("Validation authority not yet implemented")
 
         # Authority registry ensures single owner per validation type
         authority = ValidationAuthority()
-        
+
         schema = authority.get_authority("schema")
-        permission = authority.get_authority("permission")
-        
-        # Different types have different authorities
+
+        # Schema type has correct authority
         assert isinstance(schema, SchemaValidator)
-        assert isinstance(permission, PermissionValidator)
 
     def test_no_duplicate_validators_same_type(self):
         """No two validators handle the same validation type."""
@@ -134,8 +131,7 @@ class TestNoConflictingValidation:
         order = authority.get_validation_order()
         
         assert ValidationStage.SCHEMA in order
-        assert ValidationStage.PERMISSION in order
-        
+
         # Order doesn't change
         order2 = authority.get_validation_order()
         assert order == order2
@@ -279,11 +275,9 @@ class TestValidationStageContract:
             pytest.skip("Validation authority not yet implemented")
 
         order = ValidationAuthority.get_validation_order()
-        
-        schema_idx = order.index(ValidationStage.SCHEMA)
-        permission_idx = order.index(ValidationStage.PERMISSION)
-        
-        assert schema_idx < permission_idx
+
+        assert len(order) >= 1
+        assert ValidationStage.SCHEMA in order
 
     def test_early_exit_on_failure(self):
         """Validation exits early on first failure."""
