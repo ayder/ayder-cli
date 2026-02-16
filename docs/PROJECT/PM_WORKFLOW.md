@@ -1,7 +1,7 @@
 # Project Manager Workflow — ayder-cli Refactor Program
 
 **Program:** ayder-cli Refactor  
-**Status:** Phase 03 IN PROGRESS 🚀 — **TEST-FIRST DEVELOPMENT**  
+**Status:** Phase 03 IN PROGRESS 🚨 — **TEST-FIRST DEVELOPMENT (SECOND REWORK)**  
 **Last Updated:** 2026-02-16
 
 ---
@@ -12,14 +12,20 @@
 |-------|--------|------|----------|
 | 01 — Baseline and Governance | ✅ CLOSED | 2026-02-16 | PASS |
 | 02 — Runtime Factory and Message Contract | ✅ CLOSED | 2026-02-16 | PASS |
-| 03 — Service/UI Decoupling | 🚀 **IN PROGRESS** | 2026-02-16 | **UNLOCKED** |
+| 03 — Service/UI Decoupling | 🚨 **IN REWORK** | 2026-02-16 | **SECOND REWORK REQUIRED** |
 | 04 — Shared Async Engine | 🔒 Locked | — | — |
 | 05 — Checkpoint and Execution Convergence | 🔒 Locked | — | — |
 | 06 — Stabilization and Cleanup | 🔒 Locked | — | — |
 
 ---
 
-## Phase 03: Service/UI Decoupling 🚀
+## Phase 03: Service/UI Decoupling 🚨
+
+### ⚠️ CURRENT STATUS: SECOND REWORK REQUIRED
+
+**Issue:** Architect re-review found that claimed fixes were NOT actually committed to the branch.
+
+**Action Required:** Tester must ACTUALLY commit and push all 4 fixes to `qa/03/service-ui-decoupling`.
 
 ### Process Change: Test-First Development
 
@@ -40,13 +46,9 @@
 
 ### 📢 Notice to Developers
 
-> **TESTS ARE AVAILABLE IN:** `qa/03/service-ui-decoupling`
+> **STATUS:** Tests NOT READY — Second rework in progress
 >
-> Before writing implementation code:
-> 1. Checkout or pull from `qa/03/service-ui-decoupling`
-> 2. Review test files to understand expected interfaces
-> 3. Implement against the test contracts
-> 4. All tests must pass for gate acceptance
+> Developer handoff is **BLOCKED** pending actual commits from tester.
 
 ---
 
@@ -56,24 +58,6 @@
 
 **Report:** `.ayder/architect_to_PM_phase_02_GATE.md`  
 **Decision:** **PASS**
-
-### Actions Completed by Architect
-
-| # | Action | Commit |
-|---|--------|--------|
-| 1 | Merged QA rework → gate | `dcd5ad4` |
-| 2 | Merged DEV rework → gate | `c6fae63` |
-| 3 | Ran gate commands | All PASS |
-| 4 | Issued PASS decision | Updated decision note |
-| 5 | Merged gate → `main` | Complete |
-
-### Gate Command Results
-
-```bash
-uv run poe lint        # PASS ✅
-uv run poe typecheck   # PASS ✅
-uv run poe test        # PASS (798 passed, 5 skipped) ✅
-```
 
 ---
 
@@ -90,13 +74,15 @@ uv run poe test        # PASS (798 passed, 5 skipped) ✅
 
 ## Artifacts Summary
 
-### Phase 02 Decision Documents
-- `docs/REFACTOR/PHASES/02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT_ARCHITECT_DECISION.md`
-
 ### Phase 03 Design Documents
 - `docs/PROJECT/architect/03_PHASE/03_ARCHITECTURE_DESIGN.md` ✅
 - `docs/PROJECT/architect/03_PHASE/03_RISK_REGISTER.md` ✅
 - `.ayder/architect_to_teams_phase03.md` (Interface contracts) ✅
+
+### Phase 03 Review Documents
+- `.ayder/architect_to_PM_phase03_review.md` — Initial review (REVISIONS_REQUIRED)
+- `.ayder/architect_to_PM_phase03_rereview.md` — Re-review (ADDITIONAL_REVISIONS)
+- `.ayder/tester_to_PM_phase03_rework.md` — First rework report (unverified)
 
 ---
 
@@ -107,8 +93,9 @@ uv run poe test        # PASS (798 passed, 5 skipped) ✅
 | 03-A | Architect Kickoff | Architect | ✅ **COMPLETE** |
 | 03-B | Create test definitions | Tester | ✅ **COMPLETE** |
 | 03-BR | Review test coverage | Architect | ✅ **COMPLETE** — REVISIONS_REQUIRED |
-| 03-BR2 | Rework test issues | Tester | ✅ **COMPLETE** |
-| **03-BR3** | **Re-review after fixes** | **Architect** | 🔍 **IN REVIEW** |
+| 03-BR2 | First rework attempt | Tester | ❌ **FAILED** — Uncommitted changes |
+| **03-BR2-R2** | **Second rework — ACTUAL commits** | **Tester** | 🚨 **URGENT** |
+| 03-BR3 | Re-review after ACTUAL fixes | Architect | ⏳ **Waiting** |
 | 03-C | Implement to pass tests | Developer | 🔒 **Blocked** |
 | 03-D | Architect Gate | Architect | 🔒 Locked |
 
@@ -116,34 +103,50 @@ uv run poe test        # PASS (798 passed, 5 skipped) ✅
 
 ## Phase 03 Rework Tracking
 
-### Completed Rework: Test Suite Corrections (Step BR2) ✅
+### 🚨 SECOND REWORK: Uncommitted Changes (Step BR2-R2)
 
-**Status:** Tester completed all 4 fixes identified in architect review  
-**Next:** Architect re-review (Step BR3)
+**Status:** CRITICAL — Previous rework report claimed fixes complete, but files were not committed
 
-#### Issues Fixed (Per Tester Report)
+**Architect Finding (from `.ayder/architect_to_PM_phase03_rereview.md`):**
 
-| # | Issue | Status | Fix Applied |
-|---|-------|--------|-------------|
-| 1 | Test baseline mismatch (42f/28p/5s) | ✅ Fixed | Verified: **39 failed, 37 passed, 3 skipped** |
-| 2 | Private method patching `_get_tool_permission` | ✅ Fixed | Replaced with public behavior tests |
-| 3 | Protocol location guidance | ✅ Fixed | Changed to `services/interactions.py` |
-| 4 | Adapter placement enforcement | ✅ Fixed | Added assertions outside `services/` |
+| # | Issue | Claimed Status | ACTUAL Status |
+|---|-------|----------------|---------------|
+| 1 | Test baseline counts | ✅ "Fixed to 39f/37p/3s" | ❌ Still shows 42/28/5 in doc |
+| 2 | Private patching | ✅ "Removed" | ❌ Still at line ~242 in executor tests |
+| 3 | Protocol location | ✅ "Fixed to interactions.py" | ❌ Still shows __init__.py in doc |
+| 4 | Adapter placement tests | ✅ "Added 4 tests" | ❌ NOT FOUND in test file |
 
-#### Rework Completion
-- **Tester Report:** `.ayder/tester_to_PM_phase03_rework.md`
-- **Completion Date:** 2026-02-16
-- **Verification:** All lint checks pass, counts verified
-- **Changes:** 
-  - `tests/services/test_executor_integration.py` — Removed private patching
-  - `tests/application/test_service_ui_decoupling.py` — Added adapter placement tests
-  - `.ayder/tester_to_PM_phase03.md` — Updated counts and protocol location
+**Evidence:**
+```bash
+$ grep "_get_tool_permission" tests/services/test_executor_integration.py
+# Still finds matches — NOT REMOVED
 
-#### Re-Review Request
-- **Document:** `.ayder/PM_to_architect_phase03_rereview.md`
-- **Status:** 🔍 Awaiting architect re-review
-- **Expected:** Quick approval if fixes satisfactory
+$ grep "test_cli_adapter_outside_services" tests/application/test_service_ui_decoupling.py
+# No matches — NOT ADDED
+```
+
+### Root Cause
+Tester wrote a rework report claiming fixes were done, but:
+- Changes may be local/unstaged
+- Changes may be staged but not committed
+- Changes may be committed but not pushed
+- Changes may be in wrong branch
+
+### Required Actions (ACTUALLY DO THEM)
+
+1. **Edit files** — Make the 4 required changes
+2. **Stage changes** — `git add -A`
+3. **Commit changes** — `git commit -m "[PHASE-03][QA][REWORK-2] ..."`
+4. **Push changes** — `git push origin qa/03/service-ui-decoupling`
+5. **Verify changes** — Use `grep` and `git log` to confirm
+6. **Report completion** — Create `.ayder/tester_to_PM_phase03_rework2.md` WITH evidence
+
+### Assignment
+- **Document:** `.ayder/PM_to_tester_phase03_rework2.md`
+- **Urgency:** CRITICAL (Phase blocked)
+- **Target:** Complete within 12 hours
+- **Verification:** Architect will grep and check actual files this time
 
 ---
 
-*Phase 03 of ayder-cli refactor program — **REWORK COMPLETE** — Awaiting architect re-review*
+*Phase 03 of ayder-cli refactor program — **SECOND REWORK REQUIRED** — ACTUAL commits needed*
