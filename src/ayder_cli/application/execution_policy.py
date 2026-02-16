@@ -119,6 +119,7 @@ class ExecutionResult:
     success: bool
     was_confirmed: bool = False
     error: Any = None
+    result: Optional[str] = None
 
 
 def _required_permission(tool_name: str) -> str:
@@ -174,6 +175,32 @@ class ExecutionPolicy:
         if error is not None:
             return ExecutionResult(success=False, was_confirmed=False, error=error)
         return ExecutionResult(success=True, was_confirmed=False)
+
+    def execute_with_registry(
+        self,
+        request: ToolRequest,
+        registry: Any,
+        context: Optional[RuntimeContext] = None,
+    ) -> ExecutionResult:
+        """Single shared execution path: validate → check permission → execute.
+
+        Both CLI and TUI route through this method so registry.execute is never
+        called directly from interface-specific code.
+        """
+        from ayder_cli.application.validation import ValidationAuthority, ToolRequest as VToolRequest
+
+        authority = ValidationAuthority()
+        v_request = VToolRequest(name=request.name, arguments=request.arguments)
+        valid, err = authority.validate(v_request)
+        if not valid:
+            return ExecutionResult(success=False, error=err)
+
+        perm_err = self.check_permission(request.name, context)
+        if perm_err is not None:
+            return ExecutionResult(success=False, error=perm_err)
+
+        raw = registry.execute(request.name, request.arguments)
+        return ExecutionResult(success=True, was_confirmed=False, result=str(raw))
 
     def confirm_file_diff(self, diff: FileDiffConfirmation) -> bool:
         """Policy-level auto-approval for file diffs."""

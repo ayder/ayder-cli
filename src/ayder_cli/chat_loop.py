@@ -10,7 +10,11 @@ This module separates the concerns of:
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
-from ayder_cli.application.checkpoint_orchestrator import CheckpointOrchestrator, EngineState
+from ayder_cli.application.checkpoint_orchestrator import (
+    CheckpointOrchestrator,
+    CheckpointTrigger,
+    EngineState,
+)
 from ayder_cli.checkpoint_manager import CheckpointManager
 from ayder_cli.memory import MemoryManager
 from ayder_cli.parser import parse_custom_tool_calls
@@ -62,8 +66,9 @@ class IterationController:
         self._iteration = 0
 
     def should_trigger_checkpoint(self) -> bool:
-        """Check if we've exceeded the iteration limit."""
-        return self._iteration > self.max_iterations
+        """Check if we've exceeded the iteration limit via shared CheckpointTrigger."""
+        trigger = CheckpointTrigger(max_iterations=self.max_iterations)
+        return trigger.should_trigger(self._iteration)
 
     def handle_checkpoint(self, clear_and_restore_fn: Callable[[], None]) -> bool:
         """Handle memory checkpoint if available.
@@ -230,6 +235,7 @@ class ChatLoop:
                     messages=list(self.session.get_messages()),
                 )
                 orchestrator.reset_state(state)
+                orchestrator.restore_from_checkpoint(state, {"cycle": 0, "summary": ""})
                 self.iteration_ctrl.reset()
                 return True
 
@@ -246,6 +252,7 @@ class ChatLoop:
                     messages=list(self.session.get_messages()),
                 )
                 orchestrator.reset_state(state)
+                orchestrator.restore_from_checkpoint(state, {"cycle": 0, "summary": ""})
                 self.iteration_ctrl.reset()
                 return True
 
