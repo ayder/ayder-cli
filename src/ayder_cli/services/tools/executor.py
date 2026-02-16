@@ -1,8 +1,8 @@
 import json
 from typing import List, Set, Dict, Any, Optional, Tuple
 
+from ayder_cli.application.execution_policy import ExecutionPolicy
 from ayder_cli.tools.registry import ToolRegistry
-from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.tools import prepare_new_content
 from ayder_cli.core.result import ToolSuccess
@@ -140,9 +140,9 @@ class ToolExecutor:
         if self.interaction_sink is not None:
             self.interaction_sink.on_tool_call(tool_name, args_json)
 
-        # Check if tool is auto-approved by permission flags
-        tool_perm = TOOL_PERMISSIONS.get(tool_name, "x")
-        auto_approved = tool_perm in granted_permissions
+        # Check if tool is auto-approved via shared ExecutionPolicy
+        policy = ExecutionPolicy(granted_permissions)
+        auto_approved = policy.check_permission(tool_name) is None
 
         if auto_approved:
             confirmed = True
