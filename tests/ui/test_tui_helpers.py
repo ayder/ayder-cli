@@ -1,6 +1,10 @@
-"""Tests for tui_helpers.py — is_tool_blocked_in_safe_mode."""
+"""Tests for tui_helpers — is_tool_blocked_in_safe_mode.
+
+Note: Tests the actual implementation in ayder_cli.tui.helpers.
+The tui_helpers.py shim is deprecated and will be removed.
+"""
 import pytest
-from ayder_cli.tui_helpers import is_tool_blocked_in_safe_mode
+from ayder_cli.tui.helpers import is_tool_blocked_in_safe_mode
 
 
 class TestIsToolBlockedInSafeMode:
