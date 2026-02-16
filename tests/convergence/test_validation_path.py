@@ -99,7 +99,7 @@ class TestNoConflictingValidation:
         # Consistent results
         assert cli_valid == tui_valid
         if cli_error and tui_error:
-            assert type(cli_error) == type(tui_error)
+            assert type(cli_error) is type(tui_error)
 
     def test_no_path_dependent_validation_rules(self):
         """Validation rules don't depend on code path taken."""
@@ -150,7 +150,6 @@ class TestUserVisibleErrors:
             from ayder_cli.application.validation import (
                 ValidationAuthority,
                 ToolRequest,
-                ValidationError,
             )
         except ImportError:
             pytest.skip("Validation authority not yet implemented")
@@ -174,13 +173,12 @@ class TestUserVisibleErrors:
             from ayder_cli.application.validation import (
                 ValidationAuthority,
                 ToolRequest,
-                ValidationError,
             )
         except ImportError:
             pytest.skip("Validation authority not yet implemented")
 
         authority = ValidationAuthority()
-        
+
         request = ToolRequest(name="write_file", arguments={})  # Missing content
         
         valid, error = authority.validate(request)
@@ -196,13 +194,12 @@ class TestUserVisibleErrors:
             from ayder_cli.application.validation import (
                 ValidationAuthority,
                 ToolRequest,
-                ValidationError,
             )
         except ImportError:
             pytest.skip("Validation authority not yet implemented")
 
         authority = ValidationAuthority()
-        
+
         request = ToolRequest(name="invalid", arguments={})
         
         valid, error = authority.validate(request)
@@ -228,7 +225,7 @@ class TestValidationCentralization:
         auth2 = ValidationAuthority()
         
         # Same authority (or equivalent)
-        assert type(auth1) == type(auth2)
+        assert type(auth1) is type(auth2)
 
     def test_validation_not_bypassed(self):
         """No code path bypasses centralized validation."""
@@ -248,7 +245,6 @@ class TestValidationCentralization:
         """Old bypass paths are removed or delegate to authority."""
         try:
             from ayder_cli.tui.chat_loop import TuiChatLoop
-            from ayder_cli.services.tools.executor import ToolExecutor
         except ImportError:
             pytest.skip("Implementation not yet available")
 

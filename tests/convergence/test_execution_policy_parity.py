@@ -7,7 +7,6 @@ These tests define expected behavior BEFORE DEV implements shared execution.
 
 import asyncio
 import pytest
-from unittest.mock import Mock
 
 
 def _run_async(coro):
@@ -42,7 +41,6 @@ class TestPermissionDeniedParity:
         try:
             from ayder_cli.application.execution_policy import (
                 ExecutionPolicy,
-                PermissionDeniedError,
             )
         except ImportError:
             pytest.skip("Execution policy not yet implemented")
@@ -73,7 +71,7 @@ class TestPermissionDeniedParity:
         cli_result = policy.check_permission("write_file", context=cli_context)
         tui_result = policy.check_permission("write_file", context=tui_context)
         
-        assert type(cli_result) == type(tui_result)
+        assert type(cli_result) is type(tui_result)
         assert str(cli_result) == str(tui_result)
 
 
@@ -103,14 +101,11 @@ class TestConfirmationBehaviorParity:
         """Confirmation produces same outcomes in both interfaces."""
         try:
             from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
                 ConfirmationResult,
             )
         except ImportError:
             pytest.skip("Execution policy not yet implemented")
 
-        policy = ExecutionPolicy(granted_permissions={"r"})
-        
         # Approved: tool executes
         assert ConfirmationResult.APPROVED.executes_tool is True
         
@@ -153,14 +148,11 @@ class TestErrorPropagationParity:
         """Tool execution errors have same format in both interfaces."""
         try:
             from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
                 ToolExecutionError,
             )
         except ImportError:
             pytest.skip("Execution policy not yet implemented")
 
-        policy = ExecutionPolicy()
-        
         error = ToolExecutionError(
             tool_name="read_file",
             message="File not found: /missing.txt",
@@ -181,14 +173,11 @@ class TestErrorPropagationParity:
         """Validation errors have same format in both interfaces."""
         try:
             from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
                 ValidationError,
             )
         except ImportError:
             pytest.skip("Execution policy not yet implemented")
 
-        policy = ExecutionPolicy()
-        
         error = ValidationError(
             tool_name="write_file",
             field="content",
@@ -261,7 +250,7 @@ class TestExecutionPolicyContract:
         result2 = policy.execute(request)
         
         # Deterministic for same input
-        assert type(result1) == type(result2)
+        assert type(result1) is type(result2)
 
     def test_no_interface_specific_execution_paths(self):
         """No execution code branches on interface type."""
@@ -308,15 +297,12 @@ class TestConvergenceScenarios:
         try:
             from ayder_cli.application.execution_policy import (
                 ExecutionPolicy,
-                ToolRequest,
-                RuntimeContext,
             )
         except ImportError:
             pytest.skip("Execution policy not yet implemented")
 
         policy = ExecutionPolicy(granted_permissions={"r"})
-        request = ToolRequest(name="write_file", arguments={"file_path": "/test.txt", "content": "x"})
-        
+
         cli_req = policy.get_confirmation_requirement("write_file")
         tui_req = policy.get_confirmation_requirement("write_file")
         
@@ -344,4 +330,4 @@ class TestConvergenceScenarios:
         # Same error outcome
         assert cli_result.success is False
         assert tui_result.success is False
-        assert type(cli_result.error) == type(tui_result.error)
+        assert type(cli_result.error) is type(tui_result.error)

@@ -7,7 +7,6 @@ These tests define expected behavior BEFORE DEV implements shared service.
 
 import asyncio
 import pytest
-from unittest.mock import Mock, AsyncMock
 
 
 def _run_async(coro):
@@ -22,7 +21,6 @@ class TestCheckpointTriggerParity:
         """Both CLI and TUI trigger checkpoint at same iteration count."""
         try:
             from ayder_cli.application.checkpoint_orchestrator import (
-                CheckpointOrchestrator,
                 CheckpointTrigger,
             )
         except ImportError:
@@ -259,7 +257,6 @@ class TestCheckpointStateTransitionParity:
         try:
             from ayder_cli.application.checkpoint_orchestrator import (
                 CheckpointOrchestrator,
-                RuntimeContext,
             )
         except ImportError:
             pytest.skip("Checkpoint orchestrator not yet implemented")

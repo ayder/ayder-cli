@@ -31,7 +31,7 @@ The existing test suite primarily tests at the unit/integration level and does n
 
 ### QA-05.2: Checkpoint Parity Tests ✅
 
-**File:** `tests/convergence/test_checkpoint_parity.py` (24 tests)
+**File:** `tests/convergence/test_checkpoint_parity.py` (14 tests)
 
 | Test Class | Tests | Contract Verified |
 |------------|-------|-------------------|
@@ -39,7 +39,7 @@ The existing test suite primarily tests at the unit/integration level and does n
 | `TestCheckpointResetParity` | 3 | Reset clears iteration, preserves system message, equivalent behavior |
 | `TestCheckpointRestoreParity` | 3 | Loads saved state, increments cycle, equivalent behavior |
 | `TestCheckpointStateTransitionParity` | 2 | Deterministic transitions, no interface-specific logic |
-| `TestCheckpointOrchestrationContract` | 4 | Shared service, accepts context, summary parity |
+| `TestCheckpointOrchestrationContract` | 3 | Shared service, accepts context, summary parity |
 
 **Canonical Location:** `src/ayder_cli/application/checkpoint_orchestrator.py`
 
@@ -53,14 +53,14 @@ The existing test suite primarily tests at the unit/integration level and does n
 
 ### QA-05.3: Execution Policy Parity Tests ✅
 
-**File:** `tests/convergence/test_execution_policy_parity.py` (22 tests)
+**File:** `tests/convergence/test_execution_policy_parity.py` (15 tests)
 
 | Test Class | Tests | Contract Verified |
 |------------|-------|-------------------|
 | `TestPermissionDeniedParity` | 3 | Same error format, includes remediation, same check logic |
 | `TestConfirmationBehaviorParity` | 3 | Same conditions, same outcomes, file diff behavior |
 | `TestErrorPropagationParity` | 3 | Tool errors, validation errors, LLM message format |
-| `TestExecutionPolicyContract` | 4 | Shared service, consistent execution, no interface branching |
+| `TestExecutionPolicyContract` | 3 | Shared service, consistent execution, no interface branching |
 | `TestConvergenceScenarios` | 3 | Read-only auto-approve, write confirmation, denied errors |
 
 **Canonical Location:** `src/ayder_cli/application/execution_policy.py`
@@ -75,7 +75,7 @@ The existing test suite primarily tests at the unit/integration level and does n
 
 ### QA-05.4: Validation Path Tests ✅
 
-**File:** `tests/convergence/test_validation_path.py` (21 tests)
+**File:** `tests/convergence/test_validation_path.py` (15 tests)
 
 | Test Class | Tests | Contract Verified |
 |------------|-------|-------------------|
@@ -108,10 +108,10 @@ The existing test suite primarily tests at the unit/integration level and does n
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Checkpoint Parity Tests | 15 | ✅ Written (will skip until DEV implements) |
-| Execution Policy Tests | 18 | ✅ Written (will skip until DEV implements) |
+| Checkpoint Parity Tests | 14 | ✅ Written (will skip until DEV implements) |
+| Execution Policy Tests | 15 | ✅ Written (will skip until DEV implements) |
 | Validation Path Tests | 15 | ✅ Written (will skip until DEV implements) |
-| **Total New Tests** | **48** | ✅ All authored BEFORE DEV |
+| **Total New Tests** | **44** | ✅ All authored BEFORE DEV |
 
 ---
 
@@ -119,7 +119,7 @@ The existing test suite primarily tests at the unit/integration level and does n
 
 **✅ TEST-FIRST ORDER CONFIRMED**
 
-- All 48 convergence tests authored BEFORE DEV implementation
+- All 44 convergence tests authored BEFORE DEV implementation
 - Tests use `pytest.skip()` pattern for missing imports
 - Tests define expected behavior for shared services
 - DEV will implement against these contracts
@@ -131,8 +131,8 @@ The existing test suite primarily tests at the unit/integration level and does n
 ```
 tests/convergence/
 ├── __init__.py                              # Package init
-├── test_checkpoint_parity.py                # QA-05.2 (15 tests)
-├── test_execution_policy_parity.py          # QA-05.3 (18 tests)
+├── test_checkpoint_parity.py                # QA-05.2 (14 tests)
+├── test_execution_policy_parity.py          # QA-05.3 (15 tests)
 └── test_validation_path.py                  # QA-05.4 (15 tests)
 ```
 
@@ -197,12 +197,24 @@ uv run poe test-all
 
 ---
 
+## Rework Completed (Addressing Architect Review)
+
+| Item | Issue | Fix |
+|------|-------|-----|
+| S2 | 20 Ruff violations in tests/convergence/* | Fixed all F401, E721, F841 violations |
+| S2 | Branch not pushed | Ready for push |
+| S2 | Report count mismatch (48 vs 44) | Corrected to 44 tests (14+15+15) |
+| S3 | Brittle source-string assertions | Kept minimal; mostly behavior assertions |
+
+---
+
 ## Next Steps
 
-1. **Architect Review:** Await Step D gate review
-2. **DEV Assignment:** After Architect PASS, PM assigns DEV implementation
-3. **DEV implements:** Shared checkpoint/execution/validation services
-4. **Tests pass:** Skip markers removed as DEV implements
+1. **Push Branch:** Push `qa/05/checkpoint-execution-tests` to origin
+2. **Architect Review:** Await Step D gate review
+3. **DEV Assignment:** After Architect PASS, PM assigns DEV implementation
+4. **DEV implements:** Shared checkpoint/execution/validation services
+5. **Tests pass:** Skip markers removed as DEV implements
 
 ---
 
