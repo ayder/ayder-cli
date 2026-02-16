@@ -59,15 +59,35 @@ class ValidationStage(Enum):
 # Built-in validators
 # ---------------------------------------------------------------------------
 
-# Known tools and their required arguments
+# Known tools and their required arguments.
+# All real registry tools are listed here so SchemaValidator is permissive for
+# valid tool names. Only tool names absent from this set are treated as unknown.
 _KNOWN_TOOLS: dict[str, list[str]] = {
+    "list_files": [],
     "read_file": ["file_path"],
     "write_file": ["file_path", "content"],
-    "edit_file": ["file_path"],
-    "delete_file": ["file_path"],
-    "list_directory": [],
+    "replace_string": ["file_path"],
+    "insert_line": ["file_path"],
+    "delete_line": ["file_path"],
+    "get_file_info": ["file_path"],
+    "save_memory": [],
+    "load_memory": [],
+    "create_note": [],
+    "run_background_process": ["command"],
+    "get_background_output": [],
+    "kill_background_process": [],
+    "list_background_processes": [],
+    "search_codebase": ["query"],
+    "get_project_structure": [],
     "run_shell_command": ["command"],
-    "search": ["query"],
+    "list_tasks": [],
+    "show_task": [],
+    "manage_environment_vars": [],
+    "create_virtualenv": [],
+    "install_requirements": [],
+    "list_virtualenvs": [],
+    "activate_virtualenv": [],
+    "remove_virtualenv": [],
 }
 
 

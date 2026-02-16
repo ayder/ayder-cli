@@ -9,6 +9,8 @@ This module separates the concerns of:
 
 from dataclasses import dataclass, field
 from typing import Optional, Callable
+
+from ayder_cli.application.checkpoint_orchestrator import CheckpointOrchestrator, EngineState
 from ayder_cli.checkpoint_manager import CheckpointManager
 from ayder_cli.memory import MemoryManager
 from ayder_cli.parser import parse_custom_tool_calls
@@ -212,19 +214,26 @@ class ChatLoop:
             # Otherwise, continue loop (non-terminal tools were executed)
 
     def _handle_checkpoint(self) -> bool:
-        """Handle iteration limit checkpoint.
+        """Handle iteration limit checkpoint via shared CheckpointOrchestrator.
 
         Returns:
             True if checkpoint handled and loop should continue, False otherwise
         """
+        orchestrator = CheckpointOrchestrator()
+
         # Try to restore from existing memory first
         if self.mm:
             if self.cm and self.cm.has_saved_checkpoint():
                 self.mm.restore_from_checkpoint(self.session)
+                state = EngineState(
+                    iteration=self.iteration_ctrl.iteration,
+                    messages=list(self.session.get_messages()),
+                )
+                orchestrator.reset_state(state)
                 self.iteration_ctrl.reset()
                 return True
 
-            # No existing memory - try to create a checkpoint
+            # No existing memory — create a checkpoint then reset via orchestrator
             if self.mm.create_checkpoint(
                 self.session,
                 self.config.model,
@@ -232,6 +241,11 @@ class ChatLoop:
                 self.config.permissions,
                 self.config.verbose,
             ):
+                state = EngineState(
+                    iteration=self.iteration_ctrl.iteration,
+                    messages=list(self.session.get_messages()),
+                )
+                orchestrator.reset_state(state)
                 self.iteration_ctrl.reset()
                 return True
 
