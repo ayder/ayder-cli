@@ -57,6 +57,30 @@ class CLIConfirmationPolicy:
         return confirm_with_diff(file_path, new_content, description)
 
 
+async def run_async(
+    messages: list,
+    llm_provider: Any,
+    tool_registry: Any,
+    config: Any,
+    callbacks: Any = None,
+    checkpoint_manager: Any = None,
+    memory_manager: Any = None,
+    user_input: str | None = None,
+) -> str | None:
+    """Async entry point for CLI: runs the shared AgentEngine."""
+    from ayder_cli.application.agent_engine import AgentEngine
+
+    engine = AgentEngine(
+        llm_provider=llm_provider,
+        tool_registry=tool_registry,
+        config=config,
+        callbacks=callbacks,
+        checkpoint_manager=checkpoint_manager,
+        memory_manager=memory_manager,
+    )
+    return await engine.run(messages, user_input=user_input)
+
+
 # Type guard — verify adapters satisfy protocols at import time
 def _check() -> None:
     assert isinstance(CLIInteractionSink(), InteractionSink)

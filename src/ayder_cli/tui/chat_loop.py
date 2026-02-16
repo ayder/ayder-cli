@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ayder_cli.application.agent_engine import AgentEngine, EngineConfig  # noqa: F401
 from ayder_cli.client import call_llm_async
 from ayder_cli.parser import parse_custom_tool_calls
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
