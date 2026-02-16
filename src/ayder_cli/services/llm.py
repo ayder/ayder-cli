@@ -48,11 +48,18 @@ class LLMProvider(ABC):
 class OpenAIProvider(LLMProvider):
     """OpenAI/Ollama implementation of LLMProvider."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, client: Any | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        client: Any | None = None,
+        interaction_sink: Any | None = None,
+    ):
         if client:
             self.client = client
         else:
             self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.interaction_sink = interaction_sink
 
     def chat(
         self,
@@ -62,8 +69,8 @@ class OpenAIProvider(LLMProvider):
         options: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
     ) -> Any:
-        if verbose:
-            self._print_llm_request(messages, model, tools, options)
+        if verbose and self.interaction_sink is not None:
+            self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         kwargs = {
             "model": model,
@@ -87,18 +94,6 @@ class OpenAIProvider(LLMProvider):
         except Exception as e:
             logger.error(f"Failed to list models from LLM provider: {e}")
             return []
-
-    def _print_llm_request(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
-    ) -> None:
-        """Print formatted LLM request details when verbose mode is active."""
-        from ayder_cli.ui import print_llm_request_debug
-
-        print_llm_request_debug(messages, model, tools, options)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +159,7 @@ class AnthropicProvider(LLMProvider):
         self,
         api_key: str | None = None,
         client: Any | None = None,
+        interaction_sink: Any | None = None,
     ):
         if client:
             self.client = client
@@ -171,6 +167,7 @@ class AnthropicProvider(LLMProvider):
             from anthropic import Anthropic
 
             self.client = Anthropic(api_key=api_key)
+        self.interaction_sink = interaction_sink
 
     # -- public interface ---------------------------------------------------
 
@@ -182,8 +179,8 @@ class AnthropicProvider(LLMProvider):
         options: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
     ) -> Any:
-        if verbose:
-            self._print_llm_request(messages, model, tools, options)
+        if verbose and self.interaction_sink is not None:
+            self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         system, converted = self._convert_messages(messages)
         max_tokens = (options or {}).get("num_ctx", 8192)
@@ -351,17 +348,6 @@ class AnthropicProvider(LLMProvider):
             usage=_Usage(total_tokens=usage_input + usage_output),
         )
 
-    def _print_llm_request(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
-    ) -> None:
-        from ayder_cli.ui import print_llm_request_debug
-
-        print_llm_request_debug(messages, model, tools, options)
-
 
 # ---------------------------------------------------------------------------
 # Gemini provider
@@ -371,13 +357,19 @@ class AnthropicProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     """Google Gemini provider via google-genai package."""
 
-    def __init__(self, api_key: str | None = None, client: Any | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        client: Any | None = None,
+        interaction_sink: Any | None = None,
+    ):
         if client:
             self.client = client
         else:
             from google import genai
 
             self.client = genai.Client(api_key=api_key)
+        self.interaction_sink = interaction_sink
 
     def chat(
         self,
@@ -387,8 +379,8 @@ class GeminiProvider(LLMProvider):
         options: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
     ) -> Any:
-        if verbose:
-            self._print_llm_request(messages, model, tools, options)
+        if verbose and self.interaction_sink is not None:
+            self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         from google.genai import types
 
@@ -435,17 +427,6 @@ class GeminiProvider(LLMProvider):
         except Exception as e:
             logger.error(f"Failed to list models from Gemini API: {e}")
             return ["gemini-3-deep-think", "gemini-3-pro", "gemini-3-flash"]
-
-    def _print_llm_request(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
-    ) -> None:
-        from ayder_cli.ui import print_llm_request_debug
-
-        print_llm_request_debug(messages, model, tools, options)
 
     # -- message translation ------------------------------------------------
 

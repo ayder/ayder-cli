@@ -6,18 +6,13 @@ from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.tools import prepare_new_content
 from ayder_cli.core.result import ToolSuccess
-from ayder_cli.ui import (
-    confirm_tool_call,
-    describe_tool_action,
-    print_tool_result,
-    print_file_content,
-    print_tool_call,
-    confirm_with_diff,
-    print_tool_skipped,
-)
+from ayder_cli.services.interactions import InteractionSink, ConfirmationPolicy
 
 # Tools that end the agentic loop after execution (generated from ToolDefinitions)
 TERMINAL_TOOLS = frozenset(td.name for td in TOOL_DEFINITIONS if td.is_terminal)
+
+# File-modifying tools that use diff confirmation
+_DIFF_TOOLS = frozenset({"write_file", "replace_string", "insert_line", "delete_line"})
 
 
 class ToolExecutor:
@@ -26,7 +21,13 @@ class ToolExecutor:
     and interaction with the ToolRegistry.
     """
 
-    def __init__(self, tool_registry: ToolRegistry, terminal_tools: Set[str] | None = None):
+    def __init__(
+        self,
+        tool_registry: ToolRegistry,
+        terminal_tools: Set[str] | None = None,
+        interaction_sink: InteractionSink | None = None,
+        confirmation_policy: ConfirmationPolicy | None = None,
+    ):
         """
         Initialize the ToolExecutor.
 
@@ -34,11 +35,15 @@ class ToolExecutor:
             tool_registry: Registry to execute tools.
             terminal_tools: Set of tool names that should terminate the agent loop.
                             Defaults to TERMINAL_TOOLS if None.
+            interaction_sink: Optional sink for tool event notifications.
+            confirmation_policy: Optional policy for user confirmation flows.
         """
         self.tool_registry = tool_registry
         self.terminal_tools = (
             terminal_tools if terminal_tools is not None else TERMINAL_TOOLS
         )
+        self.interaction_sink = interaction_sink
+        self.confirmation_policy = confirmation_policy
 
     def execute_tool_calls(
         self,
@@ -50,12 +55,6 @@ class ToolExecutor:
         """
         Execute a list of OpenAI tool calls.
 
-        Args:
-            tool_calls: List of tool call objects from OpenAI response.
-            session: ChatSession object to append messages to.
-            granted_permissions: Set of granted permission categories.
-            verbose: Whether to print verbose output.
-
         Returns:
             True if a terminal tool was hit, False otherwise.
         """
@@ -65,12 +64,10 @@ class ToolExecutor:
         for tc in tool_calls:
             result_msg = self._handle_tool_call(tc, granted_permissions, verbose)
             if result_msg is None:
-                # Tool was declined
                 return True
 
             session.append_raw(result_msg)
 
-            # Check if terminal tool
             if tc.function.name in self.terminal_tools:
                 return True
 
@@ -85,12 +82,6 @@ class ToolExecutor:
     ) -> bool:
         """
         Execute a list of custom parsed tool calls (XML).
-
-        Args:
-            custom_calls: List of custom parsed tool calls.
-            session: ChatSession object to append messages to.
-            granted_permissions: Set of granted permission categories.
-            verbose: Whether to print verbose output.
 
         Returns:
             True if a terminal tool was hit, False otherwise.
@@ -113,7 +104,6 @@ class ToolExecutor:
                 return True
             if outcome == "declined":
                 return True
-            # success
             session.add_message("user", f"Tool '{fname}' execution result: {value}")
             if fname in self.terminal_tools:
                 return True
@@ -145,11 +135,10 @@ class ToolExecutor:
         if not is_valid:
             return ("error", error_msg)
 
-        # Print the tool call before confirmation
+        # Notify sink of tool call
         args_json = json.dumps(normalized, indent=2)
-        print_tool_call(tool_name, args_json)
-
-        description = describe_tool_action(tool_name, normalized)
+        if self.interaction_sink is not None:
+            self.interaction_sink.on_tool_call(tool_name, args_json)
 
         # Check if tool is auto-approved by permission flags
         tool_perm = TOOL_PERMISSIONS.get(tool_name, "x")
@@ -157,29 +146,40 @@ class ToolExecutor:
 
         if auto_approved:
             confirmed = True
-        elif tool_name in (
-            "write_file",
-            "replace_string",
-            "insert_line",
-            "delete_line",
-        ):
-            file_path = normalized.get("file_path", "")
-            new_content = prepare_new_content(
-                tool_name, normalized, self.tool_registry.project_ctx
-            )
-            confirmed = confirm_with_diff(file_path, new_content, description)
+        elif self.confirmation_policy is not None:
+            description = f"{tool_name}"
+            # Primary gate: all tools require confirm_action
+            confirmed = self.confirmation_policy.confirm_action(description)
+            # Secondary gate for file-modifying tools: show diff
+            if confirmed and tool_name in _DIFF_TOOLS:
+                file_path = normalized.get("file_path", "")
+                project_ctx = getattr(self.tool_registry, "project_ctx", None)
+                new_content = (
+                    prepare_new_content(tool_name, normalized, project_ctx)
+                    if project_ctx is not None
+                    else normalized.get("content", "")
+                )
+                confirmed = self.confirmation_policy.confirm_file_diff(
+                    file_path, new_content, description
+                )
         else:
-            confirmed = confirm_tool_call(description)
+            # No policy injected: auto-approve (caller must wire in policy for confirmation)
+            confirmed = True
 
         if not confirmed:
-            print_tool_skipped()
+            if self.interaction_sink is not None:
+                self.interaction_sink.on_tool_skipped()
             return ("declined", None)
 
         result = self.tool_registry.execute(tool_name, normalized)
-        print_tool_result(result)
+
+        if self.interaction_sink is not None:
+            self.interaction_sink.on_tool_result(str(result))
 
         if verbose and tool_name == "write_file" and isinstance(result, ToolSuccess):
-            print_file_content(normalized.get("file_path", ""))
+            file_path = normalized.get("file_path", "")
+            if self.interaction_sink is not None:
+                self.interaction_sink.on_file_preview(file_path)
 
         return ("success", str(result))
 
@@ -187,7 +187,7 @@ class ToolExecutor:
         self, tool_call: Any, granted_permissions: Set[str], verbose: bool
     ) -> Optional[Dict[str, Any]]:
         """
-        Handle a single OpenAI-format tool call. Thin wrapper around _execute_single_call.
+        Handle a single OpenAI-format tool call.
 
         Returns:
             Result message dict for the conversation, or None if declined.
@@ -202,7 +202,6 @@ class ToolExecutor:
 
         if outcome == "declined":
             return None
-        # Both "success" and "error" return a tool message
         return {
             "role": "tool",
             "tool_call_id": tool_call.id,
