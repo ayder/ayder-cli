@@ -107,8 +107,8 @@ uv run poe test        # PASS (798 passed, 5 skipped) ✅
 | 03-A | Architect Kickoff | Architect | ✅ **COMPLETE** |
 | 03-B | Create test definitions | Tester | ✅ **COMPLETE** |
 | 03-BR | Review test coverage | Architect | ✅ **COMPLETE** — REVISIONS_REQUIRED |
-| 03-BR2 | **Rework test issues** | **Tester** | 🔄 **IN REWORK** |
-| 03-BR3 | Re-review after fixes | Architect | ⏳ **Waiting for tester** |
+| 03-BR2 | Rework test issues | Tester | ✅ **COMPLETE** |
+| **03-BR3** | **Re-review after fixes** | **Architect** | 🔍 **IN REVIEW** |
 | 03-C | Implement to pass tests | Developer | 🔒 **Blocked** |
 | 03-D | Architect Gate | Architect | 🔒 Locked |
 
@@ -116,25 +116,34 @@ uv run poe test        # PASS (798 passed, 5 skipped) ✅
 
 ## Phase 03 Rework Tracking
 
-### Current Rework: Test Suite Corrections (Step BR2)
+### Completed Rework: Test Suite Corrections (Step BR2) ✅
 
-**Status:** Tester fixing issues identified in architect review  
-**Blocker:** Step C (Developer implementation) on hold until resolved
+**Status:** Tester completed all 4 fixes identified in architect review  
+**Next:** Architect re-review (Step BR3)
 
-#### Issues from Architect Review
+#### Issues Fixed (Per Tester Report)
 
-| # | Issue | Severity | Fix Required |
-|---|-------|----------|--------------|
-| 1 | Test baseline mismatch (42f/28p/5s → 39f/35p/1s) | Critical | Update report counts |
-| 2 | Private method patching `_get_tool_permission` | Critical | Use public behavior tests |
-| 3 | Protocol location guidance conflict | Medium | Change to `services/interactions.py` |
-| 4 | Adapter placement lacks enforcement | Medium | Add assertions outside `services/` |
+| # | Issue | Status | Fix Applied |
+|---|-------|--------|-------------|
+| 1 | Test baseline mismatch (42f/28p/5s) | ✅ Fixed | Verified: **39 failed, 37 passed, 3 skipped** |
+| 2 | Private method patching `_get_tool_permission` | ✅ Fixed | Replaced with public behavior tests |
+| 3 | Protocol location guidance | ✅ Fixed | Changed to `services/interactions.py` |
+| 4 | Adapter placement enforcement | ✅ Fixed | Added assertions outside `services/` |
 
-#### Rework Assignment
-- **Document:** `.ayder/PM_to_tester_phase03_rework.md`
-- **Target:** Complete within 24 hours
-- **Re-review:** Quick architect validation after fixes
+#### Rework Completion
+- **Tester Report:** `.ayder/tester_to_PM_phase03_rework.md`
+- **Completion Date:** 2026-02-16
+- **Verification:** All lint checks pass, counts verified
+- **Changes:** 
+  - `tests/services/test_executor_integration.py` — Removed private patching
+  - `tests/application/test_service_ui_decoupling.py` — Added adapter placement tests
+  - `.ayder/tester_to_PM_phase03.md` — Updated counts and protocol location
+
+#### Re-Review Request
+- **Document:** `.ayder/PM_to_architect_phase03_rereview.md`
+- **Status:** 🔍 Awaiting architect re-review
+- **Expected:** Quick approval if fixes satisfactory
 
 ---
 
-*Phase 03 of ayder-cli refactor program — **IN REWORK** — Test-first development in progress*
+*Phase 03 of ayder-cli refactor program — **REWORK COMPLETE** — Awaiting architect re-review*
