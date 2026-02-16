@@ -2,7 +2,7 @@
 
 **Program:** ayder-cli Refactor  
 **Current Phase:** 02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT  
-**Status:** REWORK_REQUIRED  
+**Status:** REWORK_IN_PROGRESS — Awaiting Developer Item 3  
 **Last Updated:** 2026-02-16
 
 ---
@@ -14,149 +14,127 @@
 | PHASE_ID | `02_PHASE_RUNTIME_FACTORY_AND_MESSAGE_CONTRACT` |
 | PROJECT_BRANCH | `main` |
 | ARCH_GATE_BRANCH | `arch/02/runtime-factory-gate` |
-| Gate Decision | **REWORK_REQUIRED** |
+| Gate Decision | **REWORK_REQUIRED** → In Progress |
 
 ---
 
-## Workflow Status: REWORK_REQUIRED
+## Rework Status Overview
 
-Per Architect Gate Report (`.ayder/architect_to_PM_phase_02_GATE.md`):
+| Item | Owner | Status | MR | Tests |
+|------|-------|--------|-----|-------|
+| 1 — Fix test paths | Tester | ✅ **COMPLETE** | `qa/02/factory-contract-tests-rework` → gate | 13 factory tests PASS |
+| 2 — Relax assertion | Tester | ✅ **COMPLETE** | Same MR | 31 contract tests PASS |
+| 3 — Fix `get_message_tool_calls()` | Developer | ⏳ **PENDING** | Awaiting report | Awaiting fix |
 
-### Gate Outcome
-- **Decision:** **REWORK_REQUIRED** (S2 severity)
-- **Blocker:** Test suite failures
-- **Merge to main:** BLOCKED
+---
 
-### Gate Command Results
+## Tester Rework Complete (Items 1-2)
+
+**Tester Report:** `.ayder/tester_to_PM_phase02_rework.md`
+
+### Fixes Applied
+
+| Item | File | Change |
+|------|------|--------|
+| Item 1 | `test_runtime_factory.py` | Fixed Path comparison, factory patch target |
+| Item 2 | `test_message_contract.py` | `is` → `==` assertion |
+
+### Verification Results
+
 ```bash
-uv run poe lint      # PASS
-uv run poe typecheck # PASS
-uv run poe test      # FAIL
+# Acceptance Tests (44 total)
+tests/application/test_runtime_factory.py      # 13 PASS ✅
+tests/application/test_message_contract.py     # 31 PASS ✅
+
+# Gate Commands
+uv run poe lint        # PASS ✅
+uv run poe typecheck   # PASS ✅
+uv run poe test        # 798 PASS, 5 SKIP (Item 3 pending) ⚠️
 ```
 
-Failure breakdown:
-- Developer unit tests: PASS (21 tests)
-- Tester acceptance tests: FAIL (5 failed, 39 passed)
-
-### Rework Items (3 S2 Issues)
-
-| Item | Owner | Description | Status |
-|------|-------|-------------|--------|
-| 1 | Tester | Fix test path and patch assumptions | 📋 Ready |
-| 2 | Tester | Relax `to_message_dict` dict passthrough assertion | 📋 Ready |
-| 3 | Developer | Harden `get_message_tool_calls()` to always return list | 📋 Ready |
+### Notes
+- Tester rework does NOT modify Developer implementation files
+- Full test suite pass (862 total) requires Developer's Item 3 fix
 
 ---
 
-## Rework Workflow
+## Developer Rework Pending (Item 3)
+
+**Status:** ⏳ Awaiting Developer report
+
+**Required:**
+- Fix `get_message_tool_calls()` in `message_contract.py` to ALWAYS return list
+- Handle dict with `tool_calls: None` → return `[]`
+- Handle object without `tool_calls` attr → return `[]`
+- Branch: `dev/02/runtime-factory-rework` → `arch/02/runtime-factory-gate`
+
+**Expected Report:** `.ayder/developer_to_PM_phase02_rework.md`
+
+---
+
+## Workflow Status
+
+### Rework Sequence
+
+```
+✅ QA Items 1-2 ────────────────────────────┐
+                                           ├──→ Both MRs merged → Re-run Step D
+⏳ DEV Item 3 (awaiting report) ────────────┘
+```
 
 ### Current State
 
-| Step | Previous Status | Current Action |
-|------|-----------------|----------------|
-| A | ✅ Complete | — |
-| B | ✅ Complete | **REWORK** in progress |
-| C | ✅ Complete | **REWORK** in progress |
-| D | ❌ REWORK_REQUIRED | Await rework completion |
-
-### Rework Branches
-
-| Role | Rework Branch | Target |
-|------|---------------|--------|
-| Developer | `dev/02/runtime-factory-rework` | `arch/02/runtime-factory-gate` |
-| Tester | `qa/02/factory-contract-tests-rework` | `arch/02/runtime-factory-gate` |
-
-### Sequence
-
-1. **Developer** implements Item 3 in `dev/02/runtime-factory-rework`
-2. **Tester** implements Items 1-2 in `qa/02/factory-contract-tests-rework`
-3. **Both** open MRs to `arch/02/runtime-factory-gate`
-4. **Architect** reviews and merges both MRs
-5. **Architect** re-runs gate commands
-6. **Architect** issues new decision (PASS or REWORK_REQUIRED)
+| Step | Status |
+|------|--------|
+| A | ✅ Complete |
+| B | ✅ Complete → 🔄 Rework: QA DONE, DEV PENDING |
+| C | ✅ Complete → 🔄 Rework: QA DONE, DEV PENDING |
+| D | ⏸️ Paused — Awaiting Item 3 completion |
 
 ---
 
-## Rework Tasks
+## Next Actions
 
-### Developer Rework (Item 3)
+### Immediate
 
-**Task Doc:** `docs/PROJECT/developer/02_PHASE_REWORK.md`
+1. ⏳ **AWAIT:** Developer report (`.ayder/developer_to_PM_phase02_rework.md`)
+2. 🔄 **REVIEW:** Developer Item 3 fix when ready
+3. ✅ **MERGE:** Both MRs to `arch/02/runtime-factory-gate`
+4. 🏁 **RE-RUN:** Architect Step D gate
 
-**Summary:**
-Fix `get_message_tool_calls()` in `message_contract.py` to ALWAYS return a list.
+### After Developer Report
 
-```python
-def get_message_tool_calls(message: dict | object) -> list:
-    if isinstance(message, dict):
-        tool_calls = message.get("tool_calls")
-        return tool_calls if tool_calls is not None else []
-    return getattr(message, "tool_calls", [])
-```
-
-### Tester Rework (Items 1-2)
-
-**Task Doc:** `docs/PROJECT/tester/02_PHASE_REWORK.md`
-
-**Summary:**
-1. Fix import paths and patch targets in acceptance tests
-2. Change `test_to_message_dict_from_dict` from `is` to `==` assertion
+- Verify Developer branch: `dev/02/runtime-factory-rework`
+- Verify `get_message_tool_calls()` always returns list
+- Merge Developer MR to gate
+- Request Architect re-review
 
 ---
 
-## Deliverables Tracking
+## Success Criteria for Full Rework
 
-### Original Deliverables (from Steps B and C)
-
-| Deliverable | Status | Notes |
-|-------------|--------|-------|
-| Runtime Factory | ✅ Implemented | Needs no changes |
-| Message Contract | ✅ Implemented | Needs Item 3 fix |
-| CLI/TUI Wiring | ✅ Implemented | Needs no changes |
-| Dev Unit Tests | ✅ Passing | Needs no changes |
-| Tester Acceptance Tests | ❌ Failing | Needs Items 1-2 fixes |
-
-### Rework Deliverables
-
-| Deliverable | Owner | Branch |
-|-------------|-------|--------|
-| `get_message_tool_calls()` fix | Developer | `dev/02/runtime-factory-rework` |
-| Test path fixes | Tester | `qa/02/factory-contract-tests-rework` |
-| Assertion relaxation | Tester | `qa/02/factory-contract-tests-rework` |
-
----
-
-## Success Criteria for Rework
-
-- [ ] Developer MR merged: `dev/02/runtime-factory-rework` → `arch/02/runtime-factory-gate`
-- [ ] Tester MR merged: `qa/02/factory-contract-tests-rework` → `arch/02/runtime-factory-gate`
+- [x] QA MR merged: `qa/02/factory-contract-tests-rework` → gate
+- [ ] DEV MR merged: `dev/02/runtime-factory-rework` → gate
 - [ ] `uv run poe test` passes completely (862 tests)
 - [ ] Architect re-review completed
 - [ ] New decision: PASS
 
 ---
 
-## Next Actions for PM
+## Process Notes
 
-1. ✅ **ISSUED:** Rework tasks to Developer and Tester
-2. 🔄 **MONITOR:** Progress on both rework branches
-3. ⏳ **AWAIT:** Both MRs ready for Architect review
-4. ⏳ **SCHEDULE:** Step D re-run (Architect Gate)
+### Tester Efficiency
+Tester completed Items 1-2 quickly with:
+- Clear path fixes (PosixPath vs str comparison)
+- Clear assertion fix (`is` → `==`)
+- Good coordination notes about Item 3 boundary
 
----
-
-## Process Note
-
-This is the first rework cycle in the program. The issue was identified at gate:
-- Developer unit tests passed in isolation
-- Tester acceptance tests had path/assertion mismatches with actual implementation
-- Contract helper had edge case (non-list return) not caught by dev tests
-
-**Lessons for future phases:**
-- Consider integration test run before gate submission
-- Ensure Tester tests are run against actual Developer implementation
-- Define contract behavior for edge cases (None, missing attrs) more explicitly
+### Awaiting Developer
+Tester is blocked on Developer's Item 3 fix. Once Developer submits:
+- Both MRs can be merged
+- Full test suite should pass
+- Gate can be re-run
 
 ---
 
-*Phase 02 of ayder-cli refactor program — REWORK_REQUIRED — Awaiting Items 1-3 completion*
+*Phase 02 of ayder-cli refactor program — Rework 2/3 complete — Awaiting Developer Item 3*
