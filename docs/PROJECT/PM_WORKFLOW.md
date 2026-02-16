@@ -52,64 +52,91 @@ Per `docs/REFACTOR/PROJECT_MANAGER_PROMPT.md`:
 
 ---
 
-### Step B — Developer Assignment 📋 READY
+### Step B — Developer Assignment ✅ COMPLETE
 
-**Prerequisites Met:**
-- Gate branch exists ✅
-- Architect kickoff complete ✅
-- Phase doc available ✅
+**Developer Report:** `.ayder/developer_to_PM_phase01.md`
 
-**Assignment Delivered:**
-- `docs/PROJECT/developer/01_PHASE.md` — Developer task assignment
+**Deliverables:**
+| Task | Status | Evidence |
+|------|--------|----------|
+| DEV-01.1 Baseline Inventory | ✅ | `docs/PROJECT/developer/01_PHASE/01_DEV_BASELINE_NOTES.md` |
+| DEV-01.2 Refactor Scaffolding | ✅ | `src/ayder_cli/application/` verified |
+| DEV-01.3 Risk Register | ✅ | `docs/PROJECT/developer/01_PHASE/01_DEV_RISK_ASSESSMENT.md` |
 
-**Next Actions:**
-1. Assign Developer Agent with:
-   - `PHASE_ID`: `01_PHASE_BASELINE_AND_GOVERNANCE`
-   - `PHASE_DOC`: `docs/REFACTOR/PHASES/01_PHASE_BASELINE_AND_GOVERNANCE.md`
-   - `PROJECT_BRANCH`: `main`
-   - `ARCH_GATE_BRANCH`: `arch/01/baseline-gate`
-   - `DEV_TASK_SCOPE`: `baseline-inventory`
+**Gate Commands:**
+- `uv run poe lint` ✅ PASS
+- `uv run poe typecheck` ✅ PASS
+- `uv run poe test` ✅ PASS (797 passed, 5 skipped)
 
-**Control Check B (Required before Step C):**
-- [ ] Developer branch exists: `dev/01/baseline-inventory`
-- [ ] Developer confirmed DEV-* tasks in scope
-- [ ] Developer posted implementation plan and expected changed files
+**Control Check B:** ✅ ALL PASS
+- [x] Developer branch exists: `dev/01/baseline-inventory`
+- [x] Developer confirmed DEV-* tasks in scope
+- [x] Developer posted implementation plan and expected changed files
+- [x] No scope drift — documentation and scaffolding only
 
----
-
-### Step C — Tester Assignment 📋 READY
-
-**Prerequisites Met:**
-- Gate branch exists ✅
-- Architect kickoff complete ✅
-- Phase doc available ✅
-
-**Assignment Delivered:**
-- `docs/PROJECT/tester/01_PHASE.md` — Tester task assignment
-
-**Next Actions:**
-1. Assign Tester Agent (parallel to Developer) with:
-   - `PHASE_ID`: `01_PHASE_BASELINE_AND_GOVERNANCE`
-   - `PHASE_DOC`: `docs/REFACTOR/PHASES/01_PHASE_BASELINE_AND_GOVERNANCE.md`
-   - `PROJECT_BRANCH`: `main`
-   - `ARCH_GATE_BRANCH`: `arch/01/baseline-gate`
-   - `QA_TEST_SCOPE`: `test-inventory`
-
-**Control Check C (Required before Step D):**
-- [ ] Tester branch exists: `qa/01/test-inventory`
-- [ ] Tester posted remove→replace test migration mapping
-- [ ] Tester listed acceptance-criteria tests for phase
+**Branch:** `dev/01/baseline-inventory` → `arch/01/baseline-gate`
 
 ---
 
-### Step D — Architect Gate Assignment ⏳ PENDING
+### Step C — Tester Assignment ✅ COMPLETE
 
-**Trigger:** Steps B and C both complete (Control Checks B and C pass)
+**Tester Report:** `.ayder/tester_to_PM_phase01.md`
 
-**Inputs for Step D:**
-- Developer MR list: TBD
-- Tester MR list: TBD
-- Phase acceptance checklist: See `docs/REFACTOR/PHASES/01_PHASE_BASELINE_AND_GOVERNANCE.md`
+**Deliverables:**
+| Task | Status | Evidence |
+|------|--------|----------|
+| QA-01.1 Test Inventory | ✅ | `docs/PROJECT/tester/01_PHASE/01_TEST_INVENTORY.md` |
+| QA-01.2 Obsolete Test Candidates | ✅ | `docs/PROJECT/tester/01_PHASE/01_OBSOLETE_TEST_CANDIDATES.md` |
+| QA-01.3 Characterization Tests | ✅ | `docs/PROJECT/tester/01_PHASE/01_CHARACTERIZATION_TESTS.md` |
+
+**Gate Commands:**
+- `uv run poe lint` ✅ PASS
+- `uv run poe test` ✅ PASS (733 passed, 5 skipped)
+
+**Control Check C:** ✅ ALL PASS
+- [x] Tester branch exists: `qa/01/test-inventory`
+- [x] Tester posted remove→replace test migration mapping
+- [x] Tester listed acceptance-criteria tests for phase
+
+**Branch:** `qa/01/test-inventory` → `arch/01/baseline-gate`
+
+**Key Findings:**
+- 211 tests inventoried in impacted areas
+- 20+ obsolete test candidates identified (pending Architect approval)
+- All baseline characterization tests passing
+
+---
+
+### Step D — Architect Gate Assignment 📋 READY
+
+**Prerequisites Met:**
+- Steps B and C complete ✅
+- Control Checks B and C pass ✅
+
+**Inputs for Architect Gate:**
+
+| Input | Value |
+|-------|-------|
+| `PHASE_ID` | `01_PHASE_BASELINE_AND_GOVERNANCE` |
+| `PHASE_DOC` | `docs/REFACTOR/PHASES/01_PHASE_BASELINE_AND_GOVERNANCE.md` |
+| `PROJECT_BRANCH` | `main` |
+| `ARCH_GATE_BRANCH` | `arch/01/baseline-gate` |
+| Developer MR | `dev/01/baseline-inventory` → `arch/01/baseline-gate` |
+| Tester MR | `qa/01/test-inventory` → `arch/01/baseline-gate` |
+
+**Phase Acceptance Criteria:**
+- [ ] Baseline inventory exists and is architect-approved
+- [ ] Impacted test map exists with obsolete candidate list
+- [ ] Required gate commands pass
+- [ ] No intentional runtime behavior change introduced
+
+**Architect Tasks (Step D):**
+
+| Task | Description |
+|------|-------------|
+| ARC-01.1 | Baseline Review — Validate inventory completeness |
+| ARC-01.2 | Command Gate — Run `lint`, `typecheck`, `test` |
+| ARC-01.3 | Sign-off Decision — PASS or REWORK_REQUIRED |
 
 **Control Check D (Phase Closure Gate):**
 - [ ] Architect reviewed all MRs
@@ -123,8 +150,8 @@ Per `docs/REFACTOR/PROJECT_MANAGER_PROMPT.md`:
 | Role | Branch | Target | MR Status |
 |------|--------|--------|-----------|
 | Architect | `arch/01/baseline-gate` | `main` | Created ✅ |
-| Developer | `dev/01/baseline-inventory` | `arch/01/baseline-gate` | Pending |
-| Tester | `qa/01/test-inventory` | `arch/01/baseline-gate` | Pending |
+| Developer | `dev/01/baseline-inventory` | `arch/01/baseline-gate` | Ready for Review ✅ |
+| Tester | `qa/01/test-inventory` | `arch/01/baseline-gate` | Ready for Review ✅ |
 | Architect (final) | `arch/01/baseline-gate` | `main` | Pending gate decision |
 
 ---
@@ -136,12 +163,12 @@ Per `docs/REFACTOR/PROJECT_MANAGER_PROMPT.md`:
 | Baseline inventory | Architect | `docs/PROJECT/architect/01_PHASE/01_BASELINE_INVENTORY.md` | ✅ Complete |
 | Scaffolding plan | Architect | `docs/PROJECT/architect/01_PHASE/01_SCAFFOLDING_PLAN.md` | ✅ Complete |
 | Risk register | Architect | `docs/PROJECT/architect/01_PHASE/01_RISK_REGISTER.md` | ✅ Complete |
-| Dev baseline notes | Developer | `docs/PROJECT/developer/01_PHASE/01_DEV_BASELINE_NOTES.md` | 📋 Pending |
-| Dev risk assessment | Developer | `docs/PROJECT/developer/01_PHASE/01_DEV_RISK_ASSESSMENT.md` | 📋 Pending |
-| Test inventory | Tester | `docs/PROJECT/tester/01_PHASE/01_TEST_INVENTORY.md` | 📋 Pending |
-| Obsolete test candidates | Tester | `docs/PROJECT/tester/01_PHASE/01_OBSOLETE_TEST_CANDIDATES.md` | 📋 Pending |
-| Characterization tests | Tester | `docs/PROJECT/tester/01_PHASE/01_CHARACTERIZATION_TESTS.md` | 📋 Pending |
-| Architect decision | Architect | `docs/REFACTOR/PHASES/01_PHASE_BASELINE_AND_GOVERNANCE_ARCHITECT_DECISION.md` | ⏳ Future (Step D) |
+| Dev baseline notes | Developer | `docs/PROJECT/developer/01_PHASE/01_DEV_BASELINE_NOTES.md` | ✅ Complete |
+| Dev risk assessment | Developer | `docs/PROJECT/developer/01_PHASE/01_DEV_RISK_ASSESSMENT.md` | ✅ Complete |
+| Test inventory | Tester | `docs/PROJECT/tester/01_PHASE/01_TEST_INVENTORY.md` | ✅ Complete |
+| Obsolete test candidates | Tester | `docs/PROJECT/tester/01_PHASE/01_OBSOLETE_TEST_CANDIDATES.md` | ✅ Complete |
+| Characterization tests | Tester | `docs/PROJECT/tester/01_PHASE/01_CHARACTERIZATION_TESTS.md` | ✅ Complete |
+| Architect decision | Architect | `docs/REFACTOR/PHASES/01_PHASE_BASELINE_AND_GOVERNANCE_ARCHITECT_DECISION.md` | ⏳ Pending (Step D) |
 
 ---
 
@@ -155,10 +182,9 @@ Per `docs/REFACTOR/PROJECT_MANAGER_PROMPT.md`:
 
 ## Next Actions for PM
 
-1. **Assign Developer Agent** with task document `docs/PROJECT/developer/01_PHASE.md`
-2. **Assign Tester Agent** with task document `docs/PROJECT/tester/01_PHASE.md`
-3. **Monitor Control Checks B and C** for completion
-4. **Prepare Step D assignment** when B and C complete
+1. **Assign Architect Gate Agent** with Step D inputs (above)
+2. **Provide Architect Prompt** from `docs/REFACTOR/ARCHITECT_PROMPT.md`
+3. **Monitor Control Check D** for PASS/REWORK_REQUIRED decision
 
 ---
 
@@ -173,4 +199,16 @@ Phase 01 complete only when:
 
 ---
 
-*Workflow tracker for Phase 01 of ayder-cli refactor program*
+## Risk Summary
+
+| Risk | Status | Owner |
+|------|--------|-------|
+| Async migration (CLI sync → async) | Identified | Phase 04 |
+| Message shape divergence | Identified | Phase 02 |
+| Test breakage during refactor | Mitigated | Tester inventory complete |
+| Tool execution path divergence | Identified | Phase 04-05 |
+| Checkpoint flow divergence | Identified | Phase 05 |
+
+---
+
+*Workflow tracker for Phase 01 of ayder-cli refactor program — Steps A, B, C complete; ready for Step D*
