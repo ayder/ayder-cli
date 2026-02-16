@@ -13,9 +13,11 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ayder_cli.application.checkpoint_orchestrator import CheckpointOrchestrator, EngineState
+from ayder_cli.application.execution_policy import ExecutionPolicy
+from ayder_cli.application.validation import ValidationAuthority, ToolRequest
 from ayder_cli.client import call_llm_async
 from ayder_cli.parser import parse_custom_tool_calls
-from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 # Import TUI parser components
 from ayder_cli.tui.parser import (
@@ -304,16 +306,30 @@ class TuiChatLoop:
         self.cb.on_tools_cleanup()
 
     async def _exec_tool_async(self, tc) -> dict:
-        """Execute a single tool call asynchronously."""
+        """Execute a single tool call through shared validation and execution policy."""
         name = tc.function.name
         args = _parse_arguments(tc.function.arguments)
+
+        # Shared validation authority
+        authority = ValidationAuthority()
+        valid, err = authority.validate(ToolRequest(name=name, arguments=args))
+        if not valid:
+            return {"tool_call_id": tc.id, "name": name, "result": str(err)}
+
+        # Shared execution policy — permission check
+        policy = ExecutionPolicy(self.config.permissions)
+        perm_err = policy.check_permission(name)
+        if perm_err is not None:
+            return {"tool_call_id": tc.id, "name": name, "result": str(perm_err)}
+
         result = await asyncio.to_thread(self.registry.execute, name, args)
         return {"tool_call_id": tc.id, "name": name, "result": result}
 
     # -- Custom XML tool calls -----------------------------------------------
 
     async def _execute_custom_tool_calls(self, calls: list[dict]) -> None:
-        """Execute XML-parsed tool calls and append user-role results."""
+        """Execute XML-parsed tool calls through shared execution policy."""
+        policy = ExecutionPolicy(self.config.permissions)
         results_text = []
         for call in calls:
             name = call.get("name", "unknown")
@@ -321,6 +337,11 @@ class TuiChatLoop:
             call_id = f"xml-{name}-{id(call)}"
             self.cb.on_tool_start(call_id, name, args)
             try:
+                perm_err = policy.check_permission(name)
+                if perm_err is not None:
+                    results_text.append(f"[{name}] Permission denied: {perm_err}")
+                    self.cb.on_tool_complete(call_id, f"Permission denied: {perm_err}")
+                    continue
                 result = await asyncio.to_thread(self.registry.execute, name, args)
                 results_text.append(f"[{name}] {result}")
                 self.cb.on_tool_complete(call_id, str(result))
@@ -388,15 +409,12 @@ class TuiChatLoop:
         summary_content = response.choices[0].message.content or conversation_summary
         self.cm.save_checkpoint(summary_content)
 
-        # 3. Reset messages (keep system prompt) and restore context
-        system_msg = (
-            self.messages[0]
-            if self.messages and self.messages[0].get("role") == "system"
-            else None
-        )
+        # 3. Reset messages via shared CheckpointOrchestrator
+        orchestrator = CheckpointOrchestrator()
+        state = EngineState(iteration=self._iteration, messages=list(self.messages))
+        orchestrator.reset_state(state)
         self.messages.clear()
-        if system_msg:
-            self.messages.append(system_msg)
+        self.messages.extend(state.messages)
 
         restore_msg = (
             self.mm.build_quick_restore_message()
@@ -405,15 +423,16 @@ class TuiChatLoop:
         )
         self.messages.append({"role": "user", "content": restore_msg})
 
-        self._iteration = 0
+        self._iteration = state.iteration  # 0 after reset
         self.cb.on_system_message("Checkpoint saved — context compacted. Continuing...")
         return True
 
     # -- Helpers -------------------------------------------------------------
 
     def _tool_needs_confirmation(self, tool_name: str) -> bool:
-        perm = TOOL_PERMISSIONS.get(tool_name, "r")
-        return perm not in self.config.permissions
+        """Delegate to shared ExecutionPolicy — same check for CLI and TUI."""
+        policy = ExecutionPolicy(self.config.permissions)
+        return policy.get_confirmation_requirement(tool_name).requires_confirmation
 
 
 # -- Backward-compat wrappers (keep test imports working) -------------------

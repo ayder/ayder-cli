@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from ayder_cli.application.checkpoint_orchestrator import RuntimeContext
+from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -120,32 +121,12 @@ class ExecutionResult:
     error: Any = None
 
 
-# ---------------------------------------------------------------------------
-# Permission map
-# ---------------------------------------------------------------------------
-
-# Maps tool name fragments to required permission token
-_PERMISSION_MAP: dict[str, str] = {
-    "write_file": "w",
-    "edit_file": "w",
-    "delete_file": "w",
-    "run_shell_command": "x",
-    "execute": "x",
-    "read_file": "r",
-    "list_directory": "r",
-    "search": "r",
-}
-
-# Read-only tools that need no confirmation
-_READ_ONLY_TOOLS = {"read_file", "list_directory", "search"}
-
-
 def _required_permission(tool_name: str) -> str:
-    """Return the required permission token for a tool."""
-    for fragment, perm in _PERMISSION_MAP.items():
-        if fragment in tool_name:
-            return perm
-    return "r"
+    """Return the required permission token for a tool.
+
+    Delegates to the canonical TOOL_PERMISSIONS registry — single source of truth.
+    """
+    return TOOL_PERMISSIONS.get(tool_name, "r")
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +156,6 @@ class ExecutionPolicy:
 
     def get_confirmation_requirement(self, tool_name: str) -> ConfirmationRequirement:
         """Return whether this tool needs user confirmation."""
-        if tool_name in _READ_ONLY_TOOLS:
-            return ConfirmationRequirement.NONE
         required = _required_permission(tool_name)
         if required not in self.granted_permissions:
             return ConfirmationRequirement.REQUIRED
