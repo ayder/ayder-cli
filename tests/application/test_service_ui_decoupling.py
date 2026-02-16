@@ -287,6 +287,52 @@ class TestFullDecouplingFlow:
 class TestAdapterLayer:
     """Test adapter layer (out of scope but verify interfaces work)."""
 
+    def test_cli_adapter_outside_services(self):
+        """Verify CLI adapter is NOT in services/ directory."""
+        project_root = Path(__file__).parent.parent.parent
+        cli_adapter_path = project_root / "src" / "ayder_cli" / "services" / "cli_adapter.py"
+        assert not cli_adapter_path.exists(), \
+            "CLI adapter should not be in services/"
+
+    def test_cli_adapter_in_ui_layer(self):
+        """Document expected CLI adapter location."""
+        # This test documents where CLI adapter should be
+        # Implementation will be in src/ayder_cli/ui/cli_adapter.py
+        project_root = Path(__file__).parent.parent.parent
+        expected_path = project_root / "src" / "ayder_cli" / "ui" / "cli_adapter.py"
+        # Note: This will fail until dev implements, which is correct for test-first
+        if not expected_path.exists():
+            pytest.skip("CLI adapter not yet implemented (expected in ui/)")
+
+    def test_tui_adapter_in_tui_layer(self):
+        """Document expected TUI adapter location."""
+        # This test documents where TUI adapter should be
+        # Implementation will be in src/ayder_cli/tui/adapter.py
+        project_root = Path(__file__).parent.parent.parent
+        expected_path = project_root / "src" / "ayder_cli" / "tui" / "adapter.py"
+        # Note: This will fail until dev implements, which is correct for test-first
+        if not expected_path.exists():
+            pytest.skip("TUI adapter not yet implemented (expected in tui/)")
+
+    def test_adapters_not_imported_by_services(self):
+        """Verify services/ does not import adapters (no circular deps)."""
+        import ast
+        project_root = Path(__file__).parent.parent.parent
+        services_dir = project_root / "src" / "ayder_cli" / "services"
+        for py_file in services_dir.rglob("*.py"):
+            if py_file.name == "__init__.py":
+                continue
+            content = py_file.read_text()
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if "adapter" in alias.name:
+                            assert False, f"{py_file} imports adapter"
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module and "adapter" in node.module:
+                        assert False, f"{py_file} imports from adapter"
+
     def test_cli_adapter_can_implement_sink(self):
         """CLI adapter should be able to implement InteractionSink."""
         # This documents the expected adapter pattern

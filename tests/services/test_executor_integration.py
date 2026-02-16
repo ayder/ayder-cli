@@ -228,28 +228,37 @@ class TestToolExecutorExecutionFlow:
         policy.confirm_file_diff.assert_called_once()
 
     def test_auto_approved_skips_confirmation(self):
-        """Tools with granted permission should skip policy calls."""
+        """Tools with granted permission should skip policy calls.
+        
+        Tests public behavior: when permission is in granted_permissions,
+        confirmation_policy should NOT be called, but tool should still execute.
+        """
         executor, registry, sink, policy = self._create_mock_executor()
         if executor is None:
             pytest.skip("Implementation not ready")
         
         registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
-        # Permission 'r' granted - should auto-approve
-        TOOL_PERMISSIONS = {"read_file": "r"}
+        registry.execute.return_value = Mock(__str__=lambda self: "Success")
         
-        with patch.object(
-            executor, '_get_tool_permission', return_value="r"
-        ):
-            executor._execute_single_call(
-                "read_file",
-                {"file_path": "/test.txt"},
-                {"r"},  # Permission granted
-                False
-            )
+        # Execute with 'r' permission in granted_permissions
+        executor._execute_single_call(
+            "read_file",
+            {"file_path": "/test.txt"},
+            {"r"},  # Permission 'r' is granted - should auto-approve
+            False
+        )
         
-        # Policy should not be called for auto-approved tools
+        # Policy should NOT be called for auto-approved tools
         policy.confirm_action.assert_not_called()
+        policy.confirm_file_diff.assert_not_called()
+        
+        # But tool should still execute
+        registry.execute.assert_called_once()
+        
+        # And sink should still receive notifications
+        sink.on_tool_call.assert_called_once()
+        sink.on_tool_result.assert_called_once()
 
     def test_verbose_mode_triggers_file_preview(self):
         """In verbose mode, write_file should trigger file preview."""
