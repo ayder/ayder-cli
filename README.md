@@ -1,6 +1,13 @@
 # ayder-cli
 
-A multi-provider AI agent chat client for your terminal. It connects to [Ollama](https://ollama.com), [Anthropic Claude](https://www.anthropic.com), or any OpenAI-compatible API and provides an autonomous coding assistant with file system tools and shell access.
+A multi-provider AI agent chat client for your terminal. Currently ayder supports
+
+- [Ollama](https://ollama.com) 
+- [Anthropic Claude](https://www.anthropic.com) 
+- [OpenAI](https://openai.com/) 
+- [Gemini](https://gemini.google.com/) 
+
+or any OpenAI-compatible API and provides an autonomous coding assistant with file system tools and shell access.
 
 ![ayder](docs/cc.png)
 
@@ -9,20 +16,11 @@ A multi-provider AI agent chat client for your terminal. It connects to [Ollama]
 Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugins. There are many cli coding agents there doing amazing things if you have tokens and subscriptions. ayder-cli takes a different approach:
 
 - **Multi-provider** -- switch between Ollama (local/cloud), Anthropic Claude, Gemini or any OpenAI-compatible API with a single `/provider` command. Each provider has its own config section.
-- **Fully local or cloud** -- run locally with Ollama for privacy (your code never leaves your machine), or connect to Anthropic, OpenAI, or cloud-hosted Ollama.
+- **Fully local or cloud** -- run locally with Ollama (on your machine), or connect to Gemini, Anthropic, OpenAI, or cloud-hosted Ollama.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own for configurable consecutive tool calls per user message (configurable with `-I`).
 - **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. 
 - **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Gemini genai and for Gemini and Anthropic SDK optional for native  support.
 
-
-### Supported Providers
-
-| Provider | Setup | Models |
-|----------|-------|--------|
-| **Ollama** (use with openai) | Local or cloud Ollama instance | Any Ollama model with tool support |
-| **Openai** (default) | Local or cloud Ollama instance | Any Ollama model with tool support |
-| **Anthropic** | `pip install anthropic` + API key | Claude Opus 4.6, Sonnet 4.5, Haiku 4.5, and all legacy models |
-| **Gemini** | `pip install google-generativeai` + API key | Gemini 3 Deep Think, Gemini 3 Pro, Gemini 3 Flash |
 
 ### Tested Providers with Models 
 
@@ -30,10 +28,10 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 |----------|----------|------------------------------------|
 | ollama   | Cloud    | deepseek-v3.2:cloud                |
 | ollama   | Cloud    | gemini-3-pro-preview:latest        |
-| ollama   | Cloud    | glm-4.7-flash:latest               |
+| ollama   | Local    | glm-4.7-flash:latest               |
 | ollama   | Cloud    | glm-4.7:cloud                      |
 | ollama   | Cloud    | glm-5:cloud                        |
-| ollama   | Cloud    | glm-ocr:latest                     |
+| ollama   | Local    | glm-ocr:latest                     |
 | ollama   | Cloud    | gpt-oss:120b-cloud                 |
 | ollama   | Cloud    | kimi-k2.5:cloud                    |
 | ollama   | Cloud    | minimax-m2.5:cloud                 |

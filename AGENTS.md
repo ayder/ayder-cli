@@ -10,7 +10,7 @@ This document provides coding standards, tool configurations, and workflows for 
 - **Virtual Environment**: `.venv` (already configured)
 - **Project Structure**: Standard Python package in `src/ayder_cli/`
 
-> **📖 For detailed architecture notes, module relationships, and TUI structure, see [.ayder/PROJECT_STRUCTURE.md](.ayder/PROJECT_STRUCTURE.md)**
+> **📖 For detailed architecture notes, module relationships, and TUI structure, see [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)**
 
 ## Tech Stack
 
@@ -666,5 +666,5 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
 
 **Remember**: 
 - When in doubt, run `uv run poe check-all`
-- For architecture questions, module relationships, or TUI structure, see [.ayder/PROJECT_STRUCTURE.md](.ayder/PROJECT_STRUCTURE.md)
+- For architecture questions, module relationships, or TUI structure, see [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 - All changes should maintain or improve test coverage
