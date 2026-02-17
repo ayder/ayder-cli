@@ -26,7 +26,7 @@ class ToolDefinition:
     parameters: Dict[str, Any]  # OpenAI "parameters" object
 
     # ---- permission & flags ----
-    permission: str = "r"  # "r", "w", or "x"
+    permission: str = "r"  # "r", "w", "x", or "http"
     is_terminal: bool = False
     safe_mode_blocked: bool = False
 

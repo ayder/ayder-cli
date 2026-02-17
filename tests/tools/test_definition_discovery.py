@@ -271,6 +271,7 @@ class TestBackwardCompatibility:
         
         # Shell tools
         assert 'run_shell_command' in tool_names
+        assert 'fetch_web' in tool_names
         
         # Memory tools
         assert 'save_memory' in tool_names
@@ -289,7 +290,7 @@ class TestBackwardCompatibility:
             assert td.description, "Tool must have a description"
             assert td.parameters, "Tool must have parameters"
             assert isinstance(td.parameters, dict), "Parameters must be a dict"
-            assert td.permission in ["r", "w", "x"], f"Invalid permission: {td.permission}"
+            assert td.permission in ["r", "w", "x", "http"], f"Invalid permission: {td.permission}"
 
     def test_tool_definition_to_openai_schema(self):
         """Test that to_openai_schema method works."""

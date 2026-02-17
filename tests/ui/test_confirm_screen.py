@@ -211,6 +211,22 @@ class TestToolNeedsConfirmation:
         loop.config = TuiLoopConfig(permissions={"r", "x"})
         assert not loop._tool_needs_confirmation("run_shell_command")
 
+    def test_http_tool_needs_confirmation_without_http_permission(self):
+        """Test that fetch_web needs confirmation without http permission."""
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r", "x"})
+        assert loop._tool_needs_confirmation("fetch_web")
+
+    def test_http_tool_auto_approved_with_http_permission(self):
+        """Test that fetch_web is auto-approved with http permission."""
+        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+
+        loop = TuiChatLoop.__new__(TuiChatLoop)
+        loop.config = TuiLoopConfig(permissions={"r", "http"})
+        assert not loop._tool_needs_confirmation("fetch_web")
+
     def test_all_tools_auto_approved_with_full_permissions(self):
         """Test that all tools are auto-approved with rwx permissions."""
         from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
@@ -346,20 +362,20 @@ class TestAyderAppPermissions:
 class TestCLIPermissionScreenInit:
     """Tests for CLIPermissionScreen initialization."""
 
-    def test_screen_has_three_items(self):
-        """Test that CLIPermissionScreen has 3 permission items."""
+    def test_screen_has_four_items(self):
+        """Test that CLIPermissionScreen has 4 permission items."""
         from ayder_cli.tui import CLIPermissionScreen
 
         screen = CLIPermissionScreen({"r"})
-        assert len(screen._items) == 3
+        assert len(screen._items) == 4
 
     def test_items_are_rwx(self):
-        """Test that the 3 items are r, w, x."""
+        """Test that the items are r, w, x, http."""
         from ayder_cli.tui import CLIPermissionScreen
 
         screen = CLIPermissionScreen({"r"})
         perms = [p for p, _, _ in screen._items]
-        assert perms == ["r", "w", "x"]
+        assert perms == ["r", "w", "x", "http"]
 
     def test_initial_selected_index(self):
         """Test that the initial selected index is 0."""
@@ -429,10 +445,10 @@ class TestCLIPermissionScreenRenderList:
         """Test rendering with all permissions enabled."""
         from ayder_cli.tui import CLIPermissionScreen
 
-        screen = CLIPermissionScreen({"r", "w", "x"})
+        screen = CLIPermissionScreen({"r", "w", "x", "http"})
         text = screen._render_list()
         plain = text.plain
-        assert plain.count("[✓]") == 3
+        assert plain.count("[✓]") == 4
         assert "[ ]" not in plain
 
 
@@ -492,6 +508,27 @@ class TestCLIPermissionScreenToggle:
         perm = screen._items[screen.selected_index][0]
         screen._permissions.discard(perm)
         assert "x" not in screen._permissions
+
+    def test_http_can_be_toggled_on(self):
+        """Test that http permission can be enabled."""
+        from ayder_cli.tui import CLIPermissionScreen
+
+        screen = CLIPermissionScreen({"r"})
+        screen.selected_index = 3  # HTTP
+        perm = screen._items[screen.selected_index][0]
+        assert perm == "http"
+        screen._permissions.add(perm)
+        assert "http" in screen._permissions
+
+    def test_http_can_be_toggled_off(self):
+        """Test that http permission can be disabled."""
+        from ayder_cli.tui import CLIPermissionScreen
+
+        screen = CLIPermissionScreen({"r", "http"})
+        screen.selected_index = 3
+        perm = screen._items[screen.selected_index][0]
+        screen._permissions.discard(perm)
+        assert "http" not in screen._permissions
 
 
 class TestStatusBarUpdatePermissions:

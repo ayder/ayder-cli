@@ -27,6 +27,12 @@ DEFAULTS: Dict[str, Any] = {
     },
     "editor": "vim",
     "verbose": False,
+    "logging": {
+        "file_enabled": True,
+        "file_path": ".ayder/log/ayder.log",
+        "rotation": "10 MB",
+        "retention": "7 days",
+    },
     "max_background_processes": 5,
     "max_iterations": 50,
 }
@@ -61,6 +67,14 @@ editor = "{editor}"
 # Show written file contents after write_file tool calls (true/false)
 verbose = {verbose_str}
 
+[logging]
+# Optional level: NONE, ERROR, WARNING, INFO, DEBUG
+# If omitted, runtime default is NONE.
+file_enabled = {logging_file_enabled}
+file_path = "{logging_file_path}"
+rotation = "{logging_rotation}"
+retention = "{logging_retention}"
+
 [agent]
 # Maximum agentic iterations (tool calls) per user message
 max_iterations = {max_iterations}
@@ -79,6 +93,11 @@ class Config(BaseModel):
     num_ctx: int = Field(default=65536)
     editor: str = Field(default="vim")
     verbose: bool = Field(default=False)
+    logging_level: str | None = Field(default=None)
+    logging_file_enabled: bool = Field(default=True)
+    logging_file_path: str = Field(default=".ayder/log/ayder.log")
+    logging_rotation: str = Field(default="10 MB")
+    logging_retention: str = Field(default="7 days")
     max_background_processes: int = Field(default=5)
     max_iterations: int = Field(default=50)
 
@@ -113,10 +132,17 @@ class Config(BaseModel):
             new_data.update(section_data)
 
         # Flatten utility sections
-        for section in ["editor", "ui", "agent"]:
+        for section in ["editor", "ui", "agent", "logging"]:
             if section in data and isinstance(data[section], dict):
                 section_data = new_data.pop(section)
-                new_data.update(section_data)
+                if section == "logging":
+                    for key, value in section_data.items():
+                        field_name = (
+                            key if key.startswith("logging_") else f"logging_{key}"
+                        )
+                        new_data[field_name] = value
+                else:
+                    new_data.update(section_data)
 
         return new_data
 
@@ -155,6 +181,20 @@ class Config(BaseModel):
             raise ValueError("base_url must start with http:// or https://")
         return v
 
+    @field_validator("logging_level")
+    @classmethod
+    def validate_logging_level(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        level = v.strip().upper()
+        if not level:
+            return None
+        if level not in {"NONE", "ERROR", "WARNING", "INFO", "DEBUG"}:
+            raise ValueError(
+                "logging_level must be one of NONE, ERROR, WARNING, INFO, DEBUG"
+            )
+        return level
+
 
 def load_config_for_provider(provider: str) -> Config:
     """Load config from ~/.ayder/config.toml with a specific provider active.
@@ -183,6 +223,10 @@ def load_config() -> Config:
             "provider": DEFAULTS["provider"],
             "editor": DEFAULTS["editor"],
             "verbose_str": str(DEFAULTS["verbose"]).lower(),
+            "logging_file_enabled": str(DEFAULTS["logging"]["file_enabled"]).lower(),
+            "logging_file_path": DEFAULTS["logging"]["file_path"],
+            "logging_rotation": DEFAULTS["logging"]["rotation"],
+            "logging_retention": DEFAULTS["logging"]["retention"],
             "max_iterations": DEFAULTS["max_iterations"],
         }
         for p in _PROVIDER_SECTIONS:

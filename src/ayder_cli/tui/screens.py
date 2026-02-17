@@ -164,7 +164,7 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
 class CLIPermissionScreen(ModalScreen[set | None]):
     """
     CLI-style permission toggle screen.
-    Allows enabling/disabling write and execute permissions.
+    Allows enabling/disabling tool permission categories.
     """
 
     def __init__(self, current_permissions: set):
@@ -179,6 +179,7 @@ class CLIPermissionScreen(ModalScreen[set | None]):
                 "Auto-approve write tools (write_file, replace_string, ...)",
             ),
             ("x", "Execute", "Auto-approve execute tools (run_shell_command, ...)"),
+            ("http", "HTTP", "Auto-approve web tools (fetch_web)"),
         ]
 
     def compose(self) -> ComposeResult:

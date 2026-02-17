@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.core.context import ProjectContext
+from ayder_cli.logging_config import LOG_LEVELS, setup_logging
 from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEditScreen
 from ayder_cli.tui.widgets import ChatView, StatusBar
 
@@ -252,6 +253,43 @@ def handle_verbose(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app._verbose_mode = not current
     status = "ON" if app._verbose_mode else "OFF"
     chat_view.add_system_message(f"Verbose mode: {status}")
+
+
+def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Open log-level picker and apply level for this session."""
+    current_level = getattr(app, "_logging_level", "NONE")
+
+    if args.strip():
+        selected = args.strip().upper()
+        if selected not in LOG_LEVELS:
+            chat_view.add_system_message(
+                f"Invalid level: {selected}. Choose from: {', '.join(LOG_LEVELS)}"
+            )
+            return
+        effective = setup_logging(app.config, level_override=selected)
+        app._logging_level = effective
+        chat_view.add_system_message(f"Logging level set to {effective} (session only)")
+        return
+
+    items = [(level, level) for level in LOG_LEVELS]
+
+    def on_logging_selected(selected: str | None) -> None:
+        if selected:
+            effective = setup_logging(app.config, level_override=selected)
+            app._logging_level = effective
+            chat_view.add_system_message(
+                f"Logging level set to {effective} (session only)"
+            )
+
+    app.push_screen(
+        CLISelectScreen(
+            title="Select logging level",
+            items=items,
+            current=current_level,
+            description=f"Current level: {current_level}",
+        ),
+        on_logging_selected,
+    )
 
 
 def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -688,6 +726,7 @@ COMMAND_MAP: dict[str, Callable] = {
     "/tasks": handle_tasks,
     "/tools": handle_tools,
     "/verbose": handle_verbose,
+    "/logging": handle_logging,
     "/compact": handle_compact,
     "/save-memory": handle_save_memory,
     "/load-memory": handle_load_memory,

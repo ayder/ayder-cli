@@ -50,10 +50,11 @@ class PermissionDeniedError(Exception):
         super().__init__(str(self))
 
     def __str__(self) -> str:
+        flag = f"--{self.required_permission}" if len(self.required_permission) > 1 else f"-{self.required_permission}"
         return (
             f"Permission denied for '{self.tool_name}': "
             f"requires '{self.required_permission}'. "
-            f"Grant with --permission {self.required_permission} or -x flag."
+            f"Grant with {flag} flag."
         )
 
 

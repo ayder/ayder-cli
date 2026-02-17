@@ -30,10 +30,20 @@ class TestDefaultValues:
         assert DEFAULTS["gemini"]["model"] == "gemini-3-flash"
         assert DEFAULTS["editor"] == "vim"
         assert DEFAULTS["verbose"] is False
+        assert DEFAULTS["logging"]["file_enabled"] is True
+        assert DEFAULTS["logging"]["file_path"] == ".ayder/log/ayder.log"
 
     def test_defaults_contains_all_keys(self):
         """Test that DEFAULTS has all required configuration keys."""
-        required_keys = ["provider", "openai", "anthropic", "gemini", "editor", "verbose"]
+        required_keys = [
+            "provider",
+            "openai",
+            "anthropic",
+            "gemini",
+            "editor",
+            "verbose",
+            "logging",
+        ]
         for key in required_keys:
             assert key in DEFAULTS
         # Each provider section has model and api_key
@@ -48,12 +58,14 @@ class TestDefaultValues:
         assert "[gemini]" in _DEFAULT_TOML
         assert "[editor]" in _DEFAULT_TOML
         assert "[ui]" in _DEFAULT_TOML
+        assert "[logging]" in _DEFAULT_TOML
         assert "{provider}" in _DEFAULT_TOML
         assert "{openai_model}" in _DEFAULT_TOML
         assert "{anthropic_model}" in _DEFAULT_TOML
         assert "{gemini_model}" in _DEFAULT_TOML
         assert "{editor}" in _DEFAULT_TOML
         assert "{verbose_str}" in _DEFAULT_TOML
+        assert "{logging_file_enabled}" in _DEFAULT_TOML
 
     def test_config_paths_defined(self):
         """Test that CONFIG_DIR and CONFIG_PATH are defined."""
@@ -92,6 +104,7 @@ class TestLoadConfigFirstRun:
         assert "[gemini]" in content
         assert "[editor]" in content
         assert "[ui]" in content
+        assert "[logging]" in content
 
     def test_default_values_returned_on_first_run(self, tmp_path, monkeypatch):
         """Test that default values are returned when creating new config."""
@@ -111,6 +124,7 @@ class TestLoadConfigFirstRun:
         assert config.num_ctx == DEFAULTS["openai"]["num_ctx"]
         assert config.editor == DEFAULTS["editor"]
         assert config.verbose == DEFAULTS["verbose"]
+        assert config.logging_level is None
 
     def test_config_directory_creation(self, tmp_path, monkeypatch):
         """Test that config directory is created if it doesn't exist."""
@@ -155,6 +169,7 @@ class TestLoadConfigFirstRun:
         # Verify utility sections
         assert 'editor = "vim"' in content
         assert "verbose = false" in content
+        assert "file_enabled = true" in content
 
 
 class TestLoadConfigExistingConfig:
@@ -179,6 +194,10 @@ editor = "nano"
 
 [ui]
 verbose = true
+
+[logging]
+level = "debug"
+file_enabled = false
 """
         mock_config_path.write_text(config_content)
         
@@ -194,6 +213,8 @@ verbose = true
         assert config.num_ctx == 128000
         assert config.editor == "nano"
         assert config.verbose is True
+        assert config.logging_level == "DEBUG"
+        assert config.logging_file_enabled is False
 
     def test_partial_config_llm_only(self, tmp_path, monkeypatch):
         """Test loading config with only llm section defined."""
@@ -221,6 +242,7 @@ model = "custom-model"
         assert config.num_ctx == 65536
         assert config.editor == DEFAULTS["editor"]
         assert config.verbose == DEFAULTS["verbose"]
+        assert config.logging_level is None
 
     def test_partial_config_editor_only(self, tmp_path, monkeypatch):
         """Test loading config with only editor section defined."""
@@ -247,6 +269,7 @@ editor = "emacs"
         assert config.model == DEFAULTS["openai"]["model"]
         assert config.num_ctx == DEFAULTS["openai"]["num_ctx"]
         assert config.verbose == DEFAULTS["verbose"]
+        assert config.logging_level is None
 
     def test_partial_config_ui_only(self, tmp_path, monkeypatch):
         """Test loading config with only ui section defined."""
@@ -273,6 +296,7 @@ verbose = true
         assert config.model == DEFAULTS["openai"]["model"]
         assert config.num_ctx == DEFAULTS["openai"]["num_ctx"]
         assert config.editor == DEFAULTS["editor"]
+        assert config.logging_level is None
 
     def test_partial_config_missing_keys_in_llm(self, tmp_path, monkeypatch):
         """Test that missing keys in llm section fall back to defaults."""
@@ -358,6 +382,7 @@ verbose = false
         assert config.num_ctx == DEFAULTS["openai"]["num_ctx"]
         assert config.editor == DEFAULTS["editor"]
         assert config.verbose == DEFAULTS["verbose"]
+        assert config.logging_level is None
 
     def test_num_ctx_integer_type(self, tmp_path, monkeypatch):
         """Test that num_ctx is loaded as integer."""
@@ -619,6 +644,10 @@ editor = "nano"
 [ui]
 verbose = true
 
+[logging]
+level = "warning"
+file_enabled = false
+
 [agent]
 max_iterations = 75
 """
@@ -630,4 +659,6 @@ max_iterations = 75
         assert config.api_key == "sk-ant-key"
         assert config.editor == "nano"
         assert config.verbose is True
+        assert config.logging_level == "WARNING"
+        assert config.logging_file_enabled is False
         assert config.max_iterations == 75

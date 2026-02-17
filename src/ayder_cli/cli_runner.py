@@ -86,7 +86,7 @@ def run_command(prompt: str, permissions=None, iterations=50) -> int:
 
     Args:
         prompt: The command/prompt to execute
-        permissions: Set of granted permission categories (e.g. {"r", "w", "x"})
+        permissions: Set of granted permission categories (e.g. {"r", "w", "x", "http"})
         iterations: Max agentic iterations per message
 
     Returns:

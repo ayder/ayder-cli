@@ -65,9 +65,9 @@ ayder-cli/
 │   │   └── tools/
 │   │       └── executor.py     # Tool execution with confirmation
 │   │
-│   ├── tools/                  # Tool implementations (25 tools)
+│   ├── tools/                  # Tool implementations (26 tools)
 │   │   ├── definition.py       # ToolDefinition base + auto-discovery
-│   │   ├── *_definitions.py    # Distributed tool definitions (9 files)
+│   │   ├── *_definitions.py    # Distributed tool definitions (10 files)
 │   │   ├── filesystem.py       # File system tools
 │   │   ├── search.py           # Search tools
 │   │   ├── shell.py            # Shell tools
@@ -588,7 +588,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
 )
 ```
 
-**Current Tools (25 total):**
+**Current Tools (26 total):**
 - **Filesystem** (7): list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
 - **Search** (2): search_codebase, get_project_structure
 - **Shell** (1): run_shell_command
@@ -598,6 +598,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
 - **Tasks** (2): list_tasks, show_task
 - **Environment** (1): manage_environment_vars
 - **Virtual Environments** (6): create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
+- **Web** (1): fetch_web
 
 **Discovery Features:**
 - Automatic detection of `*_definitions.py` files

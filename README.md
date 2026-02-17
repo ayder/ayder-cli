@@ -164,6 +164,14 @@ editor = "vim"
 [ui]
 verbose = false
 
+[logging]
+# Optional level: NONE, ERROR, WARNING, INFO, DEBUG
+# If omitted, runtime default is NONE.
+file_enabled = true
+file_path = ".ayder/log/ayder.log"
+rotation = "10 MB"
+retention = "7 days"
+
 [agent]
 max_iterations = 50
 ```
@@ -181,6 +189,9 @@ Please adjust *num_ctx* context size window according to your local computer ram
 | `num_ctx` | per provider | varies | Context window size in tokens. |
 | `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` command. |
 | `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
+| `logging.level` | `[logging]` | `NONE` (when omitted) | Log level (`NONE`, `ERROR`, `WARNING`, `INFO`, `DEBUG`). |
+| `logging.file_enabled` | `[logging]` | `true` | Enable/disable file sink. |
+| `logging.file_path` | `[logging]` | `.ayder/log/ayder.log` | Log file destination. |
 | `max_iterations` | `[agent]` | `50` | Maximum agentic iterations (tool calls) per user message (1-100). |
 | `max_background_processes` | -- | `5` | Maximum number of concurrent background processes (1-20). |
 
@@ -228,7 +239,7 @@ ayder --implement auth
 ayder --implement-all
 ```
 
-### Tool Permissions (-r/-w/-x)
+### Tool Permissions (-r/-w/-x/--http)
 
 By default, every tool call requires user confirmation. Use permission flags to auto-approve tool categories:
 
@@ -237,6 +248,7 @@ By default, every tool call requires user confirmation. Use permission flags to 
 | `-r` | Read | `list_files`, `read_file`, `get_file_info`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
 | `-w` | Write | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory`, `manage_environment_vars`, `create_task`, `implement_task`, `implement_all_tasks` |
 | `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
+| `--http` | Web/Network | `fetch_web` |
 
 ```bash
 # Auto-approve read-only tools (no confirmations for file reading/searching)
@@ -247,6 +259,9 @@ ayder -r -w
 
 # Auto-approve everything (fully autonomous)
 ayder -r -w -x
+
+# Allow web fetch tool without prompts
+ayder -r --http
 
 # Combine with other flags
 ayder -r -w "refactor the login module"
@@ -298,12 +313,19 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 | `/implement <id/name>` | Run a task by ID, name, or pattern (e.g. `/implement 1`) |
 | `/implement-all` | Implement all pending tasks sequentially |
 | `/verbose` | Toggle verbose mode (show file contents after `write_file` + LLM request details) |
+| `/logging` | Set Loguru level for current TUI session (`NONE`, `ERROR`, `WARNING`, `INFO`, `DEBUG`) |
 | `/compact` | Summarize conversation, save to memory, clear, and reload context |
 | `/save-memory` | Summarize conversation and save to `.ayder/memory/current_memory.md` (no clear) |
 | `/load-memory` | Load memory from `.ayder/memory/current_memory.md` and restore context |
 | `/archive-completed-tasks` | Move completed tasks to `.ayder/task_archive/` |
-| `/permission` | Toggle permission levels (r/w/x) interactively |
+| `/permission` | Toggle permission levels (r/w/x/http) interactively |
 | `exit` | Quit the application |
+
+### Logging
+
+- Default behavior: when logging is enabled (`/logging` or `logging.level`), logs are written to `.ayder/log/ayder.log` (not shown on screen).
+- TUI `/logging` changes are session-only and do not modify `config.toml`.
+- CLI `--verbose [LEVEL]` is the explicit opt-in for stdout logging during that run (default level is `INFO` when omitted).
 
 ### Keyboard Shortcuts
 
@@ -378,6 +400,13 @@ Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames
 
 ayder-cli provides code search capabilities via the `search_codebase` tool. The LLM calls it automatically when you ask it to search for patterns, function definitions, or usages across the codebase.
 
+### Web Fetch Tool
+
+`fetch_web` retrieves URL content using async `httpx` and supports `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, and `OPTIONS`.
+
+- Requires `http` permission (`--http` in CLI or `/permission` in TUI).
+- Session cookies are persisted across `fetch_web` calls within the same ayder process.
+
 ### Pluggable Tool Architecture
 
 ayder-cli features a **pluggable tool system** with dynamic auto-discovery. Adding a new tool is as simple as:
@@ -392,7 +421,7 @@ The tool system automatically:
 - Registers tools with the LLM
 - Handles imports and exports
 
-Current tool categories (25 tools total):
+Current tool categories (26 tools total):
 - **Filesystem**: list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
 - **Search**: search_codebase, get_project_structure
 - **Shell**: run_shell_command
@@ -402,6 +431,7 @@ Current tool categories (25 tools total):
 - **Tasks**: list_tasks, show_task
 - **Environment**: manage_environment_vars
 - **Virtual Environments**: create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
+- **Web**: fetch_web
 
 ## License
 

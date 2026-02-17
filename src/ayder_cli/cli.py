@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 from ayder_cli.version import get_app_version
+from ayder_cli.logging_config import LOG_LEVELS, setup_logging
 
 
 def create_parser():
@@ -46,7 +47,7 @@ def create_parser():
         "--stdin", action="store_true", help="Read prompt from stdin"
     )
 
-    # Permission flags (Unix-style: r=read, w=write, x=execute)
+    # Permission flags: r=read, w=write, x=execute, http=web/network
     parser.add_argument(
         "-r",
         action="store_true",
@@ -61,6 +62,11 @@ def create_parser():
     parser.add_argument(
         "-x", action="store_true", help="Auto-approve execute tools (run_shell_command)"
     )
+    parser.add_argument(
+        "--http",
+        action="store_true",
+        help="Auto-approve web/network tools (fetch_web)",
+    )
 
     # Max agentic iterations (overrides config.max_iterations)
     parser.add_argument(
@@ -69,6 +75,16 @@ def create_parser():
         type=int,
         default=None,
         help="Max agentic iterations per message (default: from config, 50)",
+    )
+    parser.add_argument(
+        "--verbose",
+        nargs="?",
+        const="INFO",
+        default=None,
+        type=str.upper,
+        choices=LOG_LEVELS,
+        metavar="LEVEL",
+        help="Enable Loguru logging for this run; default level is INFO",
     )
 
     # Version flag
@@ -101,14 +117,20 @@ def main():
         granted.add("w")
     if args.x:
         granted.add("x")
+    if args.http:
+        granted.add("http")
+
+    from ayder_cli.core.config import load_config
+
+    cfg = load_config()
+    setup_logging(
+        cfg,
+        level_override=args.verbose,
+        console_stream=sys.stdout if args.verbose is not None else None,
+    )
 
     # Resolve iterations: CLI flag overrides config value
-    if args.iterations is None:
-        from ayder_cli.core.config import load_config
-
-        iterations = load_config().max_iterations
-    else:
-        iterations = args.iterations
+    iterations = cfg.max_iterations if args.iterations is None else args.iterations
 
     # Handle task-related CLI options
     if args.tasks:

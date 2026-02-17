@@ -59,6 +59,7 @@ class TestToolDefinitions:
             "manage_environment_vars",
             "create_virtualenv", "install_requirements",
             "list_virtualenvs", "activate_virtualenv", "remove_virtualenv",
+            "fetch_web",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
         assert names == expected_tools
@@ -69,5 +70,4 @@ class TestToolDefinitions:
         # Also check field names in the dataclass
         field_names = {f.name for f in ToolDefinition.__dataclass_fields__.values()}
         assert "exposed_to_llm" not in field_names
-
 

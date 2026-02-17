@@ -17,6 +17,12 @@ import asyncio
 import difflib
 
 from ayder_cli.application.runtime_factory import create_runtime
+from ayder_cli.core.config import Config
+from ayder_cli.logging_config import (
+    get_effective_log_level,
+    is_logging_configured,
+    setup_logging,
+)
 from ayder_cli.tui.helpers import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
@@ -158,6 +164,9 @@ class AyderApp(App):
         # Build all shared runtime components via the factory
         rt = create_runtime()
         self.config = rt.config
+        if isinstance(self.config, Config) and not is_logging_configured():
+            setup_logging(self.config)
+        self._logging_level = get_effective_log_level()
 
         if isinstance(self.config, dict):
             actual_model = self.config.get("model", model)

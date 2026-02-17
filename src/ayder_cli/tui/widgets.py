@@ -335,6 +335,32 @@ class _SubmitTextArea(TextArea):
     def __init__(self, commands: list[str] | None = None, **kwargs):
         super().__init__(soft_wrap=True, show_line_numbers=False, **kwargs)
         self._commands = commands or []
+        self._tab_cycle_matches: list[str] = []
+        self._tab_cycle_index = -1
+
+    def _reset_tab_cycle(self) -> None:
+        """Reset slash-command tab cycle state."""
+        self._tab_cycle_matches = []
+        self._tab_cycle_index = -1
+
+    def _next_tab_completion(self, current: str) -> str | None:
+        """Return the next slash-command completion for current input."""
+        if not current.startswith("/"):
+            self._reset_tab_cycle()
+            return None
+
+        if self._tab_cycle_matches and current in self._tab_cycle_matches:
+            matches = self._tab_cycle_matches
+        else:
+            matches = [c for c in self._commands if c.startswith(current)]
+            if not matches:
+                self._reset_tab_cycle()
+                return None
+            self._tab_cycle_matches = matches
+            self._tab_cycle_index = -1
+
+        self._tab_cycle_index = (self._tab_cycle_index + 1) % len(matches)
+        return matches[self._tab_cycle_index]
 
     def _on_key(self, event) -> None:  # type: ignore[override]
         if event.key == "enter":
@@ -351,11 +377,13 @@ class _SubmitTextArea(TextArea):
             event.prevent_default()
             event.stop()
             current = self.text.strip()
-            matches = [c for c in self._commands if c.startswith(current)]
-            if len(matches) == 1:
+            completion = self._next_tab_completion(current)
+            if completion:
                 self.clear()
-                self.insert(matches[0])
+                self.insert(completion)
             return
+
+        self._reset_tab_cycle()
 
 
 class CLIInputBar(Horizontal):

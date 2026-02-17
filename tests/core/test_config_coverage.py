@@ -155,3 +155,26 @@ class TestConfigValidationMaxIterations:
         data = {"agent": {"max_iterations": 30}}
         cfg = Config(**data)
         assert cfg.max_iterations == 30
+
+
+class TestConfigValidationLoggingLevel:
+    """Tests for logging_level normalization and validation."""
+
+    def test_logging_level_defaults_to_none(self):
+        cfg = Config()
+        assert cfg.logging_level is None
+
+    def test_logging_level_normalized_to_upper(self):
+        cfg = Config(logging_level="debug")
+        assert cfg.logging_level == "DEBUG"
+
+    def test_logging_level_blank_becomes_none(self):
+        cfg = Config(logging_level="   ")
+        assert cfg.logging_level is None
+
+    def test_logging_level_invalid_raises_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Config(logging_level="TRACE")
+        assert "logging_level must be one of NONE, ERROR, WARNING, INFO, DEBUG" in str(
+            exc_info.value
+        )
