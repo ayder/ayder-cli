@@ -182,11 +182,17 @@ class ExecutionPolicy:
         request: ToolRequest,
         registry: Any,
         context: Optional[RuntimeContext] = None,
+        *,
+        pre_approved: bool = False,
     ) -> ExecutionResult:
         """Single shared execution path: validate → check permission → execute.
 
         Both CLI and TUI route through this method so registry.execute is never
         called directly from interface-specific code.
+
+        Args:
+            pre_approved: If True, skip the permission check (user already
+                confirmed via the confirmation dialog).
         """
         from ayder_cli.application.validation import ValidationAuthority, ToolRequest as VToolRequest
 
@@ -196,12 +202,13 @@ class ExecutionPolicy:
         if not valid:
             return ExecutionResult(success=False, error=err)
 
-        perm_err = self.check_permission(request.name, context)
-        if perm_err is not None:
-            return ExecutionResult(success=False, error=perm_err)
+        if not pre_approved:
+            perm_err = self.check_permission(request.name, context)
+            if perm_err is not None:
+                return ExecutionResult(success=False, error=perm_err)
 
         raw = registry.execute(request.name, request.arguments)
-        return ExecutionResult(success=True, was_confirmed=False, result=str(raw))
+        return ExecutionResult(success=True, was_confirmed=pre_approved, result=str(raw))
 
     def confirm_file_diff(self, diff: FileDiffConfirmation) -> bool:
         """Policy-level auto-approval for file diffs."""

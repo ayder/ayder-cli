@@ -30,6 +30,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+temporal = [
+    "temporalio>=1.22.0,<1.23.0; python_version < '3.13'",
+]
+
 [project.urls]
 Homepage = "https://github.com/ayder/ayder-cli"
 Repository = "https://github.com/ayder/ayder-cli.git"

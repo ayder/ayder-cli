@@ -311,3 +311,22 @@ def _run_implement_cli(task_query: str, permissions=None, iterations=50) -> int:
 def _run_implement_all_cli(permissions=None, iterations=50) -> int:
     """Implement all pending tasks sequentially."""
     return TaskRunner.implement_all(permissions=permissions, iterations=iterations)
+
+
+def _run_temporal_queue_cli(
+    queue_name: str,
+    prompt_path: str | None = None,
+    permissions=None,
+    iterations: int = 50,
+) -> int:
+    """Start a Temporal worker queue session."""
+    from ayder_cli.services.temporal_worker import TemporalWorker, TemporalWorkerConfig
+
+    worker_config = TemporalWorkerConfig(
+        queue_name=queue_name,
+        prompt_path=prompt_path,
+        permissions=set(permissions or {"r"}),
+        iterations=iterations,
+    )
+    worker = TemporalWorker(worker_config)
+    return worker.run()

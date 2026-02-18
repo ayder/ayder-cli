@@ -88,6 +88,7 @@ _KNOWN_TOOLS: dict[str, list[str]] = {
     "activate_virtualenv": [],
     "remove_virtualenv": [],
     "fetch_web": ["url"],
+    "temporal_workflow": ["action"],
 }
 
 

@@ -181,7 +181,12 @@ class TuiChatLoop:
 
             # 6. Route: OpenAI tool_calls → XML fallback → JSON fallback → done
             if tool_calls:
-                await self._execute_openai_tool_calls(tool_calls)
+                escalated = await self._execute_openai_tool_calls(tool_calls)
+                if escalated:
+                    self.cb.on_system_message(
+                        "⚠ Escalation requested. Activity stopped; waiting for user prompt."
+                    )
+                    return
                 no_tools = False
                 continue
 
@@ -191,14 +196,24 @@ class TuiChatLoop:
                 custom_calls = parse_custom_tool_calls(content)
                 valid = [c for c in custom_calls if "error" not in c]
                 if valid:
-                    await self._execute_custom_tool_calls(valid)
+                    escalated = await self._execute_custom_tool_calls(valid)
+                    if escalated:
+                        self.cb.on_system_message(
+                            "⚠ Escalation requested. Activity stopped; waiting for user prompt."
+                        )
+                        return
                     no_tools = False
                     continue
 
             # JSON fallback: model outputs tool calls as a JSON array in content
             json_calls = content_processor.parse_json_tool_calls(content)
             if json_calls:
-                await self._execute_custom_tool_calls(json_calls)
+                escalated = await self._execute_custom_tool_calls(json_calls)
+                if escalated:
+                    self.cb.on_system_message(
+                        "⚠ Escalation requested. Activity stopped; waiting for user prompt."
+                    )
+                    return
                 no_tools = False
                 continue
 
@@ -207,7 +222,7 @@ class TuiChatLoop:
 
     # -- OpenAI tool calls ---------------------------------------------------
 
-    async def _execute_openai_tool_calls(self, tool_calls) -> None:
+    async def _execute_openai_tool_calls(self, tool_calls) -> bool:
         """Split auto-approved (parallel) vs needs-confirmation (sequential)."""
         auto_approved = []
         needs_confirmation = []
@@ -223,6 +238,7 @@ class TuiChatLoop:
             self.cb.on_tool_start(tc.id, tc.function.name, args)
 
         tool_results: list[dict | BaseException] = []
+        escalated = False
 
         # Auto-approved in parallel
         if auto_approved:
@@ -241,7 +257,10 @@ class TuiChatLoop:
             if confirm is not None and getattr(confirm, "action", None) == "approve":
                 policy = ExecutionPolicy(self.config.permissions)
                 exec_result = await asyncio.to_thread(
-                    policy.execute_with_registry, ToolRequest(name, args), self.registry
+                    policy.execute_with_registry,
+                    ToolRequest(name, args),
+                    self.registry,
+                    pre_approved=True,
                 )
                 result = _unwrap_exec_result(exec_result)
                 tool_results.append(
@@ -282,6 +301,7 @@ class TuiChatLoop:
                 tid = rd["tool_call_id"]
                 name = rd["name"]
                 result = rd["result"]
+                escalated = escalated or _is_escalation_result(str(result))
                 self.cb.on_tool_complete(tid, str(result))
                 self.messages.append(
                     {
@@ -312,6 +332,7 @@ class TuiChatLoop:
             self.messages.append({"role": "user", "content": custom_instructions})
 
         self.cb.on_tools_cleanup()
+        return escalated
 
     async def _exec_tool_async(self, tc) -> dict:
         """Execute a single tool call through the shared execution policy path."""
@@ -326,10 +347,11 @@ class TuiChatLoop:
 
     # -- Custom XML tool calls -----------------------------------------------
 
-    async def _execute_custom_tool_calls(self, calls: list[dict]) -> None:
+    async def _execute_custom_tool_calls(self, calls: list[dict]) -> bool:
         """Execute XML-parsed tool calls through the shared execution policy path."""
         policy = ExecutionPolicy(self.config.permissions)
         results_text = []
+        escalated = False
         for call in calls:
             name = call.get("name", "unknown")
             args = call.get("arguments", {})
@@ -341,6 +363,7 @@ class TuiChatLoop:
                 )
                 result = exec_result.result if exec_result.success else str(exec_result.error)
                 result = result or ""
+                escalated = escalated or _is_escalation_result(str(result))
                 results_text.append(f"[{name}] {result}")
                 self.cb.on_tool_complete(call_id, result)
             except Exception as e:
@@ -349,6 +372,7 @@ class TuiChatLoop:
 
         self.messages.append({"role": "user", "content": "\n".join(results_text)})
         self.cb.on_tools_cleanup()
+        return escalated
 
     # -- Checkpoint ----------------------------------------------------------
 
@@ -447,3 +471,17 @@ def _unwrap_exec_result(exec_result) -> str:
     if hasattr(exec_result, "success"):
         return exec_result.result if exec_result.success else str(exec_result.error)
     return str(exec_result)
+
+
+def _is_escalation_result(result_text: str) -> bool:
+    """Detect escalation directive in tool result payload."""
+    try:
+        payload = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    action = payload.get("action")
+    action_control = payload.get("action_control")
+    return action == "escalate" or action_control == "escalate"

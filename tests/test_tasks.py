@@ -1,10 +1,18 @@
 """Tests for task management functionality in tasks.py."""
 
-import pytest
 from pathlib import Path
-from ayder_cli.tasks import list_tasks, show_task, create_task
+
+import pytest
+
+from ayder_cli.application.temporal_metadata import persist_temporal_run_metadata
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.tasks import (
+    create_task,
+    list_tasks,
+    show_task,
+    update_task_temporal_metadata,
+)
 
 
 @pytest.fixture
@@ -266,3 +274,88 @@ class TestCreateTaskIntegration:
         assert isinstance(result, ToolSuccess)
         assert "Test Task" in result
         assert "Test description" in result
+
+
+class TestTemporalMetadata:
+    """Tests for temporal metadata persistence and task markdown updates."""
+
+    def test_update_task_temporal_metadata_appends_section(self, project_context):
+        create_task(project_context, "Temporal Task", "desc")
+
+        result = update_task_temporal_metadata(
+            project_context,
+            task_id=1,
+            workflow_id="wf-123",
+            report_path=".ayder/tasks/reports/TASK-001/report.md",
+            origin_queue="q-dev",
+            status="completed",
+        )
+
+        assert isinstance(result, ToolSuccess)
+        task_file = project_context.root / ".ayder" / "tasks" / "TASK-001-temporal-task.md"
+        text = task_file.read_text(encoding="utf-8")
+        assert "## Temporal" in text
+        assert "wf-123" in text
+        assert "q-dev" in text
+        assert "completed" in text
+
+    def test_update_task_temporal_metadata_replaces_existing_section(self, project_context):
+        create_task(project_context, "Temporal Task", "desc")
+
+        first = update_task_temporal_metadata(
+            project_context,
+            task_id=1,
+            workflow_id="wf-old",
+            report_path="old/report.md",
+            origin_queue="q-old",
+            status="running",
+        )
+        assert isinstance(first, ToolSuccess)
+
+        second = update_task_temporal_metadata(
+            project_context,
+            task_id=1,
+            workflow_id="wf-new",
+            report_path="new/report.md",
+            origin_queue="q-new",
+            status="completed",
+        )
+        assert isinstance(second, ToolSuccess)
+
+        task_file = project_context.root / ".ayder" / "tasks" / "TASK-001-temporal-task.md"
+        text = task_file.read_text(encoding="utf-8")
+        assert text.count("## Temporal") == 1
+        assert "wf-new" in text
+        assert "new/report.md" in text
+        assert "q-new" in text
+        assert "completed" in text
+        assert "wf-old" not in text
+
+    def test_persist_temporal_run_metadata_success(self, project_context):
+        result = persist_temporal_run_metadata(
+            project_ctx=project_context,
+            metadata_dir=".ayder/metadata",
+            workflow_id="wf/unsafe:id",
+            payload={"status": "completed", "queue": "q-dev"},
+        )
+
+        assert isinstance(result, ToolSuccess)
+        rel_path = str(result)
+        assert rel_path.startswith(".ayder/metadata/runs/")
+
+        out_file = project_context.root / rel_path
+        assert out_file.exists()
+        body = out_file.read_text(encoding="utf-8")
+        assert '"completed"' in body
+        assert '"q-dev"' in body
+
+    def test_persist_temporal_run_metadata_empty_workflow_id(self, project_context):
+        result = persist_temporal_run_metadata(
+            project_ctx=project_context,
+            metadata_dir=".ayder/metadata",
+            workflow_id="   ",
+            payload={"status": "failed"},
+        )
+
+        assert isinstance(result, ToolError)
+        assert "workflow_id" in str(result)

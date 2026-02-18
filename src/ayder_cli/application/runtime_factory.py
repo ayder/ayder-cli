@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from ayder_cli.core.config import Config, load_config
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.services.llm import LLMProvider, create_llm_provider
+from ayder_cli.services.interactions import (
+    AutoApproveConfirmationPolicy,
+    NullInteractionSink,
+)
 from ayder_cli.services.tools.executor import ToolExecutor
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
@@ -58,7 +62,11 @@ def create_runtime(
     project_ctx = ProjectContext(project_root)
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
     tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
-    tool_executor = ToolExecutor(tool_registry)
+    tool_executor = ToolExecutor(
+        tool_registry,
+        interaction_sink=NullInteractionSink(),
+        confirmation_policy=AutoApproveConfirmationPolicy(),
+    )
     checkpoint_manager = CheckpointManager(project_ctx)
     memory_manager = MemoryManager(
         project_ctx,

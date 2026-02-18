@@ -10,6 +10,7 @@ from ayder_cli.tui.chat_loop import (
     TuiChatLoop,
     TuiLoopConfig,
     _parse_arguments,
+    _is_escalation_result,
 )
 from ayder_cli.tui.parser import (
     extract_think_blocks,
@@ -243,6 +244,20 @@ class TestParseArguments:
         assert _parse_arguments(None) == {}
 
 
+class TestEscalationDetection:
+    def test_escalation_from_action(self):
+        assert _is_escalation_result('{"action": "escalate"}') is True
+
+    def test_escalation_from_action_control(self):
+        assert _is_escalation_result('{"action_control": "escalate"}') is True
+
+    def test_non_escalation_payload(self):
+        assert _is_escalation_result('{"action": "hold"}') is False
+
+    def test_invalid_payload(self):
+        assert _is_escalation_result("not json") is False
+
+
 # ---------------------------------------------------------------------------
 # TuiChatLoop.run() — text-only response
 # ---------------------------------------------------------------------------
@@ -405,6 +420,37 @@ class TestRunOpenAIToolCalls:
         tool_msgs = [m for m in loop.messages if m.get("role") == "tool"]
         skipped = [m for m in tool_msgs if "skipped" in m.get("content", "").lower()]
         assert len(skipped) == 1
+
+    def test_escalation_result_stops_activity_until_user_prompt(self):
+        """Escalation from tool result should stop loop and request user intervention."""
+        loop, cb, llm, registry = _make_loop(permissions={"r", "w"})
+
+        tc = _make_tool_call(
+            call_id="tc-escalate",
+            name="temporal_workflow",
+            arguments={"action": "query_workflow", "workflow_id": "wf-1"},
+        )
+        resp_tools = _make_response(content="Checking workflow", tool_calls=[tc])
+
+        call_count = [0]
+
+        async def fake_llm(*args, **kwargs):
+            call_count[0] += 1
+            return resp_tools
+
+        escalate_payload = json.dumps({"ok": True, "action_control": "escalate"})
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=fake_llm):
+            with patch(
+                "ayder_cli.tui.chat_loop.asyncio.to_thread",
+                new_callable=AsyncMock,
+                return_value=escalate_payload,
+            ):
+                _run(loop.run())
+
+        assert call_count[0] == 1
+        system_events = [e for e in cb.events if e[0] == "system_message"]
+        assert any("Escalation requested" in e[1] for e in system_events)
 
 
 # ---------------------------------------------------------------------------

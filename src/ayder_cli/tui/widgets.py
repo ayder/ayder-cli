@@ -124,6 +124,10 @@ class ChatView(VerticalScroll):
         """Add a system message."""
         self.add_message(content, MessageType.SYSTEM)
 
+    def add_toast(self, content: str) -> None:
+        """Add a toast-style alert message."""
+        self.add_system_message(f"⚠ {content}")
+
     def clear_messages(self) -> None:
         """Clear all messages from the chat view."""
         for widget in self._message_widgets:

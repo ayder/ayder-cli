@@ -64,3 +64,43 @@ class ConfirmationPolicy(Protocol):
     ) -> bool:
         """Request confirmation with file diff preview."""
         ...
+
+
+class NullInteractionSink:
+    """No-op interaction sink for non-UI runtime composition paths."""
+
+    def on_tool_call(self, tool_name: str, args_json: str) -> None:
+        return None
+
+    def on_tool_result(self, result: str) -> None:
+        return None
+
+    def on_tool_skipped(self) -> None:
+        return None
+
+    def on_file_preview(self, file_path: str) -> None:
+        return None
+
+    def on_llm_request_debug(
+        self,
+        messages: list[dict[str, Any]] | list[Any],
+        model: str,
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None,
+    ) -> None:
+        return None
+
+
+class AutoApproveConfirmationPolicy:
+    """Default confirmation policy that approves all actions."""
+
+    def confirm_action(self, description: str) -> bool:
+        return True
+
+    def confirm_file_diff(
+        self,
+        file_path: str,
+        new_content: str,
+        description: str,
+    ) -> bool:
+        return True

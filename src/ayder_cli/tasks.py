@@ -273,3 +273,47 @@ def _update_task_status(project_ctx: ProjectContext, task_id, status):
         return ToolSuccess("Status updated")
     except Exception as e:
         return ToolError(f"Error updating task status: {str(e)}", "execution")
+
+
+def update_task_temporal_metadata(
+    project_ctx: ProjectContext,
+    task_id: int,
+    workflow_id: str,
+    report_path: str,
+    origin_queue: str,
+    status: str,
+):
+    """Append or update a Temporal metadata section in a task markdown file."""
+    _ensure_tasks_dir(project_ctx)
+    path = _get_task_path_by_id(project_ctx, int(task_id))
+
+    if path is None:
+        return ToolError(f"Error: Task TASK-{int(task_id):03d} not found.")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    temporal_block = (
+        "## Temporal\n\n"
+        f"- **Workflow ID:** {workflow_id}\n"
+        f"- **Origin Queue:** {origin_queue}\n"
+        f"- **Status:** {status}\n"
+        f"- **Report Path:** {report_path}\n"
+        f"- **Updated:** {now}\n"
+    )
+
+    try:
+        content = path.read_text(encoding="utf-8")
+
+        if re.search(r"\n## Temporal\n", content):
+            updated = re.sub(
+                r"\n## Temporal\n.*?(?=\n## |\Z)",
+                "\n" + temporal_block + "\n",
+                content,
+                flags=re.DOTALL,
+            )
+        else:
+            updated = content.rstrip() + "\n\n" + temporal_block + "\n"
+
+        path.write_text(updated, encoding="utf-8")
+        return ToolSuccess("Task temporal metadata updated")
+    except Exception as e:
+        return ToolError(f"Error updating task temporal metadata: {e}", "execution")

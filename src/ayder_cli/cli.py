@@ -32,6 +32,13 @@ def create_parser():
         action="store_true",
         help="Implement all pending tasks sequentially and exit",
     )
+    parser.add_argument(
+        "--temporal-task-queue",
+        type=str,
+        metavar="QUEUE",
+        default=None,
+        help="Start Temporal worker bound to the given task queue",
+    )
 
     # Mutually exclusive group for file and stdin
     input_group = parser.add_mutually_exclusive_group()
@@ -45,6 +52,13 @@ def create_parser():
     )
     input_group.add_argument(
         "--stdin", action="store_true", help="Read prompt from stdin"
+    )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Inject custom system prompt from file",
     )
 
     # Permission flags: r=read, w=write, x=execute, http=web/network
@@ -105,6 +119,7 @@ def main():
         _run_tasks_cli,
         _run_implement_cli,
         _run_implement_all_cli,
+        _run_temporal_queue_cli,
     )
 
     parser = create_parser()
@@ -143,6 +158,15 @@ def main():
         )
     if args.implement_all:
         sys.exit(_run_implement_all_cli(permissions=granted, iterations=iterations))
+    if args.temporal_task_queue:
+        sys.exit(
+            _run_temporal_queue_cli(
+                queue_name=args.temporal_task_queue,
+                prompt_path=args.prompt,
+                permissions=granted,
+                iterations=iterations,
+            )
+        )
 
     # Handle file/stdin input
     context = None

@@ -279,6 +279,9 @@ class TestBackwardCompatibility:
         
         # Environment tools
         assert 'manage_environment_vars' in tool_names
+
+        # Temporal tools
+        assert 'temporal_workflow' in tool_names
         
         # Virtualenv tools
         assert 'create_virtualenv' in tool_names
@@ -301,3 +304,15 @@ class TestBackwardCompatibility:
             assert schema["type"] == "function"
             assert "function" in schema
             assert schema["function"]["name"] == td.name
+
+    def test_temporal_workflow_has_action_enum(self):
+        """Temporal tool schema should define the expected action enum."""
+        temporal = next(td for td in TOOL_DEFINITIONS if td.name == "temporal_workflow")
+        schema = temporal.to_openai_schema()
+        actions = schema["function"]["parameters"]["properties"]["action"]["enum"]
+        assert "start_workflow" in actions
+        assert "query_workflow" in actions
+        assert "signal_workflow" in actions
+        assert "escalate" in actions
+        assert "cancel_workflow" in actions
+        assert "report_phase_result" in actions

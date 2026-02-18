@@ -32,6 +32,9 @@ class TestDefaultValues:
         assert DEFAULTS["verbose"] is False
         assert DEFAULTS["logging"]["file_enabled"] is True
         assert DEFAULTS["logging"]["file_path"] == ".ayder/log/ayder.log"
+        assert DEFAULTS["temporal"]["enabled"] is False
+        assert DEFAULTS["temporal"]["host"] == "localhost:7233"
+        assert DEFAULTS["temporal"]["namespace"] == "default"
 
     def test_defaults_contains_all_keys(self):
         """Test that DEFAULTS has all required configuration keys."""
@@ -43,6 +46,7 @@ class TestDefaultValues:
             "editor",
             "verbose",
             "logging",
+            "temporal",
         ]
         for key in required_keys:
             assert key in DEFAULTS
@@ -59,6 +63,9 @@ class TestDefaultValues:
         assert "[editor]" in _DEFAULT_TOML
         assert "[ui]" in _DEFAULT_TOML
         assert "[logging]" in _DEFAULT_TOML
+        assert "[temporal]" in _DEFAULT_TOML
+        assert "[temporal.timeouts]" in _DEFAULT_TOML
+        assert "[temporal.retry]" in _DEFAULT_TOML
         assert "{provider}" in _DEFAULT_TOML
         assert "{openai_model}" in _DEFAULT_TOML
         assert "{anthropic_model}" in _DEFAULT_TOML
@@ -66,6 +73,8 @@ class TestDefaultValues:
         assert "{editor}" in _DEFAULT_TOML
         assert "{verbose_str}" in _DEFAULT_TOML
         assert "{logging_file_enabled}" in _DEFAULT_TOML
+        assert "{temporal_enabled}" in _DEFAULT_TOML
+        assert "{temporal_host}" in _DEFAULT_TOML
 
     def test_config_paths_defined(self):
         """Test that CONFIG_DIR and CONFIG_PATH are defined."""
@@ -105,6 +114,9 @@ class TestLoadConfigFirstRun:
         assert "[editor]" in content
         assert "[ui]" in content
         assert "[logging]" in content
+        assert "[temporal]" in content
+        assert "[temporal.timeouts]" in content
+        assert "[temporal.retry]" in content
 
     def test_default_values_returned_on_first_run(self, tmp_path, monkeypatch):
         """Test that default values are returned when creating new config."""
@@ -170,6 +182,51 @@ class TestLoadConfigFirstRun:
         assert 'editor = "vim"' in content
         assert "verbose = false" in content
         assert "file_enabled = true" in content
+        assert "enabled = false" in content
+        assert "host = \"localhost:7233\"" in content
+
+    def test_temporal_config_loading(self, tmp_path, monkeypatch):
+        """Test loading temporal section from existing config file."""
+        mock_config_dir = tmp_path / ".ayder"
+        mock_config_path = mock_config_dir / "config.toml"
+        mock_config_dir.mkdir()
+
+        config_content = """\
+    [temporal]
+    enabled = true
+    host = "temporal.example.local:7233"
+    namespace = "prod"
+    metadata_dir = ".runtime/temporal"
+
+    [temporal.timeouts]
+    workflow_schedule_to_close_seconds = 3600
+    activity_start_to_close_seconds = 600
+    activity_heartbeat_seconds = 20
+
+    [temporal.retry]
+    initial_interval_seconds = 2
+    backoff_coefficient = 2.5
+    maximum_interval_seconds = 45
+    maximum_attempts = 4
+    """
+        mock_config_path.write_text(config_content)
+
+        monkeypatch.setattr("ayder_cli.core.config.CONFIG_DIR", mock_config_dir)
+        monkeypatch.setattr("ayder_cli.core.config.CONFIG_PATH", mock_config_path)
+
+        config = load_config()
+
+        assert config.temporal.enabled is True
+        assert config.temporal.host == "temporal.example.local:7233"
+        assert config.temporal.namespace == "prod"
+        assert config.temporal.metadata_dir == ".runtime/temporal"
+        assert config.temporal.timeouts.workflow_schedule_to_close_seconds == 3600
+        assert config.temporal.timeouts.activity_start_to_close_seconds == 600
+        assert config.temporal.timeouts.activity_heartbeat_seconds == 20
+        assert config.temporal.retry.initial_interval_seconds == 2
+        assert config.temporal.retry.backoff_coefficient == 2.5
+        assert config.temporal.retry.maximum_interval_seconds == 45
+        assert config.temporal.retry.maximum_attempts == 4
 
 
 class TestLoadConfigExistingConfig:

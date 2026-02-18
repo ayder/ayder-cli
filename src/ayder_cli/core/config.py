@@ -35,6 +35,23 @@ DEFAULTS: Dict[str, Any] = {
     },
     "max_background_processes": 5,
     "max_iterations": 50,
+    "temporal": {
+        "enabled": False,
+        "host": "localhost:7233",
+        "namespace": "default",
+        "metadata_dir": ".ayder/temporal",
+        "timeouts": {
+            "workflow_schedule_to_close_seconds": 7200,
+            "activity_start_to_close_seconds": 900,
+            "activity_heartbeat_seconds": 30,
+        },
+        "retry": {
+            "initial_interval_seconds": 5,
+            "backoff_coefficient": 2.0,
+            "maximum_interval_seconds": 60,
+            "maximum_attempts": 3,
+        },
+    },
 }
 
 _PROVIDER_SECTIONS = ("openai", "anthropic", "gemini")
@@ -78,7 +95,90 @@ retention = "{logging_retention}"
 [agent]
 # Maximum agentic iterations (tool calls) per user message
 max_iterations = {max_iterations}
+
+[temporal]
+enabled = {temporal_enabled}
+host = "{temporal_host}"
+namespace = "{temporal_namespace}"
+metadata_dir = "{temporal_metadata_dir}"
+
+[temporal.timeouts]
+workflow_schedule_to_close_seconds = {temporal_workflow_schedule_to_close_seconds}
+activity_start_to_close_seconds = {temporal_activity_start_to_close_seconds}
+activity_heartbeat_seconds = {temporal_activity_heartbeat_seconds}
+
+[temporal.retry]
+initial_interval_seconds = {temporal_initial_interval_seconds}
+backoff_coefficient = {temporal_backoff_coefficient}
+maximum_interval_seconds = {temporal_maximum_interval_seconds}
+maximum_attempts = {temporal_maximum_attempts}
 """
+
+
+class TemporalTimeoutsConfig(BaseModel):
+    """Temporal timeout settings."""
+
+    model_config = ConfigDict(frozen=True)
+
+    workflow_schedule_to_close_seconds: int = Field(default=7200)
+    activity_start_to_close_seconds: int = Field(default=900)
+    activity_heartbeat_seconds: int = Field(default=30)
+
+    @field_validator(
+        "workflow_schedule_to_close_seconds",
+        "activity_start_to_close_seconds",
+        "activity_heartbeat_seconds",
+    )
+    @classmethod
+    def validate_positive_seconds(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("temporal timeout values must be positive")
+        return v
+
+
+class TemporalRetryConfig(BaseModel):
+    """Temporal retry policy settings."""
+
+    model_config = ConfigDict(frozen=True)
+
+    initial_interval_seconds: int = Field(default=5)
+    backoff_coefficient: float = Field(default=2.0)
+    maximum_interval_seconds: int = Field(default=60)
+    maximum_attempts: int = Field(default=3)
+
+    @field_validator("initial_interval_seconds", "maximum_interval_seconds", "maximum_attempts")
+    @classmethod
+    def validate_positive_retry_values(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("temporal retry values must be positive")
+        return v
+
+    @field_validator("backoff_coefficient")
+    @classmethod
+    def validate_backoff_coefficient(cls, v: float) -> float:
+        if v < 1.0:
+            raise ValueError("backoff_coefficient must be >= 1.0")
+        return v
+
+
+class TemporalConfig(BaseModel):
+    """Optional Temporal runtime configuration."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = Field(default=False)
+    host: str = Field(default="localhost:7233")
+    namespace: str = Field(default="default")
+    metadata_dir: str = Field(default=".ayder/temporal")
+    timeouts: TemporalTimeoutsConfig = Field(default_factory=TemporalTimeoutsConfig)
+    retry: TemporalRetryConfig = Field(default_factory=TemporalRetryConfig)
+
+    @field_validator("host", "namespace", "metadata_dir")
+    @classmethod
+    def validate_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("temporal host/namespace/metadata_dir must be non-empty")
+        return v
 
 
 class Config(BaseModel):
@@ -100,6 +200,7 @@ class Config(BaseModel):
     logging_retention: str = Field(default="7 days")
     max_background_processes: int = Field(default=5)
     max_iterations: int = Field(default=50)
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
 
     @model_validator(mode="before")
     @classmethod
@@ -143,6 +244,10 @@ class Config(BaseModel):
                         new_data[field_name] = value
                 else:
                     new_data.update(section_data)
+
+        # Keep temporal section as nested config object
+        if "temporal" in data and isinstance(data["temporal"], dict):
+            new_data["temporal"] = data["temporal"]
 
         return new_data
 
@@ -228,6 +333,29 @@ def load_config() -> Config:
             "logging_rotation": DEFAULTS["logging"]["rotation"],
             "logging_retention": DEFAULTS["logging"]["retention"],
             "max_iterations": DEFAULTS["max_iterations"],
+            "temporal_enabled": str(DEFAULTS["temporal"]["enabled"]).lower(),
+            "temporal_host": DEFAULTS["temporal"]["host"],
+            "temporal_namespace": DEFAULTS["temporal"]["namespace"],
+            "temporal_metadata_dir": DEFAULTS["temporal"]["metadata_dir"],
+            "temporal_workflow_schedule_to_close_seconds": DEFAULTS["temporal"]["timeouts"][
+                "workflow_schedule_to_close_seconds"
+            ],
+            "temporal_activity_start_to_close_seconds": DEFAULTS["temporal"]["timeouts"][
+                "activity_start_to_close_seconds"
+            ],
+            "temporal_activity_heartbeat_seconds": DEFAULTS["temporal"]["timeouts"][
+                "activity_heartbeat_seconds"
+            ],
+            "temporal_initial_interval_seconds": DEFAULTS["temporal"]["retry"][
+                "initial_interval_seconds"
+            ],
+            "temporal_backoff_coefficient": DEFAULTS["temporal"]["retry"][
+                "backoff_coefficient"
+            ],
+            "temporal_maximum_interval_seconds": DEFAULTS["temporal"]["retry"][
+                "maximum_interval_seconds"
+            ],
+            "temporal_maximum_attempts": DEFAULTS["temporal"]["retry"]["maximum_attempts"],
         }
         for p in _PROVIDER_SECTIONS:
             for k, v in DEFAULTS[p].items():

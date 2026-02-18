@@ -38,8 +38,8 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
     def compose(self) -> ComposeResult:
         """Compose the modal."""
         with Vertical():
-            yield Label(f"? Tool: {self.title_text}", classes="prompt")
-            yield Label(self.description, classes="description")
+            yield Label(f"? Tool: {self.title_text}", classes="prompt", markup=False)
+            yield Label(self.description, classes="description", markup=False)
 
             if self.diff_content:
                 diff_text = self._render_diff()
@@ -266,7 +266,7 @@ class CLISafeModeScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label(f"⛔ Safe Mode: '{self.tool_name}' blocked", classes="title")
+            yield Label(f"⛔ Safe Mode: '{self.tool_name}' blocked", classes="title", markup=False)
             yield Label("Restart without --safe to enable this tool.")
             yield Label("Press any key to continue...", classes="dim")
 
@@ -313,10 +313,10 @@ class CLISelectScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         """Compose the selection modal."""
         with Vertical():
-            yield Label(f"? {self.title_text}", classes="prompt")
+            yield Label(f"? {self.title_text}", classes="prompt", markup=False)
 
             if self.description:
-                yield Label(self.description, classes="description")
+                yield Label(self.description, classes="description", markup=False)
 
             # Build the list display
             list_content = self._render_list()
@@ -402,7 +402,7 @@ class TaskEditScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label(f"Editing: {self.title_text}", classes="prompt")
+            yield Label(f"Editing: {self.title_text}", classes="prompt", markup=False)
             yield TextArea(self.initial_content, id="task-editor", language="markdown")
             yield Label("Ctrl+S save • Esc cancel", classes="hint")
 

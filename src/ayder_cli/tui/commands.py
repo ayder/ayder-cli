@@ -678,6 +678,53 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.push_screen(CLIPermissionScreen(app.permissions), on_result)
 
 
+def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /temporal command - start/status local temporal queue runner."""
+    from ayder_cli.services.temporal_worker import TemporalWorker, TemporalWorkerConfig
+
+    queue_name = args.strip()
+    current_queue = getattr(app, "_temporal_queue_name", None)
+    current_worker = getattr(app, "_temporal_worker_instance", None)
+    current_worker_task = getattr(app, "_temporal_worker_task", None)
+
+    if not queue_name:
+        if current_queue:
+            status = "running"
+            if current_worker_task is not None and getattr(
+                current_worker_task, "is_finished", False
+            ):
+                status = "stopped"
+            chat_view.add_system_message(
+                f"Temporal queue: {current_queue} ({status})"
+            )
+            return
+
+        chat_view.add_system_message("No temporal queue active. Usage: /temporal <queue-name>")
+        return
+
+    if current_worker is not None:
+        current_worker.stop()
+    if current_worker_task is not None and hasattr(current_worker_task, "cancel"):
+        current_worker_task.cancel()
+
+    worker_config = TemporalWorkerConfig(
+        queue_name=queue_name,
+        prompt_path=None,
+        permissions=set(app.permissions),
+        iterations=app.chat_loop.config.max_iterations,
+    )
+    worker = TemporalWorker(worker_config)
+    worker_task = app.run_worker(worker.run_async(), exclusive=False)
+
+    setattr(app, "_temporal_queue_name", queue_name)
+    setattr(app, "_temporal_worker_instance", worker)
+    setattr(app, "_temporal_worker_task", worker_task)
+
+    chat_view.add_system_message(
+        f"Temporal queue runner started: {queue_name}. Use Ctrl+C to stop."
+    )
+
+
 def do_clear(app: AyderApp, chat_view: ChatView) -> None:
     """Clear conversation history."""
     from ayder_cli.application.message_contract import get_message_role
@@ -737,4 +784,5 @@ COMMAND_MAP: dict[str, Callable] = {
     "/task-edit": handle_task_edit,
     "/archive-completed-tasks": handle_archive,
     "/permission": handle_permission,
+    "/temporal": handle_temporal,
 }

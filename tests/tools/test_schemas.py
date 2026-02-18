@@ -59,6 +59,7 @@ class TestToolDefinitions:
             "manage_environment_vars",
             "create_virtualenv", "install_requirements",
             "list_virtualenvs", "activate_virtualenv", "remove_virtualenv",
+            "temporal_workflow",
             "fetch_web",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
