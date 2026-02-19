@@ -27,7 +27,6 @@ class TestMainEntryPoint:
         
         with patch("ayder_cli.cli.main") as mock_main:
             # Import and run the __main__ module directly
-            import ayder_cli.__main__
             
             # Since we're just importing (not running with python -m),
             # the __name__ == "__main__" guard should prevent execution
@@ -42,7 +41,7 @@ class TestMainEntryPoint:
         with patch("ayder_cli.cli.main") as mock_main:
             # Create a mock that can be imported without executing
             import importlib.util
-            spec = importlib.util.find_spec("ayder_cli.__main__")
+            assert importlib.util.find_spec("ayder_cli.__main__") is not None
             
             # Just finding the spec doesn't execute the module
             # But importing will trigger the if __name__ == "__main__" check

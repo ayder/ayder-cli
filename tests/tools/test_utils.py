@@ -6,7 +6,7 @@ This module tests the utility functions including:
 """
 
 import json
-from unittest.mock import mock_open, patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

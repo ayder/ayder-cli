@@ -1,5 +1,4 @@
 """Tests for ConfirmResult dataclass and CLIConfirmScreen."""
-import pytest
 from unittest.mock import patch, MagicMock
 
 
@@ -170,7 +169,6 @@ class TestToolNeedsConfirmation:
     def test_read_tool_auto_approved_with_default_permissions(self):
         """Test that read tools are auto-approved with default permissions."""
         from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
-        from unittest.mock import MagicMock
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})

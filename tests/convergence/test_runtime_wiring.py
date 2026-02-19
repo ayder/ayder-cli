@@ -7,7 +7,6 @@ actual call-chain behavior via mocks.
 
 import inspect
 import asyncio
-import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
 

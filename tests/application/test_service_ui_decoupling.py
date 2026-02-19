@@ -9,7 +9,7 @@ This test file verifies the complete decoupling architecture:
 import ast
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -156,7 +156,7 @@ class TestFullDecouplingFlow:
             tool_call.id = "call_123"
             
             # Execute
-            result = executor.execute_tool_calls(
+            executor.execute_tool_calls(
                 [tool_call],
                 session,
                 granted_permissions=set(),
@@ -226,7 +226,7 @@ class TestFullDecouplingFlow:
             tool_call.function.arguments = '{"file_path": "/test.txt", "content": "data"}'
             tool_call.id = "call_123"
             
-            result = executor.execute_tool_calls(
+            executor.execute_tool_calls(
                 [tool_call],
                 session,
                 granted_permissions=set(),
@@ -268,7 +268,7 @@ class TestFullDecouplingFlow:
             tool_call.function.arguments = '{"file_path": "/test.txt"}'
             tool_call.id = "call_123"
             
-            result = executor.execute_tool_calls(
+            executor.execute_tool_calls(
                 [tool_call],
                 session,
                 granted_permissions={"r"},  # Read permission granted

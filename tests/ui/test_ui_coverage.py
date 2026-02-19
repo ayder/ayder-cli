@@ -7,9 +7,7 @@ This module tests the remaining uncovered lines in ui.py:
 - Line 238: Warning in confirm_with_diff()
 """
 
-import pytest
-from unittest.mock import mock_open, patch, MagicMock
-import pytest
+from unittest.mock import patch, MagicMock
 
 from ayder_cli import ui
 

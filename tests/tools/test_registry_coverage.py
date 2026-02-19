@@ -1,11 +1,10 @@
 """Additional coverage tests for tools/registry.py."""
 
 import json
-import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 from ayder_cli.tools import registry
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.core.result import ToolError
 
 
 class TestToolRegistryExecute:

@@ -646,16 +646,26 @@ class GeminiProvider(LLMProvider):
 
 
 def create_llm_provider(config: Any) -> LLMProvider:
-    """Create the appropriate LLM provider based on config.provider.
+    """Create the appropriate LLM provider based on config.driver.
 
     Args:
-        config: Config object with provider, base_url, api_key fields.
+        config: Config object with driver/provider/base_url/api_key fields.
 
     Returns:
         An LLMProvider instance.
     """
-    provider = getattr(config, "provider", "openai")
-    if provider == "anthropic":
+    driver_raw = getattr(config, "driver", None)
+    driver = driver_raw if isinstance(driver_raw, str) and driver_raw else None
+    if driver is None:
+        # Compatibility fallback for callers still providing provider-only config.
+        provider_name = getattr(config, "provider", "openai")
+        driver = {
+            "openai": "openai",
+            "anthropic": "anthropic",
+            "gemini": "google",
+        }.get(provider_name, "openai")
+
+    if driver == "anthropic":
         try:
             return AnthropicProvider(api_key=config.api_key)
         except ImportError:
@@ -663,7 +673,7 @@ def create_llm_provider(config: Any) -> LLMProvider:
                 "Anthropic provider requires the 'anthropic' package. "
                 "Install it with: pip install anthropic"
             )
-    if provider == "gemini":
+    if driver == "google":
         try:
             return GeminiProvider(api_key=config.api_key)
         except ImportError:
@@ -671,4 +681,9 @@ def create_llm_provider(config: Any) -> LLMProvider:
                 "Gemini provider requires the 'google-genai' package. "
                 "Install it with: pip install google-genai"
             )
-    return OpenAIProvider(base_url=config.base_url, api_key=config.api_key)
+    if driver == "openai":
+        return OpenAIProvider(base_url=config.base_url, api_key=config.api_key)
+
+    raise ValueError(
+        f"Unsupported LLM driver '{driver}'. Expected one of: openai, anthropic, google."
+    )

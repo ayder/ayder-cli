@@ -1,10 +1,7 @@
 """Tests for virtual environment management tools."""
 
-import sys
-import shutil
 from unittest.mock import patch, MagicMock
 import pytest
-from pathlib import Path
 from ayder_cli.tools import venv as impl
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError

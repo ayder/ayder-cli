@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
+from ayder_cli.core.config import list_provider_profiles
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
 from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEditScreen
@@ -36,21 +37,24 @@ def handle_help(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 
 def handle_provider(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Switch active LLM provider (openai, anthropic, gemini)."""
-    from ayder_cli.core.config import _PROVIDER_SECTIONS
-
-    providers = list(_PROVIDER_SECTIONS)
+    """Switch active LLM provider profile from [llm.<name>] config sections."""
+    providers = list_provider_profiles()
+    current_provider = app.config.provider
+    if current_provider not in providers:
+        providers.append(current_provider)
+    providers = sorted(dict.fromkeys(providers))
+    provider_aliases = {p.lower(): p for p in providers}
 
     if args.strip():
-        selected = args.strip().lower()
-        if selected not in providers:
+        selected_key = args.strip().lower()
+        selected = provider_aliases.get(selected_key)
+        if selected is None:
             chat_view.add_system_message(
-                f"Unknown provider: {selected}. Choose from: {', '.join(providers)}"
+                f"Unknown provider: {args.strip()}. Choose from: {', '.join(providers)}"
             )
             return
     else:
         # Show interactive select screen
-        current_provider = app.config.provider
         items = [(p, p) for p in providers]
 
         def on_provider_selected(selected: str | None) -> None:
@@ -88,7 +92,7 @@ def _apply_provider_switch(
     # Recreate the LLM provider
     try:
         app.llm = create_llm_provider(new_config)
-    except (ModuleNotFoundError, ImportError) as e:
+    except (ModuleNotFoundError, ImportError, ValueError) as e:
         # SDK not installed or provider not yet supported — revert and inform
         app.config = old_config
         chat_view.add_system_message(f"Cannot switch to {provider}: {e}")

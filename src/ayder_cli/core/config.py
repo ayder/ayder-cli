@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 CONFIG_DIR = Path("~/.ayder").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -10,17 +10,20 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 DEFAULTS: Dict[str, Any] = {
     "provider": "openai",
     "openai": {
+        "driver": "openai",
         "base_url": "http://localhost:11434/v1",
         "api_key": "ollama",
         "model": "qwen3-coder:latest",
         "num_ctx": 65536,
     },
     "anthropic": {
+        "driver": "anthropic",
         "api_key": "",
         "model": "claude-sonnet-4-5-20250929",
         "num_ctx": 8192,
     },
     "gemini": {
+        "driver": "google",
         "api_key": "",
         "model": "gemini-3-flash",
         "num_ctx": 65536,
@@ -55,46 +58,27 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 _PROVIDER_SECTIONS = ("openai", "anthropic", "gemini")
+_DRIVER_BY_PROVIDER = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "google",
+}
 
 _DEFAULT_TOML = """\
-# Active provider: "openai", "anthropic", or "gemini"
+config_version = "2.0"
+
+[app]
 provider = "{provider}"
-
-[openai]
-base_url = "{openai_base_url}"
-api_key = "{openai_api_key}"
-model = "{openai_model}"
-num_ctx = {openai_num_ctx}
-
-[anthropic]
-api_key = "{anthropic_api_key}"
-model = "{anthropic_model}"
-num_ctx = {anthropic_num_ctx}
-
-[gemini]
-api_key = "{gemini_api_key}"
-model = "{gemini_model}"
-num_ctx = {gemini_num_ctx}
-
-[editor]
-# Editor to use for /task-edit command (vim, nano, pico, etc.)
 editor = "{editor}"
-
-[ui]
-# Show written file contents after write_file tool calls (true/false)
 verbose = {verbose_str}
+max_background_processes = {max_background_processes}
+max_iterations = {max_iterations}
 
 [logging]
-# Optional level: NONE, ERROR, WARNING, INFO, DEBUG
-# If omitted, runtime default is NONE.
 file_enabled = {logging_file_enabled}
 file_path = "{logging_file_path}"
 rotation = "{logging_rotation}"
 retention = "{logging_retention}"
-
-[agent]
-# Maximum agentic iterations (tool calls) per user message
-max_iterations = {max_iterations}
 
 [temporal]
 enabled = {temporal_enabled}
@@ -112,6 +96,25 @@ initial_interval_seconds = {temporal_initial_interval_seconds}
 backoff_coefficient = {temporal_backoff_coefficient}
 maximum_interval_seconds = {temporal_maximum_interval_seconds}
 maximum_attempts = {temporal_maximum_attempts}
+
+[llm.openai]
+driver = "openai"
+base_url = "{openai_base_url}"
+api_key = "{openai_api_key}"
+model = "{openai_model}"
+num_ctx = {openai_num_ctx}
+
+[llm.anthropic]
+driver = "anthropic"
+api_key = "{anthropic_api_key}"
+model = "{anthropic_model}"
+num_ctx = {anthropic_num_ctx}
+
+[llm.gemini]
+driver = "google"
+api_key = "{gemini_api_key}"
+model = "{gemini_model}"
+num_ctx = {gemini_num_ctx}
 """
 
 
@@ -186,7 +189,9 @@ class Config(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
+    config_version: str = Field(default="2.0")
     provider: str = Field(default="openai")
+    driver: str = Field(default="openai")
     base_url: str | None = Field(default="http://localhost:11434/v1")
     api_key: str = Field(default="ollama")
     model: str = Field(default="qwen3-coder:latest")
@@ -205,45 +210,38 @@ class Config(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def flatten_nested_sections(cls, data: Any) -> Any:
-        """Flatten nested TOML sections into flat fields.
-
-        Handles provider sections ([openai], [anthropic], [gemini]),
-        legacy [llm] section, and utility sections ([editor], [ui], [agent]).
-        The active provider section's fields are merged into the top level.
-        """
+        """Flatten v2 TOML sections into flat fields."""
         if not isinstance(data, dict):
             return data
 
         new_data = data.copy()
 
-        # Determine active provider
-        provider = new_data.get("provider", "openai")
+        app_section = data.get("app")
+        if isinstance(app_section, dict):
+            new_data.pop("app", None)
+            new_data.update(app_section)
 
-        # Merge active provider section into flat config
-        if provider in _PROVIDER_SECTIONS and provider in data and isinstance(data[provider], dict):
-            new_data.update(new_data.pop(provider))
+        provider = str(new_data.get("provider", DEFAULTS["provider"]))
 
-        # Discard non-active provider sections
-        for p in _PROVIDER_SECTIONS:
-            new_data.pop(p, None)
+        llm_section = data.get("llm")
+        if isinstance(llm_section, dict):
+            profile = llm_section.get(provider)
+            if not isinstance(profile, dict):
+                default_profile = llm_section.get(DEFAULTS["provider"])
+                if isinstance(default_profile, dict):
+                    profile = default_profile
+            if isinstance(profile, dict):
+                new_data.update(profile)
+            new_data.pop("llm", None)
 
-        # Backward compat: flatten legacy [llm] section
-        if "llm" in data and isinstance(data["llm"], dict):
-            section_data = new_data.pop("llm")
-            new_data.update(section_data)
+        if "driver" not in new_data:
+            new_data["driver"] = _DRIVER_BY_PROVIDER.get(provider, "openai")
 
-        # Flatten utility sections
-        for section in ["editor", "ui", "agent", "logging"]:
-            if section in data and isinstance(data[section], dict):
-                section_data = new_data.pop(section)
-                if section == "logging":
-                    for key, value in section_data.items():
-                        field_name = (
-                            key if key.startswith("logging_") else f"logging_{key}"
-                        )
-                        new_data[field_name] = value
-                else:
-                    new_data.update(section_data)
+        if "logging" in data and isinstance(data["logging"], dict):
+            section_data = new_data.pop("logging")
+            for key, value in section_data.items():
+                field_name = key if key.startswith("logging_") else f"logging_{key}"
+                new_data[field_name] = value
 
         # Keep temporal section as nested config object
         if "temporal" in data and isinstance(data["temporal"], dict):
@@ -254,8 +252,15 @@ class Config(BaseModel):
     @field_validator("provider")
     @classmethod
     def validate_provider(cls, v: str) -> str:
-        if v not in ("openai", "anthropic", "gemini"):
-            raise ValueError("provider must be 'openai', 'anthropic', or 'gemini'")
+        if not v.strip():
+            raise ValueError("provider must be a non-empty profile name")
+        return v
+
+    @field_validator("driver")
+    @classmethod
+    def validate_driver(cls, v: str) -> str:
+        if v not in ("openai", "anthropic", "google"):
+            raise ValueError("driver must be one of 'openai', 'anthropic', or 'google'")
         return v
 
     @field_validator("num_ctx")
@@ -307,6 +312,10 @@ def load_config_for_provider(provider: str) -> Config:
     Re-reads the TOML file and overrides the provider key before flattening,
     so the returned Config has the chosen provider's settings merged in.
     """
+    from ayder_cli.core.config_migration import ensure_latest_config
+
+    ensure_latest_config(CONFIG_PATH, defaults=DEFAULTS)
+
     if not CONFIG_PATH.exists():
         return Config(provider=provider)
 
@@ -316,53 +325,55 @@ def load_config_for_provider(provider: str) -> Config:
         except Exception:
             return Config(provider=provider)
 
-    data["provider"] = provider
+    app = data.get("app")
+    if isinstance(app, dict):
+        app["provider"] = provider
+    else:
+        data["app"] = {"provider": provider}
     return Config(**data)
 
 
-def load_config() -> Config:
-    """Load config from ~/.ayder/config.toml, creating it with defaults if missing."""
+def list_provider_profiles() -> list[str]:
+    """Return available provider profile names from [llm.<name>] config sections."""
+    from ayder_cli.core.config_migration import ensure_latest_config
+
+    ensure_latest_config(CONFIG_PATH, defaults=DEFAULTS)
+
     if not CONFIG_PATH.exists():
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        fmt: Dict[str, Any] = {
-            "provider": DEFAULTS["provider"],
-            "editor": DEFAULTS["editor"],
-            "verbose_str": str(DEFAULTS["verbose"]).lower(),
-            "logging_file_enabled": str(DEFAULTS["logging"]["file_enabled"]).lower(),
-            "logging_file_path": DEFAULTS["logging"]["file_path"],
-            "logging_rotation": DEFAULTS["logging"]["rotation"],
-            "logging_retention": DEFAULTS["logging"]["retention"],
-            "max_iterations": DEFAULTS["max_iterations"],
-            "temporal_enabled": str(DEFAULTS["temporal"]["enabled"]).lower(),
-            "temporal_host": DEFAULTS["temporal"]["host"],
-            "temporal_namespace": DEFAULTS["temporal"]["namespace"],
-            "temporal_metadata_dir": DEFAULTS["temporal"]["metadata_dir"],
-            "temporal_workflow_schedule_to_close_seconds": DEFAULTS["temporal"]["timeouts"][
-                "workflow_schedule_to_close_seconds"
-            ],
-            "temporal_activity_start_to_close_seconds": DEFAULTS["temporal"]["timeouts"][
-                "activity_start_to_close_seconds"
-            ],
-            "temporal_activity_heartbeat_seconds": DEFAULTS["temporal"]["timeouts"][
-                "activity_heartbeat_seconds"
-            ],
-            "temporal_initial_interval_seconds": DEFAULTS["temporal"]["retry"][
-                "initial_interval_seconds"
-            ],
-            "temporal_backoff_coefficient": DEFAULTS["temporal"]["retry"][
-                "backoff_coefficient"
-            ],
-            "temporal_maximum_interval_seconds": DEFAULTS["temporal"]["retry"][
-                "maximum_interval_seconds"
-            ],
-            "temporal_maximum_attempts": DEFAULTS["temporal"]["retry"]["maximum_attempts"],
-        }
-        for p in _PROVIDER_SECTIONS:
-            for k, v in DEFAULTS[p].items():
-                fmt[f"{p}_{k}"] = v
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            f.write(_DEFAULT_TOML.format(**fmt))
-        return Config()
+        return [DEFAULTS["provider"]]
+
+    try:
+        with open(CONFIG_PATH, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        return [DEFAULTS["provider"]]
+
+    llm = data.get("llm")
+    if isinstance(llm, dict):
+        profiles = [name for name, section in llm.items() if isinstance(section, dict)]
+        if profiles:
+            return sorted(dict.fromkeys(profiles))
+
+    app = data.get("app")
+    if isinstance(app, dict):
+        provider = app.get("provider")
+        if isinstance(provider, str) and provider.strip():
+            return [provider.strip()]
+
+    return [DEFAULTS["provider"]]
+
+
+def load_config(
+    *,
+    notify_migration: bool = False,
+    output: Callable[[str], None] | None = None,
+) -> Config:
+    """Load config from ~/.ayder/config.toml, creating it with defaults if missing."""
+    from ayder_cli.core.config_migration import ensure_latest_config
+
+    ensure_latest_config(
+        CONFIG_PATH, defaults=DEFAULTS, notify=notify_migration, output=output
+    )
 
     with open(CONFIG_PATH, "rb") as f:
         try:

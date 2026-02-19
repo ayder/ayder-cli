@@ -3,10 +3,8 @@
 import json
 import sys
 import subprocess
-import shutil
 from unittest.mock import patch, MagicMock
 import pytest
-from pathlib import Path
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.tools import filesystem, search, shell, utils_tools, venv

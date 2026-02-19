@@ -6,7 +6,7 @@ Contract 4: LLM Verbose Integration
 """
 
 from typing import Any, Protocol, runtime_checkable
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -261,7 +261,6 @@ class TestLLMNoDirectUI:
         """Should not import print_llm_request_debug from ui."""
         try:
             from ayder_cli.services import llm as llm_module
-            import ast
             
             source_path = llm_module.__file__
             with open(source_path) as f:

@@ -1,8 +1,6 @@
 """Tests for checkpoint_manager.py module."""
 
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch
 
 from ayder_cli.checkpoint_manager import CheckpointManager, CHECKPOINT_FILE_NAME
 from ayder_cli.core.context import ProjectContext

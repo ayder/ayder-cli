@@ -1,10 +1,7 @@
 """Tests for parameter aliasing functionality."""
 
-import pytest
 import tempfile
 import os
-import json
-from unittest.mock import patch, MagicMock
 
 from ayder_cli.tools import registry
 from ayder_cli.core.context import ProjectContext

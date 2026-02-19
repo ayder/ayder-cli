@@ -2,7 +2,6 @@
 
 import json
 import pytest
-from unittest.mock import patch, MagicMock
 from ayder_cli.tools import registry
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError

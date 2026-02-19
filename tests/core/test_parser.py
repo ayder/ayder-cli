@@ -7,7 +7,6 @@ This module tests the parser functionality including:
 - Error handling
 """
 
-import pytest
 
 from ayder_cli.parser import parse_custom_tool_calls, _infer_parameter_name, _normalize_tool_call_markup
 

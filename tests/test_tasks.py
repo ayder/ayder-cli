@@ -1,6 +1,5 @@
 """Tests for task management functionality in tasks.py."""
 
-from pathlib import Path
 
 import pytest
 

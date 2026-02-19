@@ -137,7 +137,7 @@ def main():
 
     from ayder_cli.core.config import load_config
 
-    cfg = load_config()
+    cfg = load_config(notify_migration=True, output=print)
     setup_logging(
         cfg,
         level_override=args.verbose,

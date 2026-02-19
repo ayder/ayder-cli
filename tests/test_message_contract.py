@@ -1,6 +1,5 @@
 """Tests for application.message_contract helpers."""
 
-import pytest
 
 from ayder_cli.application.message_contract import (
     get_message_role,

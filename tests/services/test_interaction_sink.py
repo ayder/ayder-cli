@@ -6,7 +6,7 @@ Contract 2: Interaction Interfaces
 """
 
 from typing import Any, Protocol, runtime_checkable
-from unittest.mock import Mock, call
+from unittest.mock import Mock
 
 import pytest
 

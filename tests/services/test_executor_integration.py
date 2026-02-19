@@ -5,9 +5,8 @@ Contract 3: Executor Integration
 - No direct UI imports allowed.
 """
 
-import json
 from typing import Any, Protocol, runtime_checkable
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -127,7 +126,7 @@ class TestToolExecutorExecutionFlow:
         registry.execute.return_value = Mock(__str__=lambda self: "Success")
         
         # Execute
-        result = executor._execute_single_call(
+        executor._execute_single_call(
             "read_file",
             {"file_path": "/test.txt"},
             set(),  # No permissions
@@ -170,7 +169,7 @@ class TestToolExecutorExecutionFlow:
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
         policy.confirm_action.return_value = False  # User declines
         
-        result = executor._execute_single_call(
+        executor._execute_single_call(
             "read_file",
             {"file_path": "/test.txt"},
             set(),
@@ -302,7 +301,6 @@ class TestToolExecutorNoDirectUI:
             from ayder_cli.services.tools import executor as executor_module
             
             # Check that print_tool_call is not called in _execute_single_call
-            source = executor_module.__file__
             import inspect
             
             # Get source of _execute_single_call

@@ -1,11 +1,8 @@
 """Tests for ToolExecutor service."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from ayder_cli.services.tools.executor import ToolExecutor, TERMINAL_TOOLS
-from ayder_cli.core.config import Config
-from ayder_cli.core.result import ToolSuccess
 from ayder_cli.services.interactions import InteractionSink, ConfirmationPolicy
 
 

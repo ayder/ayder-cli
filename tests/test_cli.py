@@ -2,7 +2,7 @@
 
 import sys
 import pytest
-from unittest.mock import patch, MagicMock, call, mock_open
+from unittest.mock import patch, MagicMock
 from io import StringIO
 
 

@@ -5,9 +5,7 @@ Contract 1: Service Boundary Rule
 """
 
 import ast
-import sys
 from pathlib import Path
-from typing import Set
 
 import pytest
 
@@ -136,23 +134,6 @@ class TestImportGuard:
         This test simulates what would happen if someone tries to
         import ayder_cli.ui from within a service module.
         """
-        # Create a temporary module that tries to import UI
-        test_code = """
-import sys
-# Add src to path
-from pathlib import Path
-src_path = Path(__file__).parent.parent.parent / "src"
-if str(src_path) not in sys.path:
-    sys.path.insert(0, str(src_path))
-
-# This import should be blocked by architecture
-try:
-    from ayder_cli.ui import confirm_tool_call
-    print("IMPORT_SUCCEEDED")
-except ImportError as e:
-    print(f"IMPORT_BLOCKED: {e}")
-"""
-        
         # For now, we just verify the import is possible (before enforcement)
         # After implementation, this should be blocked
         try:

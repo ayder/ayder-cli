@@ -3,7 +3,6 @@
 import json
 import sys
 import pytest
-from pathlib import Path
 from unittest.mock import patch, Mock
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -136,7 +135,7 @@ class TestSearchCodebaseContextLines:
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.search_codebase(ctx, "target", context_lines=2)
+        impl.search_codebase(ctx, "target", context_lines=2)
 
         call_args = mock_run.call_args[0][0]
         assert "--context" in call_args

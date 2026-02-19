@@ -6,7 +6,6 @@ Phase 1 tests: Infrastructure validation without requiring actual definition fil
 
 import pytest
 from unittest.mock import patch, MagicMock
-import importlib
 
 from ayder_cli.tools.definition import (
     ToolDefinition,

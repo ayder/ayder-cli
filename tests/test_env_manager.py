@@ -1,8 +1,6 @@
 """Tests for manage_environment_vars tool implementation."""
 
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 from ayder_cli.tools import utils_tools as impl
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -168,7 +166,6 @@ class TestManageEnvironmentVarsGenerate:
 
     def test_generate_update_existing_variable(self, project_context, sample_env_file):
         """Test updating an existing variable with new generated value."""
-        old_content = sample_env_file.read_text()
         old_secret = "my_super_secret_key_12345678"
         
         result = impl.manage_environment_vars(

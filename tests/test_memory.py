@@ -2,12 +2,11 @@
 
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 from ayder_cli.memory import save_memory, load_memory, MemoryManager, create_memory_manager
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.core.result import ToolSuccess
 
 
 @pytest.fixture
@@ -50,6 +49,7 @@ class TestSaveMemory:
     def test_save_memory_with_tags(self, tmp_path, project_context):
         """Test saving memory with tags."""
         result = save_memory(project_context, "Content", tags="db,backend")
+        assert isinstance(result, ToolSuccess)
 
         memory_file = tmp_path / ".ayder" / "memory" / "memories.jsonl"
         entry = json.loads(memory_file.read_text().strip())

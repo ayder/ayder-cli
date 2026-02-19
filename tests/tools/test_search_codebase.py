@@ -1,9 +1,7 @@
 """Tests for codebase search functionality."""
 
 import pytest
-import shutil
 from unittest.mock import patch, MagicMock
-from pathlib import Path
 
 from ayder_cli.tools import search, utils_tools
 from ayder_cli.core.context import ProjectContext
@@ -216,7 +214,7 @@ class TestToolIntegration:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Direct call simulating dispatch
-        result = impl.search_codebase(search_context, "pattern")
+        impl.search_codebase(search_context, "pattern")
         
         mock_run.assert_called()
 

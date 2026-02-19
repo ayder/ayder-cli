@@ -1,10 +1,7 @@
 """Tests for tool schemas."""
 
-import pytest
 from ayder_cli.tools import schemas
-from ayder_cli.tools.definition import ToolDefinition, TOOL_DEFINITIONS
-from ayder_cli.tools.registry import ToolRegistry
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.tools.definition import ToolDefinition
 
 
 class TestToolSchemas:

@@ -468,3 +468,26 @@ class TestCreateLLMProvider:
 
         provider = create_llm_provider(config)
         assert isinstance(provider, OpenAIProvider)
+
+    @patch("ayder_cli.services.llm.OpenAI")
+    def test_uses_driver_for_custom_profile_name(self, mock_openai_cls):
+        """Factory uses config.driver, independent from profile/provider name."""
+        config = Mock()
+        config.provider = "deepseek"
+        config.driver = "openai"
+        config.base_url = "https://api.deepseek.com/v1"
+        config.api_key = "deepseek-key"
+
+        provider = create_llm_provider(config)
+        assert isinstance(provider, OpenAIProvider)
+        mock_openai_cls.assert_called_once_with(
+            base_url="https://api.deepseek.com/v1", api_key="deepseek-key"
+        )
+
+    def test_invalid_driver_raises_value_error(self):
+        """Factory raises ValueError for unknown driver strings."""
+        config = Mock()
+        config.driver = "unknown"
+
+        with pytest.raises(ValueError, match="Unsupported LLM driver"):
+            create_llm_provider(config)

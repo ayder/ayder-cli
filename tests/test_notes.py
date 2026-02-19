@@ -1,10 +1,9 @@
 """Tests for notes management."""
 
 import pytest
-from pathlib import Path
 from ayder_cli.notes import create_note, _title_to_slug
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.core.result import ToolSuccess
 
 
 @pytest.fixture
@@ -65,6 +64,7 @@ class TestCreateNote:
     def test_create_note_frontmatter(self, tmp_path, project_context):
         """Test that YAML frontmatter is properly formatted."""
         result = create_note(project_context, "Frontmatter Test", "Body text")
+        assert isinstance(result, ToolSuccess)
 
         notes_dir = tmp_path / ".ayder" / "notes"
         content = list(notes_dir.glob("*.md"))[0].read_text()

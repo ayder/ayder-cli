@@ -5,7 +5,7 @@ and that composition parity is maintained between both interfaces.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from dataclasses import fields
 
 
@@ -24,7 +24,7 @@ class TestRuntimeFactoryAssembly:
         )
         from ayder_cli.application.runtime_factory import create_runtime, RuntimeComponents
 
-        components = create_runtime()
+        create_runtime()
 
         # Verify all expected fields exist
         expected_fields = {
@@ -121,7 +121,6 @@ class TestFactoryCLIIntegration:
             reason="Runtime factory not yet implemented by DEV-02.1"
         )
         from ayder_cli.cli_runner import _build_services
-        from ayder_cli.application.runtime_factory import RuntimeComponents
 
         services = _build_services()
 
@@ -166,7 +165,6 @@ class TestFactoryTUIIntegration:
             reason="Runtime factory not yet implemented by DEV-02.1"
         )
         from ayder_cli.tui.app import AyderApp
-        from ayder_cli.application.runtime_factory import create_runtime
 
         # TUI now uses create_runtime factory - patch the factory call
         with patch('ayder_cli.tui.app.create_runtime') as mock_create_runtime:

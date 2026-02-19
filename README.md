@@ -1,15 +1,16 @@
 # ayder-cli
 
 A multi-provider AI agent chat client for your terminal. Currently ayder supports
-
-- [Ollama](https://ollama.com) 
-- [Anthropic Claude](https://www.anthropic.com) 
-- [OpenAI](https://openai.com/) 
-- [Gemini](https://gemini.google.com/) 
-
 or any OpenAI-compatible API and provides an autonomous coding assistant with file system tools and shell access.
 
 ![ayder](docs/cc.png)
+
+## Supported LLM providers
+
+- [Ollama](https://ollama.com)
+- [Anthropic Claude](https://www.anthropic.com)
+- [OpenAI](https://openai.com/)
+- [Gemini](https://gemini.google.com/)
 
 ## Why ayder-cli?
 
@@ -18,14 +19,13 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Multi-provider** -- switch between Ollama (local/cloud), Anthropic Claude, Gemini or any OpenAI-compatible API with a single `/provider` command. Each provider has its own config section.
 - **Fully local or cloud** -- run locally with Ollama (on your machine), or connect to Gemini, Anthropic, OpenAI, or cloud-hosted Ollama.
 - **Agentic workflow** -- the LLM doesn't just answer questions. It can read files, edit code, run shell commands, and iterate on its own for configurable consecutive tool calls per user message (configurable with `-I`).
-- **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews. 
+- **Textual TUI** -- a full dashboard interface with chat view, tool panel, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews.
 - **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Gemini genai and for Gemini and Anthropic SDK optional for native  support.
 
-
-### Tested Providers with Models 
+### Tested Providers with Models
 
 | Provider | Location | Model                              |
-|----------|----------|------------------------------------|
+| -------- | -------- | ---------------------------------- |
 | ollama   | Cloud    | deepseek-v3.2:cloud                |
 | ollama   | Cloud    | gemini-3-pro-preview:latest        |
 | ollama   | Local    | glm-4.7-flash:latest               |
@@ -50,26 +50,23 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 | gemini   | Cloud    | gemini-3-pro                       |
 | gemini   | Cloud    | gemini-3-flash                     |
 
-
 ### Tools
 
 LLMs on their own can only generate text. To be a useful coding assistant, the model needs to *act* on your codebase. ayder-cli provides a modular `tools/` package that gives the model a set of real tools it can call:
-
-
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
-  - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
-  - **Safe mode** (TUI): The TUI supports a safe mode that blocks `write_file`, `replace_string`, `insert_line`, `delete_line`, `run_shell_command`, `run_background_process`, and `kill_background_process`.
-  - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
-  - You may also prefer to run ayder-cli in a container for additional security.
+- **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
+- **Safe mode** (TUI): The TUI supports a safe mode that blocks `write_file`, `replace_string`, `insert_line`, `delete_line`, `run_shell_command`, `run_background_process`, and `kill_background_process`.
+- Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
+- You may also prefer to run ayder-cli in a container for additional security.
 
 ## Installation
 
 Requires Python 3.12+.
-Works best with uv tool. if you don't have uv in your path get it from 
- [Astral uv](https://docs.astral.sh/uv/#highlights) 
+Works best with uv tool. if you don't have uv in your path get it from
+ [Astral uv](https://docs.astral.sh/uv/#highlights)
 
-```
+```bash
 # Install it to user environemnt
 
 uv tool install ayder-cli
@@ -128,72 +125,101 @@ pip install anthropic
 ```bash
 # Install the Google Generative AI SDK
 pip install google-generativeai
-
-# Set your API key in ~/.ayder/config.toml
-# Then switch provider:
-#   /provider gemini
 ```
 
-## Configuration
+Set your API key in ~/.ayder/config.toml
+Then switch provider:
+   /provider gemini
 
-On first run, ayder-cli creates a config file at `~/.ayder/config.toml`:
+### Configuration
+
+On first run, ayder-cli creates a config file at `~/.ayder/config.toml` with the v2.0 format:
 
 ```toml
-# Active provider: "openai", "anthropic", or "gemini"
+config_version = "2.0"
+
+[app]
 provider = "openai"
-
-[openai]
-base_url = "http://localhost:11434/v1"
-api_key = "ollama"
-model = "qwen3-coder:latest"
-num_ctx = 65536
-
-[anthropic]
-api_key = ""
-model = "claude-sonnet-4-5-20250929"
-num_ctx = 8192
-
-[gemini]
-api_key = ""
-model = "gemini-2.0-flash"
-num_ctx = 65536
-
-[editor]
 editor = "vim"
-
-[ui]
 verbose = false
+max_background_processes = 5
+max_iterations = 50
 
 [logging]
-# Optional level: NONE, ERROR, WARNING, INFO, DEBUG
-# If omitted, runtime default is NONE.
 file_enabled = true
 file_path = ".ayder/log/ayder.log"
 rotation = "10 MB"
 retention = "7 days"
 
-[agent]
-max_iterations = 50
+[temporal]
+enabled = false
+host = "localhost:7233"
+namespace = "default"
+metadata_dir = ".ayder/temporal"
+
+[temporal.timeouts]
+workflow_schedule_to_close_seconds = 7200
+activity_start_to_close_seconds = 900
+activity_heartbeat_seconds = 30
+
+[temporal.retry]
+initial_interval_seconds = 5
+backoff_coefficient = 2.0
+maximum_interval_seconds = 60
+maximum_attempts = 3
+
+[llm.openai]
+driver = "openai"
+base_url = "http://localhost:11434/v1"
+api_key = "ollama"
+model = "qwen3-coder:latest"
+num_ctx = 65536
+
+[llm.anthropic]
+driver = "anthropic"
+api_key = ""
+model = "claude-sonnet-4-5-20250929"
+num_ctx = 8192
+
+[llm.gemini]
+driver = "google"
+api_key = ""
+model = "gemini-3-flash"
+num_ctx = 65536
+
+[llm.deepseek]
+driver = "openai"
+base_url = "http://api.deepseek.com/v1"
+api_key = ""
+model = "deepseek-chat"
 ```
 
-Each provider has its own section. The top-level `provider` key selects which one is active. Use `/provider` in the TUI to switch at runtime.
+The active provider is selected via `app.provider`. Provider settings are defined in `[llm.<provider>]` sections. Use `/provider` in the TUI to switch at runtime, or edit `config.toml` directly.
 
 Please adjust *num_ctx* context size window according to your local computer ram. If your ollama gets crash, decrease this 65536 value to a proper context size.
 
+### Config Options Reference
+
 | Option | Section | Default | Description |
-|--------|---------|---------|-------------|
-| `provider` | top-level | `openai` | Active provider: `openai`, `anthropic`, or `gemini`. |
-| `base_url` | `[openai]` | `http://localhost:11434/v1` | API endpoint. Works with any OpenAI-compatible server (Ollama, OpenAI, etc.). |
-| `api_key` | per provider | `ollama` | API key. Set to `"ollama"` for local Ollama, or your Anthropic/OpenAI key. |
-| `model` | per provider | varies | Model to use. Each provider section has its own default. |
-| `num_ctx` | per provider | varies | Context window size in tokens. |
-| `editor` | `[editor]` | `vim` | Editor launched by `/task-edit` command. |
-| `verbose` | `[ui]` | `false` | When `true`, prints file contents after `write_file` and LLM request details before API calls. |
-| `logging.level` | `[logging]` | `NONE` (when omitted) | Log level (`NONE`, `ERROR`, `WARNING`, `INFO`, `DEBUG`). |
-| `logging.file_enabled` | `[logging]` | `true` | Enable/disable file sink. |
-| `logging.file_path` | `[logging]` | `.ayder/log/ayder.log` | Log file destination. |
-| `max_iterations` | `[agent]` | `50` | Maximum agentic iterations (tool calls) per user message (1-100). |
-| `max_background_processes` | -- | `5` | Maximum number of concurrent background processes (1-20). |
+| ------ |-------- | ------- | ----------- |
+| `config_version` | top-level | `2.0` | Config format version. |
+| `provider` | `[app]` | `openai` | Active provider profile name. |
+| `editor` | `[app]` | `vim` | Editor launched by `/task-edit` command. |
+| `verbose` | `[app]` | `false` | When `true`, prints file contents after `write_file` and LLM request details. |
+| `max_background_processes` | `[app]` | `5` | Maximum concurrent background processes (1-20). |
+| `max_iterations` | `[app]` | `50` | Maximum agentic iterations per user message (1-100). |
+| `file_enabled` | `[logging]` | `true` | Enable file logging sink. |
+| `file_path` | `[logging]` | `.ayder/log/ayder.log` | Log file destination. |
+| `rotation` | `[logging]` | `10 MB` | Log rotation size. |
+| `retention` | `[logging]` | `7 days` | Log retention period. |
+| `enabled` | `[temporal]` | `false` | Enable Temporal workflow integration. |
+| `host` | `[temporal]` | `localhost:7233` | Temporal server address. |
+| `namespace` | `[temporal]` | `default` | Temporal namespace. |
+| `driver` | `[llm.<provider>]` | varies | Driver: `openai`, `anthropic`, or `google`. |
+| `base_url` | `[llm.<provider>]` | varies | API endpoint (OpenAI-compatible). |
+| `api_key` | `[llm.<provider>]` | varies | API key. Use `"ollama"` for local Ollama. |
+| `model` | `[llm.<provider>]` | varies | Model name to use. |
+| `num_ctx` | `[llm.<provider>]` | varies | Context window size in tokens. |
 
 ## Usage
 
@@ -221,6 +247,10 @@ ayder --file instructions.txt
 
 # Explicit stdin mode
 ayder --stdin < prompt.txt
+
+# Use a custom system prompt file
+ayder --prompt prompt-file.md "refactor this code"
+ayder -f code.py --prompt system-prompt.md "analyze this file"
 ```
 
 ### Task Commands (CLI Mode)
@@ -244,7 +274,7 @@ ayder --implement-all
 By default, every tool call requires user confirmation. Use permission flags to auto-approve tool categories:
 
 | Flag | Category | Tools |
-|------|----------|-------|
+| ---- | -------- | ----- |
 | `-r` | Read | `list_files`, `read_file`, `get_file_info`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
 | `-w` | Write | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory`, `manage_environment_vars`, `create_task`, `implement_task`, `implement_all_tasks` |
 | `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
@@ -278,8 +308,8 @@ To solve this, `ayder` features an intelligent memory management system that sum
 
 You can tune how often the agent "compresses" its memory using the `-I` (Iteration) flag.
 
-* **Small Models:** Use a lower value (e.g., `-I 50`) to keep the context lean and avoid logic errors.
-* **Large/Powerful Models:** Use a higher value (e.g., `-I 200`) to maximize the model's reasoning capabilities before summarization.
+- **Small Models:** Use a lower value (e.g., `-I 50`) to keep the context lean and avoid logic errors.
+- **Large/Powerful Models:** Use a higher value (e.g., `-I 200`) to maximize the model's reasoning capabilities before summarization.
 
 #### Transferring Memory Between Models
 
@@ -296,12 +326,13 @@ ayder -I 200
 # Combine with permissions
 ayder -r -w -I 150 "implement all pending tasks"
 ```
+
 If you have memory problems decrease iteration size and /compact the LLM memory before it gets worse.
 
 ### Slash Commands
 
 | Command | Description |
-|---------|-------------|
+| ------- | ----------- |
 | `/help` | Show available commands and keyboard shortcuts |
 | `/tools` | List all tools and their descriptions |
 | `/provider` | Switch LLM provider (openai, anthropic, gemini) with interactive selector |
@@ -330,7 +361,7 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 ### Keyboard Shortcuts
 
 | Shortcut | Action |
-|----------|--------|
+| -------- | ------ |
 | `Ctrl+D` | Quit |
 | `Ctrl+X` / `Ctrl+C` | Cancel current operation |
 | `Ctrl+L` | Clear chat |
@@ -342,35 +373,34 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 ayder-cli has three operational modes, each with a specialized system prompt and tool set:
 
 #### Default Mode
+
 The standard mode for general coding and chat. Uses the **System Prompt**.
-
-```
 > create a fibonacci function
-# AI writes code, runs tests, etc.
-```
+>
+#### AI writes code, runs tests, et.
 
-**Available tools:** File read/write, shell commands, search, view tasks.
+## Available tools: File read/write, shell commands, search, view tasks.
 
-#### Planning Mode (`/plan`)
+### Planning Mode (`/plan`)
+
 Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Master" focused solely on breaking down requirements into tasks.
 
-```
 > /plan add a user authentication to the app
-
-# The agent will analyze the codebase and create tasks...
-```
+>
+#### The agent will analyze the codebase and create tasks...
 
 **Available tools:** Read-only exploration + `create_task`.
 
 #### Task Mode (`/implement`)
+
 Activated with `/implement`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list.
 
-```
 > /implement 1
-
+>
 Running TASK-001: Add user authentication
-# AI implements the task, then marks it done
-```
+
+AI implements the task, then marks it done
+
 
 **Available tools:** Full file system access + task management tools.
 
@@ -383,18 +413,18 @@ ayder-cli includes a built-in task system for structured development:
 
 Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames for readability (e.g., `TASK-001-add-auth-middleware.md`). Legacy `TASK-001.md` filenames are also supported.
 
-```
 > /tasks
-# Opens interactive task selector — pick a task to implement
+>
+Opens interactive task selector — pick a task to implement
 
 > /task-edit 1    # opens TASK-001 in the in-app editor
 
 > /implement 1
-# AI implements TASK-001 and marks it as done
+>
+AI implements TASK-001 and marks it as done
 
 > /implement-all
-# Sequentially implements all tasks one after each other. Consider iteration size!
-```
+Sequentially implements all tasks one after each other. Consider iteration size!
 
 ### Code Search
 
@@ -416,12 +446,14 @@ ayder-cli features a **pluggable tool system** with dynamic auto-discovery. Addi
 3. **Done!** Auto-discovery automatically registers the tool
 
 The tool system automatically:
+
 - Discovers all `*_definitions.py` files
 - Validates for duplicates and required tools
 - Registers tools with the LLM
 - Handles imports and exports
 
 Current tool categories (26 tools total):
+
 - **Filesystem**: list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
 - **Search**: search_codebase, get_project_structure
 - **Shell**: run_shell_command

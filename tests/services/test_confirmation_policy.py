@@ -184,8 +184,6 @@ class TestConfirmationPolicyFlows:
         policy = Mock(spec=ConfirmationPolicy)
         policy.confirm_file_diff.return_value = True
         
-        # Simulate write_file tool
-        tool_name = "write_file"
         file_path = "/test/output.txt"
         new_content = "Hello, World!"
         description = f"Create file {file_path}"
@@ -282,6 +280,7 @@ class TestConfirmationPolicyIntegration:
                 tool_registry=registry,
                 confirmation_policy=policy
             )
+            assert executor is not None
             
             # This test will need actual implementation to work fully
             # For now, we verify the structure is in place

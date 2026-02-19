@@ -5,7 +5,7 @@ Tests colorize_diff, truncate_diff, generate_diff_preview, and confirm_with_diff
 """
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pytest
 from rich.text import Text
 from ayder_cli.ui import (
@@ -192,6 +192,7 @@ class TestGenerateDiffPreview(unittest.TestCase):
         """Verify file read errors are handled gracefully"""
         file_path = "/nonexistent/path/to/file.txt"
         result = generate_diff_preview(file_path, "content")
+        self.assertIsNotNone(result)
         # Should not crash, should return None or handle gracefully
         # (file doesn't exist but is not in temp dir, so we can't create it)
         # The function should handle this without raising

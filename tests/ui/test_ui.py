@@ -1,9 +1,7 @@
 """Tests for ui.py module."""
 
-import json
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
-import pytest
 
 from ayder_cli import ui
 

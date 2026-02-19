@@ -1,7 +1,6 @@
 import json
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from ayder_cli.services.llm import GeminiProvider, _Response
+from unittest.mock import Mock
+from ayder_cli.services.llm import GeminiProvider
 
 class TestGeminiProvider:
     """Test GeminiProvider with google-genai SDK."""

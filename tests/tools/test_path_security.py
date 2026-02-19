@@ -1,8 +1,7 @@
 """Tests for path security enforcement."""
 
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from ayder_cli.tools import filesystem, search
 from ayder_cli.core.context import ProjectContext

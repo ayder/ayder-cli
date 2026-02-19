@@ -8,7 +8,7 @@ This module tests the remaining uncovered lines in config.py:
 import pytest
 from pydantic import ValidationError
 
-from ayder_cli.core.config import Config, load_config
+from ayder_cli.core.config import Config
 
 
 class TestConfigValidationNumCtx:
@@ -151,8 +151,8 @@ class TestConfigValidationMaxIterations:
         assert cfg.max_iterations == 100
 
     def test_agent_section_flattened_from_toml(self):
-        """Test that [agent] section is properly flattened."""
-        data = {"agent": {"max_iterations": 30}}
+        """Test that [app] section max_iterations is properly flattened."""
+        data = {"app": {"max_iterations": 30}}
         cfg = Config(**data)
         assert cfg.max_iterations == 30
 

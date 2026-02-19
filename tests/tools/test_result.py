@@ -1,8 +1,7 @@
 """Tests for tool result types."""
 
-import pytest
 
-from ayder_cli.core.result import ToolSuccess, ToolError, ToolResult
+from ayder_cli.core.result import ToolSuccess, ToolError
 
 
 class TestToolSuccessBackwardsCompat:
