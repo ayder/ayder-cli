@@ -16,6 +16,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "Session cookies are persisted across fetch_web calls within the same process."
         ),
         description_template="Web URL '{url}' will be fetched with method '{method}'",
+        tags=("http",),
         func_ref="ayder_cli.tools.web:fetch_web",
         parameters={
             "type": "object",

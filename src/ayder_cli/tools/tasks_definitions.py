@@ -13,6 +13,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="list_tasks",
         description="List task files in .ayder/tasks/ directory, filtered by status (default: pending tasks only).",
         description_template="Task files will be listed",
+        tags=("metadata",),
         func_ref="ayder_cli.tasks:list_tasks",
         parameters={
             "type": "object",
@@ -30,6 +31,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="show_task",
         description="Read and return the contents of a task file. Accepts relative path, filename, task ID, or slug.",
         description_template="Task `{identifier}` will be displayed",
+        tags=("metadata",),
         func_ref="ayder_cli.tasks:show_task",
         parameters={
             "type": "object",

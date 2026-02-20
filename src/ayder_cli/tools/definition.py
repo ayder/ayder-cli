@@ -33,6 +33,9 @@ class ToolDefinition:
     # ---- UI ----
     description_template: Optional[str] = None
 
+    # ---- capability tags (used for schema filtering) ----
+    tags: Tuple[str, ...] = ("core",)
+
     # ---- implementation reference ----
     func_ref: str = ""  # "module.path:function_name" for auto-registration
 
@@ -41,15 +44,19 @@ class ToolDefinition:
     path_parameters: Tuple[str, ...] = ()  # parameter names resolved via ProjectContext
 
     def to_openai_schema(self) -> Dict[str, Any]:
-        """Return the OpenAI function-calling dict for this tool."""
-        func: Dict[str, Any] = {
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.parameters,
+        """Return the OpenAI function-calling dict for this tool.
+
+        Note: description_template is an internal UI hint and is intentionally
+        excluded from the schema sent to the LLM to avoid leaking internal state.
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
         }
-        if self.description_template is not None:
-            func["description_template"] = self.description_template
-        return {"type": "function", "function": func}
 
 # ---------------------------------------------------------------------------
 # Auto-Discovery System

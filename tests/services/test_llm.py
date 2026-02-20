@@ -72,14 +72,14 @@ class TestOpenAIProvider:
         assert call_kwargs["tool_choice"] == "auto"
 
     def test_chat_with_options(self):
-        """chat() passes options as extra_body."""
+        """chat() does not forward unknown options to OpenAI (no extra_body)."""
         mock_client = Mock()
         provider = OpenAIProvider(client=mock_client)
 
         provider.chat([], model="m", options={"num_ctx": 8192})
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
-        assert call_kwargs["extra_body"] == {"options": {"num_ctx": 8192}}
+        assert "extra_body" not in call_kwargs
 
     def test_chat_without_tools_or_options(self):
         """chat() omits tools and extra_body when not provided."""
@@ -103,7 +103,7 @@ class TestOpenAIProvider:
         assert result is mock_response
 
     def test_chat_with_both_tools_and_options(self):
-        """chat() includes both tools and options when provided."""
+        """chat() includes tools but does not forward unknown options to OpenAI."""
         mock_client = Mock()
         provider = OpenAIProvider(client=mock_client)
         tools = [{"type": "function", "function": {"name": "test"}}]
@@ -113,7 +113,7 @@ class TestOpenAIProvider:
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert call_kwargs["tools"] == tools
         assert call_kwargs["tool_choice"] == "auto"
-        assert call_kwargs["extra_body"] == {"options": {"temperature": 0.5}}
+        assert "extra_body" not in call_kwargs
 
 
 class TestAnthropicProvider:
@@ -337,7 +337,7 @@ class TestAnthropicProvider:
         assert result.choices[0].message.content == "Hi"
 
     def test_chat_passes_max_tokens_from_options(self):
-        """chat() maps options.num_ctx to max_tokens."""
+        """chat() maps options.max_output_tokens to max_tokens (not num_ctx)."""
         mock_client = Mock()
         mock_response = Mock()
         mock_response.content = []
@@ -348,28 +348,28 @@ class TestAnthropicProvider:
         provider.chat(
             [{"role": "user", "content": "hi"}],
             model="m",
-            options={"num_ctx": 16384},
-        )
-
-        call_kwargs = mock_client.messages.create.call_args[1]
-        assert call_kwargs["max_tokens"] == 16384
-
-    def test_chat_default_max_tokens(self):
-        """chat() uses 8192 as default max_tokens."""
-        mock_client = Mock()
-        mock_response = Mock()
-        mock_response.content = []
-        mock_response.usage = Mock(input_tokens=0, output_tokens=0)
-        mock_client.messages.create.return_value = mock_response
-
-        provider = AnthropicProvider(client=mock_client)
-        provider.chat(
-            [{"role": "user", "content": "hi"}],
-            model="m",
+            options={"num_ctx": 65536, "max_output_tokens": 8192},
         )
 
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["max_tokens"] == 8192
+
+    def test_chat_default_max_tokens(self):
+        """chat() uses 4096 as default max_tokens."""
+        mock_client = Mock()
+        mock_response = Mock()
+        mock_response.content = []
+        mock_response.usage = Mock(input_tokens=0, output_tokens=0)
+        mock_client.messages.create.return_value = mock_response
+
+        provider = AnthropicProvider(client=mock_client)
+        provider.chat(
+            [{"role": "user", "content": "hi"}],
+            model="m",
+        )
+
+        call_kwargs = mock_client.messages.create.call_args[1]
+        assert call_kwargs["max_tokens"] == 4096
 
     def test_assistant_tool_calls_converted(self):
         """Assistant messages with tool_calls are converted to tool_use blocks."""

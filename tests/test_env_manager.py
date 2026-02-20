@@ -105,9 +105,10 @@ class TestManageEnvironmentVarsLoad:
         assert "DATABASE_URL" in result
         assert "JWT_SECRET" in result
         assert "API_KEY" in result
-        assert "DEBUG=true" in result
-        # Check that long values are masked
-        assert "..." in result or "postgre...b" in result
+        assert "DEBUG" in result
+        # All values must be fully masked to prevent secrets entering LLM context
+        assert "DATABASE_URL=***" in result
+        assert "DEBUG=***" in result
 
     def test_load_missing_env_file(self, project_context):
         """Test loading when .env file doesn't exist."""

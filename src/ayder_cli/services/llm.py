@@ -81,8 +81,8 @@ class OpenAIProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         if options:
-            # extra_body accepts dict but type stubs may differ
-            kwargs["extra_body"] = {"options": options}  # type: ignore[assignment]
+            if stop := options.get("stop_sequences"):
+                kwargs["stop"] = stop  # type: ignore[assignment]
 
         return self.client.chat.completions.create(**kwargs)
 
@@ -183,7 +183,9 @@ class AnthropicProvider(LLMProvider):
             self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         system, converted = self._convert_messages(messages)
-        max_tokens = (options or {}).get("num_ctx", 8192)
+        # Use max_output_tokens (max response length), NOT num_ctx (context window size).
+        # Requires anthropic>=0.25.0 for cache_control support.
+        max_tokens = (options or {}).get("max_output_tokens", 4096)
 
         kwargs: Dict[str, Any] = {
             "model": model,
@@ -191,9 +193,15 @@ class AnthropicProvider(LLMProvider):
             "max_tokens": max_tokens,
         }
         if system:
-            kwargs["system"] = system
+            # Structured system block with cache_control so Anthropic caches the
+            # system prompt + tool schemas across turns (~90% token savings on hits).
+            kwargs["system"] = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+            ]
         if tools:
             kwargs["tools"] = self._convert_tools(tools)
+        if stop := (options or {}).get("stop_sequences"):
+            kwargs["stop_sequences"] = stop
 
         response = self.client.messages.create(**kwargs)
         return self._wrap_response(response)
@@ -389,9 +397,11 @@ class GeminiProvider(LLMProvider):
         # Convert options
         config_args = {}
         if options:
-            if "num_ctx" in options:
-                config_args["max_output_tokens"] = options["num_ctx"]
-            # Add other options as needed
+            # Use max_output_tokens (max response length), NOT num_ctx (context window size).
+            if "max_output_tokens" in options:
+                config_args["max_output_tokens"] = options["max_output_tokens"]
+            if stop := options.get("stop_sequences"):
+                config_args["stop_sequences"] = stop
 
         if system_instruction:
             config_args["system_instruction"] = system_instruction
@@ -641,6 +651,165 @@ class GeminiProvider(LLMProvider):
 
 
 # ---------------------------------------------------------------------------
+# Ollama provider (official ollama-python SDK)
+# ---------------------------------------------------------------------------
+
+
+class OllamaProvider(LLMProvider):
+    """Ollama provider using the official ollama-python SDK.
+
+    Wraps responses into OpenAI-compatible dataclasses so downstream
+    consumers (chat_loop, tui, client) work unchanged.
+
+    Options mapping:
+      num_ctx          → options.num_ctx
+      max_output_tokens → options.num_predict  (max tokens to generate)
+      stop_sequences   → options.stop
+    """
+
+    def __init__(
+        self,
+        host: str | None = None,
+        client: Any | None = None,
+        interaction_sink: Any | None = None,
+    ):
+        if client:
+            self.client = client
+        else:
+            from ollama import Client
+
+            self.client = Client(host=host)
+        self.interaction_sink = interaction_sink
+
+    # -- public interface ---------------------------------------------------
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        options: Optional[Dict[str, Any]] = None,
+        verbose: bool = False,
+    ) -> Any:
+        if verbose and self.interaction_sink is not None:
+            self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
+
+        converted = self._convert_messages(messages)
+
+        kwargs: Dict[str, Any] = {"model": model, "messages": converted}
+        if tools:
+            kwargs["tools"] = tools  # Ollama accepts the same OpenAI tool schema
+
+        if options:
+            ollama_opts: Dict[str, Any] = {}
+            if "num_ctx" in options:
+                ollama_opts["num_ctx"] = options["num_ctx"]
+            if "max_output_tokens" in options:
+                ollama_opts["num_predict"] = options["max_output_tokens"]
+            if stop := options.get("stop_sequences"):
+                ollama_opts["stop"] = stop
+            if ollama_opts:
+                kwargs["options"] = ollama_opts
+
+        response = self.client.chat(**kwargs)
+        return self._wrap_response(response)
+
+    def list_models(self) -> List[str]:
+        """List locally available Ollama models."""
+        try:
+            result = self.client.list()
+            return [m.model for m in result.models]
+        except Exception as e:
+            logger.error(f"Failed to list models from Ollama: {e}")
+            return []
+
+    # -- message conversion -------------------------------------------------
+
+    @staticmethod
+    def _convert_messages(messages: List[Any]) -> List[Dict[str, Any]]:
+        """Convert messages to Ollama SDK format.
+
+        Key difference from OpenAI: tool_call arguments must be dicts,
+        not JSON strings. Also handles _Message dataclass objects that
+        the CLI chat_loop may append via session.append_raw().
+        """
+        converted: List[Dict[str, Any]] = []
+
+        for msg in messages:
+            # Support both dict messages (TUI) and _Message dataclass (CLI)
+            if isinstance(msg, dict):
+                role = msg.get("role", "")
+                content = msg.get("content", "") or ""
+                tool_calls_raw = msg.get("tool_calls")
+            else:
+                # _Message dataclass from CLI path — treat as assistant
+                role = getattr(msg, "role", "assistant")
+                content = getattr(msg, "content", "") or ""
+                tool_calls_raw = getattr(msg, "tool_calls", None)
+
+            if role == "assistant" and tool_calls_raw:
+                # Convert tool_calls: arguments must be dict for Ollama SDK
+                ollama_tool_calls = []
+                for tc in tool_calls_raw:
+                    if isinstance(tc, dict):
+                        fn = tc.get("function", {})
+                        args = fn.get("arguments", {})
+                    else:
+                        fn = getattr(tc, "function", None)
+                        args = getattr(fn, "arguments", {}) if fn else {}
+                    # Deserialise if arguments arrived as a JSON string
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except (json.JSONDecodeError, TypeError):
+                            args = {}
+                    fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
+                    ollama_tool_calls.append(
+                        {"function": {"name": fn_name, "arguments": args}}
+                    )
+                converted.append(
+                    {"role": "assistant", "content": content, "tool_calls": ollama_tool_calls}
+                )
+                continue
+
+            # System / user / tool / plain assistant messages pass through as dicts
+            converted.append({"role": role, "content": content})
+
+        return converted
+
+    # -- response wrapping --------------------------------------------------
+
+    @staticmethod
+    def _wrap_response(response: Any) -> _Response:
+        """Wrap an Ollama ChatResponse into an OpenAI-compatible _Response."""
+        msg = response.message
+        content: str | None = getattr(msg, "content", None) or None
+        tool_calls: list[_ToolCall] = []
+
+        for tc in getattr(msg, "tool_calls", None) or []:
+            fn = tc.function
+            args = fn.arguments if fn.arguments is not None else {}
+            tool_calls.append(
+                _ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    type="function",
+                    function=_FunctionCall(
+                        name=fn.name,
+                        arguments=json.dumps(dict(args)),
+                    ),
+                )
+            )
+
+        prompt_tokens = getattr(response, "prompt_eval_count", 0) or 0
+        eval_tokens = getattr(response, "eval_count", 0) or 0
+
+        return _Response(
+            choices=[_Choice(message=_Message(content=content, tool_calls=tool_calls))],
+            usage=_Usage(total_tokens=prompt_tokens + eval_tokens),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -681,9 +850,22 @@ def create_llm_provider(config: Any) -> LLMProvider:
                 "Gemini provider requires the 'google-genai' package. "
                 "Install it with: pip install google-genai"
             )
+    if driver == "ollama":
+        try:
+            # Strip the /v1 suffix added by OpenAI-compat configs — the Ollama SDK
+            # builds its own paths (e.g. /api/chat) from the bare host URL.
+            host = getattr(config, "base_url", None)
+            if host and host.endswith("/v1"):
+                host = host[:-3]
+            return OllamaProvider(host=host)
+        except ImportError:
+            raise ImportError(
+                "Ollama provider requires the 'ollama' package. "
+                "Install it with: pip install ollama"
+            )
     if driver == "openai":
         return OpenAIProvider(base_url=config.base_url, api_key=config.api_key)
 
     raise ValueError(
-        f"Unsupported LLM driver '{driver}'. Expected one of: openai, anthropic, google."
+        f"Unsupported LLM driver '{driver}'. Expected one of: openai, ollama, anthropic, google."
     )

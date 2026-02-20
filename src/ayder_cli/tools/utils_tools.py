@@ -203,13 +203,10 @@ def manage_environment_vars(
                 "",
             ]
 
-            for key, val in env_vars.items():
-                # Mask long values for security
-                if val and len(val) > 20:
-                    masked = f"{val[:8]}...{val[-8:]}"
-                else:
-                    masked = val or "(empty)"
-                output_lines.append(f"{key}={masked}")
+            for key in env_vars:
+                # Always mask values to prevent secrets from entering LLM API requests
+                # and provider logs. Show keys only.
+                output_lines.append(f"{key}=***")
 
             output_lines.append("\n=== END ENVIRONMENT VARIABLES ===")
             return ToolSuccess("\n".join(output_lines))

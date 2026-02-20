@@ -337,19 +337,24 @@ class TestConvergenceIntegration:
         assert type(cli_result) is type(tui_result)
         assert str(cli_result) == str(tui_result)
 
-    def test_known_tools_in_sync_with_registry(self):
-        """_KNOWN_TOOLS in ValidationAuthority must match actual registry tool names exactly."""
-        from ayder_cli.application.validation import _KNOWN_TOOLS
+    def test_schema_validator_uses_live_registry(self):
+        """SchemaValidator recognises all tools in the live registry and no others."""
+        from ayder_cli.application.validation import SchemaValidator, ToolRequest
         from ayder_cli.tools.definition import TOOL_DEFINITIONS
 
-        registry_tools = {td.name for td in TOOL_DEFINITIONS}
-        known_tools = set(_KNOWN_TOOLS.keys())
+        validator = SchemaValidator()
 
-        missing = registry_tools - known_tools
-        extra = known_tools - registry_tools
+        for td in TOOL_DEFINITIONS:
+            # Build a request with all required args present (use sentinel value)
+            required = td.parameters.get("required", [])
+            args = {arg: "sentinel" for arg in required}
+            ok, err = validator.validate(ToolRequest(name=td.name, arguments=args))
+            assert ok, f"Registry tool '{td.name}' rejected by SchemaValidator: {err}"
 
-        assert not missing, f"Tools in registry missing from _KNOWN_TOOLS: {missing}"
-        assert not extra, f"Tools in _KNOWN_TOOLS not in registry: {extra}"
+        # Unknown tool must be rejected
+        ok, err = validator.validate(ToolRequest(name="__nonexistent__", arguments={}))
+        assert not ok
+        assert "not found in registry" in err.message
 
 
 class TestCheckpointOrchestrateMethod:

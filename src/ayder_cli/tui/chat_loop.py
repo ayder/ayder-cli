@@ -41,8 +41,11 @@ class TuiLoopConfig:
 
     model: str = "qwen3-coder:latest"
     num_ctx: int = 65536
+    max_output_tokens: int = 4096
+    stop_sequences: list = field(default_factory=list)
     max_iterations: int = 50
     permissions: set = field(default_factory=lambda: {"r"})
+    tool_tags: frozenset | None = None
 
 
 @runtime_checkable
@@ -124,13 +127,18 @@ class TuiChatLoop:
             # 1. Call LLM
             self.cb.on_thinking_start()
             try:
-                tool_schemas = [] if no_tools else self.registry.get_schemas()
+                tool_schemas = (
+                    [] if no_tools
+                    else self.registry.get_schemas(tags=self.config.tool_tags)
+                )
                 response = await call_llm_async(
                     self.llm,
                     self.messages,
                     self.config.model,
                     tools=tool_schemas,
                     num_ctx=self.config.num_ctx,
+                    max_output_tokens=self.config.max_output_tokens,
+                    stop_sequences=self.config.stop_sequences or None,
                 )
             except Exception as e:
                 self.cb.on_thinking_stop()
@@ -421,6 +429,7 @@ class TuiChatLoop:
                 self.config.model,
                 tools=[],
                 num_ctx=self.config.num_ctx,
+                max_output_tokens=self.config.max_output_tokens,
             )
         except Exception:
             self.cb.on_thinking_stop()

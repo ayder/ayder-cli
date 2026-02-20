@@ -326,16 +326,29 @@ class CLISelectScreen(ModalScreen[str | None]):
                 "↑↓ to navigate, Enter to select, Esc to cancel", classes="hint"
             )
 
-    def _render_list(self) -> Text:
-        """Render the selectable list with current highlight."""
-        result = Text()
+    MAX_VISIBLE = 15
 
-        for i, (value, display) in enumerate(self.items):
+    def _render_list(self) -> Text:
+        """Render a windowed view of the list with current highlight."""
+        result = Text()
+        total = len(self.items)
+
+        # Calculate viewport window centered around selected_index
+        half = self.MAX_VISIBLE // 2
+        start = max(0, self.selected_index - half)
+        end = min(total, start + self.MAX_VISIBLE)
+        # Re-anchor start if end hit the ceiling
+        start = max(0, end - self.MAX_VISIBLE)
+
+        if start > 0:
+            result.append(f"  ↑ {start} more above\n", style="dim")
+
+        for i in range(start, end):
+            value, display = self.items[i]
             is_selected = i == self.selected_index
             is_current = value == self.current_value
 
             if is_selected:
-                # Highlighted row
                 result.append(" → ", style="bold cyan")
                 if is_current:
                     result.append(f"{display}", style="bold green")
@@ -343,7 +356,6 @@ class CLISelectScreen(ModalScreen[str | None]):
                 else:
                     result.append(f"{display}", style="bold white")
             else:
-                # Normal row
                 result.append("   ", style="dim")
                 if is_current:
                     result.append(f"{display}", style="green")
@@ -352,6 +364,10 @@ class CLISelectScreen(ModalScreen[str | None]):
                     result.append(f"{display}", style="white")
 
             result.append("\n")
+
+        remaining = total - end
+        if remaining > 0:
+            result.append(f"  ↓ {remaining} more below\n", style="dim")
 
         return result
 

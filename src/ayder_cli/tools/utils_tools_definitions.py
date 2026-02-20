@@ -13,6 +13,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="manage_environment_vars",
         description="Manage .env files: load, validate, generate secure values, and set environment variables.",
         description_template="Environment variables will be {mode}d",
+        tags=("core",),
         func_ref="ayder_cli.tools.utils_tools:manage_environment_vars",
         parameters={
             "type": "object",

@@ -13,6 +13,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="create_note",
         description="Create a markdown note in .ayder/notes/ for investigation findings or documentation.",
         description_template="Note '{title}' will be created",
+        tags=("metadata",),
         func_ref="ayder_cli.notes:create_note",
         parameters={
             "type": "object",

@@ -570,7 +570,7 @@ ayder-cli features a **pluggable tool architecture** with dynamic auto-discovery
 **Adding a New Tool:**
 1. Create `src/ayder_cli/tools/mytool_definitions.py` with `TOOL_DEFINITIONS` tuple
 2. Implement the tool function
-3. **Auto-discovery handles the rest** - no manual registration needed
+3. **Auto-discovery and validation handle the rest** — no manual registration, no edits to `validation.py`
 
 **Tool Definition Pattern:**
 ```python
@@ -588,7 +588,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
 )
 ```
 
-**Current Tools (26 total):**
+**Current Tools (27 total):**
 - **Filesystem** (7): list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
 - **Search** (2): search_codebase, get_project_structure
 - **Shell** (1): run_shell_command
@@ -597,15 +597,27 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
 - **Background Processes** (4): run_background_process, get_background_output, kill_background_process, list_background_processes
 - **Tasks** (2): list_tasks, show_task
 - **Environment** (1): manage_environment_vars
-- **Virtual Environments** (6): create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
+- **Virtual Environments** (5): create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
 - **Web** (1): fetch_web
+- **Temporal** (1): temporal_workflow
 
 **Discovery Features:**
-- Automatic detection of `*_definitions.py` files
+- Automatic detection of `*_definitions.py` files at import time
 - Duplicate tool name validation
-- Required tools validation
+- Registry-backed input validation (see below)
 - Graceful error handling
 - Zero maintenance overhead
+
+### Registry-Backed Validation
+
+`SchemaValidator` (in `application/validation.py`) derives required-argument lists directly from `TOOL_DEFINITIONS_BY_NAME` — the same live registry the executor uses. There is **no hardcoded tool list** to keep in sync.
+
+**Source of truth**: `ToolDefinition.parameters["required"]` in each `*_definitions.py` file.
+
+Consequences:
+- Adding a tool: create the `*_definitions.py` file — validation recognises it automatically.
+- Changing required params: update `ToolDefinition.parameters["required"]` — validation is immediately correct.
+- `SchemaValidator` uses a lazy import (`from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME` inside the method body) to avoid circular imports at module load time.
 
 ### Key Patterns
 

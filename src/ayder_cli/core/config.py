@@ -60,6 +60,7 @@ DEFAULTS: Dict[str, Any] = {
 _PROVIDER_SECTIONS = ("openai", "anthropic", "gemini")
 _DRIVER_BY_PROVIDER = {
     "openai": "openai",
+    "ollama": "ollama",
     "anthropic": "anthropic",
     "gemini": "google",
 }
@@ -205,6 +206,10 @@ class Config(BaseModel):
     logging_retention: str = Field(default="7 days")
     max_background_processes: int = Field(default=5)
     max_iterations: int = Field(default=50)
+    max_output_tokens: int = Field(default=4096)
+    max_history_messages: int = Field(default=0)
+    stop_sequences: list[str] = Field(default_factory=list)
+    tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
 
     @model_validator(mode="before")
@@ -259,8 +264,8 @@ class Config(BaseModel):
     @field_validator("driver")
     @classmethod
     def validate_driver(cls, v: str) -> str:
-        if v not in ("openai", "anthropic", "google"):
-            raise ValueError("driver must be one of 'openai', 'anthropic', or 'google'")
+        if v not in ("openai", "ollama", "anthropic", "google"):
+            raise ValueError("driver must be one of 'openai', 'ollama', 'anthropic', or 'google'")
         return v
 
     @field_validator("num_ctx")
@@ -282,6 +287,20 @@ class Config(BaseModel):
     def validate_max_iterations(cls, v: int) -> int:
         if v < 1 or v > 100:
             raise ValueError("max_iterations must be between 1 and 100")
+        return v
+
+    @field_validator("max_output_tokens")
+    @classmethod
+    def validate_max_output_tokens(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_output_tokens must be positive")
+        return v
+
+    @field_validator("max_history_messages")
+    @classmethod
+    def validate_max_history_messages(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("max_history_messages must be non-negative (0 = unlimited)")
         return v
 
     @field_validator("base_url")

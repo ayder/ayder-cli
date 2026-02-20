@@ -13,6 +13,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="run_shell_command",
         description="Execute a shell command.",
         description_template="Command `{command}` will be executed",
+        tags=("core",),
         func_ref="ayder_cli.tools.shell:run_shell_command",
         parameters={
             "type": "object",

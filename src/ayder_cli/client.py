@@ -25,6 +25,8 @@ async def call_llm_async(
     model: str,
     tools: list | None = None,
     num_ctx: int = 65536,
+    max_output_tokens: int = 4096,
+    stop_sequences: list | None = None,
 ) -> Any:
     """
     Async wrapper for LLM calls.
@@ -37,6 +39,8 @@ async def call_llm_async(
         model: Model name
         tools: Available tools (optional)
         num_ctx: Context window size
+        max_output_tokens: Maximum tokens to generate in the response
+        stop_sequences: Optional list of stop sequences
 
     Returns:
         LLM response object
@@ -44,7 +48,9 @@ async def call_llm_async(
     loop = asyncio.get_event_loop()
 
     def call_sync():
-        options = {"num_ctx": num_ctx}
+        options: dict = {"num_ctx": num_ctx, "max_output_tokens": max_output_tokens}
+        if stop_sequences:
+            options["stop_sequences"] = stop_sequences
         return llm.chat(messages, model, tools, options)
 
     return await loop.run_in_executor(_executor, call_sync)
@@ -75,6 +81,7 @@ class ChatSession:
         self.config = config
         self.system_prompt = system_prompt
         self.messages: list[dict[str, Any]] = []
+        self.max_history: int = getattr(config, "max_history_messages", 0)
         self.state: dict[str, Any] = {
             "verbose": config.verbose if hasattr(config, "verbose") else False,
             "permissions": permissions or set(),
@@ -104,8 +111,16 @@ class ChatSession:
         self.messages.append(message)
 
     def get_messages(self) -> list:
-        """Get current message history for API calls."""
-        return self.messages
+        """Get current message history for API calls.
+
+        When max_history > 0, applies a sliding window: always keeps the
+        system message (if present at index 0) plus the last max_history messages.
+        This prevents context-window overflow on long sessions.
+        """
+        if not self.max_history or len(self.messages) <= self.max_history + 1:
+            return self.messages
+        system = [m for m in self.messages[:1] if m.get("role") == "system"]
+        return system + self.messages[-self.max_history:]
 
     def clear_messages(self, keep_system: bool = True):
         """Clear conversation history, optionally keeping system message.
@@ -159,8 +174,11 @@ class Agent:
             max_iterations=self.session.state.get("iterations", 50),
             model=model,
             num_ctx=cfg.num_ctx,
+            max_output_tokens=getattr(cfg, "max_output_tokens", 4096),
+            stop_sequences=list(getattr(cfg, "stop_sequences", [])),
             verbose=self.session.state.get("verbose", False),
             permissions=self.session.state.get("permissions", set()),
+            tool_tags=frozenset(cfg.tool_tags) if getattr(cfg, "tool_tags", None) else None,
         )
 
         # Create and run chat loop

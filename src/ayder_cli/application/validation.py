@@ -58,50 +58,19 @@ class ValidationStage(Enum):
 # Built-in validators
 # ---------------------------------------------------------------------------
 
-# Known tools and their required arguments.
-# All real registry tools are listed here so SchemaValidator is permissive for
-# valid tool names. Only tool names absent from this set are treated as unknown.
-_KNOWN_TOOLS: dict[str, list[str]] = {
-    "list_files": [],
-    "read_file": ["file_path"],
-    "write_file": ["file_path", "content"],
-    "replace_string": ["file_path"],
-    "insert_line": ["file_path"],
-    "delete_line": ["file_path"],
-    "get_file_info": ["file_path"],
-    "save_memory": [],
-    "load_memory": [],
-    "create_note": [],
-    "run_background_process": ["command"],
-    "get_background_output": [],
-    "kill_background_process": [],
-    "list_background_processes": [],
-    "search_codebase": ["query"],
-    "get_project_structure": [],
-    "run_shell_command": ["command"],
-    "list_tasks": [],
-    "show_task": [],
-    "manage_environment_vars": [],
-    "create_virtualenv": [],
-    "install_requirements": [],
-    "list_virtualenvs": [],
-    "activate_virtualenv": [],
-    "remove_virtualenv": [],
-    "fetch_web": ["url"],
-    "temporal_workflow": ["action"],
-}
-
-
 class SchemaValidator:
-    """Validates tool name and required argument presence."""
+    """Validates tool name and required argument presence against live registry."""
 
     def validate(self, request: ToolRequest) -> tuple[bool, Any]:
-        if request.name not in _KNOWN_TOOLS:
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+        if request.name not in TOOL_DEFINITIONS_BY_NAME:
             return False, ValidationError(
                 tool_name=request.name,
                 message=f"unknown tool: '{request.name}' not found in registry",
             )
-        required = _KNOWN_TOOLS[request.name]
+        td = TOOL_DEFINITIONS_BY_NAME[request.name]
+        required = td.parameters.get("required", [])
         for arg in required:
             if arg not in request.arguments or request.arguments[arg] is None:
                 return False, ValidationError(

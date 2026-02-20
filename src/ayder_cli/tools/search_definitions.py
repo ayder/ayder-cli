@@ -11,6 +11,7 @@ from .definition import ToolDefinition
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="search_codebase",
+        tags=("core",),
         func_ref="ayder_cli.tools.search:search_codebase",
         description=(
             "Search for a regex pattern across the codebase. Returns matching "
@@ -68,6 +69,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="get_project_structure",
         description="Generate a tree-style project structure summary.",
         description_template="Project structure will be displayed",
+        tags=("core",),
         func_ref="ayder_cli.tools.utils_tools:get_project_structure",
         parameters={
             "type": "object",

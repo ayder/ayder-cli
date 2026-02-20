@@ -13,6 +13,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="create_virtualenv",
         description="Create a new Python virtual environment in the project directory",
         description_template="Virtual environment {env_name} will be created",
+        tags=("venv",),
         func_ref="ayder_cli.tools.venv:create_virtualenv",
         parameters={
             "type": "object",
@@ -42,6 +43,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="install_requirements",
         description="Install project dependencies from requirements.txt or pyproject.toml into the virtual environment",
         description_template="Dependencies will be installed from {requirements_file} into {env_name}",
+        tags=("venv",),
         func_ref="ayder_cli.tools.venv:install_requirements",
         parameters={
             "type": "object",
@@ -71,6 +73,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="list_virtualenvs",
         description="List all virtual environments in the project directory",
         description_template="Virtual environments will be listed",
+        tags=("venv",),
         func_ref="ayder_cli.tools.venv:list_virtualenvs",
         parameters={
             "type": "object",
@@ -83,6 +86,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="activate_virtualenv",
         description="Get activation instructions for a virtual environment",
         description_template="Activation instructions for {env_name} will be provided",
+        tags=("venv",),
         func_ref="ayder_cli.tools.venv:activate_virtualenv",
         parameters={
             "type": "object",
@@ -104,6 +108,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="remove_virtualenv",
         description="Remove/uninstall a virtual environment",
         description_template="Virtual environment {env_name} will be removed",
+        tags=("venv",),
         func_ref="ayder_cli.tools.venv:remove_virtualenv",
         parameters={
             "type": "object",

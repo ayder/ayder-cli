@@ -208,6 +208,17 @@ class AyderApp(App):
                 else self.config.get("max_iterations", 50)
             )
         self._callbacks = AppCallbacks(self)
+        if isinstance(self.config, dict):
+            max_output_tokens = self.config.get("max_output_tokens", 4096)
+            stop_sequences = self.config.get("stop_sequences", [])
+            tool_tags_list = self.config.get("tool_tags", ["core", "metadata"])
+        else:
+            max_output_tokens = getattr(self.config, "max_output_tokens", 4096)
+            raw_stop = getattr(self.config, "stop_sequences", [])
+            stop_sequences = list(raw_stop) if raw_stop is not None else []
+            raw_tags = getattr(self.config, "tool_tags", ["core", "metadata"])
+            tool_tags_list = list(raw_tags) if raw_tags is not None else []
+        tool_tags = frozenset(tool_tags_list) if tool_tags_list else None
         self.chat_loop = TuiChatLoop(
             llm=self.llm,
             registry=self.registry,
@@ -215,8 +226,11 @@ class AyderApp(App):
             config=TuiLoopConfig(
                 model=self.model,
                 num_ctx=num_ctx,
+                max_output_tokens=max_output_tokens,
+                stop_sequences=stop_sequences,
                 max_iterations=max_iters,
                 permissions=self.permissions,
+                tool_tags=tool_tags,
             ),
             callbacks=self._callbacks,
             checkpoint_manager=self._checkpoint_manager,
@@ -225,7 +239,7 @@ class AyderApp(App):
 
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt with project structure."""
-        from ayder_cli.prompts import SYSTEM_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE
+        from ayder_cli.prompts import SYSTEM_PROMPT, TOOL_PROTOCOL_BLOCK, PROJECT_STRUCTURE_MACRO_TEMPLATE
 
         try:
             structure = self.registry.execute("get_project_structure", {"max_depth": 3})
@@ -233,12 +247,14 @@ class AyderApp(App):
         except Exception:
             macro = ""
 
-        system_prompt = SYSTEM_PROMPT.format(model_name=self.model) + macro
+        driver = self.config.driver if not isinstance(self.config, dict) else self.config.get("driver", "openai")
+        tool_protocol = TOOL_PROTOCOL_BLOCK if driver in ("openai", "ollama") else ""
+        system_prompt = SYSTEM_PROMPT + tool_protocol + macro
         self.messages.append({"role": "system", "content": system_prompt})
 
     def update_system_prompt_model(self) -> None:
         """Update the model name in the system prompt after /model switch."""
-        from ayder_cli.prompts import SYSTEM_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE
+        from ayder_cli.prompts import SYSTEM_PROMPT, TOOL_PROTOCOL_BLOCK, PROJECT_STRUCTURE_MACRO_TEMPLATE
 
         if self.messages and self.messages[0].get("role") == "system":
             try:
@@ -250,9 +266,9 @@ class AyderApp(App):
                 )
             except Exception:
                 macro = ""
-            self.messages[0]["content"] = (
-                SYSTEM_PROMPT.format(model_name=self.model) + macro
-            )
+            driver = self.config.driver if not isinstance(self.config, dict) else self.config.get("driver", "openai")
+            tool_protocol = TOOL_PROTOCOL_BLOCK if driver in ("openai", "ollama") else ""
+            self.messages[0]["content"] = SYSTEM_PROMPT + tool_protocol + macro
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel."""

@@ -174,6 +174,10 @@ class TestFactoryTUIIntegration:
             mock_components.config.num_ctx = 65536
             mock_components.config.max_iterations = 50
             mock_components.config.max_background_processes = 5
+            mock_components.config.max_output_tokens = 4096
+            mock_components.config.stop_sequences = []
+            mock_components.config.tool_tags = ["core", "metadata"]
+            mock_components.config.driver = "openai"
             mock_components.llm_provider = Mock()
             mock_components.tool_registry = Mock()
             mock_components.tool_registry.execute.return_value = "src/\n  main.py"

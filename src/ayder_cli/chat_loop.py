@@ -36,8 +36,11 @@ class LoopConfig:
     max_iterations: int = 50
     model: str = "qwen3-coder:latest"
     num_ctx: int = 65536
+    max_output_tokens: int = 4096
+    stop_sequences: list = field(default_factory=list)
     verbose: bool = False
     permissions: set = field(default_factory=set)
+    tool_tags: frozenset | None = None
 
 
 class IterationController:
@@ -203,11 +206,17 @@ class ChatLoop:
             schemas = self._get_tool_schemas()
 
             # Call LLM
+            options: dict = {
+                "num_ctx": self.config.num_ctx,
+                "max_output_tokens": self.config.max_output_tokens,
+            }
+            if self.config.stop_sequences:
+                options["stop_sequences"] = self.config.stop_sequences
             response = self.llm.chat(
                 model=self.config.model,
                 messages=self.session.get_messages(),
                 tools=schemas,
-                options={"num_ctx": self.config.num_ctx},
+                options=options,
                 verbose=self.config.verbose,
             )
 
@@ -257,10 +266,10 @@ class ChatLoop:
         return True
 
     def _get_tool_schemas(self) -> list:
-        """Get tool schemas, respecting no_tools flag."""
+        """Get tool schemas, respecting no_tools flag and tool_tags filter."""
         if self.session.state.pop("no_tools", False):
             return []
-        return self.tools.tool_registry.get_schemas()
+        return self.tools.tool_registry.get_schemas(tags=self.config.tool_tags)
 
     def _process_response(self, response) -> tuple[Optional[str], bool]:
         """Process LLM response.

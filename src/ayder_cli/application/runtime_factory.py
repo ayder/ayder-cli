@@ -20,7 +20,7 @@ from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
 from ayder_cli.checkpoint_manager import CheckpointManager
 from ayder_cli.memory import MemoryManager
-from ayder_cli.prompts import SYSTEM_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE
+from ayder_cli.prompts import SYSTEM_PROMPT, TOOL_PROTOCOL_BLOCK, PROJECT_STRUCTURE_MACRO_TEMPLATE
 
 
 @dataclass
@@ -56,7 +56,8 @@ def create_runtime(
     """
     cfg = config or load_config()
 
-    effective_model = model_name or cfg.model
+    if model_name:
+        cfg = cfg.model_copy(update={"model": model_name})
 
     llm_provider = create_llm_provider(cfg)
     project_ctx = ProjectContext(project_root)
@@ -81,7 +82,11 @@ def create_runtime(
     except Exception:
         macro = ""
 
-    system_prompt = SYSTEM_PROMPT.format(model_name=effective_model) + macro
+    # Inject XML TOOL PROTOCOL for OpenAI-compatible drivers (openai/ollama use custom
+    # XML parsing). Anthropic and Gemini use native function-calling — the block adds
+    # noise there.
+    tool_protocol = TOOL_PROTOCOL_BLOCK if cfg.driver in ("openai", "ollama") else ""
+    system_prompt = SYSTEM_PROMPT + tool_protocol + macro
 
     return RuntimeComponents(
         config=cfg,

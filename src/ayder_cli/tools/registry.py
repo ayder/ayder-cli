@@ -295,9 +295,20 @@ class ToolRegistry:
         if callback in self._post_execute_callbacks:
             self._post_execute_callbacks.remove(callback)
 
-    def get_schemas(self) -> List[Dict[str, Any]]:
-        """Return all tool schemas."""
-        return [td.to_openai_schema() for td in TOOL_DEFINITIONS]
+    def get_schemas(self, tags: frozenset | None = None) -> List[Dict[str, Any]]:
+        """Return tool schemas, optionally filtered by capability tags.
+
+        Args:
+            tags: When provided, only return schemas for tools whose tags
+                  intersect with this set. None means return all tools.
+        """
+        if tags is None:
+            return [td.to_openai_schema() for td in TOOL_DEFINITIONS]
+        return [
+            td.to_openai_schema()
+            for td in TOOL_DEFINITIONS
+            if set(td.tags) & tags
+        ]
 
     def _get_tool_func(self, name: str) -> Optional[Callable]:
         return self._registry.get(name)

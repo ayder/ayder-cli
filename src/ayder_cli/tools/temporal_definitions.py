@@ -10,6 +10,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="temporal_workflow",
         description="Manage Temporal workflows and queue operations using action-based commands.",
         description_template="Temporal workflow action {action} will be invoked",
+        tags=("temporal",),
         func_ref="ayder_cli.tools.temporal:temporal_workflow",
         parameters={
             "type": "object",

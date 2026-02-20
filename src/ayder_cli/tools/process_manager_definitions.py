@@ -13,6 +13,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="run_background_process",
         description="Start a long-running command in the background (servers, watchers, builds).",
         description_template="Background command `{command}` will be started",
+        tags=("background",),
         func_ref="ayder_cli.process_manager:run_background_process",
         parameters={
             "type": "object",
@@ -31,6 +32,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="get_background_output",
         description="Get recent stdout/stderr output from a background process.",
         description_template="Output for background process {process_id} will be retrieved",
+        tags=("background",),
         func_ref="ayder_cli.process_manager:get_background_output",
         parameters={
             "type": "object",
@@ -52,6 +54,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="kill_background_process",
         description="Kill a running background process.",
         description_template="Background process {process_id} will be killed",
+        tags=("background",),
         func_ref="ayder_cli.process_manager:kill_background_process",
         parameters={
             "type": "object",
@@ -70,6 +73,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="list_background_processes",
         description="List all background processes and their status.",
         description_template="Background processes will be listed",
+        tags=("background",),
         func_ref="ayder_cli.process_manager:list_background_processes",
         parameters={
             "type": "object",
