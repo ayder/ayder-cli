@@ -70,7 +70,12 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     # ---- File System (write) ----
     ToolDefinition(
         name="write_file",
-        description="Write content to a file (overwrites entire file).",
+        description=(
+            "Write content to a file, overwriting it entirely. "
+            "ONLY use this for new files or very short files (under ~50 lines). "
+            "For existing files, prefer replace_string to avoid sending the full content. "
+            "Embedding large content here is unreliable and wastes context."
+        ),
         description_template="File {file_path} will be written",
         func_ref="ayder_cli.tools.filesystem:write_file",
         parameters={
@@ -82,7 +87,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 },
                 "content": {
                     "type": "string",
-                    "description": "The content to write",
+                    "description": "The full content to write. Keep this small. For large or existing files use replace_string instead.",
                 },
             },
             "required": ["file_path", "content"],
@@ -94,7 +99,14 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ),
     ToolDefinition(
         name="replace_string",
-        description="Replace a specific string in a file with a new string.",
+        description=(
+            "Replace a specific string in a file with a new string. "
+            "PREFER this over write_file for any edit to an existing file. "
+            "Works like a search/replace patch: provide a unique excerpt of the current content "
+            "as old_string and the updated version as new_string. "
+            "Make multiple calls to apply multiple changes. "
+            "old_string must match the file exactly, including indentation."
+        ),
         description_template="File {file_path} will be modified",
         func_ref="ayder_cli.tools.filesystem:replace_string",
         parameters={
@@ -106,11 +118,11 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "The exact string to replace",
+                    "description": "The exact string to find and replace (must be unique in the file and match indentation exactly)",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "The new string to insert",
+                    "description": "The new string to substitute in place of old_string",
                 },
             },
             "required": ["file_path", "old_string", "new_string"],

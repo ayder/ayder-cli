@@ -196,7 +196,15 @@ class ToolExecutor:
         """
         fname = tool_call.function.name
         fargs = tool_call.function.arguments
-        parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
+        try:
+            parsed = json.loads(fargs) if isinstance(fargs, str) else fargs
+        except json.JSONDecodeError as e:
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": fname,
+                "content": f"Error: Failed to parse tool arguments as JSON: {e}",
+            }
 
         outcome, value = self._execute_single_call(
             fname, parsed, granted_permissions, verbose
