@@ -729,6 +729,77 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
     )
 
 
+def _discover_skills(project_ctx: ProjectContext) -> list[tuple[str, "Path"]]:
+    """Return [(skill_name, skill_md_path), ...] from .ayder/skills/."""
+    from pathlib import Path
+
+    skills_dir = Path(project_ctx.root) / ".ayder" / "skills"
+    results: list[tuple[str, Path]] = []
+    if not skills_dir.is_dir():
+        return results
+    for d in sorted(skills_dir.iterdir()):
+        if d.is_dir() and (d / "SKILL.md").exists():
+            results.append((d.name, d / "SKILL.md"))
+    return results
+
+
+def _apply_skill(
+    app: "AyderApp", skill_name: str, skill_path: "Path", chat_view: ChatView
+) -> None:
+    """Inject a skill into the conversation and update the status bar."""
+    from pathlib import Path
+
+    content = Path(skill_path).read_text(encoding="utf-8").strip()
+    if not content:
+        chat_view.add_system_message(f"SKILL.md for '{skill_name}' is empty, skipping.")
+        return
+    app.inject_skill(skill_name, content)
+    status_bar = app.query_one("#status-bar", StatusBar)
+    status_bar.set_skill(skill_name)
+    chat_view.add_system_message(f"Activated skill: {skill_name}")
+
+
+def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
+    """Activate a domain skill from .ayder/skills/ (inject as system message)."""
+    project_ctx = ProjectContext(".")
+    skills = _discover_skills(project_ctx)
+
+    if not skills:
+        chat_view.add_system_message("No skills found in .ayder/skills/")
+        return
+
+    if args.strip():
+        # Direct activation: /skill python-developer
+        name = args.strip()
+        match = next(((n, p) for n, p in skills if n == name), None)
+        if match is None:
+            available = ", ".join(n for n, _ in skills)
+            chat_view.add_system_message(
+                f"Unknown skill: '{name}'. Available: {available}"
+            )
+            return
+        _apply_skill(app, match[0], match[1], chat_view)
+    else:
+        # Interactive picker
+        current = app._active_skill or ""
+        items = [(n, n) for n, _ in skills]
+        skill_map = {n: p for n, p in skills}
+
+        def on_skill_selected(selected: str | None) -> None:
+            if selected:
+                _apply_skill(app, selected, skill_map[selected], chat_view)
+
+        app.push_screen(
+            CLISelectScreen(
+                title="Select skill",
+                items=items,
+                current=current,
+                description=f"Active: {current or 'none'}",
+            ),
+            on_skill_selected,
+        )
+
+
 def do_clear(app: AyderApp, chat_view: ChatView) -> None:
     """Clear conversation history."""
     from ayder_cli.application.message_contract import get_message_role
@@ -789,4 +860,5 @@ COMMAND_MAP: dict[str, Callable] = {
     "/archive-completed-tasks": handle_archive,
     "/permission": handle_permission,
     "/temporal": handle_temporal,
+    "/skill": handle_skill,
 }

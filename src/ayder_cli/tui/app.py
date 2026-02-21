@@ -160,6 +160,7 @@ class AyderApp(App):
         self._pending_messages: list[str] = []
         self._is_processing = False
         self._verbose_mode: bool = False
+        self._active_skill: str | None = None
 
         # Build all shared runtime components via the factory
         rt = create_runtime()
@@ -191,6 +192,12 @@ class AyderApp(App):
         # Add TUI-only commands to autocomplete
         if "/permission" not in self.commands:
             self.commands.append("/permission")
+        # Add /skill <name> completions from .ayder/skills/
+        _skills_dir = Path(".").resolve() / ".ayder" / "skills"
+        if _skills_dir.is_dir():
+            for _skill_dir in sorted(_skills_dir.iterdir()):
+                if _skill_dir.is_dir() and (_skill_dir / "SKILL.md").exists():
+                    self.commands.append(f"/skill {_skill_dir.name}")
 
         self._activity_timer: Timer | None = None
 
@@ -269,6 +276,24 @@ class AyderApp(App):
             driver = self.config.driver if not isinstance(self.config, dict) else self.config.get("driver", "openai")
             tool_protocol = TOOL_PROTOCOL_BLOCK if driver in ("openai", "ollama") else ""
             self.messages[0]["content"] = SYSTEM_PROMPT + tool_protocol + macro
+
+    def inject_skill(self, skill_name: str, skill_content: str) -> None:
+        """Inject or replace the active skill system message."""
+        from ayder_cli.prompts import SKILL_INJECTION_TEMPLATE
+
+        # Remove previous skill message if any
+        self.messages = [
+            m for m in self.messages
+            if not (
+                m.get("role") == "system"
+                and m.get("content", "").startswith("### ACTIVE SKILL:")
+            )
+        ]
+        block = SKILL_INJECTION_TEMPLATE.format(
+            skill_name=skill_name, skill_content=skill_content
+        )
+        self.messages.append({"role": "system", "content": block})
+        self._active_skill = skill_name
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel."""

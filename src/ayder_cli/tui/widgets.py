@@ -527,6 +527,7 @@ class StatusBar(Horizontal):
         yield Label(" | tokens: 0", id="token-label")
         yield Label(" | iter: 0", id="iter-label")
         yield Label(" | files: 0", id="files-label")
+        yield Label("", id="skill-label")
         yield Static(classes="spacer")
         yield Label("^C:cancel ^L:clear ^O:tools ^Q:quit", classes="key-hint")
 
@@ -559,3 +560,8 @@ class StatusBar(Horizontal):
         mode_str = "".join(sorted(permissions))
         label = self.query_one("#mode-label", Label)
         label.update(f" | mode: {mode_str}")
+
+    def set_skill(self, skill_name: str | None) -> None:
+        """Update the active skill label."""
+        label = self.query_one("#skill-label", Label)
+        label.update(f" | skill: {skill_name}" if skill_name else "")

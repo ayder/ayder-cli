@@ -268,6 +268,27 @@ The summary should:
 Save the summary and confirm when done."""
 
 
+# =============================================================================
+# SKILL INJECTION TEMPLATE (tui/commands.py)
+# =============================================================================
+# Used by: tui/commands.py::_apply_skill()
+# REASON: Inject a domain-specific skill block as a mid-conversation system
+# message. The marker "### ACTIVE SKILL:" allows replacement on re-activation.
+
+SKILL_INJECTION_TEMPLATE = """\
+
+### ACTIVE SKILL: {skill_name}
+SCOPE: This skill provides domain-specific standards that work alongside — never
+against — the base operational rules. If any instruction here conflicts with a
+base rule, the base rule wins. Refer to the Domain and Trigger sections within
+the skill content to determine when to apply it.
+
+{skill_content}
+
+### END SKILL
+"""
+
+
 # Used by: tui/commands.py::handle_load_memory()
 # REASON: Prompt LLM to load and acknowledge memory from file.
 
