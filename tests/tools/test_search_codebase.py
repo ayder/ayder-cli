@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from ayder_cli.tools import search, utils_tools
+from ayder_cli.tools.builtins import search, utils_tools
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess
 
@@ -38,8 +38,8 @@ def search_context(tmp_path):
 class TestSearchCodebase:
     """Test search_codebase functionality."""
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_basic_search(self, mock_run, mock_which, search_context):
         """Test basic pattern search."""
         mock_which.return_value = "/usr/bin/rg"
@@ -57,8 +57,8 @@ class TestSearchCodebase:
         cmd = mock_run.call_args[0][0]
         assert "def read_file" in cmd
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_search_no_matches(self, mock_run, mock_which, search_context):
         """Test search with no matches."""
         mock_which.return_value = "/usr/bin/rg"
@@ -69,8 +69,8 @@ class TestSearchCodebase:
         assert isinstance(result, ToolSuccess)
         assert "No matches found" in result
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_case_insensitive_search(self, mock_run, mock_which, search_context):
         """Test case-insensitive search."""
         mock_which.return_value = "/usr/bin/rg"
@@ -81,8 +81,8 @@ class TestSearchCodebase:
         cmd = mock_run.call_args[0][0]
         assert "--ignore-case" in cmd
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_file_pattern_filter(self, mock_run, mock_which, search_context):
         """Test search filtered by file pattern."""
         mock_which.return_value = "/usr/bin/rg"
@@ -94,8 +94,8 @@ class TestSearchCodebase:
         assert "--glob" in cmd
         assert "*.py" in cmd
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_max_results_limit(self, mock_run, mock_which, search_context):
         """Test max results limit."""
         mock_which.return_value = "/usr/bin/rg"
@@ -107,8 +107,8 @@ class TestSearchCodebase:
         assert "--max-count" in cmd
         assert "10" in cmd
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_search_in_subdirectories(self, mock_run, mock_which, search_context):
         """Test search in subdirectories."""
         mock_which.return_value = "/usr/bin/rg"
@@ -120,8 +120,8 @@ class TestSearchCodebase:
         # Should contain the absolute path to subdir
         assert str(search_context.root / "subdir") in cmd
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_context_lines(self, mock_run, mock_which, search_context):
         """Test searching with context lines."""
         mock_which.return_value = "/usr/bin/rg"
@@ -206,8 +206,8 @@ class TestGetProjectStructure:
 class TestToolIntegration:
     """Test integration between dispatcher and search tools."""
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_dispatcher_calls_search_codebase(self, mock_run, mock_which, search_context):
         """Test that dispatcher correctly calls search_codebase."""
         mock_which.return_value = "/usr/bin/rg"
@@ -218,8 +218,8 @@ class TestToolIntegration:
         
         mock_run.assert_called()
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_dispatcher_with_kwargs(self, mock_run, mock_which, search_context):
         """Test dispatcher with keyword arguments."""
         mock_which.return_value = "/usr/bin/rg"
@@ -230,8 +230,8 @@ class TestToolIntegration:
         cmd = mock_run.call_args[0][0]
         assert "--ignore-case" in cmd
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_dispatcher_with_json_string(self, mock_run, mock_which, search_context):
         """Test dispatcher handling (simulated) for complex types."""
         # Note: Argument parsing happens before search_codebase is called in real app
@@ -246,8 +246,8 @@ class TestToolIntegration:
 class TestSearchFallback:
     """Test fallback mechanisms."""
 
-    @patch("ayder_cli.tools.search.shutil.which")
-    @patch("ayder_cli.tools.search.subprocess.run")
+    @patch("ayder_cli.tools.builtins.search.shutil.which")
+    @patch("ayder_cli.tools.builtins.search.subprocess.run")
     def test_search_executes_without_error(self, mock_run, mock_which, search_context):
         """Test that search executes without raising exception."""
         mock_which.return_value = None  # Force grep fallback

@@ -60,26 +60,47 @@ ayder-cli/
 │   │   ├── context.py          # ProjectContext (path sandboxing)
 │   │   └── result.py           # ToolSuccess/ToolError types
 │   │
+│   ├── application/            # Shared application layer (CLI + TUI)
+│   │   ├── checkpoint_orchestrator.py  # CheckpointOrchestrator, RuntimeContext
+│   │   ├── execution_policy.py         # ExecutionPolicy, PermissionDeniedError
+│   │   ├── message_contract.py         # LLM message format contracts
+│   │   ├── runtime_factory.py          # create_runtime() composition root
+│   │   ├── temporal_contract.py        # Temporal workflow contracts
+│   │   ├── temporal_metadata.py        # Temporal metadata types
+│   │   └── validation.py               # ValidationAuthority, SchemaValidator
+│   │
+│   ├── loops/                  # Shared agent loop base
+│   │   ├── base.py             # AgentLoopBase (iteration, checkpoint, routing)
+│   │   └── config.py           # Shared LoopConfig dataclass
+│   │
 │   ├── services/               # Service layer
 │   │   ├── llm.py              # OpenAI/Ollama LLM provider
+│   │   ├── interactions.py     # InteractionSink, ConfirmationPolicy protocols
 │   │   └── tools/
-│   │       └── executor.py     # Tool execution with confirmation
+│   │       └── executor.py     # ToolExecutor (CLI confirmation + diff preview)
 │   │
-│   ├── tools/                  # Tool implementations (26 tools)
+│   ├── tools/                  # Tool framework + implementations (28 tools)
 │   │   ├── definition.py       # ToolDefinition base + auto-discovery
-│   │   ├── *_definitions.py    # Distributed tool definitions (10 files)
-│   │   ├── filesystem.py       # File system tools
-│   │   ├── search.py           # Search tools
-│   │   ├── shell.py            # Shell tools
-│   │   ├── venv.py             # Virtualenv tools
-│   │   ├── utils_tools.py      # Utility tools
 │   │   ├── registry.py         # Tool registry with middleware
 │   │   ├── schemas.py          # OpenAI-format JSON schemas
-│   │   └── utils.py            # Tool utilities
+│   │   ├── execution.py        # Tool execution engine
+│   │   ├── hooks.py            # Hook/middleware system
+│   │   ├── normalization.py    # Argument normalization
+│   │   ├── utils.py            # Tool utilities
+│   │   └── builtins/           # Built-in tool implementations
+│   │       ├── *_definitions.py # Distributed tool definitions (12 files)
+│   │       ├── filesystem.py   # File system tools
+│   │       ├── python_editor.py # CST-based Python editor tool
+│   │       ├── search.py       # Search tools
+│   │       ├── shell.py        # Shell tools
+│   │       ├── venv.py         # Virtualenv tools
+│   │       ├── utils_tools.py  # Utility tools
+│   │       ├── web.py          # Web fetching tool
+│   │       └── temporal.py     # Temporal workflow tool
 │   │
 │   ├── tui/                    # Textual TUI (main interface)
 │   │   ├── app.py              # AyderApp main application
-│   │   ├── chat_loop.py        # TUI chat loop logic
+│   │   ├── chat_loop.py        # TUI async chat loop (TuiChatLoop)
 │   │   ├── commands.py         # Slash command handlers
 │   │   ├── helpers.py          # TUI helper functions
 │   │   ├── parser.py           # XML tool call parser
@@ -93,7 +114,7 @@ ayder-cli/
 │   │   ├── claude.py           # Claude theme CSS
 │   │   └── original.py         # Original theme CSS
 │   │
-│   ├── chat_loop.py            # Core agentic loop
+│   ├── chat_loop.py            # Sync CLI agent loop (ChatLoop)
 │   ├── checkpoint_manager.py   # Memory checkpoint/restore
 │   ├── memory.py               # Cross-session memory storage
 │   ├── notes.py                # Note management (.ayder/notes/)
@@ -101,8 +122,6 @@ ayder-cli/
 │   ├── process_manager.py      # Background process management
 │   ├── prompts.py              # System prompts templates
 │   ├── tasks.py                # Task management (.ayder/tasks/)
-│   ├── tui_helpers.py          # TUI helper re-exports
-│   ├── tui_theme_manager.py    # Theme manager re-exports
 │   └── ui.py                   # Rich terminal UI
 │
 ├── tests/                      # Test suite
@@ -129,10 +148,17 @@ ayder-cli/
 | `cli.py` | Entry point, argument parsing |
 | `tui/app.py` | Main TUI application (AyderApp) |
 | `tui/commands.py` | Slash command handlers (/help, /model, etc.) |
-| `tui/chat_loop.py` | LLM interaction loop for TUI |
-| `client.py` | ChatSession and Agent classes |
-| `tools/filesystem.py` | File system tool implementations |
-| `tools/search.py` | Search tool implementations |
+| `tui/chat_loop.py` | Async LLM loop for TUI (TuiChatLoop + TuiCallbacks protocol) |
+| `chat_loop.py` | Sync CLI agent loop (ChatLoop) |
+| `client.py` | ChatSession, Agent, call_llm_async() |
+| `application/execution_policy.py` | Shared permission + tool execution policy |
+| `application/validation.py` | ValidationAuthority + SchemaValidator (single validation path) |
+| `application/checkpoint_orchestrator.py` | CheckpointOrchestrator (shared checkpoint logic) |
+| `application/runtime_factory.py` | create_runtime() — single composition root |
+| `loops/base.py` | AgentLoopBase shared by ChatLoop and TuiChatLoop |
+| `tools/builtins/filesystem.py` | File system tool implementations |
+| `tools/builtins/python_editor.py` | CST-based Python structural editor |
+| `tools/builtins/search.py` | Search tool implementations |
 | `core/config.py` | Configuration with Pydantic validation |
 | `core/context.py` | ProjectContext for path sandboxing |
 
@@ -568,28 +594,29 @@ source .venv/bin/activate && python3 -m pytest tests/test_failing.py -vvs && dea
 ayder-cli features a **pluggable tool architecture** with dynamic auto-discovery:
 
 **Adding a New Tool:**
-1. Create `src/ayder_cli/tools/mytool_definitions.py` with `TOOL_DEFINITIONS` tuple
-2. Implement the tool function
+1. Create `src/ayder_cli/tools/builtins/mytool_definitions.py` with `TOOL_DEFINITIONS` tuple
+2. Implement the tool function in `src/ayder_cli/tools/builtins/mytool.py`
 3. **Auto-discovery and validation handle the rest** — no manual registration, no edits to `validation.py`
 
 **Tool Definition Pattern:**
 ```python
-# src/ayder_cli/tools/mytool_definitions.py
-from ayder_cli.tools.definition import ToolDefinition
+# src/ayder_cli/tools/builtins/mytool_definitions.py
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="my_tool",
         description="What it does",
-        func_ref="ayder_cli.tools.mytool:my_function",
+        func_ref="ayder_cli.tools.builtins.mytool:my_function",
         parameters={...},
         permission="r",
     ),
 )
 ```
 
-**Current Tools (27 total):**
+**Current Tools (28 total):**
 - **Filesystem** (7): list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
+- **Python Editor** (1): python_editor (CST-based structural Python editing)
 - **Search** (2): search_codebase, get_project_structure
 - **Shell** (1): run_shell_command
 - **Memory** (2): save_memory, load_memory

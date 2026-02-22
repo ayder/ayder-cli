@@ -59,7 +59,7 @@ class ValidationStage(Enum):
 # ---------------------------------------------------------------------------
 
 class SchemaValidator:
-    """Validates tool name and required argument presence against live registry."""
+    """Validates tool name, required argument presence, and argument types."""
 
     def validate(self, request: ToolRequest) -> tuple[bool, Any]:
         from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
@@ -70,7 +70,10 @@ class SchemaValidator:
                 message=f"unknown tool: '{request.name}' not found in registry",
             )
         td = TOOL_DEFINITIONS_BY_NAME[request.name]
-        required = td.parameters.get("required", [])
+        params = td.parameters
+
+        # Required parameter check
+        required = params.get("required", [])
         for arg in required:
             if arg not in request.arguments or request.arguments[arg] is None:
                 return False, ValidationError(
@@ -78,6 +81,26 @@ class SchemaValidator:
                     field=arg,
                     message=f"required argument '{arg}' is missing or empty",
                 )
+
+        # Type validation (moved from validate_tool_call in execution.py)
+        properties = params.get("properties", {})
+        for param_name, value in request.arguments.items():
+            if param_name not in properties:
+                continue
+            expected_type = properties[param_name].get("type")
+            if expected_type == "integer" and not isinstance(value, int):
+                return False, ValidationError(
+                    tool_name=request.name,
+                    field=param_name,
+                    message=f"'{param_name}' must be integer, got {type(value).__name__}",
+                )
+            if expected_type == "string" and not isinstance(value, str):
+                return False, ValidationError(
+                    tool_name=request.name,
+                    field=param_name,
+                    message=f"'{param_name}' must be string, got {type(value).__name__}",
+                )
+
         return True, None
 
 

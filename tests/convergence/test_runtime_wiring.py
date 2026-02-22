@@ -36,29 +36,22 @@ class TestCheckpointOrchestrationWiring:
         assert "CheckpointOrchestrator" in source
         assert "orchestrate_checkpoint" in source
 
-    def test_cli_handle_checkpoint_uses_orchestrator(self):
-        """ChatLoop._handle_checkpoint delegates to CheckpointOrchestrator."""
-        from ayder_cli.chat_loop import ChatLoop
-
-        source = inspect.getsource(ChatLoop._handle_checkpoint)
-
-        assert "CheckpointOrchestrator" in source
-        assert "orchestrate_checkpoint" in source
-
     def test_tui_trigger_uses_checkpoint_trigger(self):
-        """TuiChatLoop.run uses CheckpointTrigger for iteration trigger."""
+        """TuiChatLoop delegates iteration trigger to AgentLoopBase._should_trigger_checkpoint."""
         from ayder_cli.tui.chat_loop import TuiChatLoop
+        from ayder_cli.loops.base import AgentLoopBase
 
-        source = inspect.getsource(TuiChatLoop.run)
-        assert "CheckpointTrigger" in source
-        assert "trigger.should_trigger" in source
+        # TuiChatLoop must extend AgentLoopBase
+        assert issubclass(TuiChatLoop, AgentLoopBase)
 
-    def test_cli_trigger_uses_checkpoint_trigger(self):
-        """ChatLoop.IterationController.should_trigger_checkpoint uses CheckpointTrigger."""
-        from ayder_cli.chat_loop import IterationController
+        # Shared trigger implementation uses CheckpointTrigger
+        base_source = inspect.getsource(AgentLoopBase._should_trigger_checkpoint)
+        assert "CheckpointTrigger" in base_source
+        assert "should_trigger" in base_source
 
-        source = inspect.getsource(IterationController.should_trigger_checkpoint)
-        assert "CheckpointTrigger" in source
+        # run() must delegate to the shared trigger method
+        run_source = inspect.getsource(TuiChatLoop.run)
+        assert "_should_trigger_checkpoint" in run_source
 
     def test_both_use_same_orchestrator_class(self):
         """CLI and TUI import the same CheckpointOrchestrator — not variants."""
@@ -244,40 +237,6 @@ class TestCheckpointOrchestrationCalledAtRuntime:
         mock_reset.assert_called_once()
         mock_restore.assert_called_once()
 
-    def test_cli_checkpoint_calls_reset_state(self):
-        """ChatLoop._handle_checkpoint calls CheckpointOrchestrator.reset_state."""
-        from ayder_cli.chat_loop import ChatLoop, LoopConfig
-        from ayder_cli.client import ChatSession
-
-        mm = MagicMock()
-        mm.create_checkpoint.return_value = True
-        mm.restore_from_checkpoint.return_value = None
-
-        config = LoopConfig(model="m", num_ctx=1024, max_iterations=10, permissions={"r"})
-        session = MagicMock(spec=ChatSession)
-        session.get_messages.return_value = [{"role": "system", "content": "sys"}]
-
-        loop = ChatLoop(
-            llm_provider=MagicMock(),
-            tool_executor=MagicMock(),
-            session=session,
-            config=config,
-            memory_manager=mm,
-        )
-
-        with patch(
-            "ayder_cli.application.checkpoint_orchestrator.CheckpointOrchestrator.reset_state"
-        ) as mock_reset:
-            mock_reset.side_effect = lambda state, **kw: None
-            with patch(
-                "ayder_cli.application.checkpoint_orchestrator.CheckpointOrchestrator.restore_from_checkpoint"
-            ) as mock_restore:
-                mock_restore.side_effect = lambda state, saved, **kw: None
-                result = loop._handle_checkpoint()
-
-        assert result is True
-        mock_reset.assert_called_once()
-        mock_restore.assert_called_once()
 
 
 class TestConvergenceIntegration:
@@ -345,9 +304,13 @@ class TestConvergenceIntegration:
         validator = SchemaValidator()
 
         for td in TOOL_DEFINITIONS:
-            # Build a request with all required args present (use sentinel value)
+            # Build a request with all required args present, using type-appropriate sentinels
             required = td.parameters.get("required", [])
-            args = {arg: "sentinel" for arg in required}
+            properties = td.parameters.get("properties", {})
+            args = {}
+            for arg in required:
+                expected_type = properties.get(arg, {}).get("type")
+                args[arg] = 0 if expected_type == "integer" else "sentinel"
             ok, err = validator.validate(ToolRequest(name=td.name, arguments=args))
             assert ok, f"Registry tool '{td.name}' rejected by SchemaValidator: {err}"
 
@@ -403,9 +366,3 @@ class TestCheckpointOrchestrateMethod:
         source = inspect.getsource(TuiChatLoop._handle_checkpoint)
         assert "orchestrate_checkpoint" in source
 
-    def test_cli_checkpoint_uses_orchestrate_checkpoint(self):
-        """ChatLoop._handle_checkpoint delegates to orchestrator.orchestrate_checkpoint."""
-        from ayder_cli.chat_loop import ChatLoop
-
-        source = inspect.getsource(ChatLoop._handle_checkpoint)
-        assert "orchestrate_checkpoint" in source

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from ayder_cli.cli_runner import _run_temporal_queue_cli
 from ayder_cli.core.config import Config, TemporalConfig
-from ayder_cli.tools.temporal import temporal_workflow
+from ayder_cli.tools.builtins.temporal import temporal_workflow
 
 
 class TestTemporalRuntimeWiringConvergence:
@@ -62,24 +62,11 @@ class TestTemporalRuntimeWiringConvergence:
         assert body["queue_name"] == "qa-team"
 
     def test_runtime_factory_uses_non_ui_interaction_defaults(self):
-        from ayder_cli.application.runtime_factory import create_runtime
-        from ayder_cli.services.interactions import (
-            AutoApproveConfirmationPolicy,
-            NullInteractionSink,
-        )
+        """Verify factory source uses AutoApprove and NullSink for internal ToolExecutor."""
+        import inspect
+        from ayder_cli.application.runtime_factory import create_runtime as _fn
 
-        mock_registry = MagicMock()
-        mock_registry.execute.return_value = "src/"
+        source = inspect.getsource(_fn)
 
-        with patch("ayder_cli.application.runtime_factory.create_llm_provider") as mock_llm, patch(
-            "ayder_cli.application.runtime_factory.create_default_registry",
-            return_value=mock_registry,
-        ):
-            mock_llm.return_value = MagicMock()
-            components = create_runtime(config=Config(temporal=TemporalConfig(enabled=False)))
-
-        assert isinstance(components.tool_executor.interaction_sink, NullInteractionSink)
-        assert isinstance(
-            components.tool_executor.confirmation_policy,
-            AutoApproveConfirmationPolicy,
-        )
+        assert "AutoApproveConfirmationPolicy" in source
+        assert "NullInteractionSink" in source

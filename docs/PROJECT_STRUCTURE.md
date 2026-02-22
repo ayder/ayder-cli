@@ -14,7 +14,7 @@ This document provides detailed architecture notes for the ayder-cli project.
 4. [TUI Architecture](#tui-architecture)
 5. [Import Paths](#import-paths)
 6. [Code Analysis Summaries](#code-analysis-summaries)
-7. [Phase 05 Convergence](#phase-05-convergence)
+7. [Convergence History](#convergence-history)
 
 ---
 
@@ -37,15 +37,22 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Application Layer                            │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                      TUI Mode (Default)                   │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │  │
-│  │  │  tui/app.py  │──│ tui/chat_    │──│   client.py  │     │  │
-│  │  │  (AyderApp)  │  │    loop.py   │  │(ChatSession) │     │  │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘     │  │
+│  │                  TUI Mode (Default)                       │  │
+│  │  tui/app.py (AyderApp) → tui/chat_loop.py (TuiChatLoop)  │  │
+│  │  AppCallbacks implements TuiCallbacks protocol            │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                 CLI Mode (Deprecated)                     │  │
-│  │         cli_runner.py → chat_loop.py → client.py          │  │
+│  │                   CLI Mode                                │  │
+│  │  cli_runner.py → client.py (Agent) → chat_loop.py        │  │
+│  │  (ChatLoop — sync, extends AgentLoopBase)                 │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │            Shared Application Modules                     │  │
+│  │  application/execution_policy.py   (ExecutionPolicy)      │  │
+│  │  application/validation.py         (ValidationAuthority)  │  │
+│  │  application/checkpoint_orchestrator.py (orchestration)   │  │
+│  │  application/runtime_factory.py    (create_runtime())     │  │
+│  │  loops/base.py                     (AgentLoopBase)        │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                             │
@@ -57,7 +64,6 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 │  │py (OpenAI    │  │  /executor.py│  │(Background Process)│    │
 │  │  Provider)   │  │(ToolExecutor)│  │                    │    │
 │  └──────────────┘  └──────────────┘  └────────────────────┘    │
-│                                                                │
 └────────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -74,9 +80,9 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 ┌────────────────────────────────────────────────────────────────┐
 │                     Tools Layer                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │tools/filesys.│  │tools/registry│  │tools/schemas.│          │
-│  │py, search.py │  │   .py (with  │  │ py (OpenAI   │          │
-│  │   shell.py   │  │ middleware)  │  │   schemas)   │          │
+│  │tools/builtins│  │tools/registry│  │tools/schemas.│          │
+│  │ filesys.py   │  │   .py (with  │  │ py (OpenAI   │          │
+│  │ search.py    │  │ middleware)  │  │   schemas)   │          │
 │  └──────────────┘  └──────────────┘  └──────────────┘          │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -84,17 +90,13 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 ### Key Architectural Principles
 
 1. **Layered Architecture**: Clear separation between entry → app → service → core → tools
-2. **Protocol-Based**: `TuiCallbacks` protocol decouples TUI from business logic
-3. **Dependency Injection**: Services built via `_build_services()` in cli_runner.py
-4. **Sandboxed Paths**: All file operations go through `ProjectContext` for security
-5. **Async-First**: TUI uses async/await with Textual workers
-
-### Phase 05 Convergence (current)
-
-- **Single execution path**: `ExecutionPolicy.execute_with_registry()` is the sole tool-execution entry point. Both CLI and TUI call it; no parallel paths remain.
-- **Single transition method**: `CheckpointOrchestrator.orchestrate_checkpoint()` is the only checkpoint transition method. Previous per-interface variants were removed in Phase 05.
-- **Single validation authority**: `ValidationAuthority` (in `application/validation.py`) is the only validation entry point. `PermissionValidator` stub removed in Phase 06 — validation pipeline is `[SCHEMA]` only.
-- **No CLI/TUI divergence**: `ValidationAuthority.validate()` accepts an optional `RuntimeContext` but ignores it; identical rules apply from both entry points.
+2. **Protocol-Based**: `TuiCallbacks` protocol decouples TUI from business logic; `InteractionSink`/`ConfirmationPolicy` decouple `ToolExecutor` from UI
+3. **Single Composition Root**: `application/runtime_factory.create_runtime()` assembles all dependencies — no duplicated wiring between CLI and TUI
+4. **Shared Loop Base**: `AgentLoopBase` (in `loops/base.py`) owns iteration counting, checkpoint trigger detection, and tool-call routing; both `ChatLoop` and `TuiChatLoop` extend it
+5. **Single Execution Path**: `ExecutionPolicy.execute_with_registry()` is the sole tool execution entry point; validation → permission → execute, no inline policy in loop code
+6. **Single Validation Path**: `ValidationAuthority → SchemaValidator` is the only validation stage; schema derived from live `TOOL_DEFINITIONS` registry (no hardcoded lists)
+7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security
+8. **Async-First**: TUI uses async/await with Textual workers; CLI is synchronous via `llm.chat()`
 
 ---
 
@@ -155,8 +157,25 @@ cli.py:main()
 |--------|---------|----------------------|
 | `cli.py` | Entry point, argument parsing | `main()`, `create_parser()` |
 | `client.py` | LLM client and chat session | `ChatSession`, `Agent`, `call_llm_async()` |
-| `cli_runner.py` | Command execution | `run_command()`, `InteractiveRunner` |
-| `chat_loop.py` | Deprecated CLI loop | `ChatLoop`, `IterationController` |
+| `cli_runner.py` | Command execution | `CommandRunner`, `TaskRunner`, `run_command()` |
+| `chat_loop.py` | Sync CLI agent loop | `ChatLoop`, `LoopConfig`, `ToolCallHandler` |
+
+### Shared Application Modules (`application/`)
+
+| Module | Purpose | Key Classes/Functions |
+|--------|---------|----------------------|
+| `application/execution_policy.py` | Shared tool permission + execution policy | `ExecutionPolicy`, `PermissionDeniedError`, `ToolRequest`, `ConfirmationRequirement` |
+| `application/validation.py` | Single validation path (schema only) | `ValidationAuthority`, `SchemaValidator`, `ToolRequest` |
+| `application/checkpoint_orchestrator.py` | Shared checkpoint orchestration | `CheckpointOrchestrator`, `CheckpointTrigger`, `RuntimeContext`, `EngineState` |
+| `application/runtime_factory.py` | Single composition root | `create_runtime()`, `RuntimeComponents` |
+| `application/message_contract.py` | LLM message format contracts | DTOs for message interchange |
+
+### Shared Loop Modules (`loops/`)
+
+| Module | Purpose | Key Classes/Functions |
+|--------|---------|----------------------|
+| `loops/base.py` | Shared agent loop base class | `AgentLoopBase` — iteration, checkpoint, tool routing, escalation |
+| `loops/config.py` | Shared loop configuration | `LoopConfig` dataclass |
 
 ### TUI Modules (Textual-based)
 
@@ -176,19 +195,22 @@ cli.py:main()
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `services/llm.py` | LLM provider | `LLMProvider`, `OpenAIProvider` |
-| `services/tools/executor.py` | Tool execution | `ToolExecutor` |
+| `services/interactions.py` | UI-decoupling protocols | `InteractionSink`, `ConfirmationPolicy`, `NullInteractionSink`, `AutoApproveConfirmationPolicy` |
+| `services/tools/executor.py` | CLI tool execution with diff preview | `ToolExecutor` |
 
 ### Tool Modules
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `tools/filesystem.py` | File system tools | `read_file()`, `write_file()` |
-| `tools/search.py` | Search tools | `search_codebase()` |
-| `tools/shell.py` | Shell execution | `run_shell_command()` |
-| `tools/registry.py` | Tool registry | `ToolRegistry`, `create_default_registry()` |
-| `tools/schemas.py` | Tool schemas | `tools_schema`, `TOOL_PERMISSIONS` |
-| `tools/definition.py` | Tool definitions | `ToolDefinition`, `TOOL_DEFINITIONS` |
-| `tools/utils.py` | Tool utilities | `prepare_content_for_diff()` |
+| `tools/definition.py` | Tool definitions + auto-discovery | `ToolDefinition`, `TOOL_DEFINITIONS`, `_discover_definitions()` |
+| `tools/registry.py` | Tool registry with middleware | `ToolRegistry`, `create_default_registry()` |
+| `tools/schemas.py` | Generated OpenAI schemas | `tools_schema`, `TOOL_PERMISSIONS` |
+| `tools/utils.py` | Tool utilities | `prepare_new_content()` |
+| `tools/builtins/filesystem.py` | File system tool impls | `read_file()`, `write_file()`, `replace_string()` |
+| `tools/builtins/python_editor.py` | CST-based Python structural editor | `python_editor()`, `PythonEditorBackend` |
+| `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
+| `tools/builtins/shell.py` | Shell execution impl | `run_shell_command()` |
+| `tools/builtins/*_definitions.py` | Per-domain tool definitions (12 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
 
 ### Feature Modules
 
@@ -267,19 +289,28 @@ User Input → CLIInputBar
 
 ### TuiCallbacks Protocol
 
-The `TuiCallbacks` protocol in `tui/chat_loop.py` decouples business logic from UI:
+The `TuiCallbacks` protocol in `tui/chat_loop.py` decouples `TuiChatLoop` from all UI concerns:
 
 ```python
+@runtime_checkable
 class TuiCallbacks(Protocol):
     def on_thinking_start(self) -> None: ...
     def on_thinking_stop(self) -> None: ...
     def on_assistant_content(self, text: str) -> None: ...
-    def on_tool_start(self, call_id: str, name: str, args: dict) -> None: ...
+    def on_thinking_content(self, text: str) -> None: ...
+    def on_token_usage(self, total_tokens: int) -> None: ...
+    def on_iteration_update(self, current: int, maximum: int) -> None: ...
+    def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None: ...
     def on_tool_complete(self, call_id: str, result: str) -> None: ...
-    async def request_confirmation(self, name: str, args: dict) -> ConfirmResult: ...
+    def on_tools_cleanup(self) -> None: ...
+    def on_system_message(self, text: str) -> None: ...
+    async def request_confirmation(self, name: str, arguments: dict) -> object | None: ...
+    def is_cancelled(self) -> bool: ...
 ```
 
-**AppCallbacks** (in `tui/app.py`) implements this protocol to update Textual widgets.
+**`AppCallbacks`** (in `tui/app.py`) implements this protocol to update Textual widgets.
+
+Because the protocol is `@runtime_checkable`, `isinstance(cb, TuiCallbacks)` can be used to verify any adapter at construction time.
 
 ### Command Dispatch
 
@@ -320,7 +351,7 @@ from ayder_cli.services.tools.executor import ToolExecutor
 # Tools
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.tools.schemas import tools_schema, TOOL_PERMISSIONS
-from ayder_cli.tools.impl import read_file, write_file
+from ayder_cli.tools.builtins.filesystem import read_file, write_file
 
 # TUI
 from ayder_cli.tui.app import AyderApp
@@ -413,11 +444,12 @@ registry.execute("read_file", {"file_path": "main.py"})
 
 ## File Organization Tips
 
-1. **New Tools**: Add to `tools/<domain>.py`, register in `tools/definition.py`
-2. **New TUI Commands**: Add to `tui/commands.py`, add to `COMMAND_MAP`
-3. **New Widgets**: Add to `tui/widgets.py`, import in `tui/app.py`
-4. **New Screens**: Add to `tui/screens.py`, push via `app.push_screen()`
-5. **New Themes**: Add to `themes/<name>.py`, import in `themes/__init__.py`
+1. **New Tools**: Create `tools/builtins/<domain>_definitions.py` with a `TOOL_DEFINITIONS` tuple + implement in `tools/builtins/<domain>.py`. Auto-discovery handles the rest — no edits to `definition.py` needed.
+2. **New Application-Layer Shared Logic**: Add to `application/` and import from both `chat_loop.py` and `tui/chat_loop.py`.
+3. **New TUI Commands**: Add to `tui/commands.py`, add to `COMMAND_MAP`.
+4. **New Widgets**: Add to `tui/widgets.py`, import in `tui/app.py`.
+5. **New Screens**: Add to `tui/screens.py`, push via `app.push_screen()`.
+6. **New Themes**: Add to `themes/<name>.py`, import in `themes/__init__.py`.
 
 ---
 
@@ -467,19 +499,20 @@ The application manages:
 
 ### TUI Chat Loop Summary (src/ayder_cli/tui/chat_loop.py)
 
-TuiChatLoop implements the core agentic process:
+`TuiChatLoop` (extends `AgentLoopBase`) implements the core async agentic process:
 - Handles repeated LLM calls with tool execution until completion
-- Supports multiple tool call formats: OpenAI native, XML custom, JSON fallback
-- Manages iteration counting with checkpoint system for long conversations
-- Communicates with UI exclusively through TuiCallbacks protocol
-- Processes thinking blocks and content display separately
+- Supports multiple tool call formats: OpenAI native (`tool_calls`), XML custom, JSON fallback
+- Manages iteration counting via `AgentLoopBase._increment_iteration()` with checkpoint system
+- Communicates with UI exclusively through `TuiCallbacks` protocol (no Textual imports)
+- Extracts and emits `<think>` blocks separately from display content
 
 Key features:
-- Automatic tool execution for pre-approved permissions
-- Confirmation workflow for sensitive operations
-- Memory checkpoint creation to prevent context overflow
+- Auto-approved tools run in parallel (`asyncio.gather`); confirmation-required tools run sequentially
+- Confirmation gate applies to **both** OpenAI-format and XML/JSON custom tool calls
+- `ExecutionPolicy.execute_with_registry()` is the single execution entry (validate → permission → execute)
+- Memory checkpoint creation/restore to prevent context-window overflow
 - Token usage tracking and iteration limiting
-- Graceful cancellation handling
+- Graceful cancellation via `is_cancelled()`
 
 ### Tool Registry Summary (src/ayder_cli/tools/registry.py)
 
@@ -502,22 +535,19 @@ Supports both synchronous tool execution and integrated with asyncio for TUI.
 
 ### Tool Definitions Summary (src/ayder_cli/tools/definition.py)
 
-Comprehensive schema-driven tool definitions:
-- **Categories**: File system, search, shell, processes, tasks, memory, environment, virtual environments
-- **Permissions**: "r" (read), "w" (write), "x" (execute)
-- **Safety**: Safe mode blocking for dangerous operations
-- **Path parameters**: Automatic validation via ProjectContext
-- **Aliases**: Common parameter name mappings
-- **Schema generation**: OpenAI-compatible function schemas
+Schema-driven tool definitions with auto-discovery:
+- **Auto-discovery**: `_discover_definitions()` scans all `*_definitions.py` files in `tools/builtins/` at import time — no manual registration
+- **Duplicate detection**: Tracks `(definition, source_module)` pairs; raises `ValueError` with accurate module names if a tool name appears twice
+- **Required-tool validation**: Raises `ImportError` if core tools (`list_files`, `read_file`, `write_file`, `run_shell_command`) are absent
+- **Permissions**: `"r"` (read), `"w"` (write), `"x"` (execute), `"http"` (network)
+- **Safety flags**: `safe_mode_blocked`, `is_terminal` per definition
+- **Path parameters**: Names listed in `path_parameters` are automatically resolved via `ProjectContext`
+- **Aliases**: `parameter_aliases` tuples for common name normalisation
+- **Schema generation**: `to_openai_schema()` returns the OpenAI function-calling dict
 
-Available tools cover full development lifecycle:
-- File operations: read, write, search, edit
-- System commands: shell execution, process management
-- Project management: tasks, notes, memory
-- Environment: virtual envs, environment variables
-- Utilities: project structure, file info
-
-All tool schemas are centralized for consistency and easy maintenance.
+28 tools across 12 definition files:
+- Filesystem (7), Python editor (1), Search (2), Shell (1), Memory (2), Notes (1)
+- Background Processes (4), Tasks (2), Environment (1), Virtual Environments (5), Web (1), Temporal (1)
 
 ---
 
@@ -525,36 +555,56 @@ All tool schemas are centralized for consistency and easy maintenance.
 
 ---
 
-## Phase 05 Convergence
+## Convergence History
 
-Phase 05 established single execution, transition, and validation paths shared by both CLI and TUI runtimes. Phase 06 cleaned up all temporary scaffolding.
+### Phase 05 — Single Execution / Validation / Checkpoint Paths
 
-### Single Execution Path
+- **`ExecutionPolicy.execute_with_registry()`** became the sole tool-execution entry point. Both CLI and TUI call it; no parallel paths remain.
+- **`CheckpointOrchestrator.orchestrate_checkpoint()`** became the only checkpoint transition method; previous per-interface variants removed.
+- **`ValidationAuthority → SchemaValidator`** became the only validation stage (schema-derived from live `TOOL_DEFINITIONS`, no hardcoded lists).
+- **`create_runtime()`** became the single composition root for all runtime dependencies.
 
-`application/execution_policy.py` — `ExecutionPolicy` is the sole authority for tool confirmation requirements. Both `cli/chat_loop.py` and `tui/chat_loop.py` delegate to it via `get_confirmation_requirement()`. No inline permission logic exists in either runtime.
-
-### Single Checkpoint/Transition Path
-
-`application/checkpoint_orchestrator.py` — `CheckpointOrchestrator` handles checkpoint triggers, state reset, restore, and summary generation for both CLI and TUI. It accepts an optional `RuntimeContext` but applies identical logic regardless of interface.
-
-`application/checkpoint_orchestrator.py` — `CheckpointTrigger` and `create_checkpoint_trigger()` create trigger configs from `RuntimeContext`; both CLI and TUI receive identical configs.
-
-### Single Validation Path
-
-`application/validation.py` — `ValidationAuthority` is the sole validation entry point. It runs `SchemaValidator` (the only stage as of Phase 06 cleanup). `PermissionValidator` and `ValidationStage.PERMISSION` were removed as scaffolding in Phase 06.
-
-### Removed Scaffolding (Phase 06)
+### Phase 06 — Scaffolding Removal
 
 | Removed | Reason |
 |---------|--------|
 | `tui_theme_manager.py` | Empty shim, real code in `tui/theme_manager.py` |
 | `tui_helpers.py` | Backward-compat shim, real code in `tui/helpers.py` |
-| `application/__init__.py` placeholder docstring | Stale placeholder |
 | `PermissionValidator` class | Always returned `True`, no real logic |
-| `ValidationStage.PERMISSION` | No real permission validation exists |
+| `ValidationStage.PERMISSION` | No real permission validation stage |
 | `CheckpointOrchestrator.get_transition_source()` | Introspection scaffolding |
 | `CheckpointOrchestrator.supports_context()` | Always returned `True`, scaffolding |
-| `chat_loop._extract_think_blocks` wrapper | Delegated to `tui.parser.extract_think_blocks` |
-| `chat_loop._strip_tool_markup` wrapper | Delegated to `tui.parser.strip_for_display` |
-| `chat_loop._parse_json_tool_calls` wrapper | Delegated to `tui.parser.parse_json_tool_calls` |
-| `chat_loop._regex_extract_json_tool_calls` wrapper | Delegated to `tui.parser.content_processor` |
+| `chat_loop._extract_think_blocks` wrapper | Delegated to `tui.parser` content_processor |
+| `chat_loop._strip_tool_markup` wrapper | Delegated to `tui.parser` content_processor |
+
+### Phase — Shared Agent Loop Base (`loops/base.py`)
+
+`AgentLoopBase` extracted to `loops/base.py`. Both `ChatLoop` and `TuiChatLoop` extend it:
+
+- `_increment_iteration()` / `_reset_iterations()` — shared iteration counting
+- `_should_trigger_checkpoint()` — delegates to `CheckpointTrigger`
+- `_route_tool_calls()` — shared OpenAI / XML / JSON / none routing logic
+- `_is_escalation()` — shared escalation detection
+
+### Phase — Validation Unification (Phase 4)
+
+- `validate_tool_call()` removed from `execution.py` — double-validation eliminated. Single path: `ExecutionPolicy → ValidationAuthority → SchemaValidator → registry.execute()`.
+- `validate_args()` removed from `ToolRegistry` — all validation goes through `ValidationAuthority`.
+- `SchemaValidator` gained type checking (integer/string) derived from tool definition schemas.
+
+### Architecture Bug Fixes
+
+| Bug | Fix |
+|-----|-----|
+| Double `on_thinking_stop()` on LLM exception | Removed from `except` blocks in `run()` and `_handle_checkpoint()`; kept only in `finally` |
+| Stale loop variable in `_discover_definitions()` | Collect `(definition, source_module)` tuples; unpack in duplicate-check loop |
+| XML tool calls bypass confirmation gate | `_execute_custom_tool_calls()` now calls `_tool_needs_confirmation()` before `execute_with_registry()` |
+| Silent post-execute callback failure | Added `logger.warning()` in `registry.py` post-execute exception handler |
+| Dead `FileDiffConfirmation` + `confirm_file_diff()` | Removed from `execution_policy.py`; real confirmation goes through `TuiCallbacks.request_confirmation()` |
+
+### Pending: CLI → TUI Loop Unification
+
+See `chat_loop_integration_refactor_plan.md` in the project root.
+
+Goal: replace sync `ChatLoop` with `TuiChatLoop` driven by a `CliCallbacks` adapter so
+there is one execution engine instead of two. Phases A–E are defined and awaiting review.

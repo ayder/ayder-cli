@@ -6,7 +6,7 @@ Tools: create_virtualenv, install_requirements, list_virtualenvs, activate_virtu
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -14,7 +14,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Create a new Python virtual environment in the project directory",
         description_template="Virtual environment {env_name} will be created",
         tags=("venv",),
-        func_ref="ayder_cli.tools.venv:create_virtualenv",
+        func_ref="ayder_cli.tools.builtins.venv:create_virtualenv",
         parameters={
             "type": "object",
             "properties": {
@@ -44,7 +44,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Install project dependencies from requirements.txt or pyproject.toml into the virtual environment",
         description_template="Dependencies will be installed from {requirements_file} into {env_name}",
         tags=("venv",),
-        func_ref="ayder_cli.tools.venv:install_requirements",
+        func_ref="ayder_cli.tools.builtins.venv:install_requirements",
         parameters={
             "type": "object",
             "properties": {
@@ -74,7 +74,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="List all virtual environments in the project directory",
         description_template="Virtual environments will be listed",
         tags=("venv",),
-        func_ref="ayder_cli.tools.venv:list_virtualenvs",
+        func_ref="ayder_cli.tools.builtins.venv:list_virtualenvs",
         parameters={
             "type": "object",
             "properties": {},
@@ -87,7 +87,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Get activation instructions for a virtual environment",
         description_template="Activation instructions for {env_name} will be provided",
         tags=("venv",),
-        func_ref="ayder_cli.tools.venv:activate_virtualenv",
+        func_ref="ayder_cli.tools.builtins.venv:activate_virtualenv",
         parameters={
             "type": "object",
             "properties": {
@@ -109,7 +109,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Remove/uninstall a virtual environment",
         description_template="Virtual environment {env_name} will be removed",
         tags=("venv",),
-        func_ref="ayder_cli.tools.venv:remove_virtualenv",
+        func_ref="ayder_cli.tools.builtins.venv:remove_virtualenv",
         parameters={
             "type": "object",
             "properties": {

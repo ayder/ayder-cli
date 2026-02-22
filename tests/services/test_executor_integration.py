@@ -120,7 +120,6 @@ class TestToolExecutorExecutionFlow:
             pytest.skip("Implementation not ready")
         
         # Setup mocks
-        registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
         policy.confirm_action.return_value = True
         registry.execute.return_value = Mock(__str__=lambda self: "Success")
@@ -144,7 +143,6 @@ class TestToolExecutorExecutionFlow:
         if executor is None:
             pytest.skip("Implementation not ready")
         
-        registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
         policy.confirm_action.return_value = True
         registry.execute.return_value = Mock(__str__=lambda self: "File contents")
@@ -165,7 +163,6 @@ class TestToolExecutorExecutionFlow:
         if executor is None:
             pytest.skip("Implementation not ready")
         
-        registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
         policy.confirm_action.return_value = False  # User declines
         
@@ -187,7 +184,6 @@ class TestToolExecutorExecutionFlow:
         if executor is None:
             pytest.skip("Implementation not ready")
         
-        registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
         policy.confirm_action.return_value = True
         registry.execute.return_value = Mock(__str__=lambda self: "Success")
@@ -208,7 +204,6 @@ class TestToolExecutorExecutionFlow:
         if executor is None:
             pytest.skip("Implementation not ready")
         
-        registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {
             "file_path": "/test.txt",
             "content": "hello"
@@ -236,7 +231,6 @@ class TestToolExecutorExecutionFlow:
         if executor is None:
             pytest.skip("Implementation not ready")
         
-        registry.validate_args.return_value = (True, None)
         registry.normalize_args.return_value = {"file_path": "/test.txt"}
         registry.execute.return_value = Mock(__str__=lambda self: "Success")
         

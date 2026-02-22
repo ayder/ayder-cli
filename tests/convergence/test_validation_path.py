@@ -329,7 +329,47 @@ class TestValidationStageContract:
         request = ToolRequest(name="test", arguments={})
         
         valid, _ = authority.validate(request)
-        
+
         assert valid is True
         mock_validator1.validate.assert_called_once()
         mock_validator2.validate.assert_called_once()
+
+
+class TestSchemaValidatorTypeValidation:
+    """SchemaValidator enforces type constraints moved from validate_tool_call."""
+
+    def test_integer_type_mismatch_rejected(self):
+        from ayder_cli.application.validation import SchemaValidator, ToolRequest
+
+        validator = SchemaValidator()
+        # read_file: start_line must be integer
+        ok, err = validator.validate(ToolRequest("read_file", {"file_path": "/f.py", "start_line": "bad"}))
+        assert not ok
+        assert "integer" in err.message
+        assert err.field == "start_line"
+
+    def test_string_type_mismatch_rejected(self):
+        from ayder_cli.application.validation import SchemaValidator, ToolRequest
+
+        validator = SchemaValidator()
+        # write_file: file_path must be string
+        ok, err = validator.validate(ToolRequest("write_file", {"file_path": 123, "content": "hi"}))
+        assert not ok
+        assert "string" in err.message
+        assert err.field == "file_path"
+
+    def test_valid_types_accepted(self):
+        from ayder_cli.application.validation import SchemaValidator, ToolRequest
+
+        validator = SchemaValidator()
+        ok, err = validator.validate(ToolRequest("read_file", {"file_path": "/f.py", "start_line": 10}))
+        assert ok
+        assert err is None
+
+    def test_unknown_tool_rejected(self):
+        from ayder_cli.application.validation import SchemaValidator, ToolRequest
+
+        validator = SchemaValidator()
+        ok, err = validator.validate(ToolRequest("__no_such_tool__", {}))
+        assert not ok
+        assert "not found in registry" in err.message

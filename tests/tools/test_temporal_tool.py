@@ -3,7 +3,7 @@
 import json
 
 from ayder_cli.core.result import ToolError, ToolSuccess
-from ayder_cli.tools.temporal import temporal_workflow
+from ayder_cli.tools.builtins.temporal import temporal_workflow
 
 
 def _valid_contract_payload() -> dict:

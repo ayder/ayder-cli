@@ -105,10 +105,12 @@ def test_validation_wrong_type():
         # It keeps it as string if conversion fails
         assert normalized["start_line"] == "invalid"
         
-        # Now validation should catch it
-        is_valid, error = registry.validate_tool_call("read_file", normalized)
+        # Now validation should catch it via SchemaValidator
+        from ayder_cli.application.validation import SchemaValidator, ToolRequest
+        validator = SchemaValidator()
+        is_valid, error = validator.validate(ToolRequest("read_file", normalized))
         assert not is_valid
-        assert "must be an integer" in error
+        assert "must be integer" in error.message
 
 
 def test_combined_alias_and_normalization():

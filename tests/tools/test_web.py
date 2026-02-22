@@ -6,8 +6,8 @@ import httpx
 import pytest
 
 from ayder_cli.core.result import ToolError, ToolSuccess
-from ayder_cli.tools import web
-from ayder_cli.tools.web import fetch_web
+from ayder_cli.tools.builtins import web
+from ayder_cli.tools.builtins.web import fetch_web
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +42,7 @@ def test_fetch_web_defaults_to_get():
     )
     cm, client = _mock_async_client(response=response)
 
-    with patch("ayder_cli.tools.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
         result = fetch_web("https://example.com")
 
     assert isinstance(result, ToolSuccess)
@@ -68,7 +68,7 @@ def test_fetch_web_supports_post_with_body_and_headers():
     )
     cm, client = _mock_async_client(response=response)
 
-    with patch("ayder_cli.tools.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
         result = fetch_web(
             "https://example.com/api",
             method="post",
@@ -97,7 +97,7 @@ def test_fetch_web_head_omits_body():
     )
     cm, _ = _mock_async_client(response=response)
 
-    with patch("ayder_cli.tools.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
         result = fetch_web("https://example.com", method="HEAD")
 
     assert "Body: (omitted for HEAD request)" in result
@@ -116,7 +116,7 @@ def test_fetch_web_handles_request_errors():
     error = httpx.RequestError("network failure", request=request)
     cm, _ = _mock_async_client(side_effect=error)
 
-    with patch("ayder_cli.tools.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
         result = fetch_web("https://example.com")
 
     assert isinstance(result, ToolError)
@@ -146,7 +146,7 @@ def test_fetch_web_persists_session_cookies_across_calls():
     cm2, _ = _mock_async_client(response=second_response)
     client1.cookies = httpx.Cookies({"sessionid": "abc123"})
 
-    with patch("ayder_cli.tools.web.httpx.AsyncClient", side_effect=[cm1, cm2]) as mock_client:
+    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", side_effect=[cm1, cm2]) as mock_client:
         fetch_web("https://example.com/login")
         fetch_web("https://example.com/me")
 

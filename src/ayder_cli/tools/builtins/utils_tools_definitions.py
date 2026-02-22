@@ -6,7 +6,7 @@ Tools: manage_environment_vars
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -14,7 +14,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Manage .env files: load, validate, generate secure values, and set environment variables.",
         description_template="Environment variables will be {mode}d",
         tags=("core",),
-        func_ref="ayder_cli.tools.utils_tools:manage_environment_vars",
+        func_ref="ayder_cli.tools.builtins.utils_tools:manage_environment_vars",
         parameters={
             "type": "object",
             "properties": {

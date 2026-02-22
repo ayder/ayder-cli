@@ -33,7 +33,6 @@ class TestRuntimeFactoryAssembly:
             'process_manager',
             'project_ctx',
             'tool_registry',
-            'tool_executor',
             'checkpoint_manager',
             'memory_manager',
             'system_prompt',
@@ -53,7 +52,7 @@ class TestRuntimeFactoryAssembly:
 
         # Verify no component is None
         for field_name in ['config', 'llm_provider', 'process_manager', 'project_ctx',
-                           'tool_registry', 'tool_executor', 'checkpoint_manager',
+                           'tool_registry', 'checkpoint_manager',
                            'memory_manager', 'system_prompt']:
             value = getattr(components, field_name)
             assert value is not None, f"Component '{field_name}' should not be None"
@@ -124,14 +123,13 @@ class TestFactoryCLIIntegration:
 
         services = _build_services()
 
-        # Backward compatible return order: (config, llm, tool_executor, project_ctx,
-        #                                   enhanced_system, checkpoint_manager, memory_manager)
-        assert len(services) == 7
-        cfg, llm, tool_exec, project_ctx, system_prompt, ckpt_mgr, mem_mgr = services
+        # Return order: (config, llm, project_ctx,
+        #                enhanced_system, checkpoint_manager, memory_manager)
+        assert len(services) == 6
+        cfg, llm, project_ctx, system_prompt, ckpt_mgr, mem_mgr = services
 
         assert cfg is not None
         assert llm is not None
-        assert tool_exec is not None
         assert project_ctx is not None
         assert system_prompt is not None
         assert ckpt_mgr is not None
@@ -146,7 +144,7 @@ class TestFactoryCLIIntegration:
         from ayder_cli.cli_runner import _build_services
 
         services = _build_services()
-        cfg, llm, tool_exec, project_ctx, system_prompt, ckpt_mgr, mem_mgr = services
+        cfg, llm, project_ctx, system_prompt, ckpt_mgr, mem_mgr = services
 
         # System prompt should contain expected content
         assert "model" in system_prompt.lower() or "ayder" in system_prompt.lower()
@@ -215,7 +213,6 @@ class TestFactoryCompositionParity:
         from ayder_cli.application.runtime_factory import create_runtime
         from ayder_cli.services.llm import LLMProvider
         from ayder_cli.tools.registry import ToolRegistry
-        from ayder_cli.services.tools.executor import ToolExecutor
         from ayder_cli.checkpoint_manager import CheckpointManager
         from ayder_cli.memory import MemoryManager
         from ayder_cli.process_manager import ProcessManager
@@ -230,7 +227,6 @@ class TestFactoryCompositionParity:
         assert isinstance(components.process_manager, ProcessManager)
         assert isinstance(components.project_ctx, ProjectContext)
         assert isinstance(components.tool_registry, ToolRegistry)
-        assert isinstance(components.tool_executor, ToolExecutor)
         assert isinstance(components.checkpoint_manager, CheckpointManager)
         assert isinstance(components.memory_manager, MemoryManager)
         assert isinstance(components.system_prompt, str)

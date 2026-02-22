@@ -2,7 +2,7 @@
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
@@ -11,7 +11,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Manage Temporal workflows and queue operations using action-based commands.",
         description_template="Temporal workflow action {action} will be invoked",
         tags=("temporal",),
-        func_ref="ayder_cli.tools.temporal:temporal_workflow",
+        func_ref="ayder_cli.tools.builtins.temporal:temporal_workflow",
         parameters={
             "type": "object",
             "properties": {

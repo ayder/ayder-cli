@@ -1,8 +1,8 @@
-"""Tests for cli.py — coverage for run_interactive, _build_services, and main()."""
+"""Tests for cli.py — coverage for _build_services, run_command, main(), and task runners."""
 
 import sys
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from io import StringIO
 
 
@@ -21,7 +21,7 @@ class TestBuildServices:
             num_ctx=4096,
             verbose=False
         )
-        
+
         mock_registry = MagicMock()
         mock_registry.execute.side_effect = Exception("Structure error")
 
@@ -29,11 +29,10 @@ class TestBuildServices:
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
-            cfg, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
+            cfg, llm_provider, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
 
             assert cfg == mock_config
             assert llm_provider is not None
-            assert tool_executor is not None
             assert project_ctx is not None
             assert checkpoint_manager is not None
             assert memory_manager is not None
@@ -60,7 +59,7 @@ class TestBuildServices:
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
-            cfg, llm_provider, tool_executor, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
+            cfg, llm_provider, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
 
             assert "PROJECT STRUCTURE" in enhanced_system
             assert "src/" in enhanced_system
@@ -80,7 +79,7 @@ class TestBuildServices:
             num_ctx=2048,
             verbose=True
         )
-        
+
         mock_registry = MagicMock()
         mock_registry.execute.return_value = "project/"
 
@@ -90,7 +89,6 @@ class TestBuildServices:
             cfg = services[0]
 
             assert cfg == mock_config
-            # load_config should NOT be called when config is provided
 
     def test_build_services_with_custom_project_root(self):
         """Test _build_services accepts custom project root."""
@@ -104,7 +102,7 @@ class TestBuildServices:
             num_ctx=4096,
             verbose=False
         )
-        
+
         mock_registry = MagicMock()
 
         with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
@@ -116,63 +114,92 @@ class TestBuildServices:
             mock_project_ctx_class.assert_called_once_with("/custom/path")
 
 
-
-
-
 class TestRunCommand:
     """Test run_command function."""
 
-    @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
-    def test_run_command_success(self, mock_agent_class, mock_session_class, mock_build_services):
+    @patch('ayder_cli.cli_runner._run_loop', return_value=0)
+    def test_run_command_success(self, mock_run_loop):
         """Test successful command execution."""
         from ayder_cli.cli_runner import run_command
-
-        mock_config = MagicMock()
-        mock_llm = MagicMock()
-        mock_executor = MagicMock()
-        mock_system = "system prompt"
-
-        mock_build_services.return_value = (mock_config, mock_llm, mock_executor, MagicMock(), mock_system, MagicMock(), MagicMock())
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = "Response text"
-        mock_agent_class.return_value = mock_agent
 
         result = run_command("test prompt", permissions={"r"}, iterations=5)
 
         assert result == 0
-        mock_agent.chat.assert_called_once_with("test prompt")
+        mock_run_loop.assert_called_once_with(
+            "test prompt", permissions={"r"}, iterations=5
+        )
 
-    @patch('ayder_cli.cli_runner._build_services')
-    def test_run_command_error(self, mock_build_services):
+    @patch('ayder_cli.cli_runner._run_loop', side_effect=Exception("Loop error"))
+    def test_run_command_error(self, mock_run_loop):
         """Test command execution with error."""
         from ayder_cli.cli_runner import run_command
-
-        mock_build_services.side_effect = Exception("Build error")
 
         with patch('sys.stderr', new=StringIO()) as mock_stderr:
             result = run_command("test prompt")
             assert result == 1
-            assert "Build error" in mock_stderr.getvalue()
+            assert "Loop error" in mock_stderr.getvalue()
 
-    @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
-    def test_run_command_no_response(self, mock_agent_class, mock_session_class, mock_build_services):
-        """Test command execution with no response."""
+    @patch('ayder_cli.cli_runner._run_loop', return_value=0)
+    def test_run_command_delegates_to_run_loop(self, mock_run_loop):
+        """Test run_command creates CommandRunner that delegates to _run_loop."""
         from ayder_cli.cli_runner import run_command
 
-        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
-        
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = None
-        mock_agent_class.return_value = mock_agent
-
-        result = run_command("test prompt")
+        result = run_command("test prompt", permissions={"r", "w"}, iterations=10)
 
         assert result == 0
+        mock_run_loop.assert_called_once_with(
+            "test prompt", permissions={"r", "w"}, iterations=10
+        )
+
+
+class TestRunLoop:
+    """Test _run_loop helper — the shared CLI→TuiChatLoop bridge."""
+
+    def test_run_loop_creates_tui_chat_loop(self):
+        """_run_loop must create a TuiChatLoop with CliCallbacks and call asyncio.run."""
+        from ayder_cli.cli_runner import _run_loop
+
+        mock_rt = MagicMock()
+        mock_rt.config.model = "test-model"
+        mock_rt.config.num_ctx = 4096
+        mock_rt.config.max_output_tokens = 2048
+        mock_rt.config.stop_sequences = []
+        mock_rt.config.verbose = False
+        mock_rt.config.tool_tags = None
+        mock_rt.system_prompt = "system"
+
+        with patch('ayder_cli.cli_runner.create_runtime', return_value=mock_rt) as mock_create, \
+             patch('ayder_cli.cli_runner.asyncio.run') as mock_asyncio_run:
+            result = _run_loop("hello", permissions={"r"}, iterations=10)
+
+        assert result == 0
+        mock_create.assert_called_once()
+        mock_asyncio_run.assert_called_once()
+
+    def test_run_loop_passes_system_and_user_messages(self):
+        """_run_loop must prepend system prompt and user prompt to messages."""
+        from ayder_cli.cli_runner import _run_loop
+
+        mock_rt = MagicMock()
+        mock_rt.config.model = "test-model"
+        mock_rt.config.num_ctx = 4096
+        mock_rt.config.max_output_tokens = 2048
+        mock_rt.config.stop_sequences = []
+        mock_rt.config.verbose = False
+        mock_rt.config.tool_tags = None
+        mock_rt.system_prompt = "You are a helpful assistant."
+
+        with patch('ayder_cli.cli_runner.create_runtime', return_value=mock_rt), \
+             patch('ayder_cli.cli_runner.TuiChatLoop') as MockLoop, \
+             patch('ayder_cli.cli_runner.asyncio.run'):
+            MockLoop.return_value.run = AsyncMock()
+            _run_loop("test prompt", permissions={"r"})
+
+        # Verify TuiChatLoop was constructed with correct messages
+        call_kwargs = MockLoop.call_args[1]
+        messages = call_kwargs["messages"]
+        assert messages[0] == {"role": "system", "content": "You are a helpful assistant."}
+        assert messages[1] == {"role": "user", "content": "test prompt"}
 
 
 class TestRunTasksCLI:
@@ -208,14 +235,12 @@ class TestRunTasksCLI:
 class TestRunImplementCLI:
     """Test _run_implement_cli function."""
 
-    @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
+    @patch('ayder_cli.cli_runner._run_loop', return_value=0)
     @patch('ayder_cli.core.context.ProjectContext')
     @patch('ayder_cli.tasks._get_tasks_dir')
     @patch('ayder_cli.tasks._get_task_path_by_id')
-    def test_run_implement_by_id_success(self, mock_get_path, mock_get_dir, mock_project_ctx,
-                                          mock_agent_class, mock_session_class, mock_build_services):
+    def test_run_implement_by_id_success(self, mock_get_path, mock_get_dir,
+                                          mock_project_ctx, mock_run_loop):
         """Test implementing task by ID."""
         from ayder_cli.cli_runner import _run_implement_cli
         from pathlib import Path
@@ -230,27 +255,19 @@ class TestRunImplementCLI:
             mock_get_dir.return_value = tasks_dir
             mock_get_path.return_value = task_file
 
-            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
-            mock_agent = MagicMock()
-            mock_agent.chat.return_value = "Task completed"
-            mock_agent_class.return_value = mock_agent
-
             with patch('sys.stdout', new=StringIO()):
                 result = _run_implement_cli("1", permissions={"r"}, iterations=10)
 
             assert result == 0
-            mock_agent.chat.assert_called_once()
+            mock_run_loop.assert_called_once()
 
-    @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
+    @patch('ayder_cli.cli_runner._run_loop', return_value=0)
     @patch('ayder_cli.core.context.ProjectContext')
     @patch('ayder_cli.tasks._get_tasks_dir')
     @patch('ayder_cli.tasks._extract_id')
     @patch('ayder_cli.tasks._parse_title')
     def test_run_implement_by_pattern_success(self, mock_parse_title, mock_extract_id, mock_get_dir,
-                                               mock_project_ctx, mock_agent_class, mock_session_class,
-                                               mock_build_services):
+                                               mock_project_ctx, mock_run_loop):
         """Test implementing task by pattern match."""
         from ayder_cli.cli_runner import _run_implement_cli
         from pathlib import Path
@@ -266,20 +283,14 @@ class TestRunImplementCLI:
             mock_extract_id.return_value = 1
             mock_parse_title.return_value = "Implement Authentication"
 
-            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
-            mock_agent = MagicMock()
-            mock_agent.chat.return_value = "Task completed"
-            mock_agent_class.return_value = mock_agent
-
             with patch('sys.stdout', new=StringIO()):
                 result = _run_implement_cli("auth", permissions={"r"}, iterations=10)
 
             assert result == 0
 
-    @patch('ayder_cli.cli_runner._build_services')
     @patch('ayder_cli.core.context.ProjectContext')
     @patch('ayder_cli.tasks._get_tasks_dir')
-    def test_run_implement_no_match(self, mock_get_dir, mock_project_ctx, mock_build_services):
+    def test_run_implement_no_match(self, mock_get_dir, mock_project_ctx):
         """Test implementing when no task matches."""
         from ayder_cli.cli_runner import _run_implement_cli
         from pathlib import Path
@@ -290,60 +301,45 @@ class TestRunImplementCLI:
             tasks_dir.mkdir(parents=True)
 
             mock_get_dir.return_value = tasks_dir
-            mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
 
             with patch('sys.stderr', new=StringIO()) as mock_stderr:
                 result = _run_implement_cli("nonexistent", permissions={"r"})
                 assert result == 1
                 assert "No tasks found" in mock_stderr.getvalue()
 
-    @patch('ayder_cli.cli_runner._build_services')
-    def test_run_implement_error(self, mock_build_services):
-        """Test implement with error."""
+    def test_run_implement_error(self):
+        """Test implement with error — exception inside implement_task is caught."""
         from ayder_cli.cli_runner import _run_implement_cli
 
-        mock_build_services.side_effect = Exception("Build error")
-
-        with patch('sys.stderr', new=StringIO()) as mock_stderr:
-            result = _run_implement_cli("1")
-            assert result == 1
-            assert "Build error" in mock_stderr.getvalue()
+        with patch('ayder_cli.core.context.ProjectContext', side_effect=Exception("Build error")):
+            with patch('sys.stderr', new=StringIO()) as mock_stderr:
+                result = _run_implement_cli("1")
+                assert result == 1
+                assert "Build error" in mock_stderr.getvalue()
 
 
 class TestRunImplementAllCLI:
     """Test _run_implement_all_cli function."""
 
-    @patch('ayder_cli.cli_runner._build_services')
-    @patch('ayder_cli.client.ChatSession')
-    @patch('ayder_cli.client.Agent')
-    def test_run_implement_all_success(self, mock_agent_class, mock_session_class, mock_build_services):
+    @patch('ayder_cli.cli_runner._run_loop', return_value=0)
+    def test_run_implement_all_success(self, mock_run_loop):
         """Test successful implement all."""
         from ayder_cli.cli_runner import _run_implement_all_cli
 
-        mock_build_services.return_value = (MagicMock(), MagicMock(), MagicMock(), MagicMock(), "system", MagicMock(), MagicMock())
-        mock_agent = MagicMock()
-        mock_agent.chat.return_value = "All tasks completed"
-        mock_agent_class.return_value = mock_agent
-
-        with patch('sys.stdout', new=StringIO()):
-            result = _run_implement_all_cli(permissions={"r"}, iterations=10)
+        result = _run_implement_all_cli(permissions={"r"}, iterations=10)
 
         assert result == 0
-        mock_agent.chat.assert_called_once()
+        mock_run_loop.assert_called_once()
 
-    @patch('ayder_cli.cli_runner._build_services')
-    def test_run_implement_all_error(self, mock_build_services):
+    @patch('ayder_cli.cli_runner._run_loop', side_effect=Exception("Build error"))
+    def test_run_implement_all_error(self, mock_run_loop):
         """Test implement all with error."""
         from ayder_cli.cli_runner import _run_implement_all_cli
-
-        mock_build_services.side_effect = Exception("Build error")
 
         with patch('sys.stderr', new=StringIO()) as mock_stderr:
             result = _run_implement_all_cli()
             assert result == 1
             assert "Build error" in mock_stderr.getvalue()
-
-
 
 
 class TestMainFunction:
@@ -352,15 +348,15 @@ class TestMainFunction:
     def test_main_permission_flags_indirect(self):
         """Test permission flags are parsed correctly (indirect via args)."""
         from ayder_cli.cli import create_parser
-        
+
         parser = create_parser()
-        
+
         # Test -w flag
         args = parser.parse_args(['-w', 'test command'])
         assert args.w is True
         assert args.x is False
         assert args.http is False
-        
+
         # Test -x flag
         args = parser.parse_args(['-x', 'test command'])
         assert args.x is True
@@ -372,7 +368,7 @@ class TestMainFunction:
         assert args.http is True
         assert args.w is False
         assert args.x is False
-        
+
         # Test both flags
         args = parser.parse_args(['-w', '-x', 'test command'])
         assert args.w is True
@@ -404,7 +400,6 @@ class TestMainPermissionHandling:
             with pytest.raises(SystemExit):
                 main()
 
-            # Verify run_command was called with 'w' in permissions
             call_kwargs = mock_run.call_args[1]
             assert 'w' in call_kwargs['permissions']
             assert 'r' in call_kwargs['permissions']
@@ -430,7 +425,6 @@ class TestMainPermissionHandling:
             with pytest.raises(SystemExit):
                 main()
 
-            # Verify run_command was called with 'x' in permissions
             call_kwargs = mock_run.call_args[1]
             assert 'x' in call_kwargs['permissions']
             assert 'r' in call_kwargs['permissions']
@@ -456,7 +450,6 @@ class TestMainPermissionHandling:
             with pytest.raises(SystemExit):
                 main()
 
-            # Verify run_command was called with both permissions
             call_kwargs = mock_run.call_args[1]
             assert 'w' in call_kwargs['permissions']
             assert 'x' in call_kwargs['permissions']
@@ -508,7 +501,6 @@ class TestMainPermissionHandling:
             with pytest.raises(SystemExit):
                 main()
 
-            # Verify run_command was called with only 'r' permission
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs['permissions'] == {'r'}
 
@@ -646,9 +638,7 @@ class TestModuleEntryPoint:
     def test_module_entry_point(self):
         """Test that __name__ == '__main__' block calls main()."""
         with patch('ayder_cli.cli.main') as mock_main:
-            # Simulate running the module directly
             import ayder_cli.cli as cli_module
-            # Execute the if block directly
             if True:  # Simulating __name__ == "__main__"
                 cli_module.main()
             mock_main.assert_called_once()
@@ -663,14 +653,13 @@ class TestCreateParser:
         from ayder_cli.version import get_app_version
 
         parser = create_parser()
-        
-        # Check that version action exists
+
         version_action = None
         for action in parser._actions:
             if action.dest == 'version':
                 version_action = action
                 break
-        
+
         assert version_action is not None
         assert version_action.version == get_app_version()
 
@@ -695,15 +684,13 @@ class TestCreateParser:
         from ayder_cli.cli import create_parser
 
         parser = create_parser()
-        
-        # Test default (read is True by default)
+
         args = parser.parse_args([])
         assert args.r is True
         assert args.w is False
         assert args.x is False
         assert args.http is False
-        
-        # Test with all flags
+
         args = parser.parse_args(['-r', '-w', '-x', '--http'])
         assert args.r is True
         assert args.w is True
@@ -715,16 +702,13 @@ class TestCreateParser:
         from ayder_cli.cli import create_parser
 
         parser = create_parser()
-        
-        # Default value (None — resolved from config at runtime)
+
         args = parser.parse_args([])
         assert args.iterations is None
-        
-        # Custom value
+
         args = parser.parse_args(['--iterations', '20'])
         assert args.iterations == 20
-        
-        # Short form
+
         args = parser.parse_args(['-I', '5'])
         assert args.iterations == 5
 
@@ -803,7 +787,6 @@ class TestCreateParser:
              patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
             with pytest.raises(SystemExit):
                 main()
-            # CLI flag (20) should win over config (75)
             mock_run.assert_called_once_with('hello', permissions={'r'}, iterations=20)
 
     def test_parser_command_argument(self):
@@ -811,11 +794,10 @@ class TestCreateParser:
         from ayder_cli.cli import create_parser
 
         parser = create_parser()
-        
+
         args = parser.parse_args(['hello world'])
         assert args.command == 'hello world'
-        
-        # No command
+
         args = parser.parse_args([])
         assert args.command is None
 

@@ -58,6 +58,7 @@ class TestToolDefinitions:
             "list_virtualenvs", "activate_virtualenv", "remove_virtualenv",
             "temporal_workflow",
             "fetch_web",
+            "python_editor",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
         assert names == expected_tools

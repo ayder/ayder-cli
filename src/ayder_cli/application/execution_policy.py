@@ -26,16 +26,6 @@ class ToolRequest:
     arguments: dict
 
 
-@dataclass
-class FileDiffConfirmation:
-    """Represents a file diff that may need user confirmation."""
-
-    file_path: str
-    original_content: str
-    new_content: str
-    description: str
-
-
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
@@ -209,10 +199,6 @@ class ExecutionPolicy:
 
         raw = registry.execute(request.name, request.arguments)
         return ExecutionResult(success=True, was_confirmed=pre_approved, result=str(raw))
-
-    def confirm_file_diff(self, diff: FileDiffConfirmation) -> bool:
-        """Policy-level auto-approval for file diffs."""
-        return True
 
     def format_error_for_llm(self, error: ToolExecutionError) -> dict:
         """Format a tool error as an LLM-consumable message."""

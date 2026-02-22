@@ -15,7 +15,7 @@ from ayder_cli.services.interactions import (
     AutoApproveConfirmationPolicy,
     NullInteractionSink,
 )
-from ayder_cli.services.tools.executor import ToolExecutor
+from ayder_cli.services.tools.executor import ToolExecutor as _ToolExecutor
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
 from ayder_cli.checkpoint_manager import CheckpointManager
@@ -32,7 +32,6 @@ class RuntimeComponents:
     process_manager: ProcessManager
     project_ctx: ProjectContext
     tool_registry: ToolRegistry
-    tool_executor: ToolExecutor
     checkpoint_manager: CheckpointManager
     memory_manager: MemoryManager
     system_prompt: str
@@ -63,7 +62,10 @@ def create_runtime(
     project_ctx = ProjectContext(project_root)
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
     tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
-    tool_executor = ToolExecutor(
+    # ToolExecutor is still needed internally by MemoryManager for checkpoint
+    # LLM calls (it uses tool_executor.execute_tool_calls to save summaries).
+    # It is NOT exposed in RuntimeComponents.
+    _tool_executor = _ToolExecutor(
         tool_registry,
         interaction_sink=NullInteractionSink(),
         confirmation_policy=AutoApproveConfirmationPolicy(),
@@ -72,7 +74,7 @@ def create_runtime(
     memory_manager = MemoryManager(
         project_ctx,
         llm_provider=llm_provider,
-        tool_executor=tool_executor,
+        tool_executor=_tool_executor,
         checkpoint_manager=checkpoint_manager,
     )
 
@@ -94,7 +96,6 @@ def create_runtime(
         process_manager=process_manager,
         project_ctx=project_ctx,
         tool_registry=tool_registry,
-        tool_executor=tool_executor,
         checkpoint_manager=checkpoint_manager,
         memory_manager=memory_manager,
         system_prompt=system_prompt,

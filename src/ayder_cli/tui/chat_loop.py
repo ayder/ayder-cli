@@ -15,18 +15,12 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ayder_cli.application.checkpoint_orchestrator import (
     CheckpointOrchestrator,
-    CheckpointTrigger,
     EngineState,
 )
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.client import call_llm_async
-from ayder_cli.parser import parse_custom_tool_calls
-
-# Import TUI parser components
-from ayder_cli.tui.parser import (
-    content_processor,
-    has_custom_tool_calls,
-)
+from ayder_cli.loops.base import AgentLoopBase
+from ayder_cli.parser import content_processor
 
 if TYPE_CHECKING:
     from ayder_cli.checkpoint_manager import CheckpointManager
@@ -46,6 +40,7 @@ class TuiLoopConfig:
     max_iterations: int = 50
     permissions: set = field(default_factory=lambda: {"r"})
     tool_tags: frozenset | None = None
+    max_history: int = 0
 
 
 @runtime_checkable
@@ -68,11 +63,12 @@ class TuiCallbacks(Protocol):
     def is_cancelled(self) -> bool: ...
 
 
-class TuiChatLoop:
+class TuiChatLoop(AgentLoopBase):
     """Async chat loop that drives the TUI's LLM pipeline.
 
-    Owns: iteration counting, LLM calls, tool parsing/execution,
-    checkpoint triggering. Does NOT own any Textual widgets.
+    Extends AgentLoopBase for shared iteration counting, checkpoint trigger
+    detection, tool call routing, and escalation detection.
+    Does NOT own any Textual widgets.
     """
 
     def __init__(
@@ -85,6 +81,7 @@ class TuiChatLoop:
         checkpoint_manager: CheckpointManager | None = None,
         memory_manager: MemoryManager | None = None,
     ) -> None:
+        super().__init__(config)
         self.llm = llm
         self.registry = registry
         self.messages = messages
@@ -92,21 +89,13 @@ class TuiChatLoop:
         self.cb = callbacks
         self.cm = checkpoint_manager
         self.mm = memory_manager
-        self._iteration = 0
         self._total_tokens = 0
 
     # -- public API ----------------------------------------------------------
 
     @property
-    def iteration(self) -> int:
-        return self._iteration
-
-    @property
     def total_tokens(self) -> int:
         return self._total_tokens
-
-    def reset_iterations(self) -> None:
-        self._iteration = 0
 
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
@@ -114,10 +103,9 @@ class TuiChatLoop:
             if self.cb.is_cancelled():
                 return
 
-            self._iteration += 1
+            self._increment_iteration()
             self.cb.on_iteration_update(self._iteration, self.config.max_iterations)
-            trigger = CheckpointTrigger(max_iterations=self.config.max_iterations)
-            if trigger.should_trigger(self._iteration):
+            if self._should_trigger_checkpoint():
                 if not await self._handle_checkpoint():
                     self.cb.on_system_message(
                         f"Reached max iterations ({self.config.max_iterations})."
@@ -125,6 +113,12 @@ class TuiChatLoop:
                     return
 
             # 1. Call LLM
+            # Apply sliding-window truncation when max_history is set
+            if self.config.max_history > 0 and len(self.messages) > self.config.max_history + 1:
+                llm_messages = [self.messages[0]] + self.messages[-(self.config.max_history):]
+            else:
+                llm_messages = self.messages
+
             self.cb.on_thinking_start()
             try:
                 tool_schemas = (
@@ -133,7 +127,7 @@ class TuiChatLoop:
                 )
                 response = await call_llm_async(
                     self.llm,
-                    self.messages,
+                    llm_messages,
                     self.config.model,
                     tools=tool_schemas,
                     num_ctx=self.config.num_ctx,
@@ -141,7 +135,6 @@ class TuiChatLoop:
                     stop_sequences=self.config.stop_sequences or None,
                 )
             except Exception as e:
-                self.cb.on_thinking_stop()
                 self.cb.on_system_message(f"Error: {e}")
                 return
             finally:
@@ -200,8 +193,8 @@ class TuiChatLoop:
 
             # Check for custom tool calls (including namespaced variants like <minimax:tool_call>
             # and DeepSeek format like <function_calls>)
-            if content and has_custom_tool_calls(content):
-                custom_calls = parse_custom_tool_calls(content)
+            if content and content_processor.has_tool_calls(content):
+                custom_calls = content_processor.parse_tool_calls(content)
                 valid = [c for c in custom_calls if "error" not in c]
                 if valid:
                     escalated = await self._execute_custom_tool_calls(valid)
@@ -360,14 +353,37 @@ class TuiChatLoop:
         policy = ExecutionPolicy(self.config.permissions)
         results_text = []
         escalated = False
+        custom_instructions = None
+
         for call in calls:
             name = call.get("name", "unknown")
             args = call.get("arguments", {})
             call_id = f"xml-{name}-{id(call)}"
             self.cb.on_tool_start(call_id, name, args)
+
+            # Confirmation gate — mirrors _execute_openai_tool_calls behavior
+            pre_approved = False
+            if self._tool_needs_confirmation(name):
+                confirm = await self.cb.request_confirmation(name, args)
+                action = getattr(confirm, "action", None) if confirm is not None else None
+                if action == "approve":
+                    pre_approved = True
+                elif action == "instruct":
+                    custom_instructions = getattr(confirm, "instructions", None)
+                    results_text.append(f"[{name}] Tool call denied by user.")
+                    self.cb.on_tool_complete(call_id, "Tool call denied by user.")
+                    break
+                else:
+                    results_text.append(f"[{name}] Tool call denied by user.")
+                    self.cb.on_tool_complete(call_id, "Tool call denied by user.")
+                    continue
+
             try:
                 exec_result = await asyncio.to_thread(
-                    policy.execute_with_registry, ToolRequest(name, args), self.registry
+                    policy.execute_with_registry,
+                    ToolRequest(name, args),
+                    self.registry,
+                    pre_approved=pre_approved,
                 )
                 result = exec_result.result if exec_result.success else str(exec_result.error)
                 result = result or ""
@@ -379,6 +395,8 @@ class TuiChatLoop:
                 self.cb.on_tool_complete(call_id, f"Error: {e}")
 
         self.messages.append({"role": "user", "content": "\n".join(results_text)})
+        if custom_instructions:
+            self.messages.append({"role": "user", "content": custom_instructions})
         self.cb.on_tools_cleanup()
         return escalated
 
@@ -432,7 +450,6 @@ class TuiChatLoop:
                 max_output_tokens=self.config.max_output_tokens,
             )
         except Exception:
-            self.cb.on_thinking_stop()
             return False
         finally:
             self.cb.on_thinking_stop()
@@ -451,7 +468,7 @@ class TuiChatLoop:
         self.messages.extend(m for m in state.messages if m.get("role") == "system")
         self.messages.append({"role": "user", "content": restore_msg})
 
-        self._iteration = 0
+        self._reset_iterations()
         self.cb.on_system_message("Checkpoint saved — context compacted. Continuing...")
         return True
 

@@ -19,7 +19,7 @@ def _patch_factory(registry_execute_return="tree"):
             "ayder_cli.application.runtime_factory.create_default_registry",
             return_value=mock_registry,
         ),
-        patch("ayder_cli.application.runtime_factory.ToolExecutor"),
+        patch("ayder_cli.application.runtime_factory._ToolExecutor"),
         patch("ayder_cli.application.runtime_factory.CheckpointManager"),
         patch("ayder_cli.application.runtime_factory.MemoryManager"),
         mock_registry,
@@ -75,7 +75,7 @@ def test_create_runtime_handles_project_structure_error():
             "ayder_cli.application.runtime_factory.create_default_registry",
             return_value=mock_registry,
         ),
-        patch("ayder_cli.application.runtime_factory.ToolExecutor"),
+        patch("ayder_cli.application.runtime_factory._ToolExecutor"),
         patch("ayder_cli.application.runtime_factory.CheckpointManager"),
         patch("ayder_cli.application.runtime_factory.MemoryManager"),
     ):

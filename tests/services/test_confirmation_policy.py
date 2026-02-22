@@ -272,7 +272,6 @@ class TestConfirmationPolicyIntegration:
             policy.confirm_action.return_value = True
             
             registry = Mock(spec=ToolRegistry)
-            registry.validate_args.return_value = (True, None)
             registry.execute.return_value = Mock(__str__=lambda self: "Success")
             
             # Create executor with injected policy

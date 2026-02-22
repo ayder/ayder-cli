@@ -6,7 +6,7 @@ Tools: list_tasks, show_task
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(

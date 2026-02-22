@@ -116,30 +116,6 @@ class TestConfirmationBehaviorParity:
         assert ConfirmationResult.INSTRUCT.executes_tool is False
         assert ConfirmationResult.INSTRUCT.includes_instructions is True
 
-    def test_file_diff_confirmation_same_behavior(self):
-        """File diff confirmation behaves same in CLI and TUI."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                FileDiffConfirmation,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
-
-        policy = ExecutionPolicy()
-        
-        diff = FileDiffConfirmation(
-            file_path="/test.txt",
-            original_content="old",
-            new_content="new",
-            description="Update file",
-        )
-        
-        # Same diff logic regardless of interface
-        result = policy.confirm_file_diff(diff)
-        
-        assert result in (True, False)  # Boolean result
-
 
 class TestErrorPropagationParity:
     """Error propagation format must be identical across CLI and TUI."""

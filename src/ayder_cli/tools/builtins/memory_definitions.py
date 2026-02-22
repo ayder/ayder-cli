@@ -6,7 +6,7 @@ Tools: save_memory, load_memory
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(

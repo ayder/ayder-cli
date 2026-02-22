@@ -452,11 +452,12 @@ The tool system automatically:
 - Registers tools with the LLM
 - Handles imports and exports
 
-Current tool categories (26 tools total):
+Current tool categories (28 tools total):
 
 - **Filesystem**: list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
 - **Search**: search_codebase, get_project_structure
 - **Shell**: run_shell_command
+- **Python Editor**: python_editor (CST-based structural code manipulation: get, list_all, replace, delete, rename, add_decorator, add_import, verify)
 - **Memory**: save_memory, load_memory
 - **Notes**: create_note
 - **Background Processes**: run_background_process, get_background_output, kill_background_process, list_background_processes
@@ -464,6 +465,7 @@ Current tool categories (26 tools total):
 - **Environment**: manage_environment_vars
 - **Virtual Environments**: create_virtualenv, install_requirements, list_virtualenvs, activate_virtualenv, remove_virtualenv
 - **Web**: fetch_web
+- **Workflow**: temporal_workflow
 
 ## License
 

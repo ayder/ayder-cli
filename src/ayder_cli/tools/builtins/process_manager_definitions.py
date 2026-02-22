@@ -6,7 +6,7 @@ Tools: run_background_process, get_background_output, kill_background_process, l
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(

@@ -6,13 +6,13 @@ Tools: search_codebase, get_project_structure
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="search_codebase",
         tags=("core",),
-        func_ref="ayder_cli.tools.search:search_codebase",
+        func_ref="ayder_cli.tools.builtins.search:search_codebase",
         description=(
             "Search for a regex pattern across the codebase. Returns matching "
             "lines with file paths and line numbers. Use this to locate code "
@@ -70,7 +70,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Generate a tree-style project structure summary.",
         description_template="Project structure will be displayed",
         tags=("core",),
-        func_ref="ayder_cli.tools.utils_tools:get_project_structure",
+        func_ref="ayder_cli.tools.builtins.utils_tools:get_project_structure",
         parameters={
             "type": "object",
             "properties": {

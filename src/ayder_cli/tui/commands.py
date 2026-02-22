@@ -15,6 +15,8 @@ from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEdit
 from ayder_cli.tui.widgets import ChatView, StatusBar
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ayder_cli.tui.app import AyderApp
 
 
@@ -632,6 +634,102 @@ def handle_task_edit(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message(f"Error listing tasks: {e}")
 
 
+def _open_note_in_editor(
+    app: "AyderApp", note_path, display_name: str, chat_view: ChatView
+) -> None:
+    """Open a note file in the in-app TextArea editor."""
+    from pathlib import Path
+
+    path = Path(note_path)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        chat_view.add_system_message(f"Error reading note: {e}")
+        return
+
+    def on_edit_result(new_content: str | None) -> None:
+        if new_content is None:
+            chat_view.add_system_message("Edit cancelled.")
+            return
+        try:
+            path.write_text(new_content, encoding="utf-8")
+            chat_view.add_system_message(f"Note '{display_name}' saved.")
+        except Exception as e:
+            chat_view.add_system_message(f"Error saving note: {e}")
+
+    app.push_screen(
+        TaskEditScreen(title=display_name, content=content), on_edit_result
+    )
+
+
+def handle_notes(app: "AyderApp", args: str, chat_view: ChatView) -> None:
+    """Browse and edit notes in .ayder/notes/ — optional filename argument to open directly."""
+    project_ctx = ProjectContext(".")
+    notes_dir = project_ctx.root / ".ayder" / "notes"
+
+    # Direct open by filename/stem if arg provided
+    if args.strip():
+        name = args.strip()
+        # Try exact match, then .md extension
+        candidates = [
+            notes_dir / name,
+            notes_dir / f"{name}.md",
+        ]
+        note_path = next((p for p in candidates if p.exists()), None)
+        if note_path is None:
+            chat_view.add_system_message(
+                f"Note '{name}' not found in .ayder/notes/."
+            )
+            return
+        _open_note_in_editor(app, note_path, note_path.name, chat_view)
+        return
+
+    # No arg — show interactive select screen
+    try:
+        if not notes_dir.exists():
+            chat_view.add_system_message(
+                "No notes directory found (.ayder/notes/). "
+                "Create a note first with the create_note tool."
+            )
+            return
+
+        note_files = sorted(notes_dir.glob("*.md"))
+        if not note_files:
+            chat_view.add_system_message(
+                "No notes found in .ayder/notes/. "
+                "Create a note first with the create_note tool."
+            )
+            return
+
+        items = []
+        note_paths: dict[str, Path] = {}
+        for note_file in note_files:
+            key = note_file.name
+            # Show stem as display label, full name as key
+            items.append((key, note_file.stem))
+            note_paths[key] = note_file
+
+        def on_note_selected(selected: str | None) -> None:
+            if selected:
+                path = note_paths.get(selected)
+                if path:
+                    _open_note_in_editor(app, path, selected, chat_view)
+
+        app.push_screen(
+            CLISelectScreen(
+                title="Select note to edit",
+                items=items,
+                description=(
+                    f"{len(items)} note(s) • ↑↓ navigate • Enter to edit • Esc to cancel"
+                ),
+            ),
+            on_note_selected,
+        )
+
+    except Exception as e:
+        chat_view.add_system_message(f"Error listing notes: {e}")
+
+
 def handle_archive(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /archive-completed-tasks command."""
     import shutil
@@ -729,7 +827,7 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
     )
 
 
-def _discover_skills(project_ctx: ProjectContext) -> list[tuple[str, "Path"]]:
+def _discover_skills(project_ctx: ProjectContext) -> list[tuple[str, Path]]:
     """Return [(skill_name, skill_md_path), ...] from .ayder/skills/."""
     from pathlib import Path
 
@@ -744,7 +842,7 @@ def _discover_skills(project_ctx: ProjectContext) -> list[tuple[str, "Path"]]:
 
 
 def _apply_skill(
-    app: "AyderApp", skill_name: str, skill_path: "Path", chat_view: ChatView
+    app: "AyderApp", skill_name: str, skill_path: Path, chat_view: ChatView
 ) -> None:
     """Inject a skill into the conversation and update the status bar."""
     from pathlib import Path
@@ -769,8 +867,10 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         return
 
     if args.strip():
-        # Direct activation: /skill python-developer
-        name = args.strip()
+        # Direct activation: /skill python-developer [optional command]
+        parts = args.strip().split(None, 1)
+        name = parts[0]
+        command = parts[1] if len(parts) > 1 else ""
         match = next(((n, p) for n, p in skills if n == name), None)
         if match is None:
             available = ", ".join(n for n, _ in skills)
@@ -779,6 +879,10 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
             )
             return
         _apply_skill(app, match[0], match[1], chat_view)
+        if command:
+            chat_view.add_user_message(command)
+            app.messages.append({"role": "user", "content": command})
+            app.start_llm_processing()
     else:
         # Interactive picker
         current = app._active_skill or ""
@@ -857,6 +961,7 @@ COMMAND_MAP: dict[str, Callable] = {
     "/implement": handle_implement,
     "/implement-all": handle_implement_all,
     "/task-edit": handle_task_edit,
+    "/notes": handle_notes,
     "/archive-completed-tasks": handle_archive,
     "/permission": handle_permission,
     "/temporal": handle_temporal,

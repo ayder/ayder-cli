@@ -134,8 +134,8 @@ class TestResolveFuncRef:
 
     def test_resolves_valid_reference(self):
         """Test resolving a valid module:function reference."""
-        func = registry._resolve_func_ref("ayder_cli.tools.filesystem:read_file")
-        from ayder_cli.tools.filesystem import read_file
+        func = registry._resolve_func_ref("ayder_cli.tools.builtins.filesystem:read_file")
+        from ayder_cli.tools.builtins.filesystem import read_file
         assert func is read_file
 
     def test_resolves_external_module(self):
@@ -152,21 +152,21 @@ class TestResolveFuncRef:
     def test_invalid_function_raises_attribute_error(self):
         """Test that a nonexistent function raises AttributeError."""
         with pytest.raises(AttributeError):
-            registry._resolve_func_ref("ayder_cli.tools.filesystem:nonexistent_func")
+            registry._resolve_func_ref("ayder_cli.tools.builtins.filesystem:nonexistent_func")
 
     def test_missing_colon_raises_value_error(self):
         """Test that a reference without colon raises ValueError."""
         with pytest.raises(ValueError):
-            registry._resolve_func_ref("ayder_cli.tools.filesystem.read_file")
+            registry._resolve_func_ref("ayder_cli.tools.builtins.filesystem.read_file")
 
 
 class TestCreateDefaultRegistryAutoDiscovery:
     """Tests for auto-discovery via func_ref in create_default_registry."""
 
-    def test_registers_all_27_tools(self, project_context):
-        """Test that all 27 TOOL_DEFINITIONS are registered."""
+    def test_registers_all_28_tools(self, project_context):
+        """Test that all 28 TOOL_DEFINITIONS are registered."""
         reg = registry.create_default_registry(project_context)
-        assert len(reg.get_registered_tools()) == 27
+        assert len(reg.get_registered_tools()) == 28
 
     def test_registered_names_match_definitions(self, project_context):
         """Test that registered tool names match TOOL_DEFINITIONS names."""

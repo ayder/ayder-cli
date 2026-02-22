@@ -6,7 +6,7 @@ Tools: list_files, read_file, write_file, replace_string, insert_line, delete_li
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 # Shared file path aliases
 _FILE_PATH_ALIASES = (
@@ -22,7 +22,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="List files in a directory",
         description_template="Directory {directory} will be listed",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:list_files",
+        func_ref="ayder_cli.tools.builtins.filesystem:list_files",
         parameters={
             "type": "object",
             "properties": {
@@ -46,7 +46,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Read the contents of a file, optionally specifying a line range.",
         description_template="File {file_path} will be read",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:read_file",
+        func_ref="ayder_cli.tools.builtins.filesystem:read_file",
         parameters={
             "type": "object",
             "properties": {
@@ -80,7 +80,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         ),
         description_template="File {file_path} will be written",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:write_file",
+        func_ref="ayder_cli.tools.builtins.filesystem:write_file",
         parameters={
             "type": "object",
             "properties": {
@@ -112,7 +112,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         ),
         description_template="File {file_path} will be modified",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:replace_string",
+        func_ref="ayder_cli.tools.builtins.filesystem:replace_string",
         parameters={
             "type": "object",
             "properties": {
@@ -142,7 +142,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Insert content at a specific line number in a file.",
         description_template="File {file_path} will be modified (insert at line {line_number})",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:insert_line",
+        func_ref="ayder_cli.tools.builtins.filesystem:insert_line",
         parameters={
             "type": "object",
             "properties": {
@@ -171,7 +171,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Delete a specific line from a file.",
         description_template="File {file_path} will be modified (delete line {line_number})",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:delete_line",
+        func_ref="ayder_cli.tools.builtins.filesystem:delete_line",
         parameters={
             "type": "object",
             "properties": {
@@ -197,7 +197,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Get metadata about a file (size, line count, type).",
         description_template="File info for {file_path} will be retrieved",
         tags=("core",),
-        func_ref="ayder_cli.tools.filesystem:get_file_info",
+        func_ref="ayder_cli.tools.builtins.filesystem:get_file_info",
         parameters={
             "type": "object",
             "properties": {

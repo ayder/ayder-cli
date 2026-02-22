@@ -154,6 +154,14 @@ class TestTuiLoopConfig:
         assert cfg.max_iterations == 10
         assert cfg.permissions == {"r", "w"}
 
+    def test_max_history_default_zero(self):
+        cfg = TuiLoopConfig()
+        assert cfg.max_history == 0
+
+    def test_max_history_custom(self):
+        cfg = TuiLoopConfig(max_history=20)
+        assert cfg.max_history == 20
+
 
 # ---------------------------------------------------------------------------
 # Static helpers
@@ -255,6 +263,37 @@ class TestEscalationDetection:
 
     def test_invalid_payload(self):
         assert _is_escalation_result("not json") is False
+
+
+# ---------------------------------------------------------------------------
+# TuiChatLoop.run() — thinking_stop fires exactly once per LLM call
+# ---------------------------------------------------------------------------
+
+
+class TestThinkingStopCount:
+    """on_thinking_stop() must fire exactly once — not twice on LLM exception."""
+
+    def test_thinking_stop_fires_once_on_success(self):
+        loop, cb, llm, registry = _make_loop()
+        response = _make_response(content="ok")
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", new_callable=AsyncMock, return_value=response):
+            _run(loop.run())
+
+        assert cb.events.count(("thinking_stop",)) == 1
+
+    def test_thinking_stop_fires_once_on_llm_exception(self):
+        loop, cb, llm, registry = _make_loop()
+
+        with patch(
+            "ayder_cli.tui.chat_loop.call_llm_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("network error"),
+        ):
+            _run(loop.run())
+
+        # Must fire exactly once even when an exception is raised
+        assert cb.events.count(("thinking_stop",)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -921,3 +960,99 @@ class TestIterationsPassthrough:
             main()
             call_kwargs = mock_run_tui.call_args[1]
             assert call_kwargs['iterations'] is not None  # resolved from config
+
+
+# ---------------------------------------------------------------------------
+# Sliding-window history truncation
+# ---------------------------------------------------------------------------
+
+
+class TestSlidingWindowHistory:
+    def test_no_truncation_when_max_history_zero(self):
+        """With default max_history=0, all messages are sent to LLM."""
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "msg1"},
+            {"role": "assistant", "content": "resp1"},
+            {"role": "user", "content": "msg2"},
+        ]
+        captured = {}
+        response = _make_response(content="done")
+
+        async def fake_llm(llm, msgs, *a, **kw):
+            captured["messages"] = list(msgs)
+            return response
+
+        loop = TuiChatLoop(
+            llm=MagicMock(),
+            registry=MagicMock(),
+            messages=list(messages),
+            config=TuiLoopConfig(max_history=0),
+            callbacks=FakeCallbacks(),
+        )
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=fake_llm):
+            _run(loop.run())
+
+        assert len(captured["messages"]) == 4
+
+    def test_truncation_keeps_system_plus_last_n(self):
+        """With max_history=2, system + last 2 messages are sent to LLM."""
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old1"},
+            {"role": "assistant", "content": "old2"},
+            {"role": "user", "content": "old3"},
+            {"role": "assistant", "content": "old4"},
+            {"role": "user", "content": "recent1"},
+            {"role": "assistant", "content": "recent2"},
+        ]
+        captured = {}
+        response = _make_response(content="done")
+
+        async def fake_llm(llm, msgs, *a, **kw):
+            captured["messages"] = list(msgs)
+            return response
+
+        loop = TuiChatLoop(
+            llm=MagicMock(),
+            registry=MagicMock(),
+            messages=list(messages),
+            config=TuiLoopConfig(max_history=2),
+            callbacks=FakeCallbacks(),
+        )
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=fake_llm):
+            _run(loop.run())
+
+        # system + last 2 = 3 messages
+        assert len(captured["messages"]) == 3
+        assert captured["messages"][0]["content"] == "sys"
+        assert captured["messages"][1]["content"] == "recent1"
+        assert captured["messages"][2]["content"] == "recent2"
+
+    def test_no_truncation_when_under_limit(self):
+        """When message count <= max_history + 1, no truncation occurs."""
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "msg1"},
+        ]
+        captured = {}
+        response = _make_response(content="done")
+
+        async def fake_llm(llm, msgs, *a, **kw):
+            captured["messages"] = list(msgs)
+            return response
+
+        loop = TuiChatLoop(
+            llm=MagicMock(),
+            registry=MagicMock(),
+            messages=list(messages),
+            config=TuiLoopConfig(max_history=5),
+            callbacks=FakeCallbacks(),
+        )
+
+        with patch("ayder_cli.tui.chat_loop.call_llm_async", side_effect=fake_llm):
+            _run(loop.run())
+
+        assert len(captured["messages"]) == 2

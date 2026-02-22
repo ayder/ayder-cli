@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
-from ayder_cli.tools import filesystem, search, shell, utils_tools, venv
+from ayder_cli.tools.builtins import filesystem, search, shell, utils_tools, venv
 
 # Create a namespace object that mimicks the old 'impl' module
 class ImplNamespace:
@@ -312,7 +312,7 @@ class TestReadFileSizeLimit:
     def test_read_file_rejects_oversized_file(self, tmp_path, project_context, monkeypatch):
         """Test that files exceeding MAX_FILE_SIZE are rejected with descriptive error."""
         # Temporarily set a small max size for testing
-        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
+        monkeypatch.setattr("ayder_cli.tools.builtins.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
 
         test_file = tmp_path / "large_file.txt"
         # Create content larger than the limit
@@ -331,7 +331,7 @@ class TestReadFileSizeLimit:
     def test_read_file_accepts_normal_size_file(self, tmp_path, project_context, monkeypatch):
         """Test that normal-sized files are read successfully."""
         # Temporarily set a small max size for testing
-        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 1024)  # 1KB limit
+        monkeypatch.setattr("ayder_cli.tools.builtins.filesystem.MAX_FILE_SIZE", 1024)  # 1KB limit
         
         test_file = tmp_path / "normal_file.txt"
         normal_content = "This is a normal file content."
@@ -346,7 +346,7 @@ class TestReadFileSizeLimit:
     def test_read_file_size_limit_exact_boundary(self, tmp_path, project_context, monkeypatch):
         """Test that files exactly at the size limit are accepted."""
         # Set a small max size for testing
-        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
+        monkeypatch.setattr("ayder_cli.tools.builtins.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
         
         test_file = tmp_path / "boundary_file.txt"
         # Create content exactly at the limit
@@ -362,7 +362,7 @@ class TestReadFileSizeLimit:
     def test_read_file_size_limit_one_byte_over(self, tmp_path, project_context, monkeypatch):
         """Test that files one byte over the limit are rejected."""
         # Set a small max size for testing
-        monkeypatch.setattr("ayder_cli.tools.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
+        monkeypatch.setattr("ayder_cli.tools.builtins.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
         
         test_file = tmp_path / "over_limit_file.txt"
         # Create content one byte over the limit

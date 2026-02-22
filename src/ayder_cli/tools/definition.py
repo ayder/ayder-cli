@@ -86,22 +86,23 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
         ValueError: If duplicate tool names found
         ImportError: If required core tools are missing
     """
-    definitions = []
+    # Collect (definition, source_module) pairs to track provenance
+    all_defs: list = []
     discovered_modules = []
-    
-    # Get the tools package path
-    import ayder_cli.tools as tools_package
-    package_path = tools_package.__path__
-    
-    # Iterate through all modules in tools package
+
+    # Get the tools.builtins package path
+    import ayder_cli.tools.builtins as builtins_package
+    package_path = builtins_package.__path__
+
+    # Iterate through all modules in tools.builtins package
     for finder, name, is_pkg in pkgutil.iter_modules(package_path):
         # Only process *_definitions.py files (not packages)
         if name.endswith('_definitions') and not is_pkg:
             try:
-                module = importlib.import_module(f'ayder_cli.tools.{name}')
+                module = importlib.import_module(f'ayder_cli.tools.builtins.{name}')
                 if hasattr(module, 'TOOL_DEFINITIONS'):
                     module_defs = module.TOOL_DEFINITIONS
-                    definitions.extend(module_defs)
+                    all_defs.extend((td, name) for td in module_defs)
                     discovered_modules.append(name)
                     logger.debug(
                         f"Discovered {len(module_defs)} tools from {name}"
@@ -110,17 +111,19 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
                 logger.warning(f"Failed to import {name}: {e}")
             except Exception as e:
                 logger.error(f"Error loading definitions from {name}: {e}")
-    
-    # Validate: Detect duplicate tool names
+
+    # Validate: Detect duplicate tool names (with accurate source tracking)
     seen: dict[str, str] = {}
-    for td in definitions:
+    for td, source_module in all_defs:
         if td.name in seen:
             raise ValueError(
                 f"Duplicate tool name '{td.name}' found. "
                 f"Previously defined in '{seen[td.name]}', "
-                f"duplicate found in current module"
+                f"duplicate found in '{source_module}'"
             )
-        seen[td.name] = name
+        seen[td.name] = source_module
+
+    definitions = [td for td, _ in all_defs]
     
     # Validate: Ensure required core tools are present
     required_tools = {'list_files', 'read_file', 'write_file', 'run_shell_command'}
@@ -129,7 +132,7 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
     if missing:
         raise ImportError(
             f"Required core tools missing: {missing}. "
-            f"Ensure filesystem_definitions.py and shell_definitions.py exist."
+            f"Ensure builtins/filesystem_definitions.py and builtins/shell_definitions.py exist."
         )
     
     logger.info(

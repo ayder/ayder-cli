@@ -6,7 +6,7 @@ Tools: fetch_web
 
 from typing import Tuple
 
-from .definition import ToolDefinition
+from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -17,7 +17,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         ),
         description_template="Web URL '{url}' will be fetched with method '{method}'",
         tags=("http",),
-        func_ref="ayder_cli.tools.web:fetch_web",
+        func_ref="ayder_cli.tools.builtins.web:fetch_web",
         parameters={
             "type": "object",
             "properties": {

@@ -135,7 +135,6 @@ class TestFullDecouplingFlow:
             session = Mock()
             
             # Setup registry behavior
-            registry.validate_args.return_value = (True, None)
             registry.normalize_args.return_value = {"file_path": "/test.txt"}
             registry.execute.return_value = Mock(__str__=lambda self: "Success")
             
@@ -211,7 +210,6 @@ class TestFullDecouplingFlow:
             policy = Mock(spec=ConfirmationPolicy)
             session = Mock()
             
-            registry.validate_args.return_value = (True, None)
             registry.normalize_args.return_value = {"file_path": "/test.txt"}
             policy.confirm_action.return_value = False  # User declines
             
@@ -252,7 +250,6 @@ class TestFullDecouplingFlow:
             policy = Mock(spec=ConfirmationPolicy)
             session = Mock()
             
-            registry.validate_args.return_value = (True, None)
             registry.normalize_args.return_value = {"file_path": "/test.txt"}
             registry.execute.return_value = Mock(__str__=lambda self: "Success")
             
