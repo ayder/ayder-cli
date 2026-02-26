@@ -107,6 +107,9 @@ def _apply_provider_switch(
     app.chat_loop.config.num_ctx = new_config.num_ctx
     app.update_system_prompt_model()
 
+    # Fresh iteration budget for the new provider
+    app.chat_loop.reset_iterations()
+
     status_bar = app.query_one("#status-bar", StatusBar)
     status_bar.set_model(new_config.model)
 
@@ -132,6 +135,7 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
                     app.model = selected
                     app.chat_loop.config.model = selected
                     app.update_system_prompt_model()
+                    app.chat_loop.reset_iterations()
                     status_bar = app.query_one("#status-bar", StatusBar)
                     status_bar.set_model(selected)
                     chat_view.add_system_message(f"Switched to model: {selected}")
@@ -152,21 +156,41 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
         app.model = new_model
         app.chat_loop.config.model = new_model
         app.update_system_prompt_model()
+        app.chat_loop.reset_iterations()
         status_bar = app.query_one("#status-bar", StatusBar)
         status_bar.set_model(new_model)
         chat_view.add_system_message(f"Switched to model: {new_model}")
 
 
 def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /tasks command."""
+    """Handle /tasks command — show interactive task selector or edit by ID."""
     from ayder_cli.tasks import (
         _get_tasks_dir,
+        _get_task_path_by_id,
         _parse_title,
         _extract_id,
     )
 
+    project_ctx = ProjectContext(".")
+
+    # Direct edit by ID if arg provided
+    if args.strip():
+        try:
+            task_id = int(args.strip())
+        except ValueError:
+            chat_view.add_system_message(f"Invalid task ID: {args.strip()}")
+            return
+
+        task_path = _get_task_path_by_id(project_ctx, task_id)
+        if task_path is None:
+            chat_view.add_system_message(f"Task TASK-{task_id:03d} not found.")
+            return
+
+        _open_task_in_editor(app, task_id, task_path, chat_view)
+        return
+
+    # No arg — show interactive select screen
     try:
-        project_ctx = ProjectContext(".")
         tasks_dir = _get_tasks_dir(project_ctx)
 
         if not tasks_dir.exists():
@@ -175,9 +199,8 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
             )
             return
 
-        # Build list of tasks
         items = []
-        task_paths = {}  # Map display text to task path
+        task_paths = {}
 
         for task_file in sorted(tasks_dir.glob("*.md")):
             task_id = _extract_id(task_file.name)
@@ -187,14 +210,12 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
             title = _parse_title(task_file)
             content = task_file.read_text(encoding="utf-8")
 
-            # Determine status
             status = "pending"
             if "- **status:** done" in content.lower():
                 status = "done"
             elif "- **status:** in_progress" in content.lower():
                 status = "in_progress"
 
-            # Format display with status indicator
             status_icon = (
                 "✓" if status == "done" else "○" if status == "pending" else "◐"
             )
@@ -211,17 +232,16 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
         def on_task_selected(selected: str | None) -> None:
             if selected:
-                task_id = int(selected)
-                task_path = task_paths.get(selected)
-                if task_path:
-                    title = _parse_title(task_path)
-                    _run_implement_task(app, task_id, title, chat_view)
+                tid = int(selected)
+                path = task_paths.get(selected)
+                if path:
+                    _open_task_in_editor(app, tid, path, chat_view)
 
         app.push_screen(
             CLISelectScreen(
-                title="Select task to implement",
+                title="Select task to edit",
                 items=items,
-                description=f"{len(items)} task(s) found • Enter to implement • Esc to cancel",
+                description=f"{len(items)} task(s) found • Enter to edit • Esc to cancel",
             ),
             on_task_selected,
         )
@@ -419,7 +439,7 @@ def handle_ask(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 
 def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /implement command."""
+    """Handle /implement command — interactive task picker or implement by ID."""
     from ayder_cli.tasks import (
         _get_tasks_dir,
         _get_task_path_by_id,
@@ -428,94 +448,95 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
     )
     from ayder_cli.prompts import TASK_EXECUTION_PROMPT_TEMPLATE
 
-    if not args.strip():
-        chat_view.add_system_message(
-            "Usage: /implement <task_id|name|pattern>\nExample: /implement 001"
-        )
-        return
-
     project_ctx = ProjectContext(".")
-    tasks_dir = _get_tasks_dir(project_ctx)
-    query = args.strip()
 
-    try:
-        task_id = int(query)
-        task_path = _get_task_path_by_id(project_ctx, task_id)
-        if task_path:
-            title = _parse_title(task_path)
-            rel_path = project_ctx.to_relative(task_path)
-            command = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
-            app.messages.append({"role": "user", "content": command})
-            chat_view.add_system_message(f"Running TASK-{task_id:03d}: {title}")
-
-            app.start_llm_processing()
+    # Direct implement by ID if arg provided
+    if args.strip():
+        try:
+            task_id = int(args.strip())
+        except ValueError:
+            chat_view.add_system_message(f"Invalid task ID: {args.strip()}")
             return
-    except ValueError:
-        pass
 
-    matching = []
-    query_lower = query.lower()
-    for task_file in sorted(tasks_dir.glob("*.md")):
-        task_id = _extract_id(task_file.name)
-        if task_id is None:
-            continue
-        title = _parse_title(task_file)
-        if query_lower in title.lower():
-            matching.append((task_id, task_file, title))
+        task_path = _get_task_path_by_id(project_ctx, task_id)
+        if task_path is None:
+            chat_view.add_system_message(f"Task TASK-{task_id:03d} not found.")
+            return
 
-    if not matching:
-        chat_view.add_system_message(f"No tasks found matching: {query}")
-        return
-
-    for task_id, task_path, title in matching:
+        title = _parse_title(task_path)
         rel_path = project_ctx.to_relative(task_path)
         command = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
         app.messages.append({"role": "user", "content": command})
-
-    chat_view.add_system_message(f"Running {len(matching)} matching task(s)...")
-
-    app.start_llm_processing()
-
-
-def handle_implement_all(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /implement-all command."""
-    from ayder_cli.tasks import _get_tasks_dir, _extract_id, _parse_title
-    from ayder_cli.prompts import TASK_EXECUTION_ALL_PROMPT_TEMPLATE
-
-    project_ctx = ProjectContext(".")
-    tasks_dir = _get_tasks_dir(project_ctx)
-
-    if not tasks_dir.exists():
-        chat_view.add_system_message(
-            "No tasks directory found. Create tasks first with /plan."
-        )
+        chat_view.add_system_message(f"Running TASK-{task_id:03d}: {title}")
+        app.start_llm_processing()
         return
 
-    pending = []
-    for task_file in sorted(tasks_dir.glob("*.md")):
-        task_id = _extract_id(task_file.name)
-        if task_id is None:
-            continue
-        content = task_file.read_text(encoding="utf-8")
-        if (
-            "- **status:** pending" in content.lower()
-            or "- **status:** todo" in content.lower()
-        ):
+    # No arg — show interactive select screen
+    try:
+        tasks_dir = _get_tasks_dir(project_ctx)
+
+        if not tasks_dir.exists():
+            chat_view.add_system_message(
+                "No tasks directory found. Create tasks first with /plan."
+            )
+            return
+
+        items = []
+        task_paths = {}
+
+        for task_file in sorted(tasks_dir.glob("*.md")):
+            tid = _extract_id(task_file.name)
+            if tid is None:
+                continue
+
             title = _parse_title(task_file)
-            pending.append((task_id, title))
+            content = task_file.read_text(encoding="utf-8")
 
-    if not pending:
-        chat_view.add_system_message("No pending tasks found. All tasks are complete!")
-        return
+            status = "pending"
+            if "- **status:** done" in content.lower():
+                status = "done"
+            elif "- **status:** in_progress" in content.lower():
+                status = "in_progress"
 
-    task_list = "\n".join([f"  - TASK-{tid:03d}: {title}" for tid, title in pending])
-    chat_view.add_system_message(
-        f"Implementing {len(pending)} pending tasks:\n{task_list}"
-    )
+            status_icon = (
+                "✓" if status == "done" else "○" if status == "pending" else "◐"
+            )
+            display = f"TASK-{tid:03d}: {title} [{status_icon}]"
 
-    app.messages.append({"role": "user", "content": TASK_EXECUTION_ALL_PROMPT_TEMPLATE})
+            items.append((str(tid), display))
+            task_paths[str(tid)] = task_file
 
-    app.start_llm_processing()
+        if not items:
+            chat_view.add_system_message(
+                "No tasks found. Create tasks first with /plan."
+            )
+            return
+
+        def on_task_selected(selected: str | None) -> None:
+            if selected:
+                path = task_paths.get(selected)
+                if path:
+                    t_id = int(selected)
+                    t_title = _parse_title(path)
+                    rel = project_ctx.to_relative(path)
+                    cmd = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel)
+                    app.messages.append({"role": "user", "content": cmd})
+                    chat_view.add_system_message(
+                        f"Running TASK-{t_id:03d}: {t_title}"
+                    )
+                    app.start_llm_processing()
+
+        app.push_screen(
+            CLISelectScreen(
+                title="Select task to implement",
+                items=items,
+                description=f"{len(items)} task(s) found • Enter to implement • Esc to cancel",
+            ),
+            on_task_selected,
+        )
+
+    except Exception as e:
+        chat_view.add_system_message(f"Error listing tasks: {e}")
 
 
 def _open_task_in_editor(
@@ -544,94 +565,6 @@ def _open_task_in_editor(
     app.push_screen(
         TaskEditScreen(title=f"TASK-{task_id:03d}", content=content), on_edit_result
     )
-
-
-def handle_task_edit(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /task-edit command — show interactive task selector or edit by ID."""
-    from ayder_cli.tasks import (
-        _get_tasks_dir,
-        _get_task_path_by_id,
-        _parse_title,
-        _extract_id,
-    )
-
-    project_ctx = ProjectContext(".")
-
-    # Direct edit by ID if arg provided
-    if args.strip():
-        try:
-            task_id = int(args.strip())
-        except ValueError:
-            chat_view.add_system_message(f"Invalid task ID: {args.strip()}")
-            return
-
-        task_path = _get_task_path_by_id(project_ctx, task_id)
-        if task_path is None:
-            chat_view.add_system_message(f"Task TASK-{task_id:03d} not found.")
-            return
-
-        _open_task_in_editor(app, task_id, task_path, chat_view)
-        return
-
-    # No arg — show interactive select screen
-    try:
-        tasks_dir = _get_tasks_dir(project_ctx)
-
-        if not tasks_dir.exists():
-            chat_view.add_system_message(
-                "No tasks directory found. Create tasks first with /plan."
-            )
-            return
-
-        items = []
-        task_paths = {}
-
-        for task_file in sorted(tasks_dir.glob("*.md")):
-            task_id = _extract_id(task_file.name)
-            if task_id is None:
-                continue
-
-            title = _parse_title(task_file)
-            content = task_file.read_text(encoding="utf-8")
-
-            status = "pending"
-            if "- **status:** done" in content.lower():
-                status = "done"
-            elif "- **status:** in_progress" in content.lower():
-                status = "in_progress"
-
-            status_icon = (
-                "✓" if status == "done" else "○" if status == "pending" else "◐"
-            )
-            display = f"TASK-{task_id:03d}: {title} [{status_icon}]"
-
-            items.append((str(task_id), display))
-            task_paths[str(task_id)] = task_file
-
-        if not items:
-            chat_view.add_system_message(
-                "No tasks found. Create tasks first with /plan."
-            )
-            return
-
-        def on_task_selected(selected: str | None) -> None:
-            if selected:
-                tid = int(selected)
-                path = task_paths.get(selected)
-                if path:
-                    _open_task_in_editor(app, tid, path, chat_view)
-
-        app.push_screen(
-            CLISelectScreen(
-                title="Select task to edit",
-                items=items,
-                description=f"{len(items)} task(s) found • ↑↓ navigate • Enter to edit • Esc to cancel",
-            ),
-            on_task_selected,
-        )
-
-    except Exception as e:
-        chat_view.add_system_message(f"Error listing tasks: {e}")
 
 
 def _open_note_in_editor(
@@ -921,28 +854,6 @@ def do_clear(app: AyderApp, chat_view: ChatView) -> None:
     chat_view.add_system_message("Conversation history cleared.")
 
 
-def _run_implement_task(
-    app: AyderApp, task_id: int, title: str, chat_view: ChatView
-) -> None:
-    """Run a single task implementation."""
-    from ayder_cli.tasks import _get_task_path_by_id
-    from ayder_cli.prompts import TASK_EXECUTION_PROMPT_TEMPLATE
-
-    project_ctx = ProjectContext(".")
-    task_path = _get_task_path_by_id(project_ctx, task_id)
-
-    if task_path is None:
-        chat_view.add_system_message(f"Task TASK-{task_id:03d} not found.")
-        return
-
-    rel_path = project_ctx.to_relative(task_path)
-    command = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
-    app.messages.append({"role": "user", "content": command})
-    chat_view.add_system_message(f"Running TASK-{task_id:03d}: {title}")
-
-    app.start_llm_processing()
-
-
 # Command dispatch map: command name -> handler function
 # All handlers have signature (app, args, chat_view) -> None
 COMMAND_MAP: dict[str, Callable] = {
@@ -959,8 +870,6 @@ COMMAND_MAP: dict[str, Callable] = {
     "/plan": handle_plan,
     "/ask": handle_ask,
     "/implement": handle_implement,
-    "/implement-all": handle_implement_all,
-    "/task-edit": handle_task_edit,
     "/notes": handle_notes,
     "/archive-completed-tasks": handle_archive,
     "/permission": handle_permission,

@@ -341,8 +341,7 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 | `/plan` | Analyze request and create implementation tasks |
 | `/tasks` | Browse and implement tasks from `.ayder/tasks/` |
 | `/task-edit N` | Open task N in an in-app editor (e.g. `/task-edit 1`) |
-| `/implement <id/name>` | Run a task by ID, name, or pattern (e.g. `/implement 1`) |
-| `/implement-all` | Implement all pending tasks sequentially |
+| `/implement [id]` | Interactive task picker, or implement by ID (e.g. `/implement 1`) |
 | `/verbose` | Toggle verbose mode (show file contents after `write_file` + LLM request details) |
 | `/logging` | Set Loguru level for current TUI session (`NONE`, `ERROR`, `WARNING`, `INFO`, `DEBUG`) |
 | `/compact` | Summarize conversation, save to memory, clear, and reload context |
@@ -393,7 +392,11 @@ Activated with `/plan`. Uses the **Planning Prompt**. The AI becomes a "Task Mas
 
 #### Task Mode (`/implement`)
 
-Activated with `/implement`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list.
+Activated with `/implement`. Uses the **Task Prompt**. The AI focuses on implementing tasks from the task list. Without arguments, shows an interactive task picker.
+
+> /implement
+>
+Opens interactive task selector — pick a task to implement
 
 > /implement 1
 >
@@ -419,12 +422,13 @@ Opens interactive task selector — pick a task to implement
 
 > /task-edit 1    # opens TASK-001 in the in-app editor
 
+> /implement
+>
+Opens interactive task selector — pick a task to implement
+
 > /implement 1
 >
 AI implements TASK-001 and marks it as done
-
-> /implement-all
-Sequentially implements all tasks one after each other. Consider iteration size!
 
 ### Code Search
 

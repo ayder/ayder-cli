@@ -20,6 +20,7 @@ def _make_app() -> SimpleNamespace:
         chat_loop=SimpleNamespace(
             llm=MagicMock(),
             config=SimpleNamespace(model="qwen3-coder:latest", num_ctx=65536),
+            reset_iterations=MagicMock(),
         ),
     )
     return app

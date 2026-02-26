@@ -158,7 +158,7 @@ tests/
 |----------|-----------|-------------|
 | **File System Tools** | 80+ | `list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command` |
 | **Configuration** | 30+ | Config loading, defaults, merging, validation |
-| **Task Management** | 70+ | Task creation, listing, implementation, `/implement`, `/implement-all` |
+| **Task Management** | 70+ | Task creation, listing, implementation, `/implement` |
 | **Memory Management** | 15+ | `/summary`, `/load`, `/compact` commands |
 | **UI Components** | 90+ | Box drawing, message printing, tool descriptions, diff preview |
 | **Commands** | 50+ | Slash commands (`/help`, `/tools`, `/tasks`, `/edit`, `/implement`, etc.) |

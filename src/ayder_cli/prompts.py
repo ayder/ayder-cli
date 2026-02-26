@@ -116,7 +116,33 @@ User Request: {task_description}"""
 # REASON: Instruct the LLM to implement a specific task file and mark it complete.
 # Keeps the LLM focused on a single task at a time.
 
-TASK_EXECUTION_PROMPT_TEMPLATE = """analyze file {task_path} and implement every detail according to the description and acceptance criteria. After successful implementation, mark the task as complete by changing '- **Status:** pending' to '- **Status:** done' in {task_path}. Stop iteration after changing the status, wait for user review"""
+TASK_EXECUTION_PROMPT_TEMPLATE = """
+Read the given task file at {task_path}. Before coding, list and understand
+every acceptance criterion
+
+First, extract and list:
+1. The task description (what to build)
+2. Every acceptance criterion (the checklist you must satisfy)
+3. Any files or modules referenced
+
+Then implement the task. For each acceptance criterion, explicitly verify
+your implementation satisfies it. If a criterion is ambiguous, state your
+interpretation before proceeding. Execute all necessary code changes or 
+file creations. Ensure every single acceptance criterion is met.
+
+After implementation is complete, perform this self-review:
+- Re-read the acceptance criteria from {task_path} line by line
+- For each criterion, name the specific file and function that satisfies it
+- If ANY criterion is not met, implement the missing part before continuing.
+
+Only after every criterion is verified, perform the status update on {task_path}:
+- Mark acceptance criteria to done "- [ ]" to  "- [x]"
+- Update the task status '- **Status:** pending' to '- **Status:** done'
+
+After changing the status, STOP. NEVER continue to any other tasks.
+Output a summary of what you implemented and how each acceptance criterion was met.
+Wait for user review.
+"""
 
 
 # Used by: cli_runner.py::TaskRunner.implement_all()
