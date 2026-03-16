@@ -29,12 +29,11 @@ class TestBuildServices:
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
-            cfg, llm_provider, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
+            cfg, llm_provider, project_ctx, enhanced_system, memory_manager = services
 
             assert cfg == mock_config
             assert llm_provider is not None
             assert project_ctx is not None
-            assert checkpoint_manager is not None
             assert memory_manager is not None
             # Verify macro is empty when exception occurs
             assert "PROJECT STRUCTURE" not in enhanced_system
@@ -59,11 +58,10 @@ class TestBuildServices:
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
-            cfg, llm_provider, project_ctx, enhanced_system, checkpoint_manager, memory_manager = services
+            cfg, llm_provider, project_ctx, enhanced_system, memory_manager = services
 
             assert "PROJECT STRUCTURE" in enhanced_system
             assert "src/" in enhanced_system
-            assert checkpoint_manager is not None
             assert memory_manager is not None
             mock_registry.execute.assert_called_once_with("get_project_structure", {"max_depth": 3})
 
@@ -122,11 +120,11 @@ class TestRunCommand:
         """Test successful command execution."""
         from ayder_cli.cli_runner import run_command
 
-        result = run_command("test prompt", permissions={"r"}, iterations=5)
+        result = run_command("test prompt", permissions={"r"})
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "test prompt", permissions={"r"}, iterations=5
+            "test prompt", permissions={"r"}
         )
 
     @patch('ayder_cli.cli_runner._run_loop', side_effect=Exception("Loop error"))
@@ -144,11 +142,11 @@ class TestRunCommand:
         """Test run_command creates CommandRunner that delegates to _run_loop."""
         from ayder_cli.cli_runner import run_command
 
-        result = run_command("test prompt", permissions={"r", "w"}, iterations=10)
+        result = run_command("test prompt", permissions={"r", "w"})
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "test prompt", permissions={"r", "w"}, iterations=10
+            "test prompt", permissions={"r", "w"}
         )
 
 
@@ -170,7 +168,7 @@ class TestRunLoop:
 
         with patch('ayder_cli.cli_runner.create_runtime', return_value=mock_rt) as mock_create, \
              patch('ayder_cli.cli_runner.asyncio.run') as mock_asyncio_run:
-            result = _run_loop("hello", permissions={"r"}, iterations=10)
+            result = _run_loop("hello", permissions={"r"})
 
         assert result == 0
         mock_create.assert_called_once()
@@ -256,7 +254,7 @@ class TestRunImplementCLI:
             mock_get_path.return_value = task_file
 
             with patch('sys.stdout', new=StringIO()):
-                result = _run_implement_cli("1", permissions={"r"}, iterations=10)
+                result = _run_implement_cli("1", permissions={"r"})
 
             assert result == 0
             mock_run_loop.assert_called_once()
@@ -284,7 +282,7 @@ class TestRunImplementCLI:
             mock_parse_title.return_value = "Implement Authentication"
 
             with patch('sys.stdout', new=StringIO()):
-                result = _run_implement_cli("auth", permissions={"r"}, iterations=10)
+                result = _run_implement_cli("auth", permissions={"r"})
 
             assert result == 0
 
@@ -326,7 +324,7 @@ class TestRunImplementAllCLI:
         """Test successful implement all."""
         from ayder_cli.cli_runner import _run_implement_all_cli
 
-        result = _run_implement_all_cli(permissions={"r"}, iterations=10)
+        result = _run_implement_all_cli(permissions={"r"})
 
         assert result == 0
         mock_run_loop.assert_called_once()
@@ -552,7 +550,7 @@ class TestMainTaskOptions:
             with pytest.raises(SystemExit):
                 main()
 
-            mock_run_implement.assert_called_once_with('1', permissions={'r'}, iterations=50)
+            mock_run_implement.assert_called_once_with('1', permissions={'r'})
 
     def test_main_implement_all_flag(self):
         """Test --implement-all flag calls _run_implement_all_cli."""
@@ -575,7 +573,7 @@ class TestMainTaskOptions:
             with pytest.raises(SystemExit):
                 main()
 
-            mock_run_all.assert_called_once_with(permissions={'r'}, iterations=50)
+            mock_run_all.assert_called_once_with(permissions={'r'})
 
     def test_main_temporal_task_queue_flag(self):
         """Test --temporal-task-queue calls _run_temporal_queue_cli."""
@@ -612,7 +610,6 @@ class TestMainTaskOptions:
                 queue_name="dev-team",
                 prompt_path="prompts/dev.md",
                 permissions={"r"},
-                iterations=50,
             )
 
 
@@ -697,21 +694,6 @@ class TestCreateParser:
         assert args.x is True
         assert args.http is True
 
-    def test_parser_iterations_flag(self):
-        """Test --iterations flag."""
-        from ayder_cli.cli import create_parser
-
-        parser = create_parser()
-
-        args = parser.parse_args([])
-        assert args.iterations is None
-
-        args = parser.parse_args(['--iterations', '20'])
-        assert args.iterations == 20
-
-        args = parser.parse_args(['-I', '5'])
-        assert args.iterations == 5
-
     def test_parser_temporal_task_queue_flag(self):
         """Test --temporal-task-queue flag."""
         from ayder_cli.cli import create_parser
@@ -745,50 +727,6 @@ class TestCreateParser:
         with pytest.raises(SystemExit):
             parser.parse_args(["--verbose", "trace"])
 
-    def test_iterations_none_resolved_from_config(self):
-        """Test that None iterations falls back to config.max_iterations."""
-        from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False,
-            max_iterations=75,
-        )
-
-        with patch.object(sys, 'argv', ['ayder', 'hello world']), \
-             patch.object(sys.stdin, 'isatty', return_value=True), \
-             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
-            with pytest.raises(SystemExit):
-                main()
-            mock_run.assert_called_once_with('hello world', permissions={'r'}, iterations=75)
-
-    def test_iterations_cli_overrides_config(self):
-        """Test that -I flag overrides config.max_iterations."""
-        from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False,
-            max_iterations=75,
-        )
-
-        with patch.object(sys, 'argv', ['ayder', '-I', '20', 'hello']), \
-             patch.object(sys.stdin, 'isatty', return_value=True), \
-             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
-             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
-            with pytest.raises(SystemExit):
-                main()
-            mock_run.assert_called_once_with('hello', permissions={'r'}, iterations=20)
-
     def test_parser_command_argument(self):
         """Test positional command argument."""
         from ayder_cli.cli import create_parser
@@ -812,7 +750,6 @@ class TestCreateParser:
             model="test-model",
             num_ctx=4096,
             verbose=False,
-            max_iterations=50,
         )
 
         with patch.object(sys, "argv", ["ayder", "--verbose", "debug", "--tasks"]), patch(

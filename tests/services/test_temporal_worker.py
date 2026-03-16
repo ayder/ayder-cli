@@ -24,7 +24,6 @@ def test_worker_returns_error_when_client_unavailable():
         queue_name="dev-team",
         prompt_path=None,
         permissions={"r"},
-        iterations=50,
         max_loops=1,
     )
     worker = TemporalWorker(config, client_adapter=_FakeAdapterFail())
@@ -40,7 +39,6 @@ def test_worker_runs_and_stops_after_max_loops():
         queue_name="qa-team",
         prompt_path="prompts/qa.md",
         permissions={"r", "x"},
-        iterations=25,
         max_loops=1,
     )
     worker = TemporalWorker(config, client_adapter=adapter)
@@ -57,7 +55,6 @@ def test_worker_stop_request_exits_loop():
         queue_name="arch-team",
         prompt_path=None,
         permissions={"r"},
-        iterations=10,
         max_loops=5,
     )
     worker = TemporalWorker(config, client_adapter=adapter)

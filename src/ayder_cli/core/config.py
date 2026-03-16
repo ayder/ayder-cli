@@ -37,7 +37,6 @@ DEFAULTS: Dict[str, Any] = {
         "retention": "7 days",
     },
     "max_background_processes": 5,
-    "max_iterations": 50,
     "temporal": {
         "enabled": False,
         "host": "localhost:7233",
@@ -73,7 +72,6 @@ provider = "{provider}"
 editor = "{editor}"
 verbose = {verbose_str}
 max_background_processes = {max_background_processes}
-max_iterations = {max_iterations}
 
 [logging]
 file_enabled = {logging_file_enabled}
@@ -165,6 +163,52 @@ class TemporalRetryConfig(BaseModel):
         return v
 
 
+class ContextManagerTierWeightsConfig(BaseModel):
+    """Tier weight configuration for message prioritization."""
+    model_config = ConfigDict(frozen=True)
+    
+    system: int = Field(default=100)
+    recent_user: int = Field(default=90)
+    recent_assistant: int = Field(default=80)
+    tool_result_critical: int = Field(default=70)
+    recent_tool_result: int = Field(default=60)
+    old_assistant: int = Field(default=40)
+    old_tool_result: int = Field(default=20)
+    compressed: int = Field(default=10)
+
+
+class ContextManagerConfigSection(BaseModel):
+    """Context manager configuration section."""
+    model_config = ConfigDict(frozen=True)
+    
+    enabled: bool = Field(default=True)
+    max_context_tokens: int = Field(default=8192)
+    reserve_ratio: float = Field(default=0.30)
+    summarization_threshold: float = Field(default=0.70)
+    compression_threshold: float = Field(default=0.50)
+    tool_result_compress_age: int = Field(default=5)
+    max_tool_result_length: int = Field(default=2048)
+    compress_tool_results: bool = Field(default=True)
+    tier_weights: ContextManagerTierWeightsConfig = Field(
+        default_factory=ContextManagerTierWeightsConfig
+    )
+    model_overrides: dict[str, dict] = Field(default_factory=dict)
+    
+    @field_validator("reserve_ratio", "summarization_threshold", "compression_threshold")
+    @classmethod
+    def validate_ratio(cls, v: float) -> float:
+        if not 0.0 < v < 1.0:
+            raise ValueError("ratio must be between 0 and 1")
+        return v
+    
+    @field_validator("max_context_tokens")
+    @classmethod
+    def validate_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_context_tokens must be positive")
+        return v
+
+
 class TemporalConfig(BaseModel):
     """Optional Temporal runtime configuration."""
 
@@ -205,12 +249,21 @@ class Config(BaseModel):
     logging_rotation: str = Field(default="10 MB")
     logging_retention: str = Field(default="7 days")
     max_background_processes: int = Field(default=5)
-    max_iterations: int = Field(default=50)
     max_output_tokens: int = Field(default=4096)
-    max_history_messages: int = Field(default=0)
+    max_history_messages: int = Field(default=-1)
+    prompt: str = Field(default="STANDARD")
+    chat_protocol: str = Field(default="ollama")
     stop_sequences: list[str] = Field(default_factory=list)
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
+
+    @model_validator(mode="after")
+    def set_max_history_default(self) -> "Config":
+        if self.max_history_messages == -1:
+            # Default to 30 to prevent unbounded exponential context growth
+            object.__setattr__(self, "max_history_messages", 30)
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -280,13 +333,6 @@ class Config(BaseModel):
     def validate_max_background_processes(cls, v: int) -> int:
         if v < 1 or v > 20:
             raise ValueError("max_background_processes must be between 1 and 20")
-        return v
-
-    @field_validator("max_iterations")
-    @classmethod
-    def validate_max_iterations(cls, v: int) -> int:
-        if v < 1 or v > 100:
-            raise ValueError("max_iterations must be between 1 and 100")
         return v
 
     @field_validator("max_output_tokens")

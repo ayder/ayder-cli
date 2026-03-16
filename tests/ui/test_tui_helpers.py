@@ -11,17 +11,17 @@ class TestIsToolBlockedInSafeMode:
 
     def test_safe_mode_disabled_returns_false(self):
         """When safe_mode=False, no tool is blocked."""
-        assert is_tool_blocked_in_safe_mode("write_file", False) is False
+        assert is_tool_blocked_in_safe_mode("file_editor", False) is False
         assert is_tool_blocked_in_safe_mode("run_shell_command", False) is False
         assert is_tool_blocked_in_safe_mode("read_file", False) is False
 
-    def test_write_file_blocked_in_safe_mode(self):
-        """write_file should be blocked in safe mode."""
-        assert is_tool_blocked_in_safe_mode("write_file", True) is True
+    def test_file_editor_blocked_in_safe_mode(self):
+        """file_editor should be blocked in safe mode."""
+        assert is_tool_blocked_in_safe_mode("file_editor", True) is True
 
-    def test_replace_string_blocked_in_safe_mode(self):
-        """replace_string should be blocked in safe mode."""
-        assert is_tool_blocked_in_safe_mode("replace_string", True) is True
+    def test_file_editor_blocked_in_safe_mode(self):
+        """file_editor should be blocked in safe mode."""
+        assert is_tool_blocked_in_safe_mode("file_editor", True) is True
 
     def test_run_shell_command_blocked_in_safe_mode(self):
         """run_shell_command should be blocked in safe mode."""

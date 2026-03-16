@@ -131,20 +131,47 @@ Set your API key in ~/.ayder/config.toml
 Then switch provider:
    /provider gemini
 
-### Configuration
+### Configuration: Profiles and Drivers
 
-On first run, ayder-cli creates a config file at `~/.ayder/config.toml` with the v2.0 format:
+ayder-cli uses a flexible profile-based configuration system powered by an OCP-compliant Native Provider architecture. On the first run, it creates a config file at `~/.ayder/config.toml`.
+
+**Key Concepts:**
+- **Profile Name:** A custom named section (e.g., `[llm.my_ollama]`). You can define as many profiles as you want.
+- **Driver:** The underlying native SDK or adapter used by the profile (`ollama`, `openai`, `anthropic`, or `google`). Each driver guarantees full support for native tool calling and streaming specific to that ecosystem.
+- **Active Provider:** The `provider` setting under `[app]` determines which profile is currently active.
+- **Chat Protocol:** By default, all drivers use native tool calling (`chat_protocol = "ollama"`). If you encounter an experimental or cloud-proxied model in Ollama that fails to trigger tools natively (e.g., `deepseek-v3.2:cloud`), you can set `chat_protocol = "xml"` in that profile to force a bulletproof XML-based fallback.
+
+#### Example: Running the Same Model via Different Drivers
+
+Because profiles are just names, you can easily configure the exact same model (like `qwen2.5-coder`) to run through different drivers—for instance, one local instance via Ollama, and another hosted cloud instance via an OpenAI-compatible endpoint.
 
 ```toml
 config_version = "2.0"
 
 [app]
-provider = "openai"
-editor = "vim"
-verbose = false
-max_background_processes = 5
-max_iterations = 50
+provider = "qwen_local" # <--- Currently using the local Ollama version
 
+# --- Profiles ---
+
+# 1. Local Qwen via Ollama driver
+[llm.qwen_local]
+driver = "ollama"
+base_url = "http://localhost:11434"
+model = "qwen2.5-coder:latest"
+num_ctx = 65536
+
+# 2. Cloud Qwen via OpenAI driver (e.g., DeepInfra, Together, or an OpenAI proxy)
+[llm.qwen_cloud]
+driver = "openai"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key = "sk-..."
+model = "Qwen/Qwen2.5-Coder-32B-Instruct"
+num_ctx = 65536
+```
+
+In the TUI, typing `/provider qwen_cloud` seamlessly switches from your local GPU to the cloud endpoint!
+
+```toml
 [logging]
 file_enabled = true
 file_path = ".ayder/log/ayder.log"
@@ -168,37 +195,55 @@ backoff_coefficient = 2.0
 maximum_interval_seconds = 60
 maximum_attempts = 3
 
-[llm.openai]
-driver = "openai"
-base_url = "http://localhost:11434/v1"
-api_key = "ollama"
-model = "qwen3-coder:latest"
+# --- Profiles ---
+
+[llm.my_local_ollama]
+driver = "ollama"            # <--- Uses the native Ollama driver
+base_url = "http://localhost:11434"
+model = "qwen2.5-coder:latest"
 num_ctx = 65536
+
+[llm.openai_cloud]
+driver = "openai"            # <--- Uses the native OpenAI driver
+api_key = "sk-..."
+model = "gpt-4o"
+num_ctx = 128000
 
 [llm.anthropic]
-driver = "anthropic"
-api_key = ""
-model = "claude-sonnet-4-5-20250929"
-num_ctx = 8192
+driver = "anthropic"         # <--- Uses the native Anthropic driver
+api_key = "sk-ant-..."
+model = "claude-3-5-sonnet-20241022"
+num_ctx = 200000
 
 [llm.gemini]
-driver = "google"
-api_key = ""
-model = "gemini-3-flash"
-num_ctx = 65536
+driver = "google"            # <--- Uses the native Gemini driver
+api_key = "AIza..."
+model = "gemini-2.5-pro"
+num_ctx = 1000000
 
 [llm.deepseek]
-driver = "openai"
-base_url = "http://api.deepseek.com/v1"
-api_key = ""
-model = "deepseek-chat"
+driver = "openai"            # <--- Deepseek uses the OpenAI compatible driver
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-..."
+model = "deepseek-coder"
 ```
 
-The active provider is selected via `app.provider`. Provider settings are defined in `[llm.<provider>]` sections. Use `/provider` in the TUI to switch at runtime, or edit `config.toml` directly.
+You can seamlessly switch between these profiles at runtime in the TUI using the `/provider` command, or by editing the `config.toml` directly. The core application normalizes outputs from all these different drivers into a single unified stream, meaning tools work perfectly regardless of which driver you choose!
 
 Please adjust *num_ctx* context size window according to your local computer ram. If your ollama gets crash, decrease this 65536 value to a proper context size.
 
-### Config Options Reference
+### Changing Models on the Fly (`/model`)
+
+You do **not** need to create a separate profile in `config.toml` for every single model you own. The profile defines the *connection* (driver, base URL, API key). 
+
+Once a profile is active, you can use the `/model` command in the TUI to swap the model on the fly without modifying your configuration file:
+
+- **Interactive Picker:** Typing `/model` with no arguments queries the active driver for its available models and opens an interactive UI picker.
+  - *Ollama specifically:* It queries your local `localhost:11434/api/tags` endpoint and lets you select from any model you have pulled (e.g., `qwen2.5-coder`, `llama3.1`, `phi4`).
+  - *OpenAI/Anthropic/Gemini:* It fetches the allowed models list from their respective cloud endpoints.
+- **Direct Switch:** Typing `/model <model-name>` (e.g., `/model qwen2.5-coder`) immediately updates the session to use that model.
+
+Note: Changes made with `/model` apply to the current session only. To make a model the permanent default for a profile, update the `model = "..."` field in your `config.toml`.
 
 | Option | Section | Default | Description |
 | ------ |-------- | ------- | ----------- |
@@ -207,7 +252,7 @@ Please adjust *num_ctx* context size window according to your local computer ram
 | `editor` | `[app]` | `vim` | Editor launched by `/task-edit` command. |
 | `verbose` | `[app]` | `false` | When `true`, prints file contents after `write_file` and LLM request details. |
 | `max_background_processes` | `[app]` | `5` | Maximum concurrent background processes (1-20). |
-| `max_iterations` | `[app]` | `50` | Maximum agentic iterations per user message (1-100). |
+| `max_iterations` | `[app]` | `10` | Maximum agentic iterations per user message (1-100). |
 | `file_enabled` | `[logging]` | `true` | Enable file logging sink. |
 | `file_path` | `[logging]` | `.ayder/log/ayder.log` | Log file destination. |
 | `rotation` | `[logging]` | `10 MB` | Log rotation size. |
@@ -220,6 +265,8 @@ Please adjust *num_ctx* context size window according to your local computer ram
 | `api_key` | `[llm.<provider>]` | varies | API key. Use `"ollama"` for local Ollama. |
 | `model` | `[llm.<provider>]` | varies | Model name to use. |
 | `num_ctx` | `[llm.<provider>]` | varies | Context window size in tokens. |
+| `max_history_messages` | `[app]` | `-1` | Number of messages to keep in history (-1 = auto-bound to iterations+1). |
+| `prompt` | `[app]` | `STANDARD` | System prompt tier: `MINIMAL`, `STANDARD`, or `EXTENDED`. |
 
 ## Usage
 
@@ -275,8 +322,8 @@ By default, every tool call requires user confirmation. Use permission flags to 
 
 | Flag | Category | Tools |
 | ---- | -------- | ----- |
-| `-r` | Read | `list_files`, `read_file`, `get_file_info`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
-| `-w` | Write | `write_file`, `replace_string`, `insert_line`, `delete_line`, `create_note`, `save_memory`, `manage_environment_vars`, `create_task`, `implement_task`, `implement_all_tasks` |
+| `-r` | Read | `file_explorer`, `read_file`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
+| `-w` | Write | `file_editor`, `create_note`, `save_memory`, `manage_environment_vars`, `create_task`, `implement_task`, `implement_all_tasks` |
 | `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
 | `--http` | Web/Network | `fetch_web` |
 
@@ -332,6 +379,7 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 ### Slash Commands
 
 | Command | Description |
+| `/plugin` | Toggle dynamic tool plugins (e.g. venv, python, background, temporal) |
 | ------- | ----------- |
 | `/help` | Show available commands and keyboard shortcuts |
 | `/tools` | List all tools and their descriptions |
@@ -367,7 +415,17 @@ If you have memory problems decrease iteration size and /compact the LLM memory 
 | `Tab` | Auto-complete slash commands |
 | `Up/Down` | Navigate command history |
 
-### Operational Modes
+#
+## Efficiency & Optimization
+
+Ayder-cli is optimized for both large and small (local) LLMs:
+
+- **Tool Consolidation**: 29 granular tools were merged into ~11 high-level tools (e.g., `file_editor`) to reduce token overhead by 60%.
+- **Dynamic Tool Loading**: Only "core" and "metadata" tools are loaded by default. Use `/plugin` to enable specialized toolsets (venv, web, etc.) only when needed.
+- **Tiered Prompts**: Use `prompt = "MINIMAL"` in config for smaller models (7B-14B) to strip complex reasoning frameworks and improve follow-through.
+- **Automatic Context Bounding**: Conversation history is automatically bounded based on your `max_iterations` to prevent "context rot" and keep models fast.
+
+## Operational Modes
 
 ayder-cli has three operational modes, each with a specialized system prompt and tool set:
 
@@ -458,8 +516,8 @@ The tool system automatically:
 
 Current tool categories (28 tools total):
 
-- **Filesystem**: list_files, read_file, write_file, replace_string, insert_line, delete_line, get_file_info
-- **Search**: search_codebase, get_project_structure
+- **Filesystem**: `file_explorer` (list/metadata), `read_file`, `file_editor` (unified write/replace/insert/delete)
+- **Search**: `search_codebase`, `get_project_structure`
 - **Shell**: run_shell_command
 - **Python Editor**: python_editor (CST-based structural code manipulation: get, list_all, replace, delete, rename, add_decorator, add_import, verify)
 - **Memory**: save_memory, load_memory

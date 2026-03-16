@@ -20,9 +20,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": (
-                        "The command to execute (e.g., 'ls -la', 'python test.py')"
-                    ),
+                    "description": "Command to execute.",
                 },
             },
             "required": ["command"],

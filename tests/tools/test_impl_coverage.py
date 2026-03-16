@@ -26,12 +26,8 @@ impl._generate_manual_tree = utils_tools._generate_manual_tree
 impl.manage_environment_vars = utils_tools.manage_environment_vars
 
 impl.read_file = filesystem.read_file
-impl.write_file = filesystem.write_file
-impl.replace_string = filesystem.replace_string
-impl.list_files = filesystem.list_files
-impl.insert_line = filesystem.insert_line
-impl.delete_line = filesystem.delete_line
-impl.get_file_info = filesystem.get_file_info
+impl.file_editor = filesystem.file_editor
+impl.file_explorer = filesystem.file_explorer
 impl.MAX_FILE_SIZE = filesystem.MAX_FILE_SIZE
 
 impl.run_shell_command = shell.run_shell_command
@@ -452,7 +448,7 @@ class TestWriteFileNestedDirectories:
         ctx = ProjectContext(str(tmp_path))
 
         # Write to a path with nested nonexistent directories
-        result = impl.write_file(ctx, "nonexistent_dir_xyz/subdir/file.txt", "content")
+        result = impl.file_editor(ctx, "nonexistent_dir_xyz/subdir/file.txt", "write", content="content")
 
         # Should succeed and create directories
         assert isinstance(result, ToolSuccess)
@@ -475,7 +471,7 @@ class TestReplaceStringEdgeCases:
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.replace_string(ctx, "empty.txt", "old", "new")
+        result = impl.file_editor(ctx, "empty.txt", "replace", old_string="old", new_string="new")
 
         assert "not found" in result
         assert test_file.read_text() == ""
@@ -498,7 +494,7 @@ class TestListFilesSymlinks:
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.list_files(ctx, ".")
+        result = impl.file_explorer(ctx, ".")
         files = json.loads(result)
 
         assert "real_file.txt" in files

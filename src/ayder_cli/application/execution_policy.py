@@ -9,8 +9,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
-from ayder_cli.application.checkpoint_orchestrator import RuntimeContext
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
+
+@dataclass
+class RuntimeContext:
+    """Interface context — accepted by orchestrator but does not alter behavior."""
+    interface: str  # "cli" | "tui"
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +122,8 @@ def _required_permission(tool_name: str) -> str:
 
     Delegates to the canonical TOOL_PERMISSIONS registry — single source of truth.
     """
+    if not tool_name:
+        return "restricted"
     return TOOL_PERMISSIONS.get(tool_name, "r")
 
 

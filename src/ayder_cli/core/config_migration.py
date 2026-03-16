@@ -54,7 +54,6 @@ def render_v2_config(
         "editor": str(defaults.get("editor", "vim")),
         "verbose": bool(defaults.get("verbose", False)),
         "max_background_processes": int(defaults.get("max_background_processes", 5)),
-        "max_iterations": int(defaults.get("max_iterations", 50)),
     }
     if app_overrides:
         app.update(app_overrides)
@@ -95,7 +94,6 @@ def render_v2_config(
         f'editor = {_toml_str(str(app["editor"]))}',
         f'verbose = {_toml_bool(bool(app["verbose"]))}',
         f"max_background_processes = {int(app['max_background_processes'])}",
-        f"max_iterations = {int(app['max_iterations'])}",
         "",
         "[logging]",
         f"file_enabled = {_toml_bool(bool(logging_cfg.get('file_enabled', True)))}",
@@ -210,6 +208,11 @@ def _extract_legacy_overrides(
 
     llm_legacy = data.get("llm")
     if isinstance(llm_legacy, dict):
+        # Preserve all explicit v2 nested profiles (e.g., [llm.my_profile])
+        for key, value in llm_legacy.items():
+            if isinstance(value, dict):
+                llm_overrides[key] = value
+
         # Legacy flat [llm] schema (pre-[llm.<name>]) support.
         if all(not isinstance(v, dict) for v in llm_legacy.values()):
             legacy_provider = llm_legacy.get("provider")

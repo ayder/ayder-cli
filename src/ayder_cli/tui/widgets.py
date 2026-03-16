@@ -79,6 +79,22 @@ class ChatView(VerticalScroll):
         self, content: str, msg_type: MessageType, metadata: dict | None = None
     ) -> None:
         """Add a message to the chat view."""
+        # Merge consecutive streaming messages
+        if msg_type in (MessageType.ASSISTANT, MessageType.THINKING):
+            if self.messages and self.messages[-1]["type"] == msg_type:
+                self.messages[-1]["content"] += content
+                full_content = self.messages[-1]["content"]
+                last_widget = self._message_widgets[-1]
+                
+                if msg_type == MessageType.ASSISTANT:
+                    last_widget.update(Markdown(full_content.strip()))
+                else:
+                    text = self._create_text(full_content, msg_type, metadata)
+                    if text:
+                        last_widget.update(text)
+                self.scroll_end(animate=False)
+                return
+
         self.messages.append(
             {"content": content, "type": msg_type, "metadata": metadata}
         )
@@ -164,12 +180,26 @@ class ToolPanel(Container):
         return self._user_visible
 
     def add_tool(self, tool_call_id: str, tool_name: str, arguments: dict) -> None:
-        """Add a new running tool to the panel."""
+        """Add a new running tool to the panel or update an existing one."""
         args_str = self._format_preview(str(arguments), max_len=80)
 
         tool_text = Text()
         tool_text.append(f"{tool_name}", style="yellow")
         tool_text.append(f" {args_str}", style="dim")
+
+        if tool_call_id in self._tools:
+            widget, spinner, _, _, completed = self._tools[tool_call_id]
+            if not completed:
+                # spinner update is a bit tricky, recreating text is safer if textual supports it,
+                # actually spinner just has `update` method or we can replace it.
+                # but textual Spinner doesn't support changing text easily dynamically unless via reactive.
+                # Let's just remove the old widget and mount a new one.
+                widget.remove()
+                spinner = Spinner("aesthetic", text=tool_text, style="bold yellow")
+                widget = Static(spinner, classes="tool-item running")
+                self._tools[tool_call_id] = (widget, spinner, tool_name, args_str, False)
+                self.mount(widget)
+            return
 
         spinner = Spinner("aesthetic", text=tool_text, style="bold yellow")
         widget = Static(spinner, classes="tool-item running")
@@ -243,8 +273,10 @@ class ActivityBar(Horizontal):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._thinking = False
+        self._generating = False
         self._tools_working = False
         self._thinking_spinner = Spinner("dots2", style="bold yellow")
+        self._generating_spinner = Spinner("dots2", style="bold green")
         self._tools_spinner = Spinner("aesthetic", style="bold yellow")
         self._widget: Static | None = None
 
@@ -255,6 +287,13 @@ class ActivityBar(Horizontal):
     def set_thinking(self, active: bool) -> None:
         """Show or hide the Thinking indicator."""
         self._thinking = active
+        if active:
+            self._generating = False
+        self._refresh_display()
+
+    def set_generating(self, active: bool) -> None:
+        """Show or hide the Generating indicator (content streaming)."""
+        self._generating = active
         self._refresh_display()
 
     def set_tools_working(self, active: bool) -> None:
@@ -264,9 +303,8 @@ class ActivityBar(Horizontal):
 
     def update_spinners(self) -> None:
         """Re-render spinners (call on a timer)."""
-        if not self._thinking and not self._tools_working:
+        if not self._thinking and not self._generating and not self._tools_working:
             return
-        # Build a combined renderable
         self._refresh_display()
 
     def _refresh_display(self) -> None:
@@ -275,8 +313,6 @@ class ActivityBar(Horizontal):
             return
 
         if self._thinking and self._tools_working:
-            self._widget.update(self._thinking_spinner)
-            # Show both — use thinking spinner with combined text
             self._thinking_spinner.text = Text.assemble(
                 ("Thinking... ", "bold yellow"),
                 ("| ", "dim"),
@@ -286,6 +322,16 @@ class ActivityBar(Horizontal):
         elif self._thinking:
             self._thinking_spinner.text = "Thinking..."
             self._widget.update(self._thinking_spinner)
+        elif self._generating and self._tools_working:
+            self._tools_spinner.text = Text.assemble(
+                ("Generating... ", "bold green"),
+                ("| ", "dim"),
+                ("Tools Working...", "bold yellow"),
+            )
+            self._widget.update(self._tools_spinner)
+        elif self._generating:
+            self._generating_spinner.text = "Generating..."
+            self._widget.update(self._generating_spinner)
         elif self._tools_working:
             self._tools_spinner.text = "Tools Working..."
             self._widget.update(self._tools_spinner)
@@ -295,6 +341,7 @@ class ActivityBar(Horizontal):
     def clear(self) -> None:
         """Reset all activity state."""
         self._thinking = False
+        self._generating = False
         self._tools_working = False
         if self._widget:
             self._widget.update("")
@@ -525,7 +572,6 @@ class StatusBar(Horizontal):
         yield Label(f"model: {self.model}", id="model-label")
         yield Label(f" | mode: {mode_str}", id="mode-label")
         yield Label(" | tokens: 0", id="token-label")
-        yield Label(" | iter: 0", id="iter-label")
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
         yield Static(classes="spacer")
@@ -542,11 +588,6 @@ class StatusBar(Horizontal):
         self.token_count = count
         label = self.query_one("#token-label", Label)
         label.update(f" | tokens: {count:,}")
-
-    def update_iterations(self, current: int, maximum: int) -> None:
-        """Update iteration counter display."""
-        label = self.query_one("#iter-label", Label)
-        label.update(f" | iter: {current}/{maximum}")
 
     def update_files(self, files: list[str]) -> None:
         """Update active files count."""

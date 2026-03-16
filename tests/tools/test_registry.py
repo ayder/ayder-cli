@@ -22,11 +22,11 @@ def tool_registry(project_context):
 class TestExecuteToolCall:
     """Test execute() method of ToolRegistry."""
 
-    def test_dispatch_list_files(self, tmp_path, tool_registry):
-        """Test dispatch to list_files."""
+    def test_dispatch_file_explorer(self, tmp_path, tool_registry):
+        """Test dispatch to file_explorer."""
         (tmp_path / "test.txt").write_text("content")
 
-        result = tool_registry.execute("list_files", {"directory": "."})
+        result = tool_registry.execute("file_explorer", {"path": "."})
         assert isinstance(result, ToolSuccess)
         files = json.loads(result)
         assert "test.txt" in files
@@ -39,25 +39,25 @@ class TestExecuteToolCall:
         result = tool_registry.execute("read_file", {"file_path": "test.txt"})
         assert result == "test content"
 
-    def test_dispatch_write_file(self, tmp_path, tool_registry):
-        """Test dispatch to write_file."""
+    def test_dispatch_file_editor_write(self, tmp_path, tool_registry):
+        """Test dispatch to file_editor."""
         test_file = tmp_path / "test.txt"
 
         result = tool_registry.execute(
-            "write_file",
-            {"file_path": "test.txt", "content": "new content"}
+            "file_editor",
+            {"file_path": "test.txt", "operation": "write", "content": "new content"}
         )
         assert "Successfully wrote" in result
         assert test_file.read_text() == "new content"
 
-    def test_dispatch_replace_string(self, tmp_path, tool_registry):
-        """Test dispatch to replace_string."""
+    def test_dispatch_file_editor_replace(self, tmp_path, tool_registry):
+        """Test dispatch to file_editor replace."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("old text")
 
         result = tool_registry.execute(
-            "replace_string",
-            {"file_path": "test.txt", "old_string": "old", "new_string": "new"}
+            "file_editor",
+            {"file_path": "test.txt", "operation": "replace", "old_string": "old", "new_string": "new"}
         )
         assert "Successfully replaced" in result
 
@@ -163,10 +163,11 @@ class TestResolveFuncRef:
 class TestCreateDefaultRegistryAutoDiscovery:
     """Tests for auto-discovery via func_ref in create_default_registry."""
 
-    def test_registers_all_28_tools(self, project_context):
-        """Test that all 28 TOOL_DEFINITIONS are registered."""
+    def test_registers_all_tools(self, project_context):
+        """Test that all TOOL_DEFINITIONS are registered."""
         reg = registry.create_default_registry(project_context)
-        assert len(reg.get_registered_tools()) == 28
+        # Originally 29 tools, down to 25 after consolidating filesystem tools
+        assert len(reg.get_registered_tools()) == 25
 
     def test_registered_names_match_definitions(self, project_context):
         """Test that registered tool names match TOOL_DEFINITIONS names."""

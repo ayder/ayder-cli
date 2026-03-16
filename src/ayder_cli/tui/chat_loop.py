@@ -10,22 +10,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
 
-from ayder_cli.application.checkpoint_orchestrator import (
-    CheckpointOrchestrator,
-    EngineState,
-)
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
-from ayder_cli.client import call_llm_async
+from ayder_cli.core.context_manager import ContextManager
 from ayder_cli.loops.base import AgentLoopBase
-from ayder_cli.parser import content_processor
+from ayder_cli.providers.base import _FunctionCall, _ToolCall
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ayder_cli.checkpoint_manager import CheckpointManager
     from ayder_cli.memory import MemoryManager
-    from ayder_cli.services.llm import LLMProvider
+    from ayder_cli.providers import AIProvider
     from ayder_cli.tools.registry import ToolRegistry
 
 
@@ -34,13 +32,16 @@ class TuiLoopConfig:
     """Configuration for the TUI chat loop."""
 
     model: str = "qwen3-coder:latest"
+    provider: str = "ollama"  # Needed for provider initialization
     num_ctx: int = 65536
     max_output_tokens: int = 4096
     stop_sequences: list = field(default_factory=list)
-    max_iterations: int = 50
     permissions: set = field(default_factory=lambda: {"r"})
-    tool_tags: frozenset | None = None
+    tool_tags: frozenset | None = field(
+        default_factory=lambda: frozenset({"core", "metadata"})
+    )
     max_history: int = 0
+    verbose: bool = False
 
 
 @runtime_checkable
@@ -52,7 +53,7 @@ class TuiCallbacks(Protocol):
     def on_assistant_content(self, text: str) -> None: ...
     def on_thinking_content(self, text: str) -> None: ...
     def on_token_usage(self, total_tokens: int) -> None: ...
-    def on_iteration_update(self, current: int, maximum: int) -> None: ...
+
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None: ...
     def on_tool_complete(self, call_id: str, result: str) -> None: ...
     def on_tools_cleanup(self) -> None: ...
@@ -66,20 +67,18 @@ class TuiCallbacks(Protocol):
 class TuiChatLoop(AgentLoopBase):
     """Async chat loop that drives the TUI's LLM pipeline.
 
-    Extends AgentLoopBase for shared iteration counting, checkpoint trigger
-    detection, tool call routing, and escalation detection.
+    Extends AgentLoopBase for shared escalation detection.
     Does NOT own any Textual widgets.
     """
 
     def __init__(
         self,
-        llm: LLMProvider,
+        llm: AIProvider,
         registry: ToolRegistry,
         messages: list[dict],
         config: TuiLoopConfig,
         callbacks: TuiCallbacks,
-        checkpoint_manager: CheckpointManager | None = None,
-        memory_manager: MemoryManager | None = None,
+        memory_manager: "MemoryManager | None" = None,
     ) -> None:
         super().__init__(config)
         self.llm = llm
@@ -87,9 +86,9 @@ class TuiChatLoop(AgentLoopBase):
         self.messages = messages
         self.config = config
         self.cb = callbacks
-        self.cm = checkpoint_manager
         self.mm = memory_manager
         self._total_tokens = 0
+        self.context_manager = ContextManager(config=config, model=config.model)
 
     # -- public API ----------------------------------------------------------
 
@@ -103,38 +102,162 @@ class TuiChatLoop(AgentLoopBase):
             if self.cb.is_cancelled():
                 return
 
-            self._increment_iteration()
-            self.cb.on_iteration_update(self._iteration, self.config.max_iterations)
-            if self._should_trigger_checkpoint():
-                if not await self._handle_checkpoint():
-                    self.cb.on_system_message(
-                        f"Reached max iterations ({self.config.max_iterations})."
+            # 1. Prepare schemas and messages
+            tool_schemas = (
+                []
+                if no_tools
+                else self.registry.get_schemas(tags=self.config.tool_tags)
+            )
+
+            # Use ContextManager to trim history based on token budget
+            system_msg = (
+                self.messages[0] if self.messages else {"role": "system", "content": ""}
+            )
+            system_content = system_msg.get("content", "")
+
+            llm_messages = self.context_manager.prepare_messages(
+                self.messages,
+                system_tokens=self.context_manager.count_tokens(system_content),
+                schema_tokens=self.context_manager.count_schema_tokens(tool_schemas),
+                max_history=self.config.max_history,
+            )
+
+            # Log history preview
+            history_summary = []
+            for m in llm_messages:
+                role = m.get("role")
+                content = m.get("content", "") or ""
+                if isinstance(content, list):  # handle native tool results if any
+                    content_str = str(content)
+                else:
+                    content_str = content
+                history_summary.append(f"{role}({len(content_str)})")
+            logger.debug(f"Calling LLM with history: {' -> '.join(history_summary)}")
+            if self.config.verbose:
+                for i, m in enumerate(llm_messages):
+                    logger.debug(
+                        f"  Message {i} [{m.get('role')}]: {repr(m.get('content'))[:200]}..."
                     )
-                    return
 
-            # 1. Call LLM
-            # Apply sliding-window truncation when max_history is set
-            if self.config.max_history > 0 and len(self.messages) > self.config.max_history + 1:
-                llm_messages = [self.messages[0]] + self.messages[-(self.config.max_history):]
-            else:
-                llm_messages = self.messages
-
+            # 2. Call LLM (Streaming)
             self.cb.on_thinking_start()
+
+            usage_obj = None
+            final_content = ""
+            final_reasoning = ""
+            # We'll collect tool calls in both normalized and raw formats
+            # (Raw is kept for appending to history exactly as it arrived)
+            normalized_tool_calls = []
+            raw_tool_calls_for_history: list[dict] = []
+            thinking_stopped = False
+
             try:
-                tool_schemas = (
-                    [] if no_tools
-                    else self.registry.get_schemas(tags=self.config.tool_tags)
-                )
-                response = await call_llm_async(
-                    self.llm,
+                options: dict[str, Any] = {}
+                if getattr(self.config, "num_ctx", None):
+                    options["num_ctx"] = self.config.num_ctx
+                if getattr(self.config, "max_output_tokens", None):
+                    options["max_output_tokens"] = self.config.max_output_tokens
+                if getattr(self.config, "stop_sequences", None):
+                    options["stop_sequences"] = self.config.stop_sequences
+
+                async_stream = self.llm.stream_with_tools(
                     llm_messages,
                     self.config.model,
                     tools=tool_schemas,
-                    num_ctx=self.config.num_ctx,
-                    max_output_tokens=self.config.max_output_tokens,
-                    stop_sequences=self.config.stop_sequences or None,
+                    options=options,
+                    verbose=self.config.verbose,
                 )
+
+                async for chunk in async_stream:
+                    if chunk.usage:
+                        usage_obj = chunk.usage
+
+                    if chunk.reasoning:
+                        final_reasoning += chunk.reasoning
+                        self.cb.on_thinking_content(chunk.reasoning)
+
+                    if chunk.content:
+                        final_content += chunk.content
+                        if not thinking_stopped:
+                            thinking_stopped = True
+                            self.cb.on_thinking_stop()
+                        self.cb.on_assistant_content(chunk.content)
+
+                    if chunk.tool_calls:
+                        if not thinking_stopped:
+                            thinking_stopped = True
+                            self.cb.on_thinking_stop()
+                        for tc in chunk.tool_calls:
+                            # We use `_stream_index` if available, otherwise fallback to `len()` positioning
+                            stream_idx = getattr(tc, "_stream_index", None)
+                            
+                            # Find if we are already building this tool call
+                            existing_tc = None
+                            
+                            if stream_idx is not None:
+                                # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
+                                if stream_idx < len(raw_tool_calls_for_history):
+                                    existing_tc = raw_tool_calls_for_history[stream_idx]
+                            else:
+                                # Fallback: try matching by ID
+                                existing_tc = next(
+                                    (x for x in raw_tool_calls_for_history if x["id"] == tc.id), 
+                                    None
+                                )
+                            
+                            if existing_tc is None:
+                                # New tool call start
+                                new_tc = {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name, 
+                                        "arguments": tc.arguments
+                                    },
+                                }
+                                
+                                # If we have a stream_index, ensure our array grows to that size
+                                if stream_idx is not None:
+                                    while len(raw_tool_calls_for_history) < stream_idx:
+                                        raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
+                                    raw_tool_calls_for_history.append(new_tc)
+                                else:
+                                    raw_tool_calls_for_history.append(new_tc)
+                                    
+                                # Only trigger UI start if we have a name
+                                if tc.name:
+                                    self.cb.on_tool_start(tc.id, tc.name, {})
+                            else:
+                                # Update ID if the existing one was a dummy or fallback ID, and the new one is real
+                                if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
+                                    existing_tc["id"] = tc.id
+                                    
+                                # Append arguments to existing tool call
+                                # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
+                                if tc.name and not existing_tc["function"]["name"]:
+                                    existing_tc["function"]["name"] = tc.name
+                                    self.cb.on_tool_start(existing_tc["id"], tc.name, {})
+                                    
+                                if tc.arguments:
+                                    existing_tc["function"]["arguments"] += tc.arguments
+
+                # Now that streaming is done, build the normalized objects for execution
+                for raw_tc in raw_tool_calls_for_history:
+                    tool_call_obj = _ToolCall(
+                        id=raw_tc["id"],
+                        type="function",
+                        function=_FunctionCall(
+                            name=raw_tc["function"]["name"],
+                            arguments=raw_tc["function"]["arguments"]
+                        ),
+                    )
+                    normalized_tool_calls.append(tool_call_obj)
+
+            except asyncio.CancelledError:
+                logger.info("LLM stream cancelled")
+                return
             except Exception as e:
+                logger.exception("LLM stream failed")
                 self.cb.on_system_message(f"Error: {e}")
                 return
             finally:
@@ -143,46 +266,64 @@ class TuiChatLoop(AgentLoopBase):
             if self.cb.is_cancelled():
                 return
 
-            # 2. Process response metadata
-            usage = getattr(response, "usage", None)
-            if usage:
-                tokens = getattr(usage, "total_tokens", 0) or 0
+            # Detect empty/dropped responses (server closed cleanly but sent nothing)
+            if not final_content and not normalized_tool_calls and not final_reasoning:
+                logger.warning("LLM returned empty response (possible connection drop)")
+                self.cb.on_system_message(
+                    "LLM returned an empty response. The connection may have dropped."
+                )
+                return
+
+            # 3. Process final response metadata and token counting
+            if usage_obj:
+                # Use provider-reported token count if available
+                tokens = usage_obj.get("total_tokens", 0)
                 self._total_tokens += tokens
-                self.cb.on_token_usage(self._total_tokens)
+            else:
+                # Fallback: count tokens ourselves using ContextManager
+                input_tokens = self.context_manager.count_message_tokens(llm_messages)
+                output_tokens = self.context_manager.count_tokens(final_content)
+                if final_reasoning:
+                    output_tokens += self.context_manager.count_tokens(final_reasoning)
+                self._total_tokens += input_tokens + output_tokens
+            self.cb.on_token_usage(self._total_tokens)
 
-            message = response.choices[0].message
-            content = message.content or ""
-            tool_calls = message.tool_calls
+            logger.debug(f"LLM Response Content Length: {len(final_content)}")
+            if final_reasoning:
+                logger.debug(f"LLM Reasoning Length: {len(final_reasoning)}")
 
-            # 3. Build and append assistant message dict
-            msg_dict: dict = {"role": "assistant", "content": content}
-            if tool_calls:
-                msg_dict["tool_calls"] = [
+            if normalized_tool_calls:
+                logger.debug(f"LLM Tool Calls: {len(normalized_tool_calls)}")
+
+            # If model thought but forgot to output content/tools, prompt it
+            if not final_content and not normalized_tool_calls and final_reasoning:
+                logger.debug(
+                    "Model thought but provided no content or tools. Prompting for final response."
+                )
+                self.messages.append(
+                    {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
+                )
+                self.messages.append(
                     {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
+                        "role": "user",
+                        "content": "Please provide your final response or tool call based on your reasoning above.",
                     }
-                    for tc in tool_calls
-                ]
+                )
+                continue
+
+            # Build and append assistant message dict to conversation history
+            msg_dict: dict = {"role": "assistant", "content": final_content}
+            if raw_tool_calls_for_history:
+                msg_dict["tool_calls"] = raw_tool_calls_for_history
+            if final_reasoning:
+                msg_dict["reasoning_content"] = final_reasoning
+
             self.messages.append(msg_dict)
 
-            # 4. Extract <think> blocks
-            think_blocks = content_processor.extract_think_blocks(content)
-            for text in think_blocks:
-                self.cb.on_thinking_content(text)
-
-            # 5. Strip tool markup and display content
-            display = content_processor.strip_for_display(content)
-            if display:
-                self.cb.on_assistant_content(display)
-
-            # 6. Route: OpenAI tool_calls → XML fallback → JSON fallback → done
-            if tool_calls:
-                escalated = await self._execute_openai_tool_calls(tool_calls)
+            # 4. Handle tool execution
+            if normalized_tool_calls:
+                # We use the existing unified execution path
+                escalated = await self._execute_tool_calls(normalized_tool_calls)
                 if escalated:
                     self.cb.on_system_message(
                         "⚠ Escalation requested. Activity stopped; waiting for user prompt."
@@ -191,61 +332,107 @@ class TuiChatLoop(AgentLoopBase):
                 no_tools = False
                 continue
 
-            # Check for custom tool calls (including namespaced variants like <minimax:tool_call>
-            # and DeepSeek format like <function_calls>)
-            if content and content_processor.has_tool_calls(content):
-                custom_calls = content_processor.parse_tool_calls(content)
-                valid = [c for c in custom_calls if "error" not in c]
-                if valid:
-                    escalated = await self._execute_custom_tool_calls(valid)
-                    if escalated:
-                        self.cb.on_system_message(
-                            "⚠ Escalation requested. Activity stopped; waiting for user prompt."
-                        )
-                        return
-                    no_tools = False
-                    continue
-
-            # JSON fallback: model outputs tool calls as a JSON array in content
-            json_calls = content_processor.parse_json_tool_calls(content)
-            if json_calls:
-                escalated = await self._execute_custom_tool_calls(json_calls)
-                if escalated:
-                    self.cb.on_system_message(
-                        "⚠ Escalation requested. Activity stopped; waiting for user prompt."
-                    )
-                    return
-                no_tools = False
-                continue
-
-            # Text-only response — done
+            # Text-only response — loop finished
             return
 
-    # -- OpenAI tool calls ---------------------------------------------------
+    # -- Tool execution ------------------------------------------------------
 
-    async def _execute_openai_tool_calls(self, tool_calls) -> bool:
+    async def _execute_tool_calls(self, tool_calls: List[_ToolCall]) -> bool:
         """Split auto-approved (parallel) vs needs-confirmation (sequential)."""
+        tool_results_map = {}
         auto_approved = []
         needs_confirmation = []
+
         for tc in tool_calls:
+            # Check for parsing errors injected by XML/JSON fallback protocols
+            if getattr(tc, "error", None):
+                rd = {
+                    "tool_call_id": tc.id,
+                    "name": "parse_error",
+                    "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
+                }
+                tool_results_map[tc.id] = rd
+                self.cb.on_tool_start(tc.id, "parse_error", {})
+                self.cb.on_tool_complete(tc.id, rd["result"])
+                continue
+
+            if not tc.function.name or tc.function.name == "unknown":
+                rd = {
+                    "tool_call_id": tc.id,
+                    "name": "unknown",
+                    "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
+                }
+                tool_results_map[tc.id] = rd
+                self.cb.on_tool_start(tc.id, "unknown", {})
+                self.cb.on_tool_complete(tc.id, rd["result"])
+                continue
+
+            # Validate that arguments parsed correctly — some providers
+            # (e.g. DeepSeek) send empty/malformed arguments in the native
+            # tool call while putting the real content in reasoning.
+            args = _parse_arguments(tc.function.arguments)
+            missing = _check_required_args(tc.function.name, args)
+            if missing:
+                err_msg = (
+                    f"Error: tool call '{tc.function.name}' has missing required "
+                    f"arguments: {', '.join(missing)}. "
+                    f"Raw arguments received: {tc.function.arguments!r}. "
+                    f"You must provide all required arguments in the function call."
+                )
+                rd = {
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "result": err_msg,
+                }
+                tool_results_map[tc.id] = rd
+                self.cb.on_tool_start(tc.id, tc.function.name, args)
+                self.cb.on_tool_complete(tc.id, err_msg)
+                logger.warning(
+                    f"Tool '{tc.function.name}' called with missing args {missing}. "
+                    f"Raw: {tc.function.arguments!r}"
+                )
+                continue
+
             if self._tool_needs_confirmation(tc.function.name):
                 needs_confirmation.append(tc)
             else:
                 auto_approved.append(tc)
 
-        # Show all tools as running
+        # Show non-empty tools as running
         for tc in tool_calls:
+            if tc.id in tool_results_map:
+                continue
             args = _parse_arguments(tc.function.arguments)
             self.cb.on_tool_start(tc.id, tc.function.name, args)
 
-        tool_results: list[dict | BaseException] = []
         escalated = False
 
-        # Auto-approved in parallel
+        # Auto-approved in parallel via asyncio.as_completed for speculative background execution
         if auto_approved:
-            tasks = [self._exec_tool_async(tc) for tc in auto_approved]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            tool_results.extend(results)
+
+            async def _safe_exec(tc_obj):
+                try:
+                    return tc_obj, await self._exec_tool_async(tc_obj)
+                except asyncio.CancelledError:
+                    return tc_obj, RuntimeError("Tool execution cancelled")
+                except Exception as e:
+                    return tc_obj, e
+
+            tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
+
+            for completed_task in asyncio.as_completed(tasks):
+                tc, rd = await completed_task
+                tool_results_map[tc.id] = rd
+
+                # Notify UI immediately
+                if isinstance(rd, dict):
+                    tid = rd["tool_call_id"]
+                    name = rd["name"]
+                    result = str(rd["result"])
+                    result = self.context_manager.truncate_tool_result(result)
+                    self.cb.on_tool_complete(tid, result)
+                else:
+                    self.cb.on_tool_complete(tc.id, f"Error: {rd}")
 
         # Needs-confirmation sequentially
         custom_instructions = None
@@ -264,62 +451,66 @@ class TuiChatLoop(AgentLoopBase):
                     pre_approved=True,
                 )
                 result = _unwrap_exec_result(exec_result)
-                tool_results.append(
-                    {"tool_call_id": tc.id, "name": name, "result": result}
-                )
-            elif confirm is not None and getattr(confirm, "action", None) == "instruct":
-                tool_results.append(
-                    {
-                        "tool_call_id": tc.id,
-                        "name": name,
-                        "result": "Tool call denied by user.",
-                    }
-                )
-                custom_instructions = getattr(confirm, "instructions", None)
-                # Skip remaining
-                idx = needs_confirmation.index(tc)
-                for remaining in needs_confirmation[idx + 1 :]:
-                    tool_results.append(
-                        {
-                            "tool_call_id": remaining.id,
-                            "name": remaining.function.name,
-                            "result": "Tool call skipped (user provided instructions).",
-                        }
-                    )
-                break
-            else:
-                tool_results.append(
-                    {
-                        "tool_call_id": tc.id,
-                        "name": name,
-                        "result": "Tool call denied by user.",
-                    }
-                )
+                rd = {"tool_call_id": tc.id, "name": name, "result": result}
+                tool_results_map[tc.id] = rd
 
-        # Process results → append tool messages
-        for i, rd in enumerate(tool_results):
-            if isinstance(rd, dict):
-                tid = rd["tool_call_id"]
-                name = rd["name"]
-                result = rd["result"]
-                escalated = escalated or _is_escalation_result(str(result))
-                self.cb.on_tool_complete(tid, str(result))
+                # Notify UI
+                self.cb.on_tool_complete(tc.id, result)
+
+            elif confirm is not None and getattr(confirm, "action", None) == "instruct":
+                # User provided instructions instead of approval
+                custom_instructions = getattr(confirm, "instructions", None)
+                denied_msg = "Tool call skipped by user instruction."
+                rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                tool_results_map[tc.id] = rd
+                self.cb.on_tool_complete(tc.id, denied_msg)
+                break  # Stop processing further tools if we got an instruction
+            else:
+                # User denied tool — still must add a result so the LLM sees
+                # a valid tool_call → tool_result sequence (required by API)
+                denied_msg = "Tool call denied by user."
+                rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                tool_results_map[tc.id] = rd
+                self.cb.on_tool_complete(tc.id, denied_msg)
+
+        # Ensure every tool_call has a result (API requires it)
+        for tc in tool_calls:
+            if tc.id not in tool_results_map:
+                skipped_msg = "Tool call skipped."
+                tool_results_map[tc.id] = {
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "result": skipped_msg,
+                }
+                self.cb.on_tool_complete(tc.id, skipped_msg)
+
+        # Process results in correct order -> append tool messages
+        for tc in tool_calls:
+            rd_result: dict[str, Any] | None = tool_results_map.get(tc.id)
+            if rd_result is None:
+                continue
+
+            if isinstance(rd_result, dict):
+                tid = rd_result["tool_call_id"]
+                name = rd_result["name"]
+                result = str(rd_result["result"])
+
+                logger.debug(f"Appending Tool Result [{name}] to history:\n{result[:500]}")
+
+                escalated = escalated or _is_escalation_result(result)
                 self.messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tid,
                         "name": name,
-                        "content": str(result),
+                        "content": result,
                     }
                 )
             else:
-                # rd is BaseException (includes Exception)
-                if i < len(auto_approved):
-                    err_tc = auto_approved[i]
-                    err_id, err_name = err_tc.id, err_tc.function.name
-                else:
-                    err_id, err_name = "error", "unknown"
-                error_msg = f"Error: {rd}"
+                # rd_result is BaseException (includes Exception)
+                err_id, err_name = tc.id, tc.function.name
+                error_msg = f"Error: {rd_result}"
+                logger.debug(f"Appending Tool Error [{err_name}] to history:\n{error_msg}")
                 self.messages.append(
                     {
                         "role": "tool",
@@ -341,136 +532,13 @@ class TuiChatLoop(AgentLoopBase):
         args = _parse_arguments(tc.function.arguments)
         policy = ExecutionPolicy(self.config.permissions)
         exec_result = await asyncio.to_thread(
-            policy.execute_with_registry, ToolRequest(name, args), self.registry
+            policy.execute_with_registry,
+            ToolRequest(name, args),
+            self.registry,
+            pre_approved=True,
         )
         result = _unwrap_exec_result(exec_result)
         return {"tool_call_id": tc.id, "name": name, "result": result}
-
-    # -- Custom XML tool calls -----------------------------------------------
-
-    async def _execute_custom_tool_calls(self, calls: list[dict]) -> bool:
-        """Execute XML-parsed tool calls through the shared execution policy path."""
-        policy = ExecutionPolicy(self.config.permissions)
-        results_text = []
-        escalated = False
-        custom_instructions = None
-
-        for call in calls:
-            name = call.get("name", "unknown")
-            args = call.get("arguments", {})
-            call_id = f"xml-{name}-{id(call)}"
-            self.cb.on_tool_start(call_id, name, args)
-
-            # Confirmation gate — mirrors _execute_openai_tool_calls behavior
-            pre_approved = False
-            if self._tool_needs_confirmation(name):
-                confirm = await self.cb.request_confirmation(name, args)
-                action = getattr(confirm, "action", None) if confirm is not None else None
-                if action == "approve":
-                    pre_approved = True
-                elif action == "instruct":
-                    custom_instructions = getattr(confirm, "instructions", None)
-                    results_text.append(f"[{name}] Tool call denied by user.")
-                    self.cb.on_tool_complete(call_id, "Tool call denied by user.")
-                    break
-                else:
-                    results_text.append(f"[{name}] Tool call denied by user.")
-                    self.cb.on_tool_complete(call_id, "Tool call denied by user.")
-                    continue
-
-            try:
-                exec_result = await asyncio.to_thread(
-                    policy.execute_with_registry,
-                    ToolRequest(name, args),
-                    self.registry,
-                    pre_approved=pre_approved,
-                )
-                result = exec_result.result if exec_result.success else str(exec_result.error)
-                result = result or ""
-                escalated = escalated or _is_escalation_result(str(result))
-                results_text.append(f"[{name}] {result}")
-                self.cb.on_tool_complete(call_id, result)
-            except Exception as e:
-                results_text.append(f"[{name}] Error: {e}")
-                self.cb.on_tool_complete(call_id, f"Error: {e}")
-
-        self.messages.append({"role": "user", "content": "\n".join(results_text)})
-        if custom_instructions:
-            self.messages.append({"role": "user", "content": custom_instructions})
-        self.cb.on_tools_cleanup()
-        return escalated
-
-    # -- Checkpoint ----------------------------------------------------------
-
-    async def _handle_checkpoint(self) -> bool:
-        """Create a memory checkpoint, reset messages, restore context.
-
-        Returns True if the loop should continue with a fresh context.
-        """
-        if not self.cm:
-            return False
-
-        # 1. Build a conversation summary from recent messages
-        from ayder_cli.application.message_contract import (
-            get_message_role,
-            get_message_content,
-        )
-
-        summary_parts = []
-        for msg in self.messages[-10:]:
-            role = get_message_role(msg)
-            content = get_message_content(msg)
-            if content:
-                summary_parts.append(f"[{role}] {content[:200]}")
-        conversation_summary = "\n".join(summary_parts)
-
-        # 2. Ask LLM to produce a checkpoint summary (no tools)
-        from ayder_cli.prompts import MEMORY_CHECKPOINT_PROMPT_TEMPLATE
-        from ayder_cli.checkpoint_manager import CHECKPOINT_FILE_NAME
-
-        checkpoint_prompt = MEMORY_CHECKPOINT_PROMPT_TEMPLATE.format(
-            conversation_summary=conversation_summary,
-            memory_file_name=CHECKPOINT_FILE_NAME,
-        )
-        checkpoint_messages = list(self.messages) + [
-            {"role": "user", "content": checkpoint_prompt}
-        ]
-
-        self.cb.on_system_message(
-            "Approaching iteration limit — creating memory checkpoint..."
-        )
-        self.cb.on_thinking_start()
-        try:
-            response = await call_llm_async(
-                self.llm,
-                checkpoint_messages,
-                self.config.model,
-                tools=[],
-                num_ctx=self.config.num_ctx,
-                max_output_tokens=self.config.max_output_tokens,
-            )
-        except Exception:
-            return False
-        finally:
-            self.cb.on_thinking_stop()
-
-        summary_content = response.choices[0].message.content or conversation_summary
-
-        # 3. Delegate reset/restore to shared orchestrator — no per-loop transition logic
-        orchestrator = CheckpointOrchestrator()
-        state = EngineState(iteration=self._iteration, messages=list(self.messages))
-        restore_msg = orchestrator.orchestrate_checkpoint(
-            state, summary_content, self.cm, self.mm
-        )
-
-        # Apply state back to live message list
-        self.messages.clear()
-        self.messages.extend(m for m in state.messages if m.get("role") == "system")
-        self.messages.append({"role": "user", "content": restore_msg})
-
-        self._reset_iterations()
-        self.cb.on_system_message("Checkpoint saved — context compacted. Continuing...")
-        return True
 
     # -- Helpers -------------------------------------------------------------
 
@@ -481,15 +549,65 @@ class TuiChatLoop(AgentLoopBase):
 
 
 def _parse_arguments(arguments) -> dict:
-    """Safely parse tool call arguments (str or dict)."""
+    """Safely parse tool call arguments (str or dict).
+
+    When the LLM hits its output token limit, the streamed JSON may be
+    truncated (e.g. ``{"file_path": "foo", "content": "abc...``).
+    We attempt ``json.loads`` first; on failure we try to repair the
+    truncated JSON by closing open strings/braces before giving up.
+    """
     if isinstance(arguments, dict):
         return arguments
     if isinstance(arguments, str):
         try:
             return json.loads(arguments)
         except (json.JSONDecodeError, ValueError):
+            repaired = _repair_truncated_json(arguments)
+            if repaired is not None:
+                return repaired
             return {}
     return {}
+
+
+def _repair_truncated_json(raw: str) -> dict | None:
+    """Best-effort repair of a truncated JSON object.
+
+    Handles the common case where the model's output was cut off mid-value,
+    e.g. ``{"file_path": "x.py", "operation": "write", "content": "hel``
+    We try progressively trimming from the end and closing brackets.
+    """
+    if not raw or not raw.lstrip().startswith("{"):
+        return None
+
+    # Try closing increasingly shorter prefixes
+    for trim in range(0, min(len(raw), 200), 1):
+        candidate = raw if trim == 0 else raw[:-trim]
+        # Try closing with various suffixes
+        for suffix in ['"}', '"}]}', '"}}', '}', ']}', '"]:}', '"}']:
+            try:
+                result = json.loads(candidate + suffix)
+                if isinstance(result, dict):
+                    return result
+            except (json.JSONDecodeError, ValueError):
+                continue
+    return None
+
+
+def _check_required_args(tool_name: str, parsed_args: dict) -> list[str]:
+    """Return list of missing or empty required arguments for a tool."""
+    from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+    tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    if not tool_def or not tool_def.parameters:
+        return []
+    required = tool_def.parameters.get("required", [])
+    # Check both missing keys and empty-string values
+    missing = []
+    for r in required:
+        val = parsed_args.get(r)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            missing.append(r)
+    return missing
 
 
 def _unwrap_exec_result(exec_result) -> str:

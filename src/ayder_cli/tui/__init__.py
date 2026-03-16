@@ -30,7 +30,6 @@ def run_tui(
     model: str = "default",
     safe_mode: bool = False,
     permissions: set | None = None,
-    iterations: int | None = None,
 ) -> None:
     """
     Run the CLI-style TUI application.
@@ -39,12 +38,11 @@ def run_tui(
         model: The LLM model name to use
         safe_mode: Whether to enable safe mode
         permissions: Set of granted permission levels ("r", "w", "x")
-        iterations: Max agentic iterations per message (None = use config default)
     """
     import sys
 
     app = AyderApp(
-        model=model, safe_mode=safe_mode, permissions=permissions, iterations=iterations
+        model=model, safe_mode=safe_mode, permissions=permissions
     )
     app.run(mouse=False)
 

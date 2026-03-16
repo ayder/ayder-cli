@@ -118,16 +118,15 @@ class TestCreateDefaultRegistry:
         """Lines 188-218: All tools are registered."""
         ctx = ProjectContext(str(tmp_path))
         reg = registry.create_default_registry(ctx)
-        
+
         tools = reg.get_registered_tools()
         expected_tools = [
-            "list_files", "read_file", "write_file", "replace_string",
+            "file_explorer", "read_file", "file_editor",
             "run_shell_command", "get_project_structure", "search_codebase"
         ]
 
         for tool in expected_tools:
             assert tool in tools
-
     def test_create_default_registry_executes_read_file(self, tmp_path):
         """Lines 188-218: Registry can execute read_file."""
         test_file = tmp_path / "test.txt"
@@ -140,15 +139,15 @@ class TestCreateDefaultRegistry:
         result = reg.execute("read_file", {"file_path": "test.txt"})
         assert "test content" in result
 
-    def test_create_default_registry_executes_list_files(self, tmp_path):
-        """Lines 188-218: Registry can execute list_files."""
+    def test_create_default_registry_executes_file_explorer(self, tmp_path):
+        """Lines 188-218: Registry can execute file_explorer."""
         (tmp_path / "file.txt").write_text("content")
 
         # Set up project context with tmp_path as root
         ctx = ProjectContext(str(tmp_path))
         reg = registry.create_default_registry(ctx)
 
-        result = reg.execute("list_files", {"directory": "."})
+        result = reg.execute("file_explorer", {"path": "."})
         assert "file.txt" in result
 
 
@@ -209,29 +208,27 @@ class TestParameterAliases:
         
         assert "file_path" in normalized
         assert "path" not in normalized
+def test_filepath_alias_for_file_editor(tmp_path):
+    """'filepath' is converted to 'file_path'."""
+    # Set up project context with tmp_path as root
+    ctx = ProjectContext(str(tmp_path))
 
-    def test_filepath_alias_for_write_file(self, tmp_path):
-        """'filepath' is converted to 'file_path'."""
-        # Set up project context with tmp_path as root
-        ctx = ProjectContext(str(tmp_path))
-        
-        args = {"filepath": "test.txt"}
-        normalized = registry.normalize_tool_arguments("write_file", args, ctx)
-        
-        assert "file_path" in normalized
-        assert "filepath" not in normalized
+    args = {"filepath": "test.txt", "operation": "write"}
+    normalized = registry.normalize_tool_arguments("file_editor", args, ctx)
 
-    def test_dir_alias_for_list_files(self, tmp_path):
-        """'dir' is converted to 'directory'."""
-        # Set up project context with tmp_path as root
-        ctx = ProjectContext(str(tmp_path))
+    assert "file_path" in normalized
+    assert "filepath" not in normalized
 
-        args = {"dir": "."}
-        normalized = registry.normalize_tool_arguments("list_files", args, ctx)
+def test_dir_alias_for_file_explorer(tmp_path):
+    """'dir' is converted to 'path'."""
+    # Set up project context with tmp_path as root
+    ctx = ProjectContext(str(tmp_path))
 
-        assert "directory" in normalized
-        assert "dir" not in normalized
+    args = {"dir": "."}
+    normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
 
+    assert "path" in normalized
+    assert "dir" not in normalized
 
 class TestRegistrySchemas:
     """Test get_schemas and tool accessibility."""
@@ -242,8 +239,8 @@ class TestRegistrySchemas:
         reg = registry.ToolRegistry(ctx)
         schemas = reg.get_schemas()
         names = {s["function"]["name"] for s in schemas}
-        assert "list_files" in names
-        assert "write_file" in names
+        assert "file_explorer" in names
+        assert "file_editor" in names
         assert "search_codebase" in names
         assert "get_project_structure" in names
 

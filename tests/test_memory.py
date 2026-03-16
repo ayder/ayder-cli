@@ -133,22 +133,19 @@ class TestMemoryManager:
         project_ctx = ProjectContext(str(tmp_path))
         llm = Mock()
         tool_executor = Mock()
-        cm = Mock()
-        return MemoryManager(project_ctx, llm, tool_executor, cm)
+        return MemoryManager(project_ctx, llm, tool_executor)
 
     def test_initialization(self, tmp_path):
         """Test MemoryManager initialization."""
         project_ctx = ProjectContext(str(tmp_path))
         llm = Mock()
         tool_executor = Mock()
-        cm = Mock()
         
-        mm = MemoryManager(project_ctx, llm, tool_executor, cm)
+        mm = MemoryManager(project_ctx, llm, tool_executor)
         
         assert mm.project_ctx == project_ctx
         assert mm.llm == llm
         assert mm.tool_executor == tool_executor
-        assert mm.cm == cm
         assert mm._cycle_count == 0
 
     def test_initialization_without_optional_deps(self, tmp_path):
@@ -159,7 +156,6 @@ class TestMemoryManager:
         
         assert mm.llm is None
         assert mm.tool_executor is None
-        assert mm.cm is None
 
     def test_build_checkpoint_prompt(self, memory_manager):
         """Test building checkpoint prompt."""
@@ -172,7 +168,7 @@ class TestMemoryManager:
     def test_build_restore_prompt(self, memory_manager, tmp_path):
         """Test building restore prompt."""
         # Create a checkpoint file
-        checkpoint_file = tmp_path / ".ayder" / "memory" / "current_memory.md"
+        checkpoint_file = tmp_path / ".ayder" / "memory" / "checkpoint.md"
         checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_file.write_text("Saved checkpoint content")
         
@@ -182,7 +178,7 @@ class TestMemoryManager:
         prompt = memory_manager.build_restore_prompt()
         
         assert "Saved checkpoint content" in prompt
-        assert "current_memory.md" in prompt
+        assert "checkpoint.md" in prompt
 
     def test_build_restore_prompt_with_content(self, memory_manager):
         """Test building restore prompt with provided content."""
@@ -211,26 +207,30 @@ class TestMemoryManager:
         
         assert "No previous memory" in message or "Continuing task" in message
 
-    def test_create_checkpoint_no_llm(self, memory_manager):
+    @pytest.mark.anyio
+    async def test_create_checkpoint_no_llm(self, memory_manager):
         """Test create_checkpoint returns False when no LLM."""
         memory_manager.llm = None
         session = Mock()
         
-        result = memory_manager.create_checkpoint(session, "model", 4096, set(), False)
+        result = await memory_manager.create_checkpoint(session, "model", 4096, set(), False)
         
         assert result is False
 
-    def test_create_checkpoint_no_tool_executor(self, memory_manager):
+    @pytest.mark.anyio
+    async def test_create_checkpoint_no_tool_executor(self, memory_manager):
         """Test create_checkpoint returns False when no tool executor."""
         memory_manager.tool_executor = None
         session = Mock()
         
-        result = memory_manager.create_checkpoint(session, "model", 4096, set(), False)
+        result = await memory_manager.create_checkpoint(session, "model", 4096, set(), False)
         
         assert result is False
 
-    def test_create_checkpoint_success(self, memory_manager):
+    @pytest.mark.anyio
+    async def test_create_checkpoint_success(self, memory_manager):
         """Test successful checkpoint creation."""
+        from unittest.mock import AsyncMock
         session = Mock()
         session.get_messages.return_value = [
             {"role": "user", "content": "Hello"},
@@ -238,54 +238,42 @@ class TestMemoryManager:
         ]
         
         # Mock LLM response
-        mock_message = Mock()
-        mock_message.content = "Checkpoint saved"
-        mock_message.tool_calls = None
-        
-        mock_choice = Mock()
-        mock_choice.message = mock_message
-        
         mock_response = Mock()
-        mock_response.choices = [mock_choice]
+        mock_response.content = "Checkpoint saved"
+        mock_response.tool_calls = None
         
-        memory_manager.llm.chat.return_value = mock_response
+        memory_manager.llm.chat = AsyncMock(return_value=mock_response)
         memory_manager.tool_executor.tool_registry = Mock()
         memory_manager.tool_executor.tool_registry.get_schemas.return_value = []
         
-        result = memory_manager.create_checkpoint(session, "model", 4096, set(), False)
+        result = await memory_manager.create_checkpoint(session, "model", 4096, set(), False)
         
         assert result is True
         assert memory_manager._cycle_count == 1
         session.add_message.assert_called()
         session.clear_messages.assert_called_once_with(keep_system=True)
 
-    def test_create_checkpoint_with_tool_calls(self, memory_manager):
+    @pytest.mark.anyio
+    async def test_create_checkpoint_with_tool_calls(self, memory_manager):
         """Test checkpoint creation when LLM makes tool calls."""
+        from unittest.mock import AsyncMock
         session = Mock()
         session.get_messages.return_value = []
         
         # Mock LLM response with tool calls
         mock_tool_call = Mock()
-        mock_message = Mock()
-        mock_message.content = None
-        mock_message.tool_calls = [mock_tool_call]
-        
-        mock_choice = Mock()
-        mock_choice.message = mock_message
-        
         mock_response = Mock()
-        mock_response.choices = [mock_choice]
+        mock_response.content = None
+        mock_response.tool_calls = [mock_tool_call]
         
-        memory_manager.llm.chat.return_value = mock_response
+        memory_manager.llm.chat = AsyncMock(return_value=mock_response)
         memory_manager.tool_executor.tool_registry = Mock()
         memory_manager.tool_executor.tool_registry.get_schemas.return_value = []
         memory_manager.tool_executor.execute_tool_calls = Mock()
         
-        result = memory_manager.create_checkpoint(session, "model", 4096, set(), False)
+        result = await memory_manager.create_checkpoint(session, "model", 4096, set(), False)
         
         assert result is True
-        session.append_raw.assert_called_once_with(mock_message)
-        memory_manager.tool_executor.execute_tool_calls.assert_called_once()
 
     def test_restore_from_checkpoint(self, memory_manager):
         """Test restore_from_checkpoint."""

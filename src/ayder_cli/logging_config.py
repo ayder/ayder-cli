@@ -95,6 +95,11 @@ def setup_logging(
             )
 
     logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
+
+    # Suppress noisy third-party loggers
+    for logger_name in ("markdown_it", "httpcore", "httpx", "openai", "anthropic"):
+        logging.getLogger(logger_name).setLevel(logging.INFO)
+
     _configured = True
     _current_level = effective_level
     return effective_level

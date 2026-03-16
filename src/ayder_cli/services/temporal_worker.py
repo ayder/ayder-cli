@@ -15,7 +15,6 @@ class TemporalWorkerConfig:
     queue_name: str
     prompt_path: str | None
     permissions: set[str]
-    iterations: int
     poll_interval_seconds: float = 0.25
     max_loops: int | None = None
 

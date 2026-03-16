@@ -16,7 +16,6 @@ from typing import Optional
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
-from ayder_cli.checkpoint_manager import CHECKPOINT_FILE_NAME
 from ayder_cli.prompts import (
     MEMORY_CHECKPOINT_PROMPT_TEMPLATE,
     MEMORY_RESTORE_PROMPT_TEMPLATE,
@@ -129,6 +128,9 @@ def load_memory(
         return ToolError(f"Error loading memories: {str(e)}", "execution")
 
 
+CHECKPOINT_FILE_NAME = "checkpoint.md"
+
+
 class MemoryManager:
     """Manages LLM-based checkpoint/restore operations for long-running agent sessions.
 
@@ -136,8 +138,6 @@ class MemoryManager:
     - Creating checkpoints by asking the LLM to summarize progress
     - Restoring context from saved checkpoints
     - Building prompts for checkpoint and restore operations
-
-    File I/O for checkpoints is delegated to CheckpointManager.
     """
 
     def __init__(
@@ -145,7 +145,6 @@ class MemoryManager:
         project_ctx: ProjectContext,
         llm_provider=None,
         tool_executor=None,
-        checkpoint_manager=None,
     ):
         """Initialize MemoryManager.
 
@@ -153,12 +152,10 @@ class MemoryManager:
             project_ctx: Project context for path resolution
             llm_provider: LLM provider for making checkpoint calls
             tool_executor: Tool executor for executing save operations
-            checkpoint_manager: CheckpointManager for file I/O operations
         """
         self.project_ctx = project_ctx
         self.llm = llm_provider
         self.tool_executor = tool_executor
-        self.cm = checkpoint_manager
         self._checkpoint_dir = project_ctx.root / ".ayder" / "memory"
         self._checkpoint_file = self._checkpoint_dir / CHECKPOINT_FILE_NAME
         self._cycle_count = 0
@@ -226,28 +223,10 @@ class MemoryManager:
             memory_content=checkpoint_content
         )
 
-    def create_checkpoint(
+    async def create_checkpoint(
         self, session, model: str, num_ctx: int, permissions: set, verbose: bool
     ) -> bool:
-        """Create a memory checkpoint by asking LLM to write a summary.
-
-        This method orchestrates the LLM interaction to create a checkpoint:
-        1. Builds a conversation summary
-        2. Asks LLM to create a checkpoint via prompt
-        3. Executes any tool calls from LLM response
-        4. Resets the conversation
-        5. Loads back the memory as a user message
-
-        Args:
-            session: Chat session for message management
-            model: Model name
-            num_ctx: Context window size
-            permissions: Granted permission categories
-            verbose: Whether to show verbose output
-
-        Returns:
-            True if checkpoint was created successfully, False otherwise
-        """
+        """Create a memory checkpoint by asking LLM to write a summary."""
         if not self.llm or not self.tool_executor:
             return False
 
@@ -261,7 +240,7 @@ class MemoryManager:
         # Get schemas for tools (we need write_file tool)
         schemas = self.tool_executor.tool_registry.get_schemas()
 
-        response = self.llm.chat(
+        response = await self.llm.chat(
             model=model,
             messages=session.get_messages(),
             tools=schemas,
@@ -269,15 +248,40 @@ class MemoryManager:
             verbose=verbose,
         )
 
-        msg = response.choices[0].message
-        content = msg.content or ""
-        tool_calls = msg.tool_calls
+        content = response.content or ""
+        tool_calls = response.tool_calls
 
         # If LLM made tool calls to save memory, execute them
         if tool_calls:
-            session.append_raw(msg)
+            # We need to map ToolCallDef back to what execute_tool_calls expects (OpenAI-like objects)
+            # Actually, let's fix execute_tool_calls or map here.
+            # For now, map to dicts which might be acceptable if it handles them.
+            # execute_tool_calls usually expects native objects from OpenAI SDK.
+            # We'll map them to a compatible object.
+            from ayder_cli.providers import _ToolCall, _FunctionCall
+            compat_calls = [
+                _ToolCall(
+                    id=tc.id,
+                    type="function",
+                    function=_FunctionCall(name=tc.name, arguments=tc.arguments)
+                ) for tc in tool_calls
+            ]
+            
+            # Append the assistant message with tool calls to session
+            session.append_raw({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.name, "arguments": tc.arguments}
+                    } for tc in tool_calls
+                ]
+            })
+            
             self.tool_executor.execute_tool_calls(
-                tool_calls, session, permissions, verbose
+                compat_calls, session, permissions, verbose
             )
         elif content:
             # LLM responded with text, maybe it already saved or we need to retry
@@ -331,7 +335,6 @@ def create_memory_manager(
     project_root: str = ".",
     llm_provider=None,
     tool_executor=None,
-    checkpoint_manager=None,
 ) -> MemoryManager:
     """Factory function to create a MemoryManager instance.
 
@@ -339,7 +342,6 @@ def create_memory_manager(
         project_root: Project root directory path
         llm_provider: LLM provider for making checkpoint calls
         tool_executor: Tool executor for executing save operations
-        checkpoint_manager: CheckpointManager for file I/O operations
 
     Returns:
         Configured MemoryManager instance
@@ -347,4 +349,4 @@ def create_memory_manager(
     from ayder_cli.core.context import ProjectContext
 
     project_ctx = ProjectContext(project_root)
-    return MemoryManager(project_ctx, llm_provider, tool_executor, checkpoint_manager)
+    return MemoryManager(project_ctx, llm_provider, tool_executor)

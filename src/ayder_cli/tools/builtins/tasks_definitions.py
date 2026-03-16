@@ -38,7 +38,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "properties": {
                 "identifier": {
                     "type": "string",
-                    "description": "Task identifier: relative path (e.g., '.ayder/tasks/TASK-001-add-auth.md'), filename (e.g., 'TASK-001-add-auth.md'), task ID (e.g., '001' or 'TASK-001'), or slug (e.g., 'add-auth')",
+                    "description": "Task identifier (ID, path, or slug).",
                 },
             },
             "required": ["identifier"],

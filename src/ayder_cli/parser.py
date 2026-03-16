@@ -65,7 +65,9 @@ class ContentProcessor:
     _RE_TOOL_CALL_BLOCK = re.compile(
         r"<(\w+:)?tool_call>.*?</(\w+:)?tool_call>", re.DOTALL
     )
-    _RE_FUNCTION_BLOCK = re.compile(r"<function=.*?</function>", re.DOTALL)
+    _RE_FUNCTION_BLOCK = re.compile(
+        r"<function=.*?(?:</function>|</tool_call>)", re.DOTALL
+    )
     # DeepSeek format: <function_calls><invoke>...</invoke></function_calls>
     # Also covers DSML-prefixed variants (｜DSML｜function_calls, etc.)
     _RE_FUNCTION_CALLS_BLOCK = re.compile(
@@ -98,20 +100,25 @@ class ContentProcessor:
     _RE_JSON_ARGS = re.compile(
         r'"arguments"\s*:\s*["\{](.*?)["\}](?:\s*[,}])', re.DOTALL
     )
-    _RE_KV_PAIR = re.compile(r'"(\w+)"\s*:\s*"([^"]*)"')
+    _RE_JSON_KV_PAIR = re.compile(r'"(\w+)"\s*:\s*"([^"]*)"')
 
     # -- Whitespace cleanup --------------------------------------------------
     _RE_BLANK_LINES = re.compile(r"\n{3,}")
 
     # -- XML extraction (for parse_tool_calls) -------------------------------
-    _RE_FUNC = re.compile(r"<function=(.*?)>(.*?)</function>", re.DOTALL)
+    # Standard function tag pattern. 
+    # Accepts </function> or </tool_call> as closer.
+    _RE_FUNC = re.compile(
+        r"<function=(.*?)>(.*?)(?:</function>|</tool_call>)", 
+        re.DOTALL
+    )
     _RE_PARAM = re.compile(r"<parameter=(.*?)>(.*?)</parameter>", re.DOTALL)
     _RE_PARAM_UNCLOSED = re.compile(r"<parameter=(.*?)>(.*)", re.DOTALL)
 
     # -- Markup normalization (for _normalize_markup) -----------------------
     # Unwrap <tool_call> wrappers (including namespaced variants)
     _RE_TOOL_CALL_WRAPPER = re.compile(
-        r"<(\w+:)?tool_call>\s*(.*?)\s*</(\w+:)?tool_call>",
+        r"<(\w+:)?tool_call>(.*?)</(\w+:)?tool_call>",
         re.DOTALL,
     )
     # DeepSeek <invoke> extraction
@@ -188,8 +195,12 @@ class ContentProcessor:
         """
         if not content:
             return []
+        
+        # We need to know if it was explicitly wrapped to allow lazy parsing
+        is_explicitly_wrapped = "<tool_call>" in content.lower() or "<function_calls>" in content.lower()
+        
         normalized = self._normalize_markup(content)
-        results = self._parse_xml_tool_calls(normalized)
+        results = self._parse_xml_tool_calls(normalized, is_wrapped=is_explicitly_wrapped)
         if not results:
             results = self.parse_json_tool_calls(content)
         return results
@@ -245,14 +256,15 @@ class ContentProcessor:
         4. Convert DeepSeek <function_calls>/<invoke> to standard format.
         """
         content = self._normalize_dsml(content)
-        content = self._RE_TOOL_CALL_WRAPPER.sub(
-            lambda m: (
-                m.group(2)
-                if "</function>" in m.group(2)
-                else m.group(2) + "</function>"
-            ),
-            content,
-        )
+
+        def _unwrap_tool_call(match: re.Match) -> str:
+            inner = match.group(2).strip()
+            # Ensure </function> exists if it looks like a function call and is missing one
+            if "<function=" in inner and "</function>" not in inner:
+                inner += "</function>"
+            return inner
+
+        content = self._RE_TOOL_CALL_WRAPPER.sub(_unwrap_tool_call, content)
         content = self._convert_deepseek(content)
         return content
 
@@ -295,13 +307,13 @@ class ContentProcessor:
     # Private: XML tool call extraction
     # =========================================================================
 
-    def _parse_xml_tool_calls(self, content: str) -> list[dict[str, Any]]:
+    def _parse_xml_tool_calls(self, content: str, is_wrapped: bool = False) -> list[dict[str, Any]]:
         """Extract tool calls from <function=name>...</function> patterns.
 
         Handles:
         - Standard: <function=name><parameter=key>value</parameter></function>
         - Unclosed parameters: <parameter=key>value (no closing tag)
-        - Lazy: <function=name>value</function> (single-param tools only)
+        - Lazy: <function=name>value</function> (only if wrapped or single-param tools)
         """
         calls = []
         for func_match in self._RE_FUNC.finditer(content):
@@ -343,11 +355,16 @@ class ContentProcessor:
                     calls.append({"name": func_name, "arguments": {}})
 
             elif body and "<parameter" not in body:
-                # Lazy format — infer single parameter name from schema
+                # Lazy format — infer single parameter name from schema.
                 inferred = self._infer_parameter_name(func_name)
-                if inferred:
+                
+                # Heuristic: if not wrapped, the body shouldn't look like prose (e.g. no spaces or short)
+                is_prose = " " in body and len(body) > 30
+                
+                if inferred and (is_wrapped or not is_prose):
                     calls.append({"name": func_name, "arguments": {inferred: body}})
-                else:
+                elif is_wrapped:
+                    # Wrapped but no inference possible -> error
                     calls.append({
                         "name": func_name,
                         "arguments": {},
@@ -356,6 +373,20 @@ class ContentProcessor:
                             f"<function={func_name}><parameter=name>value</parameter></function>"
                         ),
                     })
+                elif not is_prose:
+                    # Not wrapped but looks like a value (short/no spaces)
+                    # We still try to infer if possible, else return it with error if unknown
+                    if inferred:
+                        calls.append({"name": func_name, "arguments": {inferred: body}})
+                    else:
+                        calls.append({
+                            "name": func_name,
+                            "arguments": {},
+                            "error": f"Missing <parameter> tags. Use: <function={func_name}><parameter=name>value</parameter></function>"
+                        })
+                else:
+                    # Not wrapped and looks like prose -> ignore
+                    continue
             else:
                 # Empty body — valid for no-argument tools
                 calls.append({"name": func_name, "arguments": {}})
@@ -420,7 +451,7 @@ class ContentProcessor:
                 try:
                     args = json.loads("{" + raw + "}")
                 except (json.JSONDecodeError, ValueError):
-                    for kv in self._RE_KV_PAIR.finditer(raw):
+                    for kv in self._RE_JSON_KV_PAIR.finditer(raw):
                         args[kv.group(1)] = kv.group(2)
             calls.append({"name": name, "arguments": args})
         return calls

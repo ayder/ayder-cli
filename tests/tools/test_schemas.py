@@ -46,9 +46,8 @@ class TestToolDefinitions:
     def test_all_tools_in_schema(self):
         """Verify tools_schema contains all defined tools."""
         expected_tools = {
-            "list_files", "read_file", "write_file", "replace_string",
+            "file_explorer", "read_file", "file_editor",
             "run_shell_command", "search_codebase", "get_project_structure",
-            "insert_line", "delete_line", "get_file_info",
             "create_note", "save_memory", "load_memory",
             "run_background_process", "get_background_output",
             "kill_background_process", "list_background_processes",
@@ -58,6 +57,7 @@ class TestToolDefinitions:
             "list_virtualenvs", "activate_virtualenv", "remove_virtualenv",
             "temporal_workflow",
             "fetch_web",
+            "dbs_tool",
             "python_editor",
         }
         names = {s["function"]["name"] for s in schemas.tools_schema}
@@ -69,4 +69,3 @@ class TestToolDefinitions:
         # Also check field names in the dataclass
         field_names = {f.name for f in ToolDefinition.__dataclass_fields__.values()}
         assert "exposed_to_llm" not in field_names
-

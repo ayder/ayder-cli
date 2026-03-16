@@ -20,7 +20,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The command to run in the background (e.g., 'npm run dev', 'python -m http.server')",
+                    "description": "Command to run in background.",
                 },
             },
             "required": ["command"],

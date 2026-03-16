@@ -105,7 +105,7 @@ class TestDiscoveryValidationLogic:
         # Create valid tool definitions including required ones
         tools = [
             ToolDefinition(
-                name="list_files",
+                name="file_explorer",
                 description="List files",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -115,7 +115,7 @@ class TestDiscoveryValidationLogic:
                 parameters={"type": "object", "properties": {}},
             ),
             ToolDefinition(
-                name="write_file",
+                name="file_editor",
                 description="Write file",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -150,7 +150,7 @@ class TestDiscoveryErrorHandling:
         # Create valid tools
         tools = [
             ToolDefinition(
-                name="list_files",
+                name="file_explorer",
                 description="List files",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -160,7 +160,7 @@ class TestDiscoveryErrorHandling:
                 parameters={"type": "object", "properties": {}},
             ),
             ToolDefinition(
-                name="write_file",
+                name="file_editor",
                 description="Write file",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -197,7 +197,7 @@ class TestDiscoveryErrorHandling:
         """Test that ImportError during module import is handled."""
         tools = [
             ToolDefinition(
-                name="list_files",
+                name="file_explorer",
                 description="List files",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -207,7 +207,7 @@ class TestDiscoveryErrorHandling:
                 parameters={"type": "object", "properties": {}},
             ),
             ToolDefinition(
-                name="write_file",
+                name="file_editor",
                 description="Write file",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -260,9 +260,9 @@ class TestBackwardCompatibility:
         tool_names = {td.name for td in TOOL_DEFINITIONS}
         
         # Filesystem tools
-        assert 'list_files' in tool_names
+        assert 'file_explorer' in tool_names
         assert 'read_file' in tool_names
-        assert 'write_file' in tool_names
+        assert 'file_editor' in tool_names
         
         # Search tools
         assert 'search_codebase' in tool_names
@@ -271,6 +271,7 @@ class TestBackwardCompatibility:
         # Shell tools
         assert 'run_shell_command' in tool_names
         assert 'fetch_web' in tool_names
+        assert 'dbs_tool' in tool_names
         
         # Memory tools
         assert 'save_memory' in tool_names

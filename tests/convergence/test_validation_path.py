@@ -85,7 +85,7 @@ class TestNoConflictingValidation:
 
         authority = ValidationAuthority()
         
-        request = ToolRequest(name="write_file", arguments={"file_path": "/test.txt"})
+        request = ToolRequest(name="file_editor", arguments={"file_path": "/test.txt"})
         
         # Same validation from CLI entry
         cli_valid, cli_error = authority.validate(request, context=RuntimeContext(interface="cli"))
@@ -175,14 +175,14 @@ class TestUserVisibleErrors:
 
         authority = ValidationAuthority()
 
-        request = ToolRequest(name="write_file", arguments={})  # Missing content
+        request = ToolRequest(name="file_editor", arguments={})  # Missing content
         
         valid, error = authority.validate(request)
         
         if not valid:
             # Error mentions the tool and field
             error_str = str(error)
-            assert "write_file" in error_str or "content" in error_str.lower()
+            assert "file_editor" in error_str or "content" in error_str.lower()
 
     def test_stable_error_format(self):
         """Error format is stable for programmatic handling."""
@@ -352,8 +352,8 @@ class TestSchemaValidatorTypeValidation:
         from ayder_cli.application.validation import SchemaValidator, ToolRequest
 
         validator = SchemaValidator()
-        # write_file: file_path must be string
-        ok, err = validator.validate(ToolRequest("write_file", {"file_path": 123, "content": "hi"}))
+        # file_editor: file_path must be string
+        ok, err = validator.validate(ToolRequest("file_editor", {"file_path": 123, "operation": "write", "content": "hi"}))
         assert not ok
         assert "string" in err.message
         assert err.field == "file_path"

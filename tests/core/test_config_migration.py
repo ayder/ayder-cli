@@ -85,7 +85,6 @@ provider = "openai"
 editor = "vim"
 verbose = false
 max_background_processes = 5
-max_iterations = 50
 
 [logging]
 file_enabled = true

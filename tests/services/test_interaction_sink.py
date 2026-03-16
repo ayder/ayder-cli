@@ -276,16 +276,21 @@ class TestInteractionSinkIntegration:
     def test_llm_provider_accepts_sink_in_constructor(self):
         """LLM providers should accept InteractionSink for verbose output."""
         try:
-            from ayder_cli.services.llm import OpenAIProvider
+            from ayder_cli.providers.impl.openai import OpenAIProvider
             
             sink = Mock(spec=InteractionSink)
             mock_client = Mock()
             
+            config = Mock()
+            config.base_url = "http://mock"
+            config.api_key = "mock"
+            
             # Constructor should accept interaction_sink parameter
             provider = OpenAIProvider(
-                client=mock_client,
+                config=config,
                 interaction_sink=sink
             )
+            provider.client = mock_client
             
             assert hasattr(provider, "interaction_sink")
             assert provider.interaction_sink is sink
@@ -298,23 +303,34 @@ class TestInteractionSinkIntegration:
     def test_verbose_mode_uses_sink_not_ui(self):
         """When verbose=True, provider should call sink, not import UI."""
         try:
-            from ayder_cli.services.llm import OpenAIProvider
+            from ayder_cli.providers.impl.openai import OpenAIProvider
             
             sink = Mock(spec=InteractionSink)
+            from unittest.mock import AsyncMock
             mock_client = Mock()
             mock_response = Mock()
-            mock_client.chat.completions.create.return_value = mock_response
+            choice = Mock()
+            choice.message.content = "response"
+            choice.message.reasoning_content = ""
+            choice.message.tool_calls = []
+            mock_response.choices = [choice]
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            
+            config = Mock()
+            config.base_url = "http://mock"
+            config.api_key = "mock"
             
             provider = OpenAIProvider(
-                client=mock_client,
+                config=config,
                 interaction_sink=sink
             )
+            provider.client = mock_client
             
             messages = [{"role": "user", "content": "Hello"}]
             model = "gpt-4"
             
-            # Call with verbose=True
-            provider.chat(messages, model, verbose=True)
+            import asyncio
+            asyncio.run(provider.chat(messages, model, verbose=True))
             
             # Should call sink method, not UI function
             sink.on_llm_request_debug.assert_called_once()

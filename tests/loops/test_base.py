@@ -40,74 +40,6 @@ class TestClassHierarchy:
 
 
 # ---------------------------------------------------------------------------
-# Iteration counting
-# ---------------------------------------------------------------------------
-
-
-class TestIterationCounting:
-    def test_initial_iteration_is_zero(self):
-        loop = _make_loop()
-        assert loop.iteration == 0
-
-    def test_increment_returns_new_value(self):
-        loop = _make_loop()
-        assert loop._increment_iteration() == 1
-        assert loop._increment_iteration() == 2
-
-    def test_iteration_property_reflects_count(self):
-        loop = _make_loop()
-        loop._increment_iteration()
-        loop._increment_iteration()
-        assert loop.iteration == 2
-
-    def test_reset_iterations_public(self):
-        loop = _make_loop()
-        loop._increment_iteration()
-        loop._increment_iteration()
-        loop.reset_iterations()
-        assert loop.iteration == 0
-
-    def test_reset_iterations_private(self):
-        loop = _make_loop()
-        loop._iteration = 10
-        loop._reset_iterations()
-        assert loop._iteration == 0
-
-    def test_direct_attribute_access(self):
-        """Tests may set _iteration directly — must remain accessible."""
-        loop = _make_loop()
-        loop._iteration = 7
-        assert loop.iteration == 7
-
-
-# ---------------------------------------------------------------------------
-# Checkpoint trigger
-# ---------------------------------------------------------------------------
-
-
-class TestCheckpointTrigger:
-    def test_triggers_at_max(self):
-        loop = _make_loop(max_iterations=5)
-        loop._iteration = 5
-        assert loop._should_trigger_checkpoint() is True
-
-    def test_triggers_above_max(self):
-        loop = _make_loop(max_iterations=5)
-        loop._iteration = 6
-        assert loop._should_trigger_checkpoint() is True
-
-    def test_does_not_trigger_below_max(self):
-        loop = _make_loop(max_iterations=5)
-        loop._iteration = 4
-        assert loop._should_trigger_checkpoint() is False
-
-    def test_zero_max_triggers_immediately(self):
-        loop = _make_loop(max_iterations=0)
-        loop._iteration = 0
-        assert loop._should_trigger_checkpoint() is True
-
-
-# ---------------------------------------------------------------------------
 # Tool call routing
 # ---------------------------------------------------------------------------
 
@@ -190,13 +122,11 @@ class TestLoopConfig:
         cfg = LoopConfig()
         assert cfg.model == "qwen3-coder:latest"
         assert cfg.num_ctx == 65536
-        assert cfg.max_iterations == 50
         assert cfg.permissions == set()
         assert cfg.verbose is False
         assert cfg.tool_tags is None
 
     def test_custom_values(self):
-        cfg = LoopConfig(model="gpt-4", max_iterations=10, permissions={"r", "w"})
+        cfg = LoopConfig(model="gpt-4", permissions={"r", "w"})
         assert cfg.model == "gpt-4"
-        assert cfg.max_iterations == 10
         assert cfg.permissions == {"r", "w"}

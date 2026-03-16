@@ -20,7 +20,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "'params' JSON string."
         ),
         description_template="Python editor: {method} on {file_path}",
-        tags=("core",),
+        tags=("python",),
         func_ref="ayder_cli.tools.builtins.python_editor:python_editor",
         parameters={
             "type": "object",

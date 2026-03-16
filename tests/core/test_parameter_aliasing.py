@@ -9,9 +9,9 @@ from ayder_cli.core.context import ProjectContext
 
 def test_parameter_aliases_file_path():
     """Test that 'path' and 'absolute_path' are aliased to 'file_path'."""
-    # Create a temp directory as project root for sandboxing
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
         
         args = {"path": "test.txt", "start_line": 10}
@@ -33,35 +33,35 @@ def test_parameter_aliases_file_path():
         assert "filepath" not in normalized
 
 
-def test_parameter_aliases_list_files():
-    """Test that 'dir', 'path', 'folder' are aliased to 'directory'."""
-    # Create a temp directory as project root for sandboxing
+def test_parameter_aliases_file_explorer():
+    """Test that 'dir', 'path', 'folder' are aliased to 'path'."""
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
         
         args = {"dir": "."}
-        normalized = registry.normalize_tool_arguments("list_files", args, ctx)
-        assert "directory" in normalized
-        assert os.path.realpath(normalized["directory"]) == os.path.realpath(tmp_dir)
+        normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+        assert "path" in normalized
+        assert os.path.realpath(normalized["path"]) == os.path.realpath(tmp_dir)
         assert "dir" not in normalized
         
         args = {"path": "."}
-        normalized = registry.normalize_tool_arguments("list_files", args, ctx)
-        assert "directory" in normalized
-        assert os.path.realpath(normalized["directory"]) == os.path.realpath(tmp_dir)
+        normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+        assert "path" in normalized
+        assert os.path.realpath(normalized["path"]) == os.path.realpath(tmp_dir)
         
         args = {"folder": "."}
-        normalized = registry.normalize_tool_arguments("list_files", args, ctx)
-        assert "directory" in normalized
-        assert os.path.realpath(normalized["directory"]) == os.path.realpath(tmp_dir)
+        normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+        assert "path" in normalized
+        assert os.path.realpath(normalized["path"]) == os.path.realpath(tmp_dir)
 
 
 def test_path_resolution_to_absolute():
     """Test that relative paths are resolved to absolute."""
-    # Create a temp directory as project root for sandboxing
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
         
         args = {"file_path": "."}
@@ -71,9 +71,9 @@ def test_path_resolution_to_absolute():
 
 def test_type_coercion_line_numbers():
     """Test that string line numbers are coerced to integers."""
-    # Create a temp directory as project root for sandboxing
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
         
         args = {"file_path": "test.txt", "start_line": "10", "end_line": "20"}
@@ -87,9 +87,9 @@ def test_type_coercion_line_numbers():
 
 def test_validation_wrong_type():
     """Test that validation catches wrong parameter types."""
-    # Create a temp directory as project root for sandboxing
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
         
         # Test with string where integer expected (and not coercible)
@@ -115,9 +115,9 @@ def test_validation_wrong_type():
 
 def test_combined_alias_and_normalization():
     """Test combining aliasing with path resolution."""
-    # Create a temp directory as project root for sandboxing
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
         
         args = {"path": ".", "start_line": "5"}  # Using alias and relative path
@@ -130,9 +130,9 @@ def test_combined_alias_and_normalization():
 
 def test_backward_compatibility():
     """Test that correct parameter names still work."""
-    # Create a temp directory as project root for sandboxing
+    # Create a temp path as project root for sandboxing
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set up project context with temp directory as root
+        # Set up project context with temp path as root
         ctx = ProjectContext(tmp_dir)
 
         args = {"file_path": "test.txt", "start_line": 10}

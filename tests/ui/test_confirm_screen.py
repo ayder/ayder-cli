@@ -85,12 +85,12 @@ class TestCLIConfirmScreenInit:
         from ayder_cli.tui import CLIConfirmScreen
 
         screen = CLIConfirmScreen(
-            title="write_file",
+            title="file_editor",
             description="File test.py will be written",
             diff_content="+new line",
             action_name="Write file"
         )
-        assert screen.title_text == "write_file"
+        assert screen.title_text == "file_editor"
         assert screen.description == "File test.py will be written"
         assert screen.diff_content == "+new line"
         assert screen.action_name == "Write file"
@@ -181,8 +181,8 @@ class TestToolNeedsConfirmation:
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})
-        assert loop._tool_needs_confirmation("write_file")
-        assert loop._tool_needs_confirmation("replace_string")
+        assert loop._tool_needs_confirmation("file_editor")
+        
 
     def test_execute_tool_needs_confirmation_with_default_permissions(self):
         """Test that execute tools need confirmation with default permissions."""
@@ -198,7 +198,7 @@ class TestToolNeedsConfirmation:
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "w"})
-        assert not loop._tool_needs_confirmation("write_file")
+        assert not loop._tool_needs_confirmation("file_editor")
         assert not loop._tool_needs_confirmation("replace_string")
 
     def test_execute_tool_auto_approved_with_x_permission(self):
@@ -232,7 +232,7 @@ class TestToolNeedsConfirmation:
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "w", "x"})
         assert not loop._tool_needs_confirmation("read_file")
-        assert not loop._tool_needs_confirmation("write_file")
+        assert not loop._tool_needs_confirmation("file_editor")
         assert not loop._tool_needs_confirmation("run_shell_command")
 
     def test_unknown_tool_auto_approved(self):
@@ -255,20 +255,21 @@ class TestGenerateDiff:
         assert app._generate_diff("read_file", {"file_path": "test.py"}) is None
         assert app._generate_diff("run_shell_command", {"command": "ls"}) is None
 
-    def test_write_file_new_file(self, tmp_path):
+    def test_file_editor_new_file(self, tmp_path):
         """Test diff for writing a new file."""
         from ayder_cli.tui import AyderApp
 
         app = AyderApp.__new__(AyderApp)
         new_file = str(tmp_path / "new.py")
-        diff = app._generate_diff("write_file", {
+        diff = app._generate_diff("file_editor", {
             "file_path": new_file,
+            "operation": "write",
             "content": "print('hello')\n"
         })
         assert diff is not None
         assert "+print('hello')" in diff
 
-    def test_write_file_existing_file(self, tmp_path):
+    def test_file_editor_existing_file(self, tmp_path):
         """Test diff for overwriting an existing file."""
         from ayder_cli.tui import AyderApp
 
@@ -276,8 +277,9 @@ class TestGenerateDiff:
         existing.write_text("old content\n")
 
         app = AyderApp.__new__(AyderApp)
-        diff = app._generate_diff("write_file", {
+        diff = app._generate_diff("file_editor", {
             "file_path": str(existing),
+            "operation": "write",
             "content": "new content\n"
         })
         assert diff is not None
@@ -292,7 +294,8 @@ class TestGenerateDiff:
         f.write_text("def foo():\n    pass\n")
 
         app = AyderApp.__new__(AyderApp)
-        diff = app._generate_diff("replace_string", {
+        diff = app._generate_diff("file_editor", {
+            "operation": "replace",
             "file_path": str(f),
             "old_string": "pass",
             "new_string": "return 42"
@@ -317,7 +320,6 @@ class TestRunTuiPermissions:
                 model="default",
                 safe_mode=False,
                 permissions={"r", "w"},
-                iterations=None
             )
 
     def test_run_tui_default_permissions(self):
@@ -332,7 +334,6 @@ class TestRunTuiPermissions:
                 model="default",
                 safe_mode=False,
                 permissions=None,
-                iterations=None
             )
 
 

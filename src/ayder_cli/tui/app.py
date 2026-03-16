@@ -53,7 +53,8 @@ class AppCallbacks:
     def on_thinking_stop(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_thinking(False)
-        self._app._maybe_stop_activity_timer()
+        # Transition to "Generating" so the user sees activity while content streams
+        activity.set_generating(True)
 
     def on_assistant_content(self, text: str) -> None:
         chat_view = self._app.query_one("#chat-view", ChatView)
@@ -70,17 +71,11 @@ class AppCallbacks:
             ).update_token_usage(t)
         )
 
-    def on_iteration_update(self, current: int, maximum: int) -> None:
-        self._app.call_later(
-            lambda c=current, m=maximum: self._app.query_one(
-                "#status-bar", StatusBar
-            ).update_iterations(c, m)
-        )
-
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
         tool_panel.add_tool(call_id, name, arguments)
         activity = self._app.query_one("#activity-bar", ActivityBar)
+        activity.set_generating(False)
         activity.set_tools_working(True)
         self._app._start_activity_timer()
 
@@ -93,7 +88,7 @@ class AppCallbacks:
     def on_tools_cleanup(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_tools_working(False)
-        self._app._maybe_stop_activity_timer()
+        activity.set_generating(False)
         # Schedule panel cleanup after a short delay
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
         self._app.set_timer(2.0, lambda: tool_panel.clear_completed())
@@ -140,7 +135,6 @@ class AyderApp(App):
         model: str = "default",
         safe_mode: bool = False,
         permissions: set | None = None,
-        iterations: int | None = None,
         **kwargs,
     ):
         """
@@ -150,12 +144,10 @@ class AyderApp(App):
             model: The LLM model name to use
             safe_mode: Whether to enable safe mode
             permissions: Set of granted permission levels ("r", "w", "x")
-            iterations: Max agentic iterations per message (None = use config default)
         """
         super().__init__(**kwargs)
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
-        self._iterations_override = iterations
 
         self._pending_messages: list[str] = []
         self._is_processing = False
@@ -178,8 +170,24 @@ class AyderApp(App):
         self.llm = rt.llm_provider
         self._process_manager = rt.process_manager
         self.registry = rt.tool_registry
-        self._checkpoint_manager = rt.checkpoint_manager
+
         self._memory_manager = rt.memory_manager
+
+        # Wire up debug logging for verbose mode
+        from ayder_cli.tui.adapter import TUIInteractionSink
+        
+        def on_llm_debug(messages, model, tools, options):
+            num_msg = len(messages) if messages else 0
+            num_tools = len(tools) if tools else 0
+            chat_view = self.query_one("#chat-view", ChatView)
+            chat_view.add_system_message(
+                f"[DEBUG] LLM Request: {model} | {num_msg} messages | {num_tools} tools"
+            )
+
+        if hasattr(self.llm, "interaction_sink"):
+            self.llm.interaction_sink = TUIInteractionSink(
+                on_llm_request_debug_cb=on_llm_debug
+            )
 
         self._setup_registry_callbacks()
         self._setup_registry_middleware()
@@ -207,13 +215,6 @@ class AyderApp(App):
             if not isinstance(self.config, dict)
             else self.config.get("num_ctx", 65536)
         )
-        max_iters = self._iterations_override
-        if max_iters is None:
-            max_iters = (
-                self.config.max_iterations
-                if not isinstance(self.config, dict)
-                else self.config.get("max_iterations", 50)
-            )
         self._callbacks = AppCallbacks(self)
         if isinstance(self.config, dict):
             max_output_tokens = self.config.get("max_output_tokens", 4096)
@@ -232,21 +233,25 @@ class AyderApp(App):
             messages=self.messages,
             config=TuiLoopConfig(
                 model=self.model,
+                provider=self.config.provider,
                 num_ctx=num_ctx,
                 max_output_tokens=max_output_tokens,
                 stop_sequences=stop_sequences,
-                max_iterations=max_iters,
                 permissions=self.permissions,
                 tool_tags=tool_tags,
+                max_history=getattr(self.config, 'max_history_messages', 30),
             ),
             callbacks=self._callbacks,
-            checkpoint_manager=self._checkpoint_manager,
             memory_manager=self._memory_manager,
         )
 
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt with project structure."""
-        from ayder_cli.prompts import SYSTEM_PROMPT, TOOL_PROTOCOL_BLOCK, PROJECT_STRUCTURE_MACRO_TEMPLATE
+        from ayder_cli.prompts import (
+            get_system_prompt,
+            DBS_TOOL_PROMPT_BLOCK,
+            PROJECT_STRUCTURE_MACRO_TEMPLATE,
+        )
 
         try:
             structure = self.registry.execute("get_project_structure", {"max_depth": 3})
@@ -254,14 +259,17 @@ class AyderApp(App):
         except Exception:
             macro = ""
 
-        driver = self.config.driver if not isinstance(self.config, dict) else self.config.get("driver", "openai")
-        tool_protocol = TOOL_PROTOCOL_BLOCK if driver in ("openai", "ollama") else ""
-        system_prompt = SYSTEM_PROMPT + tool_protocol + macro
+        base_prompt = get_system_prompt(self.config.prompt)
+        system_prompt = base_prompt + DBS_TOOL_PROMPT_BLOCK + macro
         self.messages.append({"role": "system", "content": system_prompt})
 
     def update_system_prompt_model(self) -> None:
         """Update the model name in the system prompt after /model switch."""
-        from ayder_cli.prompts import SYSTEM_PROMPT, TOOL_PROTOCOL_BLOCK, PROJECT_STRUCTURE_MACRO_TEMPLATE
+        from ayder_cli.prompts import (
+            get_system_prompt,
+            DBS_TOOL_PROMPT_BLOCK,
+            PROJECT_STRUCTURE_MACRO_TEMPLATE,
+        )
 
         if self.messages and self.messages[0].get("role") == "system":
             try:
@@ -273,9 +281,9 @@ class AyderApp(App):
                 )
             except Exception:
                 macro = ""
-            driver = self.config.driver if not isinstance(self.config, dict) else self.config.get("driver", "openai")
-            tool_protocol = TOOL_PROTOCOL_BLOCK if driver in ("openai", "ollama") else ""
-            self.messages[0]["content"] = SYSTEM_PROMPT + tool_protocol + macro
+            self.messages[0]["content"] = (
+                get_system_prompt(self.config.prompt) + DBS_TOOL_PROMPT_BLOCK + macro
+            )
 
     def inject_skill(self, skill_name: str, skill_content: str) -> None:
         """Inject or replace the active skill system message."""
@@ -344,20 +352,16 @@ class AyderApp(App):
 
     def _generate_diff(self, tool_name: str, arguments: dict) -> str | None:
         """Generate a diff preview for file-modifying tools."""
-        file_modifying_tools = {
-            "write_file",
-            "replace_string",
-            "insert_line",
-            "delete_line",
-        }
-        if tool_name not in file_modifying_tools:
+        if tool_name != "file_editor":
             return None
 
         file_path = arguments.get("file_path", "")
+        operation = arguments.get("operation", "")
+        
         try:
             path = Path(file_path)
             if not path.exists():
-                if tool_name == "write_file":
+                if operation == "write":
                     new_content = arguments.get("content", "")
                     return "\n".join(f"+{line}" for line in new_content.split("\n"))
                 return None
@@ -365,22 +369,22 @@ class AyderApp(App):
             original = path.read_text(encoding="utf-8")
             original_lines = original.splitlines(keepends=True)
 
-            if tool_name == "write_file":
+            if operation == "write":
                 new_content = arguments.get("content", "")
                 new_lines = new_content.splitlines(keepends=True)
-            elif tool_name == "replace_string":
+            elif operation == "replace":
                 old_string = arguments.get("old_string", "")
                 new_string = arguments.get("new_string", "")
                 new_content = original.replace(old_string, new_string, 1)
                 new_lines = new_content.splitlines(keepends=True)
-            elif tool_name == "insert_line":
+            elif operation == "insert":
                 line_num = arguments.get("line_number", 1)
                 content = arguments.get("content", "")
                 lines = list(original_lines)
                 idx = max(0, min(line_num - 1, len(lines)))
                 lines.insert(idx, content + "\n")
                 new_lines = lines
-            elif tool_name == "delete_line":
+            elif operation == "delete":
                 line_num = arguments.get("line_number", 1)
                 lines = list(original_lines)
                 idx = line_num - 1
@@ -514,13 +518,14 @@ class AyderApp(App):
         self._callbacks._worker = worker
         try:
             await self.chat_loop.run(no_tools=no_tools)
+        except asyncio.CancelledError:
+            pass  # Worker cancellation is normal (Ctrl+C / exclusive worker)
         except Exception as e:
             if not worker.is_cancelled:
                 chat_view = self.query_one("#chat-view", ChatView)
                 chat_view.add_system_message(f"Error: {e}")
         finally:
-            if not worker.is_cancelled:
-                self.call_later(self._finish_processing)
+            self.call_later(self._finish_processing)
 
     def _handle_command(self, cmd: str) -> None:
         """Handle slash commands - dispatch to tui.commands handlers."""

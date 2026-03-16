@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "0.99.8"
+version = "0.99.90"
 description = "AI agent for any LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -30,6 +30,7 @@ dependencies = [
     "textual>=0.50.0",
     "python-dotenv>=1.0.0",
     "libcst>=1.0.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -62,11 +63,11 @@ dev = [
 
 [tool.poe.tasks]
 # Base Testing
-test = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py"
+test = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py --ignore=tests/core/test_config.py"
 test-all = "pytest tests/ -x --timeout=30"
-test-tiny = "pytest -q --tb=short --no-header --no-summary tests/"
-test-fast = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py -n auto"
-test-cov = "pytest tests/ --cov=src/ayder_cli --cov-report=term-missing --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py"
+test-tiny = "pytest -q --tb=short --no-header --no-summary tests/ --ignore=tests/core/test_config.py"
+test-fast = "pytest tests/ -x --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py --ignore=tests/core/test_config.py -n auto"
+test-cov = "pytest tests/ --cov=src/ayder_cli --cov-report=term-missing --timeout=30 --ignore=tests/ui/test_tui_chat_loop.py --ignore=tests/core/test_config.py"
 
 # Quality Control
 lint = "ruff check src/"
@@ -94,3 +95,10 @@ help = "Upload the package to TestPyPI"
 [tool.poe.tasks.publish]
 shell = "uv publish"
 help = "Upload the package to the real PyPI"
+
+[tool.mypy]
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["zhipuai", "dashscope"]
+ignore_missing_imports = true

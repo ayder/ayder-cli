@@ -22,7 +22,7 @@ def _build_services(config=None, project_root="."):
 
     Returns:
         Tuple of (config, llm_provider, project_ctx,
-                  enhanced_system, checkpoint_manager, memory_manager)
+                  enhanced_system, memory_manager)
     """
     rt = create_runtime(config=config, project_root=project_root)
     return (
@@ -30,7 +30,6 @@ def _build_services(config=None, project_root="."):
         rt.llm_provider,
         rt.project_ctx,
         rt.system_prompt,
-        rt.checkpoint_manager,
         rt.memory_manager,
     )
 
@@ -38,7 +37,6 @@ def _build_services(config=None, project_root="."):
 def _run_loop(
     prompt: str,
     permissions: set | None = None,
-    iterations: int = 50,
 ) -> int:
     """Create a TuiChatLoop with CliCallbacks and run it.
 
@@ -48,7 +46,6 @@ def _run_loop(
     Args:
         prompt: The user prompt to send to the loop.
         permissions: Granted permission categories.
-        iterations: Max agentic iterations.
 
     Returns:
         Exit code (0 for success, 1 for error).
@@ -62,16 +59,17 @@ def _run_loop(
 
     config = TuiLoopConfig(
         model=rt.config.model,
+        provider=rt.config.provider,
         num_ctx=rt.config.num_ctx,
         max_output_tokens=getattr(rt.config, "max_output_tokens", 4096),
         stop_sequences=list(getattr(rt.config, "stop_sequences", [])),
-        max_iterations=iterations,
         permissions=set(permissions or {"r"}),
         tool_tags=(
             frozenset(rt.config.tool_tags)
             if getattr(rt.config, "tool_tags", None)
             else None
         ),
+        max_history=getattr(rt.config, "max_history_messages", 30),
     )
 
     cb = CliCallbacks(verbose=getattr(rt.config, "verbose", False))
@@ -81,21 +79,20 @@ def _run_loop(
         messages=messages,
         config=config,
         callbacks=cb,
-        checkpoint_manager=rt.checkpoint_manager,
         memory_manager=rt.memory_manager,
     )
 
     asyncio.run(loop.run())
+    print()  # Ensure terminal prompt starts on a new line after streaming output
     return 0
 
 
 class CommandRunner:
     """Runner for single command execution mode."""
 
-    def __init__(self, prompt: str, permissions=None, iterations=50):
+    def __init__(self, prompt: str, permissions=None):
         self.prompt = prompt
         self.permissions = permissions
-        self.iterations = iterations
 
     def run(self) -> int:
         """Execute the command and return exit code.
@@ -107,25 +104,23 @@ class CommandRunner:
             return _run_loop(
                 self.prompt,
                 permissions=self.permissions,
-                iterations=self.iterations,
             )
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
 
 
-def run_command(prompt: str, permissions=None, iterations=50) -> int:
+def run_command(prompt: str, permissions=None) -> int:
     """Execute a single command and return exit code.
 
     Args:
         prompt: The command/prompt to execute
         permissions: Set of granted permission categories (e.g. {"r", "w", "x", "http"})
-        iterations: Max agentic iterations per message
 
     Returns:
         Exit code (0 for success, 1 for error)
     """
-    runner = CommandRunner(prompt, permissions=permissions, iterations=iterations)
+    runner = CommandRunner(prompt, permissions=permissions)
     return runner.run()
 
 
@@ -151,13 +146,12 @@ class TaskRunner:
             return 1
 
     @staticmethod
-    def implement_task(task_query: str, permissions=None, iterations=50) -> int:
+    def implement_task(task_query: str, permissions=None) -> int:
         """Implement a specific task by ID or name.
 
         Args:
             task_query: Task ID or name pattern to search for
             permissions: Set of granted permission categories
-            iterations: Max agentic iterations per message
 
         Returns:
             Exit code (0 for success, 1 for error/not found)
@@ -180,7 +174,7 @@ class TaskRunner:
                 task_path = _get_task_path_by_id(project_ctx, task_id)
                 if task_path:
                     return TaskRunner._execute_task(
-                        task_path, project_ctx, permissions, iterations
+                        task_path, project_ctx, permissions
                     )
             except ValueError:
                 pass
@@ -194,7 +188,7 @@ class TaskRunner:
                 title = _parse_title(task_file)
                 if query_lower in title.lower():
                     return TaskRunner._execute_task(
-                        task_file, project_ctx, permissions, iterations
+                        task_file, project_ctx, permissions
                     )
 
             print(f"No tasks found matching: {task_query}", file=sys.stderr)
@@ -208,7 +202,6 @@ class TaskRunner:
         task_path: Path,
         project_ctx,
         permissions,
-        iterations,
     ) -> int:
         """Execute a single task file.
 
@@ -216,7 +209,6 @@ class TaskRunner:
             task_path: Path to the task markdown file
             project_ctx: ProjectContext instance
             permissions: Set of granted permission categories
-            iterations: Max agentic iterations per message
 
         Returns:
             Exit code (0 for success, 1 for error)
@@ -225,15 +217,14 @@ class TaskRunner:
 
         rel_path = project_ctx.to_relative(task_path)
         prompt = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
-        return _run_loop(prompt, permissions=permissions, iterations=iterations)
+        return _run_loop(prompt, permissions=permissions)
 
     @staticmethod
-    def implement_all(permissions=None, iterations=50) -> int:
+    def implement_all(permissions=None) -> int:
         """Implement all pending tasks sequentially.
 
         Args:
             permissions: Set of granted permission categories
-            iterations: Max agentic iterations per message
 
         Returns:
             Exit code (0 for success, 1 for error)
@@ -244,7 +235,6 @@ class TaskRunner:
             return _run_loop(
                 TASK_EXECUTION_ALL_PROMPT_TEMPLATE,
                 permissions=permissions,
-                iterations=iterations,
             )
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
@@ -256,23 +246,22 @@ def _run_tasks_cli() -> int:
     return TaskRunner.list_tasks()
 
 
-def _run_implement_cli(task_query: str, permissions=None, iterations=50) -> int:
+def _run_implement_cli(task_query: str, permissions=None) -> int:
     """Implement a specific task by ID or name."""
     return TaskRunner.implement_task(
-        task_query, permissions=permissions, iterations=iterations
+        task_query, permissions=permissions
     )
 
 
-def _run_implement_all_cli(permissions=None, iterations=50) -> int:
+def _run_implement_all_cli(permissions=None) -> int:
     """Implement all pending tasks sequentially."""
-    return TaskRunner.implement_all(permissions=permissions, iterations=iterations)
+    return TaskRunner.implement_all(permissions=permissions)
 
 
 def _run_temporal_queue_cli(
     queue_name: str,
     prompt_path: str | None = None,
     permissions=None,
-    iterations: int = 50,
 ) -> int:
     """Start a Temporal worker queue session."""
     from ayder_cli.services.temporal_worker import TemporalWorker, TemporalWorkerConfig
@@ -281,7 +270,6 @@ def _run_temporal_queue_cli(
         queue_name=queue_name,
         prompt_path=prompt_path,
         permissions=set(permissions or {"r"}),
-        iterations=iterations,
     )
     worker = TemporalWorker(worker_config)
     return worker.run()

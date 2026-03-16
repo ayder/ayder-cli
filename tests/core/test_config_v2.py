@@ -17,7 +17,6 @@ provider = "deepseek"
 editor = "nano"
 verbose = true
 max_background_processes = 9
-max_iterations = 42
 
 [logging]
 file_enabled = false
@@ -44,7 +43,6 @@ num_ctx = 65536
     assert cfg.editor == "nano"
     assert cfg.verbose is True
     assert cfg.max_background_processes == 9
-    assert cfg.max_iterations == 42
     assert cfg.logging_file_enabled is False
     assert cfg.logging_file_path == "logs/ayder.log"
     assert cfg.model == "deepseek-chat"
@@ -77,7 +75,6 @@ provider = "openai"
 editor = "vim"
 verbose = false
 max_background_processes = 5
-max_iterations = 50
 
 [llm.openai]
 driver = "openai"

@@ -29,11 +29,11 @@ class TestPermissionDeniedParity:
 
         policy = ExecutionPolicy(granted_permissions={"r"})
         
-        error = policy.check_permission("write_file")
+        error = policy.check_permission("file_editor")
         
         assert isinstance(error, PermissionDeniedError)
-        assert "write" in str(error).lower()
-        assert error.tool_name == "write_file"
+        assert "'w'" in str(error).lower()
+        assert error.tool_name == "file_editor"
         assert error.required_permission == "w"
 
     def test_denied_error_includes_remediation(self):
@@ -68,8 +68,8 @@ class TestPermissionDeniedParity:
         tui_context = RuntimeContext(interface="tui")
         
         # Same permission logic regardless of interface
-        cli_result = policy.check_permission("write_file", context=cli_context)
-        tui_result = policy.check_permission("write_file", context=tui_context)
+        cli_result = policy.check_permission("file_editor", context=cli_context)
+        tui_result = policy.check_permission("file_editor", context=tui_context)
         
         assert type(cli_result) is type(tui_result)
         assert str(cli_result) == str(tui_result)
@@ -92,7 +92,7 @@ class TestConfirmationBehaviorParity:
         
         # Write tool needs confirmation with only 'r' permission
         read_req = policy.get_confirmation_requirement("read_file")
-        write_req = policy.get_confirmation_requirement("write_file")
+        write_req = policy.get_confirmation_requirement("file_editor")
         
         assert read_req == ConfirmationRequirement.NONE
         assert write_req == ConfirmationRequirement.REQUIRED
@@ -155,13 +155,13 @@ class TestErrorPropagationParity:
             pytest.skip("Execution policy not yet implemented")
 
         error = ValidationError(
-            tool_name="write_file",
+            tool_name="file_editor",
             field="content",
             message="Content cannot be empty",
         )
         
         # Structured validation error
-        assert error.tool_name == "write_file"
+        assert error.tool_name == "file_editor"
         assert error.field == "content"
         assert "empty" in error.message
 
@@ -217,7 +217,7 @@ class TestExecutionPolicyContract:
         policy = ExecutionPolicy(granted_permissions={"r", "w"})
         
         request = ToolRequest(
-            name="write_file",
+            name="file_editor",
             arguments={"file_path": "/test.txt", "content": "hello"},
         )
         
@@ -279,8 +279,8 @@ class TestConvergenceScenarios:
 
         policy = ExecutionPolicy(granted_permissions={"r"})
 
-        cli_req = policy.get_confirmation_requirement("write_file")
-        tui_req = policy.get_confirmation_requirement("write_file")
+        cli_req = policy.get_confirmation_requirement("file_editor")
+        tui_req = policy.get_confirmation_requirement("file_editor")
         
         # Same confirmation requirement
         assert cli_req == tui_req

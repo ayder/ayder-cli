@@ -27,7 +27,6 @@ class TestTemporalRuntimeWiringConvergence:
                 queue_name="dev-team",
                 prompt_path="prompts/dev.md",
                 permissions={"r", "w"},
-                iterations=33,
             )
 
             assert result == 0
@@ -36,7 +35,6 @@ class TestTemporalRuntimeWiringConvergence:
             assert config_obj.queue_name == "dev-team"
             assert config_obj.prompt_path == "prompts/dev.md"
             assert config_obj.permissions == {"r", "w"}
-            assert config_obj.iterations == 33
             worker_instance.run.assert_called_once()
 
     def test_temporal_tool_routes_to_service_action_path(self, monkeypatch):

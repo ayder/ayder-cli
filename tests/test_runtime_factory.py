@@ -5,14 +5,14 @@ from unittest.mock import patch, MagicMock
 from ayder_cli.application.runtime_factory import RuntimeComponents, create_runtime
 
 
-def _patch_factory(registry_execute_return="tree"):
-    """Return a context manager that patches all factory dependencies."""
+def _patch_factory():
+    """Helper to mock all external dependencies of the factory."""
     mock_registry = MagicMock()
-    mock_registry.execute.return_value = registry_execute_return
+    mock_registry.execute.return_value = "project tree"
 
     return (
         patch("ayder_cli.application.runtime_factory.load_config"),
-        patch("ayder_cli.application.runtime_factory.create_llm_provider"),
+        patch("ayder_cli.application.runtime_factory.provider_orchestrator.create"),
         patch("ayder_cli.application.runtime_factory.ProjectContext"),
         patch("ayder_cli.application.runtime_factory.ProcessManager"),
         patch(
@@ -20,11 +20,9 @@ def _patch_factory(registry_execute_return="tree"):
             return_value=mock_registry,
         ),
         patch("ayder_cli.application.runtime_factory._ToolExecutor"),
-        patch("ayder_cli.application.runtime_factory.CheckpointManager"),
         patch("ayder_cli.application.runtime_factory.MemoryManager"),
         mock_registry,
     )
-
 
 def _make_cfg(model="test-model", max_background_processes=5):
     cfg = MagicMock()
@@ -34,10 +32,10 @@ def _make_cfg(model="test-model", max_background_processes=5):
 
 
 def test_create_runtime_returns_all_components():
-    (p_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_cm, p_mm, mock_registry) = (
+    (p_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm, mock_registry) = (
         _patch_factory()
     )
-    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_cm, p_mm:
+    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm:
         cfg = _make_cfg()
         mock_load.return_value = cfg
 
@@ -50,10 +48,10 @@ def test_create_runtime_returns_all_components():
 
 
 def test_create_runtime_accepts_injected_config():
-    (p_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_cm, p_mm, mock_registry) = (
+    (p_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm, mock_registry) = (
         _patch_factory()
     )
-    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_cm, p_mm:
+    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm:
         cfg = _make_cfg()
 
         rt = create_runtime(config=cfg)
@@ -68,7 +66,7 @@ def test_create_runtime_handles_project_structure_error():
 
     with (
         patch("ayder_cli.application.runtime_factory.load_config") as mock_load,
-        patch("ayder_cli.application.runtime_factory.create_llm_provider"),
+        patch("ayder_cli.application.runtime_factory.provider_orchestrator.create"),
         patch("ayder_cli.application.runtime_factory.ProjectContext"),
         patch("ayder_cli.application.runtime_factory.ProcessManager"),
         patch(
@@ -76,7 +74,6 @@ def test_create_runtime_handles_project_structure_error():
             return_value=mock_registry,
         ),
         patch("ayder_cli.application.runtime_factory._ToolExecutor"),
-        patch("ayder_cli.application.runtime_factory.CheckpointManager"),
         patch("ayder_cli.application.runtime_factory.MemoryManager"),
     ):
         cfg = _make_cfg()

@@ -37,7 +37,7 @@ class CliCallbacks:
         pass
 
     def on_assistant_content(self, text: str) -> None:
-        print(text)
+        print(text, end="", flush=True)
 
     def on_thinking_content(self, text: str) -> None:
         pass
@@ -45,10 +45,6 @@ class CliCallbacks:
     def on_token_usage(self, total_tokens: int) -> None:
         if self.verbose:
             print(f"[tokens] {total_tokens}", file=sys.stderr)
-
-    def on_iteration_update(self, current: int, maximum: int) -> None:
-        if self.verbose:
-            print(f"[iteration] {current}/{maximum}", file=sys.stderr)
 
     # -- tool events ---------------------------------------------------------
 

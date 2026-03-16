@@ -89,11 +89,11 @@ class TestPrintRunning:
 class TestDescribeToolAction:
     """Tests for describe_tool_action() function."""
 
-    def test_write_file(self):
-        """Test description for write_file tool."""
-        result = ui.describe_tool_action("write_file", {"file_path": "/tmp/test.txt"})
+    def test_file_editor(self):
+        """Test description for file_editor tool."""
+        result = ui.describe_tool_action("file_editor", {"file_path": "/tmp/test.txt"})
         assert "/tmp/test.txt" in result
-        assert "will be written" in result
+        assert "will be modified" in result
 
     def test_read_file(self):
         """Test description for read_file tool."""
@@ -101,20 +101,20 @@ class TestDescribeToolAction:
         assert "/tmp/read.txt" in result
         assert "will be read" in result
 
-    def test_list_files(self):
-        """Test description for list_files tool."""
-        result = ui.describe_tool_action("list_files", {"directory": "/home"})
+    def test_file_explorer(self):
+        """Test description for file_explorer tool."""
+        result = ui.describe_tool_action("file_explorer", {"path": "/home"})
         assert "/home" in result
-        assert "will be listed" in result
+        assert "Exploring path" in result
 
-    def test_list_files_default_directory(self):
-        """Test description for list_files tool with default directory."""
-        result = ui.describe_tool_action("list_files", {})
+    def test_file_explorer_default_directory(self):
+        """Test description for file_explorer tool with default directory."""
+        result = ui.describe_tool_action("file_explorer", {"path": "."})
         assert "." in result
 
-    def test_replace_string(self):
-        """Test description for replace_string tool."""
-        result = ui.describe_tool_action("replace_string", {"file_path": "/tmp/modify.py"})
+    def test_file_editor(self):
+        """Test description for file_editor tool."""
+        result = ui.describe_tool_action("file_editor", {"file_path": "/tmp/modify.py"})
         assert "/tmp/modify.py" in result
         assert "will be modified" in result
 
@@ -133,24 +133,24 @@ class TestDescribeToolAction:
     def test_with_string_args(self):
         """Test with JSON string arguments."""
         args_json = '{"file_path": "/tmp/test.txt", "content": "hello"}'
-        result = ui.describe_tool_action("write_file", args_json)
+        result = ui.describe_tool_action("file_editor", args_json)
         assert "/tmp/test.txt" in result
 
     def test_with_dict_args(self):
         """Test with dict arguments directly."""
         args_dict = {"file_path": "/path/to/file"}
-        result = ui.describe_tool_action("write_file", args_dict)
+        result = ui.describe_tool_action("file_editor", args_dict)
         assert "/path/to/file" in result
 
     def test_with_invalid_json_string(self):
         """Test with invalid JSON string."""
-        result = ui.describe_tool_action("write_file", "not valid json")
+        result = ui.describe_tool_action("file_editor", "not valid json")
         # Should fallback to empty args and use default template
-        assert "will be written" in result
+        assert "will be modified" in result
 
     def test_missing_required_args(self):
         """Test with missing required arguments."""
-        result = ui.describe_tool_action("write_file", {})
+        result = ui.describe_tool_action("file_editor", {})
         assert "unknown" in result
 
 

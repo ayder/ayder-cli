@@ -7,7 +7,7 @@ from ayder_cli.tui.commands import COMMAND_MAP, handle_temporal
 
 
 def _make_app() -> SimpleNamespace:
-    chat_loop = SimpleNamespace(config=SimpleNamespace(max_iterations=50))
+    chat_loop = SimpleNamespace(config=SimpleNamespace())
     return SimpleNamespace(
         permissions={"r", "w"},
         chat_loop=chat_loop,

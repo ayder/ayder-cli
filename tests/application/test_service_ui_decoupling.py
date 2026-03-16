@@ -173,25 +173,36 @@ class TestFullDecouplingFlow:
     def test_llm_verbose_with_injected_sink(self):
         """Full flow: LLM provider with sink for verbose output."""
         try:
-            from ayder_cli.services.llm import OpenAIProvider
+            from ayder_cli.providers.impl.openai import OpenAIProvider
             
             sink = Mock(spec=InteractionSink)
+            from unittest.mock import AsyncMock
             mock_client = Mock()
             mock_response = Mock()
-            mock_client.chat.completions.create.return_value = mock_response
+            choice = Mock()
+            choice.message.content = "response"
+            choice.message.reasoning_content = ""
+            choice.message.tool_calls = []
+            mock_response.choices = [choice]
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            
+            config = Mock()
+            config.base_url = "http://mock"
+            config.api_key = "mock"
             
             # Create provider with injected sink
             provider = OpenAIProvider(
-                client=mock_client,
+                config=config,
                 interaction_sink=sink
             )
+            provider.client = mock_client
             
             messages = [{"role": "user", "content": "Hello"}]
             model = "gpt-4"
             tools = [{"function": {"name": "test_tool"}}]
             
-            # Execute with verbose
-            provider.chat(messages, model, tools=tools, verbose=True)
+            import asyncio
+            asyncio.run(provider.chat(messages, model, tools=tools, verbose=True))
             
             # Verify sink was used
             sink.on_llm_request_debug.assert_called_once()
@@ -406,12 +417,16 @@ class TestBackwardCompatibility:
     def test_llm_works_without_sink(self):
         """LLM provider should work without sink (legacy mode)."""
         try:
-            from ayder_cli.services.llm import OpenAIProvider
+            from ayder_cli.providers.impl.openai import OpenAIProvider
             
             mock_client = Mock()
             
+            config = Mock()
+            config.base_url = "http://mock"
+            config.api_key = "mock"
             # Create without sink (legacy)
-            provider = OpenAIProvider(client=mock_client)
+            provider = OpenAIProvider(config=config)
+            provider.client = mock_client
             
             # Should still work
             assert provider.client is mock_client

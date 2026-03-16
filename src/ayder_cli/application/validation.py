@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
-from ayder_cli.application.checkpoint_orchestrator import RuntimeContext
-
 
 # ---------------------------------------------------------------------------
 # DTOs
@@ -84,10 +82,19 @@ class SchemaValidator:
 
         # Type validation (moved from validate_tool_call in execution.py)
         properties = params.get("properties", {})
-        for param_name, value in request.arguments.items():
+        for param_name, value in list(request.arguments.items()):
             if param_name not in properties:
                 continue
             expected_type = properties[param_name].get("type")
+            
+            # Coerce string to integer if expected
+            if expected_type == "integer" and isinstance(value, str):
+                try:
+                    value = int(value)
+                    request.arguments[param_name] = value
+                except ValueError:
+                    pass  # Let it fail the type check below
+
             if expected_type == "integer" and not isinstance(value, int):
                 return False, ValidationError(
                     tool_name=request.name,
@@ -137,7 +144,7 @@ class ValidationAuthority:
     def validate(
         self,
         request: ToolRequest,
-        context: Optional[RuntimeContext] = None,
+        context: Optional[Any] = None,
     ) -> tuple[bool, Any]:
         """Run validators in order; exit early on first failure."""
         # If custom stages were registered via register(), use those

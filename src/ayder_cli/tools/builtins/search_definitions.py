@@ -13,28 +13,18 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="search_codebase",
         tags=("core",),
         func_ref="ayder_cli.tools.builtins.search:search_codebase",
-        description=(
-            "Search for a regex pattern across the codebase. Returns matching "
-            "lines with file paths and line numbers. Use this to locate code "
-            "before reading files."
-        ),
+        description="Search files by name pattern or content regex.",
         description_template="Codebase will be searched for pattern '{pattern}'",
         parameters={
             "type": "object",
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": (
-                        "The regex pattern to search for "
-                        "(e.g., 'def read_file', 'class.*Test', 'TODO.*bug')"
-                    ),
+                    "description": "Regex pattern to search for.",
                 },
                 "file_pattern": {
                     "type": "string",
-                    "description": (
-                        "Optional file glob pattern to limit search "
-                        "(e.g., '*.py', 'src/**/*.js')"
-                    ),
+                    "description": "Optional file glob filter.",
                 },
                 "case_sensitive": {
                     "type": "boolean",
@@ -42,9 +32,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 },
                 "context_lines": {
                     "type": "integer",
-                    "description": (
-                        "Number of context lines to show before/after each match (default: 0)"
-                    ),
+                    "description": "Context lines around match (default: 0).",
                 },
                 "max_results": {
                     "type": "integer",

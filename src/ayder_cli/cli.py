@@ -82,14 +82,7 @@ def create_parser():
         help="Auto-approve web/network tools (fetch_web)",
     )
 
-    # Max agentic iterations (overrides config.max_iterations)
-    parser.add_argument(
-        "-I",
-        "--iterations",
-        type=int,
-        default=None,
-        help="Max agentic iterations per message (default: from config, 50)",
-    )
+
     parser.add_argument(
         "--verbose",
         nargs="?",
@@ -98,7 +91,15 @@ def create_parser():
         type=str.upper,
         choices=LOG_LEVELS,
         metavar="LEVEL",
-        help="Enable Loguru logging for this run; default level is INFO",
+        help="Enable verbose console output and logging; default level is INFO",
+    )
+    parser.add_argument(
+        "--logging-level",
+        type=str.upper,
+        choices=LOG_LEVELS,
+        metavar="LEVEL",
+        default=None,
+        help="Set the logging level for this session (e.g. DEBUG, INFO). Logs are written to .ayder/log/ayder.log",
     )
 
     # Version flag
@@ -138,14 +139,15 @@ def main():
     from ayder_cli.core.config import load_config
 
     cfg = load_config(notify_migration=True, output=print)
+    
+    # Priority: 1. --verbose level, 2. --logging-level, 3. config.logging_level
+    effective_log_level = args.verbose or args.logging_level
+    
     setup_logging(
         cfg,
-        level_override=args.verbose,
+        level_override=effective_log_level,
         console_stream=sys.stdout if args.verbose is not None else None,
     )
-
-    # Resolve iterations: CLI flag overrides config value
-    iterations = cfg.max_iterations if args.iterations is None else args.iterations
 
     # Handle task-related CLI options
     if args.tasks:
@@ -153,18 +155,17 @@ def main():
     if args.implement:
         sys.exit(
             _run_implement_cli(
-                args.implement, permissions=granted, iterations=iterations
+                args.implement, permissions=granted
             )
         )
     if args.implement_all:
-        sys.exit(_run_implement_all_cli(permissions=granted, iterations=iterations))
+        sys.exit(_run_implement_all_cli(permissions=granted))
     if args.temporal_task_queue:
         sys.exit(
             _run_temporal_queue_cli(
                 queue_name=args.temporal_task_queue,
                 prompt_path=args.prompt,
                 permissions=granted,
-                iterations=iterations,
             )
         )
 
@@ -197,10 +198,10 @@ def main():
         # Default: TUI mode
         from ayder_cli.tui import run_tui
 
-        run_tui(permissions=granted, iterations=iterations)
+        run_tui(permissions=granted)
         return
 
-    sys.exit(run_command(prompt, permissions=granted, iterations=iterations))
+    sys.exit(run_command(prompt, permissions=granted))
 
 
 if __name__ == "__main__":

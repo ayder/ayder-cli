@@ -73,18 +73,6 @@ class TestCliCallbacksOutput:
         captured = capsys.readouterr()
         assert captured.err == ""
 
-    def test_on_iteration_update_verbose(self, capsys):
-        cb = CliCallbacks(verbose=True)
-        cb.on_iteration_update(3, 50)
-        captured = capsys.readouterr()
-        assert "3/50" in captured.err
-
-    def test_on_iteration_update_quiet(self, capsys):
-        cb = CliCallbacks(verbose=False)
-        cb.on_iteration_update(3, 50)
-        captured = capsys.readouterr()
-        assert captured.err == ""
-
 
 class TestCliCallbacksSilentMethods:
     """Methods that produce no output."""

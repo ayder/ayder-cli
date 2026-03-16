@@ -35,9 +35,10 @@ def test_handle_logging_applies_direct_level():
 
     mock_setup.assert_called_once_with(app.config, level_override="INFO")
     assert app._logging_level == "INFO"
-    chat_view.add_system_message.assert_called_once_with(
-        "Logging level set to INFO (session only)"
-    )
+    chat_view.add_system_message.assert_called_once()
+    msg = chat_view.add_system_message.call_args[0][0]
+    assert "Logging level set to INFO" in msg
+    assert "ayder.log" in msg
 
 
 def test_handle_logging_opens_select_screen_and_applies_choice():
@@ -57,6 +58,7 @@ def test_handle_logging_opens_select_screen_and_applies_choice():
 
     mock_setup.assert_called_once_with(app.config, level_override="DEBUG")
     assert app._logging_level == "DEBUG"
-    chat_view.add_system_message.assert_called_once_with(
-        "Logging level set to DEBUG (session only)"
-    )
+    chat_view.add_system_message.assert_called_once()
+    msg = chat_view.add_system_message.call_args[0][0]
+    assert "Logging level set to DEBUG" in msg
+    assert "ayder.log" in msg

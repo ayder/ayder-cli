@@ -126,7 +126,7 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
     definitions = [td for td, _ in all_defs]
     
     # Validate: Ensure required core tools are present
-    required_tools = {'list_files', 'read_file', 'write_file', 'run_shell_command'}
+    required_tools = {'file_explorer', 'read_file', 'file_editor', 'run_shell_command'}
     found_tools = {td.name for td in definitions}
     missing = required_tools - found_tools
     if missing:

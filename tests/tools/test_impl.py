@@ -14,13 +14,9 @@ class ImplNamespace:
     pass
 
 impl = ImplNamespace()
-impl.list_files = filesystem.list_files
+impl.file_explorer = filesystem.file_explorer
 impl.read_file = filesystem.read_file
-impl.write_file = filesystem.write_file
-impl.replace_string = filesystem.replace_string
-impl.insert_line = filesystem.insert_line
-impl.delete_line = filesystem.delete_line
-impl.get_file_info = filesystem.get_file_info
+impl.file_editor = filesystem.file_editor
 impl.MAX_FILE_SIZE = filesystem.MAX_FILE_SIZE
 
 impl.search_codebase = search.search_codebase
@@ -49,7 +45,7 @@ def project_context(tmp_path):
     return ProjectContext(str(tmp_path))
 
 
-class TestListFiles:
+class TestFileExplorerDirectory:
     """Test list_files() function."""
 
     def test_list_files_current_directory(self, tmp_path, monkeypatch, project_context):
@@ -61,7 +57,7 @@ class TestListFiles:
 
         # Change to tmp_path and test with default (current directory)
         monkeypatch.chdir(tmp_path)
-        result = impl.list_files(project_context)
+        result = impl.file_explorer(project_context, path=".")
 
         assert isinstance(result, ToolSuccess)
         files = json.loads(result)
@@ -75,7 +71,7 @@ class TestListFiles:
         (tmp_path / "file1.txt").write_text("content1")
         (tmp_path / "file2.txt").write_text("content2")
 
-        result = impl.list_files(project_context, str(tmp_path))
+        result = impl.file_explorer(project_context, str(tmp_path))
         files = json.loads(result)
 
         assert "file1.txt" in files
@@ -84,7 +80,7 @@ class TestListFiles:
     def test_list_files_nonexistent_directory(self, tmp_path, project_context):
         """Test error handling for non-existent directory."""
         # Use a path within the sandbox that doesn't exist
-        result = impl.list_files(project_context, "nonexistent/path/12345")
+        result = impl.file_explorer(project_context, "nonexistent/path/12345")
         assert isinstance(result, ToolError)
         assert "Error" in result
 
@@ -98,10 +94,10 @@ class TestListFiles:
         if sys.platform != 'win32':
             restricted_dir.chmod(0o000)
             try:
-                result = impl.list_files(project_context, str(restricted_dir))
+                result = impl.file_explorer(project_context, str(restricted_dir))
                 assert isinstance(result, ToolError)
                 assert result.category == "execution"
-                assert "Error listing files" in result
+                assert "Error exploring path" in result
             finally:
                 # Restore permissions for cleanup
                 restricted_dir.chmod(0o755)
@@ -173,7 +169,7 @@ class TestReadFile:
         assert "3: Third line" in result
 
 
-class TestWriteFile:
+class TestFileEditorWrite:
     """Test write_file() function."""
 
     def test_write_new_file(self, tmp_path, project_context):
@@ -181,7 +177,7 @@ class TestWriteFile:
         test_file = tmp_path / "new_file.txt"
         content = "This is new content"
 
-        result = impl.write_file(project_context, str(test_file), content)
+        result = impl.file_editor(project_context, str(test_file), "write", content=content)
 
         assert isinstance(result, ToolSuccess)
         assert "Successfully wrote" in result
@@ -193,7 +189,7 @@ class TestWriteFile:
         test_file.write_text("Old content")
 
         new_content = "New content"
-        result = impl.write_file(project_context, str(test_file), new_content)
+        result = impl.file_editor(project_context, str(test_file), "write", content=new_content)
 
         assert "Successfully wrote" in result
         assert test_file.read_text() == new_content
@@ -203,7 +199,7 @@ class TestWriteFile:
         test_file = tmp_path / "unicode.txt"
         content = "Unicode: 你好世界 🌍 émojis àccents"
 
-        result = impl.write_file(project_context, str(test_file), content)
+        result = impl.file_editor(project_context, str(test_file), "write", content=content)
 
         assert "Successfully wrote" in result
         assert test_file.read_text() == content
@@ -211,12 +207,12 @@ class TestWriteFile:
     def test_write_file_invalid_path(self, tmp_path, project_context):
         """Test error handling for invalid paths."""
         # Try to write to a path that can't be created (within sandbox)
-        result = impl.write_file(project_context, "/subdir/file.txt", "content")
+        result = impl.file_editor(project_context, "/subdir/file.txt", "write", content="content")
         assert isinstance(result, ToolError)
         assert "Error" in result
 
 
-class TestReplaceString:
+class TestFileEditorReplace:
     """Test replace_string() function."""
 
     def test_successful_string_replacement(self, tmp_path, project_context):
@@ -224,7 +220,7 @@ class TestReplaceString:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello world! Hello everyone!")
 
-        result = impl.replace_string(project_context, str(test_file), "world", "universe")
+        result = impl.file_editor(project_context, str(test_file), "replace", old_string="world", new_string="universe")
 
         assert isinstance(result, ToolSuccess)
         assert "Successfully replaced" in result
@@ -235,7 +231,7 @@ class TestReplaceString:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello world!")
 
-        result = impl.replace_string(project_context, str(test_file), "notfound", "replacement")
+        result = impl.file_editor(project_context, str(test_file), "replace", old_string="notfound", new_string="replacement")
 
         assert isinstance(result, ToolError)
         assert "Error" in result
@@ -248,14 +244,14 @@ class TestReplaceString:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello world! Hello world! Hello world!")
 
-        result = impl.replace_string(project_context, str(test_file), "world", "Python")
+        result = impl.file_editor(project_context, str(test_file), "replace", old_string="world", new_string="Python")
 
         assert "Successfully replaced" in result
         assert test_file.read_text() == "Hello Python! Hello Python! Hello Python!"
 
     def test_replace_string_nonexistent_file(self, tmp_path, project_context):
         """Test error handling for non-existent file."""
-        result = impl.replace_string(project_context, "nonexistent/file.txt", "old", "new")
+        result = impl.file_editor(project_context, "nonexistent/file.txt", "replace", old_string="old", new_string="new")
         assert "Error" in result
 
 
@@ -392,20 +388,20 @@ class TestReadFileExceptions:
             assert "Mocked IO error" in result
 
 
-class TestWriteFileExceptions:
+class TestFileEditorWriteExceptions:
     """Test exception handling in write_file - Lines 108-109."""
 
     def test_write_file_general_exception(self, tmp_path, project_context):
         """Test general exception handling in write_file."""
         with patch('builtins.open', side_effect=PermissionError("Permission denied")):
-            result = impl.write_file(project_context, "test.txt", "content")
+            result = impl.file_editor(project_context, "test.txt", "write", content="content")
             assert isinstance(result, ToolError)
             assert result.category == "execution"
-            assert "Error writing file" in result
+            assert "Error executing file_editor" in result
             assert "Permission denied" in result
 
 
-class TestReplaceStringExceptions:
+class TestFileEditorReplaceExceptions:
     """Test exception handling in replace_string - Lines 162-163."""
 
     def test_replace_string_general_exception(self, tmp_path, project_context):
@@ -414,10 +410,10 @@ class TestReplaceStringExceptions:
         test_file.write_text("content")
 
         with patch('builtins.open', side_effect=IOError("Mocked IO error")):
-            result = impl.replace_string(project_context, str(test_file), "old", "new")
+            result = impl.file_editor(project_context, str(test_file), "replace", old_string="old", new_string="new")
             assert isinstance(result, ToolError)
             assert result.category == "execution"
-            assert "Error replacing text" in result
+            assert "Error executing file_editor" in result
             assert "Mocked IO error" in result
 
 
@@ -568,7 +564,7 @@ class TestFormatSearchResultsErrors:
         assert "Pattern:" in result
 
 
-class TestInsertLine:
+class TestFileEditorInsert:
     """Test insert_line() function."""
 
     def test_insert_at_beginning(self, tmp_path, project_context):
@@ -576,7 +572,7 @@ class TestInsertLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3\n")
 
-        result = impl.insert_line(project_context, str(test_file), 1, "Inserted")
+        result = impl.file_editor(project_context, str(test_file), "insert", line_number=1, content="Inserted")
         assert isinstance(result, ToolSuccess)
         assert "Successfully inserted" in result
         assert test_file.read_text() == "Inserted\nLine 1\nLine 2\nLine 3\n"
@@ -586,7 +582,7 @@ class TestInsertLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3\n")
 
-        result = impl.insert_line(project_context, str(test_file), 2, "Inserted")
+        result = impl.file_editor(project_context, str(test_file), "insert", line_number=2, content="Inserted")
         assert isinstance(result, ToolSuccess)
         assert test_file.read_text() == "Line 1\nInserted\nLine 2\nLine 3\n"
 
@@ -595,7 +591,7 @@ class TestInsertLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\n")
 
-        result = impl.insert_line(project_context, str(test_file), 100, "Appended")
+        result = impl.file_editor(project_context, str(test_file), "insert", line_number=100, content="Appended")
         assert isinstance(result, ToolSuccess)
         assert test_file.read_text() == "Line 1\nLine 2\nAppended\n"
 
@@ -604,20 +600,20 @@ class TestInsertLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\n")
 
-        result = impl.insert_line(project_context, str(test_file), 0, "bad")
+        result = impl.file_editor(project_context, str(test_file), "insert", line_number=0, content="bad")
         assert isinstance(result, ToolError)
         assert result.category == "validation"
 
     def test_insert_nonexistent_file(self, tmp_path, project_context):
         """Test inserting into nonexistent file."""
-        result = impl.insert_line(project_context, "nonexistent.txt", 1, "content")
+        result = impl.file_editor(project_context, "nonexistent.txt", "insert", line_number=1, content="content")
         assert isinstance(result, ToolError)
         assert "does not exist" in result
 
     def test_insert_path_traversal(self, tmp_path):
         """Test path traversal is blocked."""
         ctx = ProjectContext(str(tmp_path))
-        result = impl.insert_line(ctx, "../outside.txt", 1, "content")
+        result = impl.file_editor(ctx, "../outside.txt", "insert", line_number=1, content="content")
         assert isinstance(result, ToolError)
         assert result.category == "security"
 
@@ -626,12 +622,12 @@ class TestInsertLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\n")
 
-        result = impl.insert_line(project_context, str(test_file), 1, "No newline")
+        result = impl.file_editor(project_context, str(test_file), "insert", line_number=1, content="No newline")
         assert isinstance(result, ToolSuccess)
         assert test_file.read_text() == "No newline\nLine 1\n"
 
 
-class TestDeleteLine:
+class TestFileEditorDelete:
     """Test delete_line() function."""
 
     def test_delete_first_line(self, tmp_path, project_context):
@@ -639,7 +635,7 @@ class TestDeleteLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3\n")
 
-        result = impl.delete_line(project_context, str(test_file), 1)
+        result = impl.file_editor(project_context, str(test_file), "delete", line_number=1)
         assert isinstance(result, ToolSuccess)
         assert "Deleted line 1" in result
         assert "Line 1" in result  # preview of deleted content
@@ -650,7 +646,7 @@ class TestDeleteLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3\n")
 
-        result = impl.delete_line(project_context, str(test_file), 2)
+        result = impl.file_editor(project_context, str(test_file), "delete", line_number=2)
         assert isinstance(result, ToolSuccess)
         assert test_file.read_text() == "Line 1\nLine 3\n"
 
@@ -659,7 +655,7 @@ class TestDeleteLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3\n")
 
-        result = impl.delete_line(project_context, str(test_file), 3)
+        result = impl.file_editor(project_context, str(test_file), "delete", line_number=3)
         assert isinstance(result, ToolSuccess)
         assert test_file.read_text() == "Line 1\nLine 2\n"
 
@@ -668,7 +664,7 @@ class TestDeleteLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\n")
 
-        result = impl.delete_line(project_context, str(test_file), 5)
+        result = impl.file_editor(project_context, str(test_file), "delete", line_number=5)
         assert isinstance(result, ToolError)
         assert result.category == "validation"
         assert "out of range" in result
@@ -678,25 +674,25 @@ class TestDeleteLine:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\n")
 
-        result = impl.delete_line(project_context, str(test_file), 0)
+        result = impl.file_editor(project_context, str(test_file), "delete", line_number=0)
         assert isinstance(result, ToolError)
         assert result.category == "validation"
 
     def test_delete_nonexistent_file(self, tmp_path, project_context):
         """Test deleting from nonexistent file."""
-        result = impl.delete_line(project_context, "nonexistent.txt", 1)
+        result = impl.file_editor(project_context, "nonexistent.txt", "delete", line_number=1)
         assert isinstance(result, ToolError)
         assert "does not exist" in result
 
     def test_delete_path_traversal(self, tmp_path):
         """Test path traversal is blocked."""
         ctx = ProjectContext(str(tmp_path))
-        result = impl.delete_line(ctx, "../outside.txt", 1)
+        result = impl.file_editor(ctx, "../outside.txt", "delete", line_number=1)
         assert isinstance(result, ToolError)
         assert result.category == "security"
 
 
-class TestGetFileInfo:
+class TestFileExplorerFile:
     """Test get_file_info() function."""
 
     def test_file_info_basic(self, tmp_path, project_context):
@@ -704,7 +700,7 @@ class TestGetFileInfo:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Line 1\nLine 2\nLine 3\n")
 
-        result = impl.get_file_info(project_context, str(test_file))
+        result = impl.file_explorer(project_context, str(test_file))
         assert isinstance(result, ToolSuccess)
         info = json.loads(result)
         assert info["line_count"] == 3
@@ -713,21 +709,10 @@ class TestGetFileInfo:
         assert info["is_directory"] is False
         assert info["size_bytes"] > 0
 
-    def test_file_info_directory(self, tmp_path, project_context):
-        """Test directory info."""
-        subdir = tmp_path / "subdir"
-        subdir.mkdir()
-
-        result = impl.get_file_info(project_context, str(subdir))
-        assert isinstance(result, ToolSuccess)
-        info = json.loads(result)
-        assert info["is_directory"] is True
-        assert info["is_file"] is False
-        assert info["line_count"] is None
 
     def test_file_info_nonexistent(self, tmp_path, project_context):
         """Test nonexistent file."""
-        result = impl.get_file_info(project_context, "nonexistent.txt")
+        result = impl.file_explorer(project_context, "nonexistent.txt")
         assert isinstance(result, ToolError)
         assert "does not exist" in result
 
@@ -736,14 +721,14 @@ class TestGetFileInfo:
         test_file = tmp_path / "small.txt"
         test_file.write_text("hi")
 
-        result = impl.get_file_info(project_context, str(test_file))
+        result = impl.file_explorer(project_context, str(test_file))
         info = json.loads(result)
         assert "B" in info["size_human"]
 
     def test_file_info_path_traversal(self, tmp_path):
         """Test path traversal is blocked."""
         ctx = ProjectContext(str(tmp_path))
-        result = impl.get_file_info(ctx, "../outside.txt")
+        result = impl.file_explorer(ctx, "../outside.txt")
         assert isinstance(result, ToolError)
         assert result.category == "security"
 
@@ -752,7 +737,7 @@ class TestGetFileInfo:
         test_file = tmp_path / "Makefile"
         test_file.write_text("all:\n\techo hello\n")
 
-        result = impl.get_file_info(project_context, str(test_file))
+        result = impl.file_explorer(project_context, str(test_file))
         info = json.loads(result)
         assert info["extension"] is None or info["extension"] == ""
 

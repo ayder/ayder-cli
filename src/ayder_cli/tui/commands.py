@@ -6,6 +6,8 @@ being a method on AyderApp. This cuts AyderApp roughly in half.
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.core.config import list_provider_profiles
@@ -15,8 +17,6 @@ from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEdit
 from ayder_cli.tui.widgets import ChatView, StatusBar
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from ayder_cli.tui.app import AyderApp
 
 
@@ -82,7 +82,7 @@ def _apply_provider_switch(
 ) -> None:
     """Apply provider switch: reload config from config.toml for the chosen provider."""
     from ayder_cli.core.config import load_config_for_provider
-    from ayder_cli.services.llm import create_llm_provider
+    from ayder_cli.providers import provider_orchestrator
 
     # Save old config for rollback on error
     old_config = app.config
@@ -93,7 +93,7 @@ def _apply_provider_switch(
 
     # Recreate the LLM provider
     try:
-        app.llm = create_llm_provider(new_config)
+        app.llm = provider_orchestrator.create(new_config)
     except (ModuleNotFoundError, ImportError, ValueError) as e:
         # SDK not installed or provider not yet supported — revert and inform
         app.config = old_config
@@ -107,9 +107,6 @@ def _apply_provider_switch(
     app.chat_loop.config.num_ctx = new_config.num_ctx
     app.update_system_prompt_model()
 
-    # Fresh iteration budget for the new provider
-    app.chat_loop.reset_iterations()
-
     status_bar = app.query_one("#status-bar", StatusBar)
     status_bar.set_model(new_config.model)
 
@@ -118,45 +115,49 @@ def _apply_provider_switch(
     )
 
 
+async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
+    """Async helper to list models and show selector."""
+    try:
+        models = await app.llm.list_models()
+        if not models:
+            chat_view.add_system_message(f"Current model: {app.model}")
+            return
+
+        # Show interactive select screen
+        items = [(m, m) for m in sorted(models)]
+
+        def on_model_selected(selected: str | None) -> None:
+            if selected:
+                app.model = selected
+                app.chat_loop.config.model = selected
+                app.update_system_prompt_model()
+                status_bar = app.query_one("#status-bar", StatusBar)
+                status_bar.set_model(selected)
+                chat_view.add_system_message(f"Switched to model: {selected}")
+
+        app.push_screen(
+            CLISelectScreen(
+                title="Select model",
+                items=items,
+                current=app.model,
+                description=f"Currently using: {app.model}",
+            ),
+            on_model_selected,
+        )
+    except Exception as e:
+        chat_view.add_system_message(f"Error listing models: {e}")
+
+
 def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /model command."""
     if not args.strip():
-        try:
-            models = app.llm.list_models()
-            if not models:
-                chat_view.add_system_message(f"Current model: {app.model}")
-                return
-
-            # Show interactive select screen
-            items = [(m, m) for m in sorted(models)]
-
-            def on_model_selected(selected: str | None) -> None:
-                if selected:
-                    app.model = selected
-                    app.chat_loop.config.model = selected
-                    app.update_system_prompt_model()
-                    app.chat_loop.reset_iterations()
-                    status_bar = app.query_one("#status-bar", StatusBar)
-                    status_bar.set_model(selected)
-                    chat_view.add_system_message(f"Switched to model: {selected}")
-
-            app.push_screen(
-                CLISelectScreen(
-                    title="Select model",
-                    items=items,
-                    current=app.model,
-                    description=f"Currently using: {app.model}",
-                ),
-                on_model_selected,
-            )
-        except Exception as e:
-            chat_view.add_system_message(f"Error listing models: {e}")
+        # Run async model listing in the background
+        asyncio.create_task(_list_and_show_models(app, chat_view))
     else:
         new_model = args.strip()
         app.model = new_model
         app.chat_loop.config.model = new_model
         app.update_system_prompt_model()
-        app.chat_loop.reset_iterations()
         status_bar = app.query_one("#status-bar", StatusBar)
         status_bar.set_model(new_model)
         chat_view.add_system_message(f"Switched to model: {new_model}")
@@ -277,6 +278,8 @@ def handle_verbose(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /verbose command."""
     current = getattr(app, "_verbose_mode", False)
     app._verbose_mode = not current
+    if hasattr(app, "chat_loop"):
+        app.chat_loop.config.verbose = app._verbose_mode
     status = "ON" if app._verbose_mode else "OFF"
     chat_view.add_system_message(f"Verbose mode: {status}")
 
@@ -294,7 +297,10 @@ def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
             return
         effective = setup_logging(app.config, level_override=selected)
         app._logging_level = effective
-        chat_view.add_system_message(f"Logging level set to {effective} (session only)")
+        log_path = Path(app.config.logging_file_path).expanduser().absolute()
+        chat_view.add_system_message(
+            f"Logging level set to {effective} (session only). Logs: {log_path}"
+        )
         return
 
     items = [(level, level) for level in LOG_LEVELS]
@@ -303,8 +309,9 @@ def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
         if selected:
             effective = setup_logging(app.config, level_override=selected)
             app._logging_level = effective
+            log_path = Path(app.config.logging_file_path).expanduser().absolute()
             chat_view.add_system_message(
-                f"Logging level set to {effective} (session only)"
+                f"Logging level set to {effective} (session only). Logs: {log_path}"
             )
 
     app.push_screen(
@@ -348,7 +355,6 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.messages.append({"role": "user", "content": compact_prompt})
     chat_view.add_system_message("Compacting: summarize → save → clear → load")
 
-    app.chat_loop.reset_iterations()
     app.start_llm_processing()
 
 
@@ -380,7 +386,7 @@ def handle_save_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
 def handle_load_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /load-memory command."""
     from ayder_cli.prompts import LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE
-    from ayder_cli.checkpoint_manager import CHECKPOINT_FILE_NAME
+    from ayder_cli.memory import CHECKPOINT_FILE_NAME
 
     project_ctx = ProjectContext(".")
     memory_file = project_ctx.root / ".ayder" / "memory" / CHECKPOINT_FILE_NAME
@@ -746,7 +752,6 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
         queue_name=queue_name,
         prompt_path=None,
         permissions=set(app.permissions),
-        iterations=app.chat_loop.config.max_iterations,
     )
     worker = TemporalWorker(worker_config)
     worker_task = app.run_worker(worker.run_async(), exclusive=False)
@@ -849,9 +854,71 @@ def do_clear(app: AyderApp, chat_view: ChatView) -> None:
         else:
             app.messages.clear()
 
-    app.chat_loop.reset_iterations()
     chat_view.clear_messages()
     chat_view.add_system_message("Conversation history cleared.")
+
+
+
+def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
+    """Toggle dynamic tool plugins (e.g. venv, http, background, temporal)."""
+    from ayder_cli.tools.definition import TOOL_DEFINITIONS
+    
+    # Discover available non-core tags
+    available_plugins = set()
+    for td in TOOL_DEFINITIONS:
+        for tag in td.tags:
+            if tag not in ("core", "metadata"):
+                available_plugins.add(tag)
+                
+    available_plugins_list = sorted(list(available_plugins))
+    
+    # Initialize tool_tags if needed
+    if app.chat_loop.config.tool_tags is None:
+        app.chat_loop.config.tool_tags = frozenset({"core", "metadata"})
+        
+    current_tags = set(app.chat_loop.config.tool_tags)
+    
+    if args.strip():
+        plugin_name = args.strip().lower()
+        if plugin_name not in available_plugins_list:
+            chat_view.add_system_message(f"Unknown plugin: '{plugin_name}'. Available: {', '.join(available_plugins_list)}")
+            return
+            
+        if plugin_name in current_tags:
+            current_tags.remove(plugin_name)
+            status = "disabled"
+        else:
+            current_tags.add(plugin_name)
+            status = "enabled"
+            
+        app.chat_loop.config.tool_tags = frozenset(current_tags)
+        chat_view.add_system_message(f"Plugin '{plugin_name}' {status}.")
+    else:
+        # Show interactive select screen
+        items = []
+        for p in available_plugins_list:
+            mark = "✓" if p in current_tags else " "
+            items.append((p, f"[{mark}] {p}"))
+            
+        def on_plugin_selected(selected: str | None) -> None:
+            if selected:
+                if selected in current_tags:
+                    current_tags.remove(selected)
+                    status = "disabled"
+                else:
+                    current_tags.add(selected)
+                    status = "enabled"
+                app.chat_loop.config.tool_tags = frozenset(current_tags)
+                chat_view.add_system_message(f"Plugin '{selected}' {status}.")
+
+        app.push_screen(
+            CLISelectScreen(
+                title="Toggle Tool Plugins",
+                items=items,
+                description="Select a plugin to toggle • Esc to close",
+            ),
+            on_plugin_selected,
+        )
 
 
 # Command dispatch map: command name -> handler function
@@ -875,4 +942,5 @@ COMMAND_MAP: dict[str, Callable] = {
     "/permission": handle_permission,
     "/temporal": handle_temporal,
     "/skill": handle_skill,
+    "/plugin": handle_plugin,
 }

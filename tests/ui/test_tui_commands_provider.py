@@ -20,7 +20,6 @@ def _make_app() -> SimpleNamespace:
         chat_loop=SimpleNamespace(
             llm=MagicMock(),
             config=SimpleNamespace(model="qwen3-coder:latest", num_ctx=65536),
-            reset_iterations=MagicMock(),
         ),
     )
     return app
@@ -104,7 +103,7 @@ def test_apply_provider_switch_updates_runtime_for_dynamic_profile():
             return_value=new_config,
         ),
         patch(
-            "ayder_cli.services.llm.create_llm_provider",
+            "ayder_cli.providers.provider_orchestrator.create",
             return_value=new_llm,
         ),
     ):
@@ -134,7 +133,7 @@ def test_apply_provider_switch_rolls_back_on_invalid_driver():
             return_value=SimpleNamespace(model="x", num_ctx=1),
         ),
         patch(
-            "ayder_cli.services.llm.create_llm_provider",
+            "ayder_cli.providers.provider_orchestrator.create",
             side_effect=ValueError("Unsupported LLM driver 'bad'"),
         ),
     ):

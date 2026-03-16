@@ -12,13 +12,9 @@ class ImplNamespace:
     pass
 
 impl = ImplNamespace()
-impl.list_files = filesystem.list_files
+impl.file_explorer = filesystem.file_explorer
 impl.read_file = filesystem.read_file
-impl.write_file = filesystem.write_file
-impl.replace_string = filesystem.replace_string
-impl.insert_line = filesystem.insert_line
-impl.delete_line = filesystem.delete_line
-impl.get_file_info = filesystem.get_file_info
+impl.file_editor = filesystem.file_editor
 impl.search_codebase = search.search_codebase
 
 
@@ -50,7 +46,7 @@ class TestToolPathSecurity:
         # Mock validate_path to ensure it's called
         with patch.object(ProjectContext, 'validate_path', side_effect=ValueError("Access denied")) as mock_validate:
             # list_files
-            result = impl.list_files(ctx, ".")
+            result = impl.file_explorer(ctx, ".")
             assert isinstance(result, ToolError)
             assert result.category == "security"
             assert "Security Error" in result
@@ -63,7 +59,7 @@ class TestToolPathSecurity:
             assert "Security Error" in result
 
             # write_file
-            result = impl.write_file(ctx, "file.txt", "content")
+            result = impl.file_editor(ctx, "file.txt", "write", content="content")
             assert isinstance(result, ToolError)
             assert result.category == "security"
             assert "Security Error" in result
@@ -90,7 +86,7 @@ class TestToolPathSecurity:
         """Test write_file rejects ../ paths."""
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.write_file(ctx, "../outside.txt", "content")
+        result = impl.file_editor(ctx, "../outside.txt", "write", content="content")
         assert isinstance(result, ToolError)
         assert result.category == "security"
         assert "Security Error" in result
@@ -100,7 +96,7 @@ class TestToolPathSecurity:
         """Test list_files rejects ../ paths."""
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.list_files(ctx, "..")
+        result = impl.file_explorer(ctx, "..")
         assert isinstance(result, ToolError)
         assert result.category == "security"
         assert "Security Error" in result
@@ -110,7 +106,7 @@ class TestToolPathSecurity:
         """Test replace_string rejects ../ paths."""
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.replace_string(ctx, "../outside.txt", "old", "new")
+        result = impl.file_editor(ctx, "../outside.txt", "replace", old_string="old", new_string="new")
         assert isinstance(result, ToolError)
         assert result.category == "security"
         assert "Security Error" in result
@@ -130,7 +126,7 @@ class TestToolPathSecurity:
         """Test insert_line rejects ../ paths."""
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.insert_line(ctx, "../outside.txt", 1, "content")
+        result = impl.file_editor(ctx, "../outside.txt", "insert", line_number=1, content="content")
         assert isinstance(result, ToolError)
         assert result.category == "security"
         assert "Security Error" in result
@@ -139,7 +135,7 @@ class TestToolPathSecurity:
         """Test delete_line rejects ../ paths."""
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.delete_line(ctx, "../outside.txt", 1)
+        result = impl.file_editor(ctx, "../outside.txt", "delete", line_number=1)
         assert isinstance(result, ToolError)
         assert result.category == "security"
         assert "Security Error" in result
@@ -148,7 +144,7 @@ class TestToolPathSecurity:
         """Test get_file_info rejects ../ paths."""
         ctx = ProjectContext(str(tmp_path))
 
-        result = impl.get_file_info(ctx, "../outside.txt")
+        result = impl.file_explorer(ctx, "../outside.txt")
         assert isinstance(result, ToolError)
         assert result.category == "security"
         assert "Security Error" in result

@@ -5,7 +5,7 @@ This script demonstrates the new verbose mode functionality.
 """
 
 from unittest.mock import Mock
-from ayder_cli.services.llm import OpenAIProvider
+from ayder_cli.providers.impl.openai import OpenAIProvider
 from ayder_cli.ui import print_llm_request_debug
 
 def test_display():
