@@ -176,6 +176,7 @@ class TestFactoryTUIIntegration:
             mock_components.llm_provider = Mock()
             mock_components.tool_registry = Mock()
             mock_components.tool_registry.execute.return_value = "src/\n  main.py"
+            mock_components.tool_registry.get_system_prompts.return_value = ""
             mock_components.memory_manager = Mock()
             mock_components.system_prompt = "test system prompt"
             mock_create_runtime.return_value = mock_components
@@ -268,6 +269,7 @@ class TestFactoryEdgeCases:
         with patch('ayder_cli.application.runtime_factory.create_default_registry') as mock_create:
             mock_registry = Mock()
             mock_registry.execute.side_effect = Exception("Structure error")
+            mock_registry.get_system_prompts.return_value = ""
             mock_create.return_value = mock_registry
 
             # Should not raise

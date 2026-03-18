@@ -80,10 +80,6 @@ def get_system_prompt(prompt_name: str) -> str:
 
 # Replaced by ChatProtocol plugin system (see src/ayder_cli/protocols/)
 
-DBS_TOOL_PROMPT_BLOCK = """
-A RAG server only related with DBS issues. Use this tool for DBS related requests
-"""
-
 
 # =============================================================================
 # PROJECT STRUCTURE MACRO

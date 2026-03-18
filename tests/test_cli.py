@@ -24,6 +24,7 @@ class TestBuildServices:
 
         mock_registry = MagicMock()
         mock_registry.execute.side_effect = Exception("Structure error")
+        mock_registry.get_system_prompts.return_value = ""
 
         with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
@@ -53,6 +54,7 @@ class TestBuildServices:
 
         mock_registry = MagicMock()
         mock_registry.execute.return_value = "src/\n  main.py\n  utils.py"
+        mock_registry.get_system_prompts.return_value = ""
 
         with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \

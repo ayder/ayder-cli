@@ -9,6 +9,7 @@ def _patch_factory():
     """Helper to mock all external dependencies of the factory."""
     mock_registry = MagicMock()
     mock_registry.execute.return_value = "project tree"
+    mock_registry.get_system_prompts.return_value = ""
 
     return (
         patch("ayder_cli.application.runtime_factory.load_config"),
@@ -63,6 +64,7 @@ def test_create_runtime_accepts_injected_config():
 def test_create_runtime_handles_project_structure_error():
     mock_registry = MagicMock()
     mock_registry.execute.side_effect = Exception("unavailable")
+    mock_registry.get_system_prompts.return_value = ""
 
     with (
         patch("ayder_cli.application.runtime_factory.load_config") as mock_load,

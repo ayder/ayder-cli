@@ -51,6 +51,11 @@ class ToolRegistry:
             process_manager=self.process_manager,
         )
 
+    def get_system_prompts(self, tags: frozenset | None = None) -> str:
+        """Return concatenated system_prompt blocks for enabled tools."""
+        defs = TOOL_DEFINITIONS if tags is None else [td for td in TOOL_DEFINITIONS if set(td.tags) & tags]
+        return "".join(td.system_prompt for td in defs if td.system_prompt)
+
     def get_registered_tools(self) -> list:
         return list(self._registry.keys())
 

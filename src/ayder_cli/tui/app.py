@@ -130,6 +130,8 @@ class AyderApp(App):
         ("ctrl+l", "clear", "Clear Chat"),
         ("ctrl+o", "toggle_tools", "Toggle Tools"),
         ("ctrl+t", "toggle_thinking", "Toggle Thinking"),
+        ("pageup", "scroll_chat_up", "Scroll Up"),
+        ("pagedown", "scroll_chat_down", "Scroll Down"),
     ]
 
     def __init__(
@@ -252,7 +254,6 @@ class AyderApp(App):
         """Build and set the system prompt with project structure."""
         from ayder_cli.prompts import (
             get_system_prompt,
-            DBS_TOOL_PROMPT_BLOCK,
             PROJECT_STRUCTURE_MACRO_TEMPLATE,
         )
 
@@ -263,14 +264,16 @@ class AyderApp(App):
             macro = ""
 
         base_prompt = get_system_prompt(self.config.prompt)
-        system_prompt = base_prompt + DBS_TOOL_PROMPT_BLOCK + macro
+        raw_tags = getattr(self.config, "tool_tags", None) if not isinstance(self.config, dict) else self.config.get("tool_tags")
+        tags = frozenset(raw_tags) if raw_tags else None
+        tool_prompts = self.registry.get_system_prompts(tags=tags)
+        system_prompt = base_prompt + tool_prompts + macro
         self.messages.append({"role": "system", "content": system_prompt})
 
     def update_system_prompt_model(self) -> None:
         """Update the model name in the system prompt after /model switch."""
         from ayder_cli.prompts import (
             get_system_prompt,
-            DBS_TOOL_PROMPT_BLOCK,
             PROJECT_STRUCTURE_MACRO_TEMPLATE,
         )
 
@@ -284,8 +287,10 @@ class AyderApp(App):
                 )
             except Exception:
                 macro = ""
+            tags = self.chat_loop.config.tool_tags
+            tool_prompts = self.registry.get_system_prompts(tags=tags)
             self.messages[0]["content"] = (
-                get_system_prompt(self.config.prompt) + DBS_TOOL_PROMPT_BLOCK + macro
+                get_system_prompt(self.config.prompt) + tool_prompts + macro
             )
 
     def inject_skill(self, skill_name: str, skill_content: str) -> None:
@@ -468,7 +473,6 @@ class AyderApp(App):
         """Size the top spacer so the banner sits just above the input bar."""
         chat_view = self.query_one("#chat-view", ChatView)
         viewport_h = chat_view.size.height
-        # Sum the height of all children except the spacer
         content_h = sum(
             child.size.height
             for child in chat_view.children
@@ -608,6 +612,16 @@ class AyderApp(App):
         chat_view.set_thinking_visible(self._show_thinking)
         state = "visible" if self._show_thinking else "hidden"
         chat_view.add_system_message(f"Thinking blocks {state} (Ctrl+T to toggle)")
+
+    def action_scroll_chat_up(self) -> None:
+        """Scroll chat view up one page."""
+        chat_view = self.query_one("#chat-view", ChatView)
+        chat_view.scroll_page_up(animate=False)
+
+    def action_scroll_chat_down(self) -> None:
+        """Scroll chat view down one page."""
+        chat_view = self.query_one("#chat-view", ChatView)
+        chat_view.scroll_page_down(animate=False)
 
     def action_clear(self) -> None:
         """Clear chat history."""

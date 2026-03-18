@@ -39,6 +39,9 @@ class ToolDefinition:
     # ---- implementation reference ----
     func_ref: str = ""  # "module.path:function_name" for auto-registration
 
+    # ---- optional system prompt block injected when tool is enabled ----
+    system_prompt: str = ""
+
     # ---- parameter normalisation helpers ----
     parameter_aliases: Tuple[Tuple[str, str], ...] = ()  # ((alias, canonical), ...)
     path_parameters: Tuple[str, ...] = ()  # parameter names resolved via ProjectContext

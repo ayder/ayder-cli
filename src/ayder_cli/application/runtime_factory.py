@@ -21,7 +21,6 @@ from ayder_cli.process_manager import ProcessManager
 from ayder_cli.memory import MemoryManager
 from ayder_cli.prompts import (
     get_system_prompt,
-    DBS_TOOL_PROMPT_BLOCK,
     PROJECT_STRUCTURE_MACRO_TEMPLATE,
 )
 
@@ -86,7 +85,9 @@ def create_runtime(
 
     # Format the final prompt (protocol injection now handled dynamically by chat_loop and protocols)
     base_prompt = get_system_prompt(cfg.prompt)
-    system_prompt = base_prompt + DBS_TOOL_PROMPT_BLOCK + macro
+    tool_tags = frozenset(cfg.tool_tags) if getattr(cfg, "tool_tags", None) else None
+    tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
+    system_prompt = base_prompt + tool_prompts + macro
 
     return RuntimeComponents(
         config=cfg,

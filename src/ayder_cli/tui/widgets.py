@@ -458,6 +458,18 @@ class _SubmitTextArea(TextArea):
                 self.insert(completion)
             return
 
+        if event.key == "pageup":
+            event.prevent_default()
+            event.stop()
+            self.app.query_one("#chat-view", ChatView).scroll_page_up(animate=False)
+            return
+
+        if event.key == "pagedown":
+            event.prevent_default()
+            event.stop()
+            self.app.query_one("#chat-view", ChatView).scroll_page_down(animate=False)
+            return
+
         self._reset_tab_cycle()
 
 
@@ -599,7 +611,7 @@ class StatusBar(Horizontal):
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
         yield Static(classes="spacer")
-        yield Label("^C:cancel ^L:clear ^O:tools ^T:think ^Q:quit", classes="key-hint")
+        yield Label("^C:cancel ^L:clear ^O:tools ^T:think PgUp/Dn:scroll ^Q:quit", classes="key-hint")
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""

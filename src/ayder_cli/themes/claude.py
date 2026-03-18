@@ -485,21 +485,19 @@ Screen {
     background: #0d0d1a;
 }
 
-/* Inline mode - Configures the app to run within the terminal flow rather than full screen.
-   Sets the height of the 'window' seen in the terminal. */
+/* Inline mode - Configures the app to run within the terminal flow rather than full screen. */
 Screen:inline {
-    height: 80vh;
+    height: 100vh;
     min-height: 20;
 }
 
 /* ID-based selectors for the main layout components in app.py compose() */
 
 #chat-view {
-    height: 1fr; /* Takes up all available space above the input/tools */
+    height: 1fr;
     width: 100%;
     background: transparent;
-    overflow-y: auto;
-    scrollbar-size: 0 0; /* Hides the scrollbar track */
+    scrollbar-size: 0 0;
     scrollbar-size-horizontal: 0;
     scrollbar-size-vertical: 0;
 }

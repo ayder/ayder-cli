@@ -252,16 +252,18 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 
 def handle_tools(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /tools command - list all available tools."""
-    from ayder_cli.tools.schemas import tools_schema
-
+    """Handle /tools command - list currently enabled tools."""
     try:
-        if not tools_schema:
-            chat_view.add_system_message("No tools available.")
+        tags = app.chat_loop.config.tool_tags
+        schemas = app.registry.get_schemas(tags=tags)
+
+        if not schemas:
+            chat_view.add_system_message("No tools enabled.")
             return
 
-        tools_text = "**Available Tools:**\n\n"
-        for tool in tools_schema:
+        tag_str = ", ".join(sorted(tags)) if tags else "all"
+        tools_text = f"**Enabled Tools** (tags: {tag_str}):\n\n"
+        for tool in schemas:
             func = tool.get("function", {})
             name = func.get("name", "Unknown")
             desc = func.get("description", "No description provided.")

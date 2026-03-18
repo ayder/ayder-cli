@@ -64,6 +64,9 @@ class OpenAIProvider(AIProvider):
                 kwargs["stop"] = stop
             if max_tokens := options.get("max_output_tokens"):
                 kwargs[self.MAX_TOKENS_PARAM] = max_tokens
+            extra = self._build_extra_body(options)
+            if extra:
+                kwargs["extra_body"] = extra
 
         if verbose:
             logger.debug(f"OpenAI Chat Request: model={model}, tools={len(tools) if tools else 0}")

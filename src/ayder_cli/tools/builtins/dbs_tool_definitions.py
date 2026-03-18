@@ -16,7 +16,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "or SQL queries/files (mode='sql')."
         ),
         description_template="DBS RAG query with mode '{mode}'",
-        tags=("http",),
+        tags=("dbs",),
+        system_prompt="\nA RAG server only related with DBS issues. Use this tool for DBS related requests\n",
         func_ref="ayder_cli.tools.builtins.dbs_tool:dbs_tool",
         parameters={
             "type": "object",
