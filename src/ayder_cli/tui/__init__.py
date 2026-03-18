@@ -44,7 +44,7 @@ def run_tui(
     app = AyderApp(
         model=model, safe_mode=safe_mode, permissions=permissions
     )
-    app.run(mouse=False)
+    app.run(inline=True, mouse=False)
 
     # Ensure mouse reporting is disabled after exit — Textual's driver may
     # leave it on if the shutdown path doesn't fully complete (e.g. Ctrl+Q).
