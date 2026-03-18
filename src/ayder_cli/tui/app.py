@@ -121,6 +121,7 @@ class AyderApp(App):
 
     CSS = get_theme_css()
     ENABLE_COMMAND_PALETTE = False
+    ENABLE_MOUSE_SUPPORT = False
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
@@ -128,6 +129,7 @@ class AyderApp(App):
         ("ctrl+c", "cancel", "Cancel"),
         ("ctrl+l", "clear", "Clear Chat"),
         ("ctrl+o", "toggle_tools", "Toggle Tools"),
+        ("ctrl+t", "toggle_thinking", "Toggle Thinking"),
     ]
 
     def __init__(
@@ -152,6 +154,7 @@ class AyderApp(App):
         self._pending_messages: list[str] = []
         self._is_processing = False
         self._verbose_mode: bool = False
+        self._show_thinking: bool = False
         self._active_skill: str | None = None
 
         # Build all shared runtime components via the factory
@@ -597,6 +600,14 @@ class AyderApp(App):
         chat_view = self.query_one("#chat-view", ChatView)
         state = "visible" if visible else "hidden"
         chat_view.add_system_message(f"Tool panel {state} (Ctrl+O to toggle)")
+
+    def action_toggle_thinking(self) -> None:
+        """Toggle thinking/reasoning block visibility."""
+        self._show_thinking = not self._show_thinking
+        chat_view = self.query_one("#chat-view", ChatView)
+        chat_view.set_thinking_visible(self._show_thinking)
+        state = "visible" if self._show_thinking else "hidden"
+        chat_view.add_system_message(f"Thinking blocks {state} (Ctrl+T to toggle)")
 
     def action_clear(self) -> None:
         """Clear chat history."""

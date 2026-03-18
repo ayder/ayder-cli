@@ -268,9 +268,13 @@ class TuiChatLoop(AgentLoopBase):
 
             # Detect empty/dropped responses (server closed cleanly but sent nothing)
             if not final_content and not normalized_tool_calls and not final_reasoning:
-                logger.warning("LLM returned empty response (possible connection drop)")
+                logger.warning(
+                    "LLM returned empty response (possible connection drop). "
+                    f"model={self.config.model}, provider={self.config.provider}"
+                )
                 self.cb.on_system_message(
-                    "LLM returned an empty response. The connection may have dropped."
+                    "LLM returned an empty response. Check model compatibility "
+                    "or try switching chat_protocol in config."
                 )
                 return
 

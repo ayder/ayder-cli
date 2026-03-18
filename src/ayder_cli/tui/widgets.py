@@ -25,6 +25,7 @@ class ChatView(VerticalScroll):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._message_widgets: list[Static] = []
+        self._thinking_visible: bool = False
 
     def _create_text(
         self, content: str, msg_type: MessageType, metadata: dict | None = None
@@ -75,6 +76,13 @@ class ChatView(VerticalScroll):
             text.append(content, style="dim italic")
             return text
 
+    def set_thinking_visible(self, visible: bool) -> None:
+        """Toggle visibility of all thinking message widgets."""
+        self._thinking_visible = visible
+        for msg, widget in zip(self.messages, self._message_widgets):
+            if msg["type"] == MessageType.THINKING:
+                widget.display = visible
+
     def add_message(
         self, content: str, msg_type: MessageType, metadata: dict | None = None
     ) -> None:
@@ -85,7 +93,7 @@ class ChatView(VerticalScroll):
                 self.messages[-1]["content"] += content
                 full_content = self.messages[-1]["content"]
                 last_widget = self._message_widgets[-1]
-                
+
                 if msg_type == MessageType.ASSISTANT:
                     last_widget.update(Markdown(full_content.strip()))
                 else:
@@ -113,6 +121,9 @@ class ChatView(VerticalScroll):
                 msg_widget = Static(text, classes=f"message {msg_type.value}")
                 self._message_widgets.append(msg_widget)
                 self.mount(msg_widget)
+                # Hide thinking blocks by default
+                if msg_type == MessageType.THINKING and not self._thinking_visible:
+                    msg_widget.display = False
 
         self.scroll_end(animate=False)
 
@@ -376,6 +387,8 @@ class _SubmitTextArea(TextArea):
     Also supports Tab completion for slash commands.
     """
 
+    PLACEHOLDER = "Type your message or @path/to/file"
+
     class Submitted(Message):
         """Posted when the user presses Enter to submit."""
 
@@ -388,6 +401,17 @@ class _SubmitTextArea(TextArea):
         self._commands = commands or []
         self._tab_cycle_matches: list[str] = []
         self._tab_cycle_index = -1
+        self._placeholder_widget: Static | None = None
+
+    def on_mount(self) -> None:
+        self._placeholder_widget = Static(
+            self.PLACEHOLDER, id="input-placeholder"
+        )
+        self.mount(self._placeholder_widget)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if self._placeholder_widget:
+            self._placeholder_widget.display = not bool(self.text)
 
     def _reset_tab_cycle(self) -> None:
         """Reset slash-command tab cycle state."""
@@ -480,7 +504,7 @@ class CLIInputBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         """Compose the input bar."""
-        yield Static(">", classes="prompt")
+        yield Static("❯", classes="prompt")
         self._input = _SubmitTextArea(
             commands=self.commands,
             id="chat-input",
@@ -575,7 +599,7 @@ class StatusBar(Horizontal):
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
         yield Static(classes="spacer")
-        yield Label("^C:cancel ^L:clear ^O:tools ^Q:quit", classes="key-hint")
+        yield Label("^C:cancel ^L:clear ^O:tools ^T:think ^Q:quit", classes="key-hint")
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""
@@ -606,3 +630,4 @@ class StatusBar(Horizontal):
         """Update the active skill label."""
         label = self.query_one("#skill-label", Label)
         label.update(f" | skill: {skill_name}" if skill_name else "")
+

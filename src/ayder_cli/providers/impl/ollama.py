@@ -102,7 +102,8 @@ class ToolStreamParser:
 
         # 1. Process text content
         content = getattr(delta, "content", None)
-        reasoning = getattr(delta, "reasoning_content", None)
+        # OpenAI uses "reasoning_content", Ollama uses "reasoning"
+        reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
         
         # Deepseek-v3.2 often puts its XML tool tags directly into the reasoning payload 
         # instead of the content payload when using Ollama fallback. 
@@ -388,6 +389,15 @@ class OllamaProvider(OpenAIProvider):
     """
 
     MAX_TOKENS_PARAM = "max_tokens"
+    # Ollama doesn't support OpenAI's stream_options parameter
+    _STREAM_OPTIONS = False
+
+    def _build_extra_body(self, options: Dict[str, Any]) -> Dict[str, Any] | None:
+        """Pass Ollama-specific options via extra_body."""
+        ollama_opts: Dict[str, Any] = {}
+        if num_ctx := options.get("num_ctx"):
+            ollama_opts["num_ctx"] = num_ctx
+        return ollama_opts if ollama_opts else None
 
     async def list_models(self) -> List[str]:
         """
@@ -476,10 +486,31 @@ class OllamaProvider(OpenAIProvider):
         options: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
-        
+
         if self.config.chat_protocol == "ollama":
+            # Use ToolStreamParser to handle <think> tags that Ollama models
+            # (e.g. qwen3, deepseek) embed in the content field
+            parser = ToolStreamParser()
             async for chunk in super().stream_with_tools(messages, model, tools, options, verbose):
-                yield chunk
+                # If the base provider already extracted reasoning_content natively, pass through
+                if chunk.reasoning or chunk.tool_calls:
+                    yield chunk
+                    continue
+
+                # Otherwise, run content through parser to extract <think> blocks
+                if chunk.content and chunk.raw_chunk:
+                    events = list(parser.ingest(chunk.raw_chunk))
+                    content_text = "".join(e.text for e in events if e.type == "content")
+                    reasoning_text = "".join(e.text for e in events if e.type == "think")
+                    yield NormalizedStreamChunk(
+                        content=content_text,
+                        reasoning=reasoning_text,
+                        tool_calls=chunk.tool_calls,
+                        raw_chunk=chunk.raw_chunk,
+                        usage=chunk.usage,
+                    )
+                else:
+                    yield chunk
             return
 
         # Fallback XML logic for streaming

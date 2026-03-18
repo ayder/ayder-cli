@@ -357,10 +357,9 @@ ActivityBar Static {
 CLIInputBar {
     height: auto;
     max-height: 8;
-    background: transparent;
-    border-top: solid #333350;
-    border-bottom: solid #333350;
-    padding: 0;
+    background: #1a1a35;
+    border-top: heavy #5eaff5;
+    padding: 1 0;
 }
 
 CLIInputBar Static {
@@ -385,10 +384,19 @@ CLIInputBar #chat-input:focus {
     border: none;
 }
 
-/* The ">" prompt character. */
+/* The "❯" prompt character. */
 CLIInputBar .prompt {
     color: #5eaff5;
     text-style: bold;
+}
+
+/* Placeholder hint text inside the input area. */
+#input-placeholder {
+    color: #555570;
+    text-style: italic;
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
 }
 
 /* StatusBar - The bar at the very bottom showing context info (model, tokens).
@@ -490,13 +498,10 @@ Screen:inline {
     height: 1fr; /* Takes up all available space above the input/tools */
     width: 100%;
     background: transparent;
+    overflow-y: auto;
     scrollbar-size: 0 0; /* Hides the scrollbar track */
     scrollbar-size-horizontal: 0;
     scrollbar-size-vertical: 0;
-}
-
-#chat-view:focus {
-    scrollbar-size: 0 0;
 }
 
 #tool-panel {

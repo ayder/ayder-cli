@@ -81,7 +81,8 @@ class OpenAIProvider(AIProvider):
         """Map full OpenAI response object to normalized format."""
         msg = response.choices[0].message
         content = msg.content or ""
-        reasoning = getattr(msg, "reasoning_content", "") or ""
+        # OpenAI uses "reasoning_content", Ollama uses "reasoning"
+        reasoning = getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "") or ""
         tool_calls = []
         if msg.tool_calls:
             for tc in msg.tool_calls:
@@ -114,8 +115,11 @@ class OpenAIProvider(AIProvider):
             "model": model,
             "messages": messages, # OpenAI handles the standard format natively
             "stream": True,
-            "stream_options": {"include_usage": True},
         }
+
+        # stream_options is OpenAI-specific; subclasses can disable via class attr
+        if getattr(self, "_STREAM_OPTIONS", True):
+            kwargs["stream_options"] = {"include_usage": True}
 
         if tools:
             kwargs["tools"] = tools
@@ -125,6 +129,9 @@ class OpenAIProvider(AIProvider):
                 kwargs["stop"] = stop
             if max_tokens := options.get("max_output_tokens"):
                 kwargs[self.MAX_TOKENS_PARAM] = max_tokens
+            extra = self._build_extra_body(options)
+            if extra:
+                kwargs["extra_body"] = extra
 
         if verbose:
             logger.debug(f"OpenAI Stream Request: model={model}, tools={len(tools) if tools else 0}")
@@ -132,24 +139,27 @@ class OpenAIProvider(AIProvider):
                 self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         try:
+            logger.debug(f"Stream kwargs: {', '.join(f'{k}={v!r}' for k, v in kwargs.items() if k != 'messages')}")
             async_stream = await self.client.chat.completions.create(**kwargs)
-            
+
+            chunk_count = 0
             async for chunk in async_stream:
-                if verbose:
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    c = getattr(delta, "content", "") if delta else ""
-                    rc = getattr(delta, "reasoning_content", "") if delta else ""
-                    tc = getattr(delta, "tool_calls", []) if delta else []
-                    logger.debug(
-                        f"OpenAI Chunk: content_len={len(c or '')}, "
-                        f"reasoning_len={len(rc or '')}, tools={len(tc or [])}"
-                    )
+                chunk_count += 1
 
                 yield self._normalize_chunk(chunk)
-                
+
+            if chunk_count == 0:
+                logger.warning("Stream yielded zero chunks")
+            else:
+                logger.debug(f"Stream completed: {chunk_count} chunks total")
+
         except Exception as e:
             logger.error(f"OpenAI streaming failed: {e}")
             raise
+
+    def _build_extra_body(self, options: Dict[str, Any]) -> Dict[str, Any] | None:
+        """Build extra_body dict for provider-specific options. Override in subclasses."""
+        return None
 
     def _normalize_chunk(self, chunk: Any) -> NormalizedStreamChunk:
         """Map the OpenAI chunk object directly to our normalized format.
@@ -175,7 +185,8 @@ class OpenAIProvider(AIProvider):
             return NormalizedStreamChunk(raw_chunk=chunk, usage=usage)
 
         content = getattr(delta, "content", "") or ""
-        reasoning = getattr(delta, "reasoning_content", "") or ""
+        # OpenAI uses "reasoning_content", Ollama uses "reasoning"
+        reasoning = getattr(delta, "reasoning_content", "") or getattr(delta, "reasoning", "") or ""
 
         if delta.tool_calls:
             for tc in delta.tool_calls:
