@@ -14,7 +14,7 @@ from ayder_cli.core.config import list_provider_profiles
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
 from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEditScreen
-from ayder_cli.tui.widgets import ChatView, StatusBar
+from ayder_cli.tui.widgets import AgentPanel, ChatView, StatusBar
 
 if TYPE_CHECKING:
     from ayder_cli.tui.app import AyderApp
@@ -922,6 +922,66 @@ def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         )
 
 
+def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
+    """Handle /agent command: dispatch, list, or cancel agents."""
+    parts = args.strip().split(None, 1)
+    if not parts:
+        chat_view.add_system_message(
+            "Usage: /agent <name> <task> | /agent list | /agent cancel <name>"
+        )
+        return
+
+    subcommand = parts[0]
+
+    if not hasattr(app, "_agent_registry") or app._agent_registry is None:
+        chat_view.add_system_message("No agents configured. Add [agents.*] sections to config.toml.")
+        return
+
+    if subcommand == "list":
+        agents = app._agent_registry.agents
+        if not agents:
+            chat_view.add_system_message("No agents configured.")
+            return
+        lines = ["Configured agents:"]
+        for name in agents:
+            status = app._agent_registry.get_status(name)
+            lines.append(f"  {name}: {status}")
+        chat_view.add_system_message("\n".join(lines))
+        return
+
+    if subcommand == "cancel":
+        cancel_name = parts[1].strip() if len(parts) > 1 else ""
+        if not cancel_name:
+            chat_view.add_system_message("Usage: /agent cancel <name>")
+            return
+        if app._agent_registry.cancel(cancel_name):
+            chat_view.add_system_message(f"Cancelling agent '{cancel_name}'...")
+        else:
+            chat_view.add_system_message(f"Agent '{cancel_name}' is not running.")
+        return
+
+    # /agent <name> <task>
+    agent_name = subcommand
+    task = parts[1] if len(parts) > 1 else ""
+    if not task:
+        chat_view.add_system_message(f"Usage: /agent {agent_name} <task description>")
+        return
+
+    if agent_name not in app._agent_registry.agents:
+        chat_view.add_system_message(f"Unknown agent: '{agent_name}'")
+        return
+
+    # Show agent in panel and dispatch (sync, fire-and-forget)
+    try:
+        agent_panel = app.query_one("#agent-panel", AgentPanel)
+        agent_panel.add_agent(agent_name)
+    except Exception:
+        pass
+
+    result = app._agent_registry.dispatch(agent_name, task)
+    chat_view.add_system_message(result)
+
+
 # Command dispatch map: command name -> handler function
 # All handlers have signature (app, args, chat_view) -> None
 COMMAND_MAP: dict[str, Callable] = {
@@ -944,4 +1004,5 @@ COMMAND_MAP: dict[str, Callable] = {
     "/temporal": handle_temporal,
     "/skill": handle_skill,
     "/plugin": handle_plugin,
+    "/agent": handle_agent,
 }
