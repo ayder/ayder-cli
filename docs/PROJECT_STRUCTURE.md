@@ -214,9 +214,6 @@ cli.py:main()
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `tasks.py` | Task management | `list_tasks()`, `show_task()` |
-| `memory.py` | Cross-session memory | `save_memory()`, `load_memory()` |
-| `notes.py` | Note creation | `create_note()` |
 | `process_manager.py` | Background processes | `ProcessManager`, `run_background_process()` |
 | `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE` |
 | `parser.py` | XML parsing | `parse_custom_tool_calls()` |

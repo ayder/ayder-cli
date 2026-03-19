@@ -108,7 +108,10 @@ ayder-cli/
 │   │       ├── utils_tools.py  # manage_environment_vars
 │   │       ├── web.py          # fetch_web
 │   │       ├── dbs_tool.py     # DBS RAG API tool
-│   │       └── temporal.py     # Temporal workflow tool
+│   │       ├── temporal.py     # Temporal workflow tool
+│   │       ├── tasks.py        # Task management (.ayder/tasks/)
+│   │       ├── notes.py        # Note management (.ayder/notes/)
+│   │       └── memory.py       # Cross-session memory storage
 │   │
 │   ├── tui/                    # Textual TUI (main interface)
 │   │   ├── __init__.py         # run_tui() entry point
@@ -128,12 +131,9 @@ ayder-cli/
 │   │   ├── claude.py           # Claude theme CSS
 │   │   └── original.py         # Original theme CSS
 │   │
-│   ├── memory.py               # Cross-session memory storage
-│   ├── notes.py                # Note management (.ayder/notes/)
 │   ├── parser.py               # XML/JSON tool call parser
 │   ├── process_manager.py      # Background process management
 │   ├── prompts.py              # System prompt templates
-│   ├── tasks.py                # Task management (.ayder/tasks/)
 │   └── ui.py                   # Rich terminal UI helpers
 │
 ├── tests/                      # Test suite (998+ tests)
