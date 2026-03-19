@@ -159,13 +159,33 @@ cli.py:main()
 | `cli_runner.py` | Command execution | `CommandRunner`, `TaskRunner`, `run_command()` |
 
 
+### Agent System Modules (`agents/`)
+
+| Module | Purpose |
+|--------|---------|
+| `agents/config.py` | `AgentConfig` Pydantic model for `[agents.*]` TOML sections |
+| `agents/summary.py` | `AgentSummary` dataclass — structured result of agent runs |
+| `agents/callbacks.py` | `AgentCallbacks` — `ChatCallbacks` for autonomous agents |
+| `agents/runner.py` | `AgentRunner` — wraps one `ChatLoop` per agent dispatch |
+| `agents/registry.py` | `AgentRegistry` — dispatch, cancel, status, capability prompts |
+| `agents/tool.py` | `call_agent` tool definition + handler factory |
+
+**Agent dispatch flow (Approach A — all non-blocking):**
+1. Config parsed → `AgentConfig` objects in `Config.agents`
+2. `AyderApp.__init__` creates `AgentRegistry` if agents configured
+3. LLM calls `call_agent` tool → `registry.dispatch()` (sync, fire-and-forget)
+4. User runs `/agent <name> <task>` → same `registry.dispatch()`
+5. Agent runs `ChatLoop` with isolated runtime + `AgentCallbacks` in background
+6. Summary parsed from `<agent-summary>` block → `AgentSummary` → `_summary_queue`
+7. `pre_iteration_hook` drains queue → injects summaries as system messages
+
 ### Shared Application Modules (`application/`)
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `application/execution_policy.py` | Shared tool permission + execution policy | `ExecutionPolicy`, `PermissionDeniedError`, `ToolRequest`, `ConfirmationRequirement` |
 | `application/validation.py` | Single validation path (schema only) | `ValidationAuthority`, `SchemaValidator`, `ToolRequest` |
-| `application/runtime_factory.py` | Single composition root | `create_runtime()`, `RuntimeComponents` |
+| `application/runtime_factory.py` | Single composition root | `create_runtime()`, `create_agent_runtime()`, `RuntimeComponents` |
 | `application/message_contract.py` | LLM message format contracts | DTOs for message interchange |
 
 ### Shared Loop Modules (`loops/`)

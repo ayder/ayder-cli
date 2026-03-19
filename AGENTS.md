@@ -61,10 +61,19 @@ ayder-cli/
 │   │   ├── context.py          # ProjectContext (path sandboxing)
 │   │   └── result.py           # ToolSuccess/ToolError types
 │   │
+│   ├── agents/                 # Multi-agent system
+│   │   ├── __init__.py         # Package exports
+│   │   ├── callbacks.py        # AgentCallbacks (ChatCallbacks for agents)
+│   │   ├── config.py           # AgentConfig (Pydantic model)
+│   │   ├── registry.py         # AgentRegistry (lifecycle management)
+│   │   ├── runner.py           # AgentRunner (isolated ChatLoop execution)
+│   │   ├── summary.py          # AgentSummary (structured result)
+│   │   └── tool.py             # call_agent tool definition + handler
+│   │
 │   ├── application/            # Shared application layer (CLI + TUI)
 │   │   ├── execution_policy.py         # ExecutionPolicy, PermissionDeniedError
 │   │   ├── message_contract.py         # LLM message format contracts
-│   │   ├── runtime_factory.py          # create_runtime() composition root
+│   │   ├── runtime_factory.py          # create_runtime() + create_agent_runtime()
 │   │   ├── temporal_contract.py        # Temporal workflow contracts
 │   │   ├── temporal_metadata.py        # Temporal metadata types
 │   │   └── validation.py              # ValidationAuthority, SchemaValidator
