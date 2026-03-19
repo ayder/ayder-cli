@@ -22,7 +22,6 @@ from ayder_cli.providers.base import _FunctionCall, _ToolCall
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ayder_cli.memory import MemoryManager
     from ayder_cli.providers import AIProvider
     from ayder_cli.tools.registry import ToolRegistry
 
@@ -78,7 +77,6 @@ class TuiChatLoop(AgentLoopBase):
         messages: list[dict],
         config: TuiLoopConfig,
         callbacks: TuiCallbacks,
-        memory_manager: "MemoryManager | None" = None,
     ) -> None:
         super().__init__(config)
         self.llm = llm
@@ -86,7 +84,6 @@ class TuiChatLoop(AgentLoopBase):
         self.messages = messages
         self.config = config
         self.cb = callbacks
-        self.mm = memory_manager
         self._total_tokens = 0
         self.context_manager = ContextManager(config=config, model=config.model)
 
