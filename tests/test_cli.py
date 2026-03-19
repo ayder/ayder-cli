@@ -30,17 +30,14 @@ class TestBuildServices:
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
-            cfg, llm_provider, project_ctx, enhanced_system, memory_manager = services
+            cfg, llm_provider, project_ctx, system_prompt = services
 
             assert cfg == mock_config
             assert llm_provider is not None
             assert project_ctx is not None
-            assert memory_manager is not None
-            # Verify macro is empty when exception occurs
-            assert "PROJECT STRUCTURE" not in enhanced_system
 
     def test_build_services_success_with_structure_macro(self):
-        """Test _build_services successfully adds structure macro."""
+        """Test _build_services successfully returns 4-tuple."""
         from ayder_cli.cli_runner import _build_services
         from ayder_cli.core.config import Config
 
@@ -60,12 +57,12 @@ class TestBuildServices:
              patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
              patch('openai.OpenAI'):
             services = _build_services()
-            cfg, llm_provider, project_ctx, enhanced_system, memory_manager = services
+            cfg, llm_provider, project_ctx, system_prompt = services
 
-            assert "PROJECT STRUCTURE" in enhanced_system
-            assert "src/" in enhanced_system
-            assert memory_manager is not None
-            mock_registry.execute.assert_called_once_with("get_project_structure", {"max_depth": 3})
+            assert cfg == mock_config
+            assert llm_provider is not None
+            assert project_ctx is not None
+            assert system_prompt is not None
 
     def test_build_services_with_custom_config(self):
         """Test _build_services accepts custom config parameter."""
