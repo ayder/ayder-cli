@@ -227,67 +227,6 @@ Provide a brief summary, save it, confirm reset, and acknowledge the context."""
 
 
 # =============================================================================
-# MEMORY CHECKPOINT PROMPTS (memory.py)
-# =============================================================================
-# Used by: memory.py::MemoryManager.build_checkpoint_prompt()
-# REASON: When iteration limit is reached, force the LLM to save progress
-# before automatic context reset. Prevents loss of work during long tasks.
-
-MEMORY_CHECKPOINT_PROMPT_TEMPLATE = """You are approaching the iteration limit. To prevent context loss and continue efficiently, please create a memory checkpoint:
-
-1. SUMMARIZE the current task progress, key decisions, and important context from this conversation:
-{conversation_summary}
-
-2. SAVE this summary to the memory file at `.ayder/memory/{memory_file_name}` using the write_file tool.
-
-The summary should include:
-- What task is being worked on
-- What has been completed so far
-- What is the next step
-- Any important context, file paths, or decisions made
-- Any errors encountered and how they were/will be resolved
-
-Be concise but comprehensive - this memory will be used to continue the task after a context reset."""
-
-
-# Used by: memory.py::MemoryManager.build_restore_prompt()
-# REASON: After automatic context reset at iteration limit, instruct the LLM
-# to read the saved memory and continue the task without losing progress.
-
-MEMORY_RESTORE_PROMPT_TEMPLATE = """I've reset the conversation context to prevent token overflow. Please read the memory file at `.ayder/memory/{memory_file_name}` and continue from where we left off.
-
-Based on the saved memory:
-```
-{memory_content}
-```
-
-Acknowledge the context restoration and continue working on the task. Maintain the same approach and context as before the reset."""
-
-
-# Used by: memory.py::MemoryManager.build_quick_restore_message()
-# REASON: User-facing message that includes the saved memory content directly
-# in the prompt for immediate context restoration after checkpoint reset.
-
-MEMORY_QUICK_RESTORE_MESSAGE_TEMPLATE = """[SYSTEM: Context reset completed. Continuing from saved memory.]
-
-Previous context from memory checkpoint:
----
-{memory_content}
----
-
-Please acknowledge and continue the task from where we left off."""
-
-
-# Used by: memory.py::MemoryManager.build_quick_restore_message()
-# REASON: Fallback when no memory was saved before the checkpoint reset.
-# Informs the user that the context was reset but no previous state exists.
-
-MEMORY_NO_MEMORY_MESSAGE = (
-    """Continuing task after context reset. No previous memory was saved."""
-)
-
-
-# =============================================================================
 # SAVE/LOAD MEMORY COMMANDS (tui/commands.py)
 # =============================================================================
 # Used by: tui/commands.py::handle_save_memory()
