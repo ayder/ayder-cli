@@ -7,8 +7,12 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ayder_cli.core.config import Config, load_config, load_config_for_provider
+
+if TYPE_CHECKING:
+    from ayder_cli.agents.config import AgentConfig
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.providers import AIProvider, provider_orchestrator
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
@@ -103,7 +107,6 @@ def create_agent_runtime(
     Returns:
         RuntimeComponents with agent-specific wiring.
     """
-    from ayder_cli.agents.config import AgentConfig  # noqa: F811
 
     # 1. Resolve provider config
     if agent_config.provider:
