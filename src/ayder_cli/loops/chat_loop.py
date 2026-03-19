@@ -44,6 +44,7 @@ class ChatLoopConfig:
     )
     max_history: int = 0
     verbose: bool = False
+    pre_iteration_hook: Any | None = None  # async callable(messages) -> None
 
 
 @runtime_checkable
@@ -101,6 +102,10 @@ class ChatLoop(AgentLoopBase):
         while True:
             if self.cb.is_cancelled():
                 return
+
+            # Pre-iteration hook (used for agent summary injection)
+            if self.config.pre_iteration_hook is not None:
+                await self.config.pre_iteration_hook(self.messages)
 
             # 1. Prepare schemas and messages
             tool_schemas = (
