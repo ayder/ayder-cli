@@ -4,8 +4,7 @@ Concrete shared logic:
 - Tool call routing: _route_tool_calls() (XML/JSON/OpenAI format detection)
 - Escalation detection: _is_escalation()
 
-Both ChatLoop (CLI) and TuiChatLoop (TUI) extend this class.
-Each subclass owns its own run() loop, LLM calls, and UI interactions.
+ChatLoop (in loops/chat_loop.py) extends this class.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from ayder_cli.parser import content_processor
 
 
 class AgentLoopBase:
-    """Shared helpers inherited by CLI ChatLoop and TUI TuiChatLoop."""
+    """Shared helpers inherited by ChatLoop."""
 
     def __init__(self, config: Any) -> None:
         self._config = config

@@ -1,7 +1,7 @@
-"""CliCallbacks — TuiCallbacks adapter for plain terminal sessions.
+"""CliCallbacks — ChatCallbacks adapter for plain terminal sessions.
 
-Implements the TuiCallbacks protocol so that TuiChatLoop can be driven
-from the synchronous CLI without any Textual dependency.
+Implements the ChatCallbacks protocol so that ChatLoop can be driven
+from a plain terminal without Textual widgets.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ class CliConfirmResult:
 
 
 class CliCallbacks:
-    """TuiCallbacks adapter for the CLI — writes to stdout/stderr.
+    """ChatCallbacks adapter for the CLI — writes to stdout/stderr.
 
     All write/exec tools are auto-approved, matching the current CLI behaviour
     where ToolExecutor uses AutoApproveConfirmationPolicy.
