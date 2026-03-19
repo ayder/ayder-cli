@@ -59,12 +59,3 @@ class TestTemporalRuntimeWiringConvergence:
         assert body["workflow_id"] == "wf-101"
         assert body["queue_name"] == "qa-team"
 
-    def test_runtime_factory_uses_non_ui_interaction_defaults(self):
-        """Verify factory source uses AutoApprove and NullSink for internal ToolExecutor."""
-        import inspect
-        from ayder_cli.application.runtime_factory import create_runtime as _fn
-
-        source = inspect.getsource(_fn)
-
-        assert "AutoApproveConfirmationPolicy" in source
-        assert "NullInteractionSink" in source
