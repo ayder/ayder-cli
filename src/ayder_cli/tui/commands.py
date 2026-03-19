@@ -388,14 +388,13 @@ def handle_save_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
 def handle_load_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /load-memory command."""
     from ayder_cli.prompts import LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE
-    from ayder_cli.memory import CHECKPOINT_FILE_NAME
 
     project_ctx = ProjectContext(".")
-    memory_file = project_ctx.root / ".ayder" / "memory" / CHECKPOINT_FILE_NAME
+    memory_file = project_ctx.root / ".ayder" / "memory" / "checkpoint.md"
 
     if not memory_file.exists():
         chat_view.add_system_message(
-            f"No memory file found at `.ayder/memory/{CHECKPOINT_FILE_NAME}`. "
+            "No memory file found at `.ayder/memory/checkpoint.md`. "
             "Use `/save-memory` to create one first."
         )
         return
