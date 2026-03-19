@@ -140,8 +140,8 @@ class TestResolveFuncRef:
 
     def test_resolves_external_module(self):
         """Test resolving a function from a non-tools module."""
-        func = registry._resolve_func_ref("ayder_cli.notes:create_note")
-        from ayder_cli.notes import create_note
+        func = registry._resolve_func_ref("ayder_cli.tools.builtins.notes:create_note")
+        from ayder_cli.tools.builtins.notes import create_note
         assert func is create_note
 
     def test_invalid_module_raises_import_error(self):

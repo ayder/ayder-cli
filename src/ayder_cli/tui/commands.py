@@ -165,7 +165,7 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /tasks command — show interactive task selector or edit by ID."""
-    from ayder_cli.tasks import (
+    from ayder_cli.tools.builtins.tasks import (
         _get_tasks_dir,
         _get_task_path_by_id,
         _parse_title,
@@ -447,7 +447,7 @@ def handle_ask(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /implement command — interactive task picker or implement by ID."""
-    from ayder_cli.tasks import (
+    from ayder_cli.tools.builtins.tasks import (
         _get_tasks_dir,
         _get_task_path_by_id,
         _parse_title,
@@ -673,7 +673,7 @@ def handle_notes(app: "AyderApp", args: str, chat_view: ChatView) -> None:
 def handle_archive(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /archive-completed-tasks command."""
     import shutil
-    from ayder_cli.tasks import _get_tasks_dir, _extract_id, _parse_title
+    from ayder_cli.tools.builtins.tasks import _get_tasks_dir, _extract_id, _parse_title
 
     project_ctx = ProjectContext(".")
     tasks_dir = _get_tasks_dir(project_ctx)

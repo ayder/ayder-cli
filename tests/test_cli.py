@@ -203,7 +203,7 @@ class TestRunTasksCLI:
     """Test _run_tasks_cli function."""
 
     @patch('ayder_cli.core.context.ProjectContext')
-    @patch('ayder_cli.tasks.list_tasks')
+    @patch('ayder_cli.tools.builtins.tasks.list_tasks')
     def test_run_tasks_cli_success(self, mock_list_tasks, mock_project_ctx):
         """Test successful tasks listing."""
         from ayder_cli.cli_runner import _run_tasks_cli
@@ -216,7 +216,7 @@ class TestRunTasksCLI:
             assert "Task 1" in mock_stdout.getvalue()
 
     @patch('ayder_cli.core.context.ProjectContext')
-    @patch('ayder_cli.tasks.list_tasks')
+    @patch('ayder_cli.tools.builtins.tasks.list_tasks')
     def test_run_tasks_cli_error(self, mock_list_tasks, mock_project_ctx):
         """Test tasks listing with error."""
         from ayder_cli.cli_runner import _run_tasks_cli
@@ -234,8 +234,8 @@ class TestRunImplementCLI:
 
     @patch('ayder_cli.cli_runner._run_loop', return_value=0)
     @patch('ayder_cli.core.context.ProjectContext')
-    @patch('ayder_cli.tasks._get_tasks_dir')
-    @patch('ayder_cli.tasks._get_task_path_by_id')
+    @patch('ayder_cli.tools.builtins.tasks._get_tasks_dir')
+    @patch('ayder_cli.tools.builtins.tasks._get_task_path_by_id')
     def test_run_implement_by_id_success(self, mock_get_path, mock_get_dir,
                                           mock_project_ctx, mock_run_loop):
         """Test implementing task by ID."""
@@ -260,9 +260,9 @@ class TestRunImplementCLI:
 
     @patch('ayder_cli.cli_runner._run_loop', return_value=0)
     @patch('ayder_cli.core.context.ProjectContext')
-    @patch('ayder_cli.tasks._get_tasks_dir')
-    @patch('ayder_cli.tasks._extract_id')
-    @patch('ayder_cli.tasks._parse_title')
+    @patch('ayder_cli.tools.builtins.tasks._get_tasks_dir')
+    @patch('ayder_cli.tools.builtins.tasks._extract_id')
+    @patch('ayder_cli.tools.builtins.tasks._parse_title')
     def test_run_implement_by_pattern_success(self, mock_parse_title, mock_extract_id, mock_get_dir,
                                                mock_project_ctx, mock_run_loop):
         """Test implementing task by pattern match."""
@@ -286,7 +286,7 @@ class TestRunImplementCLI:
             assert result == 0
 
     @patch('ayder_cli.core.context.ProjectContext')
-    @patch('ayder_cli.tasks._get_tasks_dir')
+    @patch('ayder_cli.tools.builtins.tasks._get_tasks_dir')
     def test_run_implement_no_match(self, mock_get_dir, mock_project_ctx):
         """Test implementing when no task matches."""
         from ayder_cli.cli_runner import _run_implement_cli

@@ -1,7 +1,7 @@
 """Tests for notes management."""
 
 import pytest
-from ayder_cli.notes import create_note, _title_to_slug
+from ayder_cli.tools.builtins.notes import create_note, _title_to_slug
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess
 

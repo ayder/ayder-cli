@@ -133,7 +133,7 @@ class TaskRunner:
         """
         try:
             from ayder_cli.core.context import ProjectContext
-            from ayder_cli.tasks import list_tasks
+            from ayder_cli.tools.builtins.tasks import list_tasks
 
             result = list_tasks(ProjectContext("."))
             print(result)
@@ -155,7 +155,7 @@ class TaskRunner:
         """
         try:
             from ayder_cli.core.context import ProjectContext
-            from ayder_cli.tasks import (
+            from ayder_cli.tools.builtins.tasks import (
                 _get_tasks_dir,
                 _get_task_path_by_id,
                 _extract_id,
