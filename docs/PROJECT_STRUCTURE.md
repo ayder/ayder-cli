@@ -50,7 +50,6 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 │  │            Shared Application Modules                     │  │
 │  │  application/execution_policy.py   (ExecutionPolicy)      │  │
 │  │  application/validation.py         (ValidationAuthority)  │  │
-│  │  application/checkpoint_orchestrator.py (orchestration)   │  │
 │  │  application/runtime_factory.py    (create_runtime())     │  │
 │  │  loops/base.py                     (AgentLoopBase)        │  │
 │  └───────────────────────────────────────────────────────────┘  │
@@ -166,7 +165,6 @@ cli.py:main()
 |--------|---------|----------------------|
 | `application/execution_policy.py` | Shared tool permission + execution policy | `ExecutionPolicy`, `PermissionDeniedError`, `ToolRequest`, `ConfirmationRequirement` |
 | `application/validation.py` | Single validation path (schema only) | `ValidationAuthority`, `SchemaValidator`, `ToolRequest` |
-| `application/checkpoint_orchestrator.py` | Shared checkpoint orchestration | `CheckpointOrchestrator`, `CheckpointTrigger`, `RuntimeContext`, `EngineState` |
 | `application/runtime_factory.py` | Single composition root | `create_runtime()`, `RuntimeComponents` |
 | `application/message_contract.py` | LLM message format contracts | DTOs for message interchange |
 
@@ -174,7 +172,7 @@ cli.py:main()
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `loops/base.py` | Shared agent loop base class | `AgentLoopBase` — iteration, checkpoint, tool routing, escalation |
+| `loops/base.py` | Shared agent loop base class | `AgentLoopBase` — iteration, tool routing, escalation |
 | `loops/config.py` | Shared loop configuration | `LoopConfig` dataclass |
 
 ### TUI Modules (Textual-based)
@@ -217,9 +215,8 @@ cli.py:main()
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `tasks.py` | Task management | `list_tasks()`, `show_task()` |
-| `memory.py` | Cross-session memory | `MemoryManager`, `save_memory()`, `load_memory()` |
+| `memory.py` | Cross-session memory | `save_memory()`, `load_memory()` |
 | `notes.py` | Note creation | `create_note()` |
-| `checkpoint_manager.py` | Memory checkpoints | `CheckpointManager` |
 | `process_manager.py` | Background processes | `ProcessManager`, `run_background_process()` |
 | `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE` |
 | `parser.py` | XML parsing | `parse_custom_tool_calls()` |
@@ -386,8 +383,7 @@ Use `TYPE_CHECKING` for type-only imports:
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ayder_cli.memory import MemoryManager
-    from ayder_cli.checkpoint_manager import CheckpointManager
+    from ayder_cli.core.context import ProjectContext
 ```
 
 ### Protocol-Based Imports
@@ -482,12 +478,11 @@ It exposes key components like AyderApp, widgets (ChatView, ToolPanel), and scre
 AyderApp is the main Textual application implementing a chat-style interface:
 - **Layout**: Banner, ChatView, ToolPanel, ActivityBar, CLIInputBar, StatusBar
 - **Keybindings**: Ctrl+Q (quit), Ctrl+C/X (cancel), Ctrl+L (clear), Ctrl+O (toggle tools)
-- **Features**: 
+- **Features**:
   - Async processing with worker threads
   - Tool confirmation with diff previews
   - Activity animations and status updates
   - Safe mode with middleware checks
-  - Memory checkpoint system integration
 - **Architecture**: Uses AppCallbacks to implement TuiCallbacks protocol, decoupling business logic from UI
 
 The application manages:
@@ -495,14 +490,13 @@ The application manages:
 - Tool registry initialization with middleware
 - System prompt construction with project structure
 - Process manager for background operations
-- Checkpoint and memory managers
 
 ### TUI Chat Loop Summary (src/ayder_cli/tui/chat_loop.py)
 
 `TuiChatLoop` (extends `AgentLoopBase`) implements the core async agentic process:
 - Handles repeated LLM calls with tool execution until completion
 - Supports multiple tool call formats: OpenAI native (`tool_calls`), XML custom, JSON fallback
-- Manages iteration counting via `AgentLoopBase._increment_iteration()` with checkpoint system
+- Manages iteration counting via `AgentLoopBase._increment_iteration()`
 - Communicates with UI exclusively through `TuiCallbacks` protocol (no Textual imports)
 - Extracts and emits `<think>` blocks separately from display content
 
@@ -510,7 +504,6 @@ Key features:
 - Auto-approved tools run in parallel (`asyncio.gather`); confirmation-required tools run sequentially
 - Confirmation gate applies to **both** OpenAI-format and XML/JSON custom tool calls
 - `ExecutionPolicy.execute_with_registry()` is the single execution entry (validate → permission → execute)
-- Memory checkpoint creation/restore to prevent context-window overflow
 - Token usage tracking and iteration limiting
 - Graceful cancellation via `is_cancelled()`
 
@@ -582,7 +575,6 @@ Schema-driven tool definitions with auto-discovery:
 `AgentLoopBase` extracted to `loops/base.py`. Both `ChatLoop` and `TuiChatLoop` extend it:
 
 - `_increment_iteration()` / `_reset_iterations()` — shared iteration counting
-- `_should_trigger_checkpoint()` — delegates to `CheckpointTrigger`
 - `_route_tool_calls()` — shared OpenAI / XML / JSON / none routing logic
 - `_is_escalation()` — shared escalation detection
 
@@ -596,7 +588,7 @@ Schema-driven tool definitions with auto-discovery:
 
 | Bug | Fix |
 |-----|-----|
-| Double `on_thinking_stop()` on LLM exception | Removed from `except` blocks in `run()` and `_handle_checkpoint()`; kept only in `finally` |
+| Double `on_thinking_stop()` on LLM exception | Removed from `except` blocks in `run()`; kept only in `finally` |
 | Stale loop variable in `_discover_definitions()` | Collect `(definition, source_module)` tuples; unpack in duplicate-check loop |
 | XML tool calls bypass confirmation gate | `_execute_custom_tool_calls()` now calls `_tool_needs_confirmation()` before `execute_with_registry()` |
 | Silent post-execute callback failure | Added `logger.warning()` in `registry.py` post-execute exception handler |
