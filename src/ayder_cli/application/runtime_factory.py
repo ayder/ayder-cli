@@ -11,14 +11,8 @@ from dataclasses import dataclass
 from ayder_cli.core.config import Config, load_config
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.providers import AIProvider, provider_orchestrator
-from ayder_cli.services.interactions import (
-    AutoApproveConfirmationPolicy,
-    NullInteractionSink,
-)
-from ayder_cli.services.tools.executor import ToolExecutor as _ToolExecutor
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
-from ayder_cli.memory import MemoryManager
 from ayder_cli.prompts import (
     get_system_prompt,
     PROJECT_STRUCTURE_MACRO_TEMPLATE,
@@ -34,7 +28,6 @@ class RuntimeComponents:
     process_manager: ProcessManager
     project_ctx: ProjectContext
     tool_registry: ToolRegistry
-    memory_manager: MemoryManager
     system_prompt: str
 
 
@@ -63,19 +56,6 @@ def create_runtime(
     project_ctx = ProjectContext(project_root)
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
     tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
-    # ToolExecutor is still needed internally by MemoryManager for checkpoint
-    # LLM calls (it uses tool_executor.execute_tool_calls to save summaries).
-    # It is NOT exposed in RuntimeComponents.
-    _tool_executor = _ToolExecutor(
-        tool_registry,
-        interaction_sink=NullInteractionSink(),
-        confirmation_policy=AutoApproveConfirmationPolicy(),
-    )
-    memory_manager = MemoryManager(
-        project_ctx,
-        llm_provider=llm_provider,
-        tool_executor=_tool_executor,
-    )
 
     try:
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
@@ -95,6 +75,5 @@ def create_runtime(
         process_manager=process_manager,
         project_ctx=project_ctx,
         tool_registry=tool_registry,
-        memory_manager=memory_manager,
         system_prompt=system_prompt,
     )

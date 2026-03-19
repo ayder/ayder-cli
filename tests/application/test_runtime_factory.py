@@ -33,7 +33,6 @@ class TestRuntimeFactoryAssembly:
             'process_manager',
             'project_ctx',
             'tool_registry',
-            'memory_manager',
             'system_prompt',
         }
         actual_fields = {f.name for f in fields(RuntimeComponents)}
@@ -51,7 +50,7 @@ class TestRuntimeFactoryAssembly:
 
         # Verify no component is None
         for field_name in ['config', 'llm_provider', 'process_manager', 'project_ctx',
-                           'tool_registry', 'memory_manager', 'system_prompt']:
+                           'tool_registry', 'system_prompt']:
             value = getattr(components, field_name)
             assert value is not None, f"Component '{field_name}' should not be None"
 
@@ -121,16 +120,14 @@ class TestFactoryCLIIntegration:
 
         services = _build_services()
 
-        # Return order: (config, llm, project_ctx,
-        #                enhanced_system, memory_manager)
-        assert len(services) == 5
-        cfg, llm, project_ctx, system_prompt, mem_mgr = services
+        # Return order: (config, llm, project_ctx, enhanced_system)
+        assert len(services) == 4
+        cfg, llm, project_ctx, system_prompt = services
 
         assert cfg is not None
         assert llm is not None
         assert project_ctx is not None
         assert system_prompt is not None
-        assert mem_mgr is not None
 
     def test_cli_factory_integration_preserves_behavior(self):
         """CLI factory integration preserves existing behavior."""
@@ -141,7 +138,7 @@ class TestFactoryCLIIntegration:
         from ayder_cli.cli_runner import _build_services
 
         services = _build_services()
-        cfg, llm, project_ctx, system_prompt, mem_mgr = services
+        cfg, llm, project_ctx, system_prompt = services
 
         # System prompt should contain expected content
         assert "model" in system_prompt.lower() or "ayder" in system_prompt.lower()
@@ -177,7 +174,6 @@ class TestFactoryTUIIntegration:
             mock_components.tool_registry = Mock()
             mock_components.tool_registry.execute.return_value = "src/\n  main.py"
             mock_components.tool_registry.get_system_prompts.return_value = ""
-            mock_components.memory_manager = Mock()
             mock_components.system_prompt = "test system prompt"
             mock_create_runtime.return_value = mock_components
 
@@ -210,7 +206,6 @@ class TestFactoryCompositionParity:
         from ayder_cli.application.runtime_factory import create_runtime
         from ayder_cli.providers import AIProvider
         from ayder_cli.process_manager import ProcessManager
-        from ayder_cli.memory import MemoryManager
         from ayder_cli.core.context import ProjectContext
         from ayder_cli.core.config import Config
         from ayder_cli.tools.registry import ToolRegistry
@@ -223,7 +218,6 @@ class TestFactoryCompositionParity:
         assert isinstance(components.process_manager, ProcessManager)
         assert isinstance(components.project_ctx, ProjectContext)
         assert isinstance(components.tool_registry, ToolRegistry)
-        assert isinstance(components.memory_manager, MemoryManager)
         assert isinstance(components.system_prompt, str)
 
     def test_factory_consistent_system_prompt(self):

@@ -20,8 +20,6 @@ def _patch_factory():
             "ayder_cli.application.runtime_factory.create_default_registry",
             return_value=mock_registry,
         ),
-        patch("ayder_cli.application.runtime_factory._ToolExecutor"),
-        patch("ayder_cli.application.runtime_factory.MemoryManager"),
         mock_registry,
     )
 
@@ -33,10 +31,10 @@ def _make_cfg(model="test-model", max_background_processes=5):
 
 
 def test_create_runtime_returns_all_components():
-    (p_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm, mock_registry) = (
+    (p_load, p_llm, p_ctx, p_pm, p_reg, mock_registry) = (
         _patch_factory()
     )
-    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm:
+    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg:
         cfg = _make_cfg()
         mock_load.return_value = cfg
 
@@ -49,10 +47,10 @@ def test_create_runtime_returns_all_components():
 
 
 def test_create_runtime_accepts_injected_config():
-    (p_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm, mock_registry) = (
+    (p_load, p_llm, p_ctx, p_pm, p_reg, mock_registry) = (
         _patch_factory()
     )
-    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg, p_exec, p_mm:
+    with p_load as mock_load, p_llm, p_ctx, p_pm, p_reg:
         cfg = _make_cfg()
 
         rt = create_runtime(config=cfg)
@@ -75,8 +73,6 @@ def test_create_runtime_handles_project_structure_error():
             "ayder_cli.application.runtime_factory.create_default_registry",
             return_value=mock_registry,
         ),
-        patch("ayder_cli.application.runtime_factory._ToolExecutor"),
-        patch("ayder_cli.application.runtime_factory.MemoryManager"),
     ):
         cfg = _make_cfg()
         mock_load.return_value = cfg

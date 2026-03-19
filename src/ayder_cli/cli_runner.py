@@ -21,8 +21,7 @@ def _build_services(config=None, project_root="."):
     """Build the service dependency graph via the shared runtime factory.
 
     Returns:
-        Tuple of (config, llm_provider, project_ctx,
-                  enhanced_system, memory_manager)
+        Tuple of (config, llm_provider, project_ctx, enhanced_system)
     """
     rt = create_runtime(config=config, project_root=project_root)
     return (
@@ -30,7 +29,6 @@ def _build_services(config=None, project_root="."):
         rt.llm_provider,
         rt.project_ctx,
         rt.system_prompt,
-        rt.memory_manager,
     )
 
 
@@ -79,7 +77,6 @@ def _run_loop(
         messages=messages,
         config=config,
         callbacks=cb,
-        memory_manager=rt.memory_manager,
     )
 
     asyncio.run(loop.run())
