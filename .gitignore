@@ -17,6 +17,9 @@ htmlcov/
 # macOS files
 .DS_Store
 
+# Git worktrees
+.worktrees/
+
 # Virtual environments
 .venv
 TODO
