@@ -1,4 +1,6 @@
-"""TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar."""
+"""TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar, AgentPanel."""
+
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
@@ -642,4 +644,82 @@ class StatusBar(Horizontal):
         """Update the active skill label."""
         label = self.query_one("#skill-label", Label)
         label.update(f" | skill: {skill_name}" if skill_name else "")
+
+
+class AgentPanel(Container):
+    """Panel for displaying active and completed agent runs.
+
+    Shows agent name, status, elapsed time, and summary.
+    Placed below ToolPanel in the layout. Hidden when no agents active.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._agents: dict[str, Static] = {}
+
+    def compose(self) -> ComposeResult:
+        return
+        yield
+
+    def on_mount(self) -> None:
+        self.display = False
+
+    def update_agent(self, name: str, event: str, data: Any = None) -> None:
+        """Handle an agent progress event."""
+        if event == "tool_start" and isinstance(data, dict):
+            tool_name = data.get("name", "?")
+            self._update_widget(name, f"Running tool: {tool_name}")
+        elif event == "assistant_content":
+            pass  # Don't update on every content chunk
+        elif event == "thinking_start":
+            self._update_widget(name, "Thinking...")
+        elif event == "tools_cleanup":
+            self._update_widget(name, "Processing...")
+
+    def add_agent(self, name: str) -> None:
+        """Show a new agent as running."""
+        text = Text()
+        text.append(f"  Agent ", style="dim")
+        text.append(f"{name}", style="bold magenta")
+        text.append(f" running...", style="dim")
+
+        widget = Static(text, classes="agent-item running")
+        self._agents[name] = widget
+        self.mount(widget)
+        self.display = True
+
+    def complete_agent(self, name: str, summary: str, status: str = "completed") -> None:
+        """Mark agent as completed with summary."""
+        if name in self._agents:
+            widget = self._agents[name]
+            text = Text()
+            if status == "completed":
+                text.append("  ✓ ", style="bold green")
+            elif status == "timeout":
+                text.append("  ⏱ ", style="bold yellow")
+            else:
+                text.append("  ✗ ", style="bold red")
+            text.append(f"{name}", style="bold")
+            preview = summary[:80] + "..." if len(summary) > 80 else summary
+            text.append(f" — {preview}", style="dim")
+            widget.update(text)
+            widget.remove_class("running")
+
+    def remove_agent(self, name: str) -> None:
+        """Remove agent widget."""
+        if name in self._agents:
+            self._agents[name].remove()
+            del self._agents[name]
+        if not self._agents:
+            self.display = False
+
+    def _update_widget(self, name: str, status_text: str) -> None:
+        if name not in self._agents:
+            self.add_agent(name)
+        widget = self._agents[name]
+        text = Text()
+        text.append(f"  Agent ", style="dim")
+        text.append(f"{name}", style="bold magenta")
+        text.append(f" — {status_text}", style="dim")
+        widget.update(text)
 
