@@ -30,15 +30,26 @@ class ToolRegistry:
         self.project_ctx = project_ctx
         self.process_manager = process_manager
         self._registry: Dict[str, Callable] = {}
+        self._dynamic_definitions: list = []
         self.hooks = HookManager()
 
     def register(self, name: str, func: Callable) -> None:
         self._registry[name] = func
 
+    def register_dynamic_tool(self, tool_def: Any, handler: Callable) -> None:
+        """Register a tool dynamically at runtime (e.g., call_agent).
+
+        Adds the ToolDefinition to a per-instance list (included in schema
+        queries) and the handler to _registry (for execution dispatch).
+        """
+        self._dynamic_definitions.append(tool_def)
+        self._registry[tool_def.name] = handler
+
     def get_schemas(self, tags: frozenset | None = None) -> List[Dict[str, Any]]:
+        all_defs = list(TOOL_DEFINITIONS) + self._dynamic_definitions
         if tags is None:
-            return [td.to_openai_schema() for td in TOOL_DEFINITIONS]
-        return [td.to_openai_schema() for td in TOOL_DEFINITIONS if set(td.tags) & tags]
+            return [td.to_openai_schema() for td in all_defs]
+        return [td.to_openai_schema() for td in all_defs if set(td.tags) & tags]
 
     def execute(self, name: str, arguments: Any) -> ToolResult:
         tool_func = self._registry.get(name)
@@ -53,7 +64,8 @@ class ToolRegistry:
 
     def get_system_prompts(self, tags: frozenset | None = None) -> str:
         """Return concatenated system_prompt blocks for enabled tools."""
-        defs = TOOL_DEFINITIONS if tags is None else [td for td in TOOL_DEFINITIONS if set(td.tags) & tags]
+        all_defs = list(TOOL_DEFINITIONS) + self._dynamic_definitions
+        defs = all_defs if tags is None else [td for td in all_defs if set(td.tags) & tags]
         return "".join(td.system_prompt for td in defs if td.system_prompt)
 
     def get_registered_tools(self) -> list:

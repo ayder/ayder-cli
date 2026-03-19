@@ -27,7 +27,10 @@ from ayder_cli.tui.helpers import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.screens import CLIConfirmScreen
+from ayder_cli.agents.registry import AgentRegistry
+from ayder_cli.agents.tool import AGENT_TOOL_DEFINITION, create_call_agent_handler
 from ayder_cli.tui.widgets import (
+    AgentPanel,
     ChatView,
     ToolPanel,
     ActivityBar,
@@ -198,6 +201,36 @@ class AyderApp(App):
         self.messages: list[dict] = []
         self._init_system_prompt()
 
+        # Initialize agent registry if agents are configured (Part 1)
+        self._agent_registry: AgentRegistry | None = None
+        if hasattr(self.config, 'agents') and isinstance(self.config.agents, dict) and self.config.agents:
+            def _agent_progress(name, event, data):
+                """Forward agent events to AgentPanel."""
+                try:
+                    panel = self.query_one("#agent-panel", AgentPanel)
+                    self.call_later(lambda: panel.update_agent(name, event, data))
+                except Exception:
+                    pass
+
+            self._agent_registry = AgentRegistry(
+                agents=self.config.agents,
+                parent_config=self.config,
+                project_ctx=rt.project_ctx,
+                process_manager=self._process_manager,
+                permissions=self.permissions,
+                agent_timeout=getattr(self.config, 'agent_timeout', 300),
+                on_progress=_agent_progress,
+            )
+
+            # Register call_agent tool
+            handler = create_call_agent_handler(self._agent_registry)
+            self.registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
+
+            # Append capability prompts to system prompt
+            cap_prompts = self._agent_registry.get_capability_prompts()
+            if cap_prompts and self.messages and self.messages[0].get("role") == "system":
+                self.messages[0]["content"] += cap_prompts
+
         # Initialize command list from tui.commands
         self.commands = sorted(COMMAND_MAP.keys())
         # Add TUI-only commands to autocomplete
@@ -246,6 +279,32 @@ class AyderApp(App):
             ),
             callbacks=self._callbacks,
         )
+
+        # Wire pre-iteration hook for agent summary injection (Part 2)
+        # Must be after self.chat_loop is created above
+        if self._agent_registry:
+            async def _inject_summaries(messages):
+                summaries = self._agent_registry.drain_summaries()
+                for s in summaries:
+                    messages.append({"role": "system", "content": s.format_for_injection()})
+                    try:
+                        chat_view = self.query_one("#chat-view", ChatView)
+                        self.call_later(
+                            lambda ss=s: chat_view.add_system_message(
+                                f"Agent '{ss.agent_name}' {ss.status}: {ss.summary[:100]}"
+                            )
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        panel = self.query_one("#agent-panel", AgentPanel)
+                        self.call_later(
+                            lambda ss=s: panel.complete_agent(ss.agent_name, ss.summary, ss.status)
+                        )
+                    except Exception:
+                        pass
+
+            self.chat_loop.config.pre_iteration_hook = _inject_summaries
 
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt with project structure."""
@@ -448,6 +507,7 @@ class AyderApp(App):
         """Compose the UI layout - terminal style with scrolling content."""
         yield ChatView(id="chat-view")
         yield ToolPanel(id="tool-panel")
+        yield AgentPanel(id="agent-panel")
         yield ActivityBar(id="activity-bar")
         yield CLIInputBar(commands=self.commands, id="input-bar")
         yield StatusBar(model=self.model, permissions=self.permissions, id="status-bar")
@@ -455,6 +515,10 @@ class AyderApp(App):
     def on_mount(self) -> None:
         """Called when app is mounted."""
         self.title = f"ayder - {self.model}"
+
+        # Set the event loop on the agent registry now that it's running (Part 3)
+        if self._agent_registry:
+            self._agent_registry.set_loop(asyncio.get_running_loop())
 
         # Show the banner as scrollable content in the chat view
         chat_view = self.query_one("#chat-view", ChatView)
