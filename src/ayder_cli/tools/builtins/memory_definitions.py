@@ -14,7 +14,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Save a piece of context or insight to persistent cross-session memory.",
         description_template="Memory will be saved (category: {category})",
         tags=("metadata",),
-        func_ref="ayder_cli.memory:save_memory",
+        func_ref="ayder_cli.tools.builtins.memory:save_memory",
         parameters={
             "type": "object",
             "properties": {
@@ -41,7 +41,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description="Load saved memories from persistent cross-session storage.",
         description_template="Memories will be loaded",
         tags=("metadata",),
-        func_ref="ayder_cli.memory:load_memory",
+        func_ref="ayder_cli.tools.builtins.memory:load_memory",
         parameters={
             "type": "object",
             "properties": {
