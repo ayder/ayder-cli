@@ -69,8 +69,9 @@ ayder-cli/
 │   │   ├── temporal_metadata.py        # Temporal metadata types
 │   │   └── validation.py              # ValidationAuthority, SchemaValidator
 │   │
-│   ├── loops/                  # Shared agent loop base
+│   ├── loops/                  # Shared agent loop + base classes
 │   │   ├── base.py             # AgentLoopBase (iteration, checkpoint, routing)
+│   │   ├── chat_loop.py        # ChatLoop (async LLM + tool execution loop)
 │   │   └── config.py           # Shared LoopConfig dataclass
 │   │
 │   ├── providers/              # LLM provider implementations
@@ -116,7 +117,7 @@ ayder-cli/
 │   ├── tui/                    # Textual TUI (main interface)
 │   │   ├── __init__.py         # run_tui() entry point
 │   │   ├── app.py              # AyderApp main application
-│   │   ├── chat_loop.py        # TUI async chat loop (TuiChatLoop)
+│   │   ├── chat_loop.py        # Backward-compat re-exports → loops/chat_loop.py
 │   │   ├── commands.py         # Slash command handlers (19 commands)
 │   │   ├── helpers.py          # TUI helper functions
 │   │   ├── adapter.py          # TUIInteractionSink (verbose debug)
@@ -158,7 +159,8 @@ ayder-cli/
 | `cli.py` | Entry point, argument parsing |
 | `tui/app.py` | Main TUI application (AyderApp) |
 | `tui/commands.py` | Slash command handlers (19 commands) |
-| `tui/chat_loop.py` | Async LLM loop for TUI (TuiChatLoop + TuiCallbacks protocol) |
+| `loops/chat_loop.py` | Async LLM + tool execution loop (ChatLoop + ChatCallbacks protocol) |
+| `tui/chat_loop.py` | Backward-compat re-exports (TuiChatLoop → ChatLoop aliases) |
 | `cli_runner.py` | CLI command execution + sync agent loop |
 | `application/runtime_factory.py` | `create_runtime()` — single composition root for CLI + TUI |
 | `application/execution_policy.py` | Shared permission + tool execution policy |

@@ -91,7 +91,7 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 1. **Layered Architecture**: Clear separation between entry → app → service → core → tools
 2. **Protocol-Based**: `TuiCallbacks` protocol decouples TUI from business logic; `InteractionSink`/`ConfirmationPolicy` decouple `ToolExecutor` from UI
 3. **Single Composition Root**: `application/runtime_factory.create_runtime()` assembles all dependencies — no duplicated wiring between CLI and TUI
-4. **Shared Loop Base**: `AgentLoopBase` (in `loops/base.py`) owns iteration counting, checkpoint trigger detection, and tool-call routing; both `ChatLoop` and `TuiChatLoop` extend it
+4. **Shared Loop Base**: `AgentLoopBase` (in `loops/base.py`) owns tool-call routing and escalation detection; `ChatLoop` (in `loops/chat_loop.py`) extends it with the full async LLM + tool execution loop
 5. **Single Execution Path**: `ExecutionPolicy.execute_with_registry()` is the sole tool execution entry point; validation → permission → execute, no inline policy in loop code
 6. **Single Validation Path**: `ValidationAuthority → SchemaValidator` is the only validation stage; schema derived from live `TOOL_DEFINITIONS` registry (no hardcoded lists)
 7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security
@@ -157,7 +157,7 @@ cli.py:main()
 | `cli.py` | Entry point, argument parsing | `main()`, `create_parser()` |
 | `client.py` | LLM client and chat session | `ChatSession`, `Agent`, `call_llm_async()` |
 | `cli_runner.py` | Command execution | `CommandRunner`, `TaskRunner`, `run_command()` |
-| `chat_loop.py` | Sync CLI agent loop | `ChatLoop`, `LoopConfig`, `ToolCallHandler` |
+
 
 ### Shared Application Modules (`application/`)
 
@@ -180,7 +180,7 @@ cli.py:main()
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `tui/app.py` | Main TUI application | `AyderApp`, `AppCallbacks` |
-| `tui/chat_loop.py` | TUI chat loop logic | `TuiChatLoop`, `TuiLoopConfig` |
+| `tui/chat_loop.py` | Backward-compat re-exports | `TuiChatLoop` → `ChatLoop`, `TuiLoopConfig` → `ChatLoopConfig` |
 | `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()` |
 | `tui/widgets.py` | Custom widgets | `ChatView`, `ToolPanel`, `CLIInputBar` |
 | `tui/screens.py` | Modal screens | `CLIConfirmScreen`, `CLISelectScreen` |
@@ -283,7 +283,7 @@ User Input → CLIInputBar
 
 ### TuiCallbacks Protocol
 
-The `TuiCallbacks` protocol in `tui/chat_loop.py` decouples `TuiChatLoop` from all UI concerns:
+The `ChatCallbacks` protocol in `loops/chat_loop.py` (aliased as `TuiCallbacks` in `tui/chat_loop.py`) decouples `ChatLoop` from all UI concerns:
 
 ```python
 @runtime_checkable
@@ -388,10 +388,10 @@ if TYPE_CHECKING:
 The TUI uses protocols to avoid circular imports:
 
 ```python
-# tui/chat_loop.py
+# loops/chat_loop.py (aliased as TuiCallbacks in tui/chat_loop.py)
 from typing import Protocol
 
-class TuiCallbacks(Protocol):
+class ChatCallbacks(Protocol):
     ...
 
 # tui/app.py
@@ -438,7 +438,7 @@ registry.execute("read_file", {"file_path": "main.py"})
 ## File Organization Tips
 
 1. **New Tools**: Create `tools/builtins/<domain>_definitions.py` with a `TOOL_DEFINITIONS` tuple + implement in `tools/builtins/<domain>.py`. Auto-discovery handles the rest — no edits to `definition.py` needed.
-2. **New Application-Layer Shared Logic**: Add to `application/` and import from both `chat_loop.py` and `tui/chat_loop.py`.
+2. **New Application-Layer Shared Logic**: Add to `application/` and import from `loops/chat_loop.py`.
 3. **New TUI Commands**: Add to `tui/commands.py`, add to `COMMAND_MAP`.
 4. **New Widgets**: Add to `tui/widgets.py`, import in `tui/app.py`.
 5. **New Screens**: Add to `tui/screens.py`, push via `app.push_screen()`.
@@ -488,9 +488,9 @@ The application manages:
 - System prompt construction with project structure
 - Process manager for background operations
 
-### TUI Chat Loop Summary (src/ayder_cli/tui/chat_loop.py)
+### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)
 
-`TuiChatLoop` (extends `AgentLoopBase`) implements the core async agentic process:
+`ChatLoop` (extends `AgentLoopBase`) implements the core async agentic process:
 - Handles repeated LLM calls with tool execution until completion
 - Supports multiple tool call formats: OpenAI native (`tool_calls`), XML custom, JSON fallback
 - Manages iteration counting via `AgentLoopBase._increment_iteration()`
@@ -569,7 +569,7 @@ Schema-driven tool definitions with auto-discovery:
 
 ### Phase — Shared Agent Loop Base (`loops/base.py`)
 
-`AgentLoopBase` extracted to `loops/base.py`. Both `ChatLoop` and `TuiChatLoop` extend it:
+`AgentLoopBase` extracted to `loops/base.py`. `ChatLoop` (in `loops/chat_loop.py`) extends it:
 
 - `_increment_iteration()` / `_reset_iterations()` — shared iteration counting
 - `_route_tool_calls()` — shared OpenAI / XML / JSON / none routing logic
