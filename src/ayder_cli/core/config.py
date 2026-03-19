@@ -257,6 +257,8 @@ class Config(BaseModel):
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
+    agent_timeout: int = Field(default=300)
+    agents: dict[str, Any] = Field(default_factory=dict)  # dict[str, AgentConfig] — Any to avoid circular import
 
     @model_validator(mode="after")
     def set_max_history_default(self) -> "Config":
@@ -305,6 +307,18 @@ class Config(BaseModel):
         if "temporal" in data and isinstance(data["temporal"], dict):
             new_data["temporal"] = data["temporal"]
 
+        # Parse [agents.*] sections into AgentConfig objects
+        agents_section = data.get("agents")
+        if isinstance(agents_section, dict):
+            from ayder_cli.agents.config import AgentConfig
+            parsed_agents = {}
+            for key, agent_data in agents_section.items():
+                if isinstance(agent_data, dict):
+                    agent_data = agent_data.copy()
+                    agent_data["name"] = key  # TOML key wins
+                    parsed_agents[key] = AgentConfig(**agent_data)
+            new_data["agents"] = parsed_agents
+
         return new_data
 
     @field_validator("provider")
@@ -347,6 +361,13 @@ class Config(BaseModel):
     def validate_max_history_messages(cls, v: int) -> int:
         if v < 0:
             raise ValueError("max_history_messages must be non-negative (0 = unlimited)")
+        return v
+
+    @field_validator("agent_timeout")
+    @classmethod
+    def validate_agent_timeout(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("agent_timeout must be positive")
         return v
 
     @field_validator("base_url")
