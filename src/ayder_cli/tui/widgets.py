@@ -639,7 +639,7 @@ class StatusBar(Horizontal):
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
         yield Static(classes="spacer")
-        yield Label("^C:cancel ^L:clear ^O:tools ^T:think PgUp/Dn:scroll ^Q:quit", classes="key-hint")
+        yield Label("^C:cancel ^L:clear ^O:tools ^T:think ^G:agents PgUp/Dn:scroll ^Q:quit", classes="key-hint")
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""
