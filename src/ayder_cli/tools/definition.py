@@ -161,3 +161,12 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = _discover_definitions()
 TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {
     td.name: td for td in TOOL_DEFINITIONS
 }
+
+
+def register_dynamic_definition(td: ToolDefinition) -> None:
+    """Add a dynamically registered tool to the name lookup.
+
+    Called from ToolRegistry.register_dynamic_tool() so that
+    SchemaValidator can validate dynamic tools like call_agent.
+    """
+    TOOL_DEFINITIONS_BY_NAME[td.name] = td

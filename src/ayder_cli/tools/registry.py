@@ -40,10 +40,14 @@ class ToolRegistry:
         """Register a tool dynamically at runtime (e.g., call_agent).
 
         Adds the ToolDefinition to a per-instance list (included in schema
-        queries) and the handler to _registry (for execution dispatch).
+        queries), the handler to _registry (for execution dispatch), and
+        the definition to the global name lookup (for SchemaValidator).
         """
+        from ayder_cli.tools.definition import register_dynamic_definition
+
         self._dynamic_definitions.append(tool_def)
         self._registry[tool_def.name] = handler
+        register_dynamic_definition(tool_def)
 
     def get_schemas(self, tags: frozenset | None = None) -> List[Dict[str, Any]]:
         all_defs = list(TOOL_DEFINITIONS) + self._dynamic_definitions

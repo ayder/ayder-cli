@@ -320,7 +320,20 @@ class ChatLoop(AgentLoopBase):
                 )
                 continue
 
-            # Build and append assistant message dict to conversation history
+            # Build and append assistant message dict to conversation history.
+            # Sanitize tool call arguments: some models emit malformed JSON which
+            # gets stored in history. On the next API call, providers (e.g. Ollama)
+            # validate the history and reject requests with invalid arguments.
+            if raw_tool_calls_for_history:
+                for tc_entry in raw_tool_calls_for_history:
+                    raw_args = tc_entry["function"].get("arguments", "")
+                    if isinstance(raw_args, str):
+                        try:
+                            json.loads(raw_args)
+                        except (json.JSONDecodeError, ValueError):
+                            parsed = _parse_arguments(raw_args)
+                            tc_entry["function"]["arguments"] = json.dumps(parsed)
+
             msg_dict: dict = {"role": "assistant", "content": final_content}
             if raw_tool_calls_for_history:
                 msg_dict["tool_calls"] = raw_tool_calls_for_history
