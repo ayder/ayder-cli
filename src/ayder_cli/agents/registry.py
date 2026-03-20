@@ -109,11 +109,19 @@ class AgentRegistry:
         self._active[name] = runner
 
         async def _run_and_queue():
+            result: AgentSummary | None = None
             try:
-                summary = await runner.run(task)
-                await self._summary_queue.put(summary)
+                result = await runner.run(task)
+                await self._summary_queue.put(result)
             finally:
+                # These two operations must stay together without an await between
+                # them to ensure active_count is accurate when on_complete fires
                 self._active.pop(name, None)
+                if self._on_complete is not None and result is not None:
+                    try:
+                        self._on_complete(result)
+                    except Exception:
+                        logger.exception("on_complete callback failed")
 
         # Schedule on event loop (thread-safe)
         if self._loop is None:

@@ -1,7 +1,8 @@
 """Tests for AgentRegistry — lifecycle management for agents."""
 
+import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.registry import AgentRegistry
@@ -154,3 +155,37 @@ class TestAgentRegistry:
         registry._active["reviewer"] = MagicMock()
         registry._active["writer"] = MagicMock()
         assert registry.active_count == 2
+
+    @pytest.mark.anyio
+    async def test_on_complete_called_after_agent_finishes(self, agent_configs):
+        """on_complete callback fires after agent completes and is removed from _active."""
+        callback = MagicMock()
+        reg = AgentRegistry(
+            agents=agent_configs,
+            parent_config=MagicMock(),
+            project_ctx=MagicMock(),
+            process_manager=MagicMock(),
+            permissions={"r"},
+            agent_timeout=300,
+            on_complete=callback,
+        )
+        loop = asyncio.get_running_loop()
+        reg.set_loop(loop)
+
+        summary = AgentSummary(
+            agent_name="reviewer", status="completed", summary="Done.", error=None
+        )
+
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=summary)
+
+            reg.dispatch("reviewer", "Review code")
+
+            # Allow the scheduled coroutine to run
+            await asyncio.sleep(0.1)
+
+        callback.assert_called_once_with(summary)
+        # Agent should be removed from _active
+        assert "reviewer" not in reg._active
