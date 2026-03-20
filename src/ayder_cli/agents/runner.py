@@ -35,7 +35,8 @@ class AgentRunner:
         process_manager: Any,
         permissions: set[str],
         timeout: int = 300,
-        on_progress: Callable[[str, str, Any], None] | None = None,
+        run_id: int = 0,
+        on_progress: Callable[[int, str, str, Any], None] | None = None,
     ) -> None:
         self._agent_config = agent_config
         self._parent_config = parent_config
@@ -43,6 +44,7 @@ class AgentRunner:
         self._process_manager = process_manager
         self._permissions = permissions
         self._timeout = timeout
+        self.run_id = run_id
         self._on_progress = on_progress
         self._cancel_event = asyncio.Event()
         self.status: str = "idle"
@@ -79,6 +81,7 @@ class AgentRunner:
 
             callbacks = AgentCallbacks(
                 agent_name=self.agent_name,
+                run_id=self.run_id,
                 cancel_event=self._cancel_event,
                 on_progress=self._on_progress,
             )
