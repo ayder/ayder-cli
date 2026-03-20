@@ -23,6 +23,7 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **7 native drivers** -- Ollama, OpenAI, Anthropic, Gemini, DeepSeek, Qwen (DashScope), and GLM (ZhipuAI). Each driver guarantees native tool calling and streaming support.
 - **Fully local or cloud** -- run locally with Ollama, or connect to any cloud provider.
 - **Agentic workflow** -- the LLM reads files, edits code, runs shell commands, and iterates autonomously with configurable iteration limits per message.
+- **Multi-agent** -- define specialized sub-agents in `config.toml`. Each agent runs independently with its own LLM, model, and context. Results are injected back into the main conversation when complete.
 - **Textual TUI** -- an inline terminal interface with chat view, tool panel, thinking block toggle, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews.
 - **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Other provider SDKs are optional.
 
@@ -179,6 +180,7 @@ max_output_tokens = 4096      # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
+agent_timeout = 300           # Seconds before a background agent is cancelled
 
 [logging]
 file_enabled = true
@@ -352,6 +354,9 @@ For small local models (7B-14B), lower `max_context_tokens` to match the model's
 | `/load-memory` | Load memory and restore context |
 | `/archive-completed-tasks` | Move completed tasks to `.ayder/task_archive/` |
 | `/temporal` | Start/status Temporal queue worker |
+| `/agent list` | List configured agents and their current status |
+| `/agent <name> <task>` | Dispatch an agent to run a task in the background |
+| `/agent cancel <name>` | Cancel a running agent |
 
 ### Logging
 
@@ -457,6 +462,144 @@ The tool system:
 | **Web** | `fetch_web` |
 | **DBS** | `dbs_tool` (RAG API for DBS-related queries) |
 | **Workflow** | `temporal_workflow` |
+| **Agents** | `call_agent` (dispatch a named agent to run a task in the background) |
+
+## Multi-Agent System
+
+ayder-cli supports user-defined **specialized agents**: each agent is an independent AI loop with its own LLM provider, model, system prompt, and context window. Agents run as background tasks — they never block the main conversation and their results are automatically injected back when they complete.
+
+### How Agents Work
+
+```
+Main LLM (your conversation)
+    │
+    ├─ calls `call_agent` tool  ─────────────────────────────────┐
+    │   OR you type `/agent <name> <task>`                       │
+    │                                                            ▼
+    │                                            AgentRunner (background asyncio task)
+    │                                            ┌─────────────────────────────────┐
+    │                                            │  Isolated ChatLoop              │
+    │                                            │  • own LLM provider + model     │
+    │                                            │  • own context window           │
+    │                                            │  • own ToolRegistry             │
+    │                                            │  • auto-approves all tools      │
+    │                                            │  • produces <agent-summary>     │
+    │                                            └────────────────┬────────────────┘
+    │                                                             │ completes
+    │                                                             ▼
+    │                                            AgentSummary → _summary_queue
+    │
+    ▼ (next main LLM turn)
+pre_iteration_hook drains queue
+    └─ injects AgentSummary as system message into main context
+         └─ main LLM sees: "[Agent 'reviewer' completed] FINDINGS: ..."
+```
+
+Key properties:
+- **Separate context** — agents have no access to the main conversation history. They receive only their system prompt and the task description.
+- **Non-blocking** — dispatching an agent returns immediately. Both `/agent` and `call_agent` are fire-and-forget.
+- **Concurrent** — multiple agents can run simultaneously, each in its own async task.
+- **Summary injection** — when an agent finishes, its structured `<agent-summary>` block is injected as a system message into the main LLM's context at the start of the next turn.
+- **Timeout** — agents are automatically cancelled after `agent_timeout` seconds (default: 300).
+
+### Configuring Agents
+
+Add `[agents.<name>]` sections to your `~/.ayder/config.toml`:
+
+```toml
+[app]
+provider = "ollama"
+agent_timeout = 300           # Global timeout for all agents (seconds)
+
+[llm.ollama]
+driver = "ollama"
+model = "qwen3-coder:latest"
+num_ctx = 65536
+
+[llm.anthropic]
+driver = "anthropic"
+api_key = "sk-ant-..."
+model = "claude-sonnet-4-5-20250929"
+num_ctx = 200000
+
+# --- Agents ---
+
+[agents.code-reviewer]
+system_prompt = """You are a senior code reviewer. Review the code for bugs,
+security issues, and style violations. Be concise and actionable."""
+provider = "anthropic"         # Optional: use a different provider than main
+model = "claude-sonnet-4-5-20250929"  # Optional: use a different model
+
+[agents.test-writer]
+system_prompt = """You are a test engineer. Write comprehensive pytest tests
+for the code provided. Follow existing test patterns in the codebase."""
+# No provider/model → inherits from [app] provider
+
+[agents.doc-writer]
+system_prompt = """You are a technical writer. Write clear, concise docstrings
+and inline comments for the code provided."""
+```
+
+Each agent field:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `system_prompt` | Yes | The agent's role and instructions |
+| `provider` | No | LLM provider profile name (inherits from `[app]` if omitted) |
+| `model` | No | Model name override (inherits from provider profile if omitted) |
+
+### Using Agents
+
+**From the TUI (slash commands):**
+
+```
+# List configured agents and their status
+/agent list
+
+# Dispatch an agent to review your authentication module
+/agent code-reviewer Review src/auth.py for security issues
+
+# Dispatch the test writer for a specific module
+/agent test-writer Write tests for src/api/users.py
+
+# Cancel a running agent
+/agent cancel code-reviewer
+```
+
+**Via the main LLM (automatic):**
+
+When agents are configured, the main LLM is told about them via its system prompt and can call `call_agent` autonomously:
+
+```
+You: Review the authentication module and write tests for it.
+
+LLM: I'll dispatch two agents to handle this in parallel.
+     [calls call_agent: name="code-reviewer", task="Review src/auth.py..."]
+     [calls call_agent: name="test-writer", task="Write tests for src/auth.py..."]
+
+     Both agents are running in the background. I'll incorporate
+     their findings when they complete.
+
+... (agents run independently) ...
+
+LLM: [next turn, after agents complete]
+     The code-reviewer found 2 issues: ...
+     The test-writer produced 8 new tests: ...
+```
+
+**Agent summary format:**
+
+Agents end their final response with a structured block that ayder-cli parses:
+
+```
+<agent-summary>
+FINDINGS: Found a SQL injection vulnerability in login() and missing input validation in register()
+FILES_CHANGED: none
+RECOMMENDATIONS: Parameterize all DB queries; add Pydantic validators to all endpoints
+</agent-summary>
+```
+
+This summary is injected into the main LLM's context as a system message so the main agent can act on it, summarize it for you, or chain it to further work.
 
 ## License
 
