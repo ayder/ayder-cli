@@ -238,7 +238,10 @@ class AyderApp(App):
                 except Exception:
                     pass
 
-                # Batch wake-up: only trigger LLM when ALL agents are done
+                # Batch wake-up: only trigger LLM when ALL agents are done.
+                # Dual-drain contract: this path drains the queue and kicks off a new LLM
+                # run. pre_iteration_hook (_inject_summaries) covers the in-flight case where
+                # agents complete while _is_processing == True. Do not add a second drain here.
                 if self._agent_registry and self._agent_registry.active_count == 0:
                     if not self._is_processing:
                         # Drain summaries and inject into messages
