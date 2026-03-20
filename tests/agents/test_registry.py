@@ -1,8 +1,7 @@
 """Tests for AgentRegistry — lifecycle management for agents."""
 
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.registry import AgentRegistry
