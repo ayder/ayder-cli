@@ -492,6 +492,11 @@ AgentPanel {
     display: none;
 }
 
+AgentPanel .agent-entry {
+    height: auto;
+    padding: 0 1;
+}
+
 AgentPanel .agent-status {
     height: auto;
     color: #d4a043;
