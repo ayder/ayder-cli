@@ -122,7 +122,7 @@ async def test_batch_wakeup_pattern_only_fires_when_all_agents_complete():
 
     wakeup_calls = []
 
-    def on_complete(summary):
+    def on_complete(run_id, summary):
         # This is the pattern app.py will use
         if reg.active_count == 0:
             wakeup_calls.append(summary)
@@ -140,17 +140,21 @@ async def test_batch_wakeup_pattern_only_fires_when_all_agents_complete():
         on_complete=on_complete,
     )
 
-    reg._active["a"] = MagicMock()
-    reg._active["b"] = MagicMock()
+    mock_a = MagicMock()
+    mock_a.agent_name = "a"
+    mock_b = MagicMock()
+    mock_b.agent_name = "b"
+    reg._active[1] = mock_a
+    reg._active[2] = mock_b
 
     summary_a = AgentSummary(agent_name="a", status="completed", summary="done a", error=None)
     await reg._summary_queue.put(summary_a)
-    reg._active.pop("a")
-    on_complete(summary_a)
+    reg._active.pop(1)
+    on_complete(1, summary_a)
     assert len(wakeup_calls) == 0  # b is still running
 
     summary_b = AgentSummary(agent_name="b", status="completed", summary="done b", error=None)
     await reg._summary_queue.put(summary_b)
-    reg._active.pop("b")
-    on_complete(summary_b)
+    reg._active.pop(2)
+    on_complete(2, summary_b)
     assert len(wakeup_calls) == 1  # Now all done, wake up fires
