@@ -133,3 +133,25 @@ class TestAgentRegistry:
         result = registry.drain_summaries()
         assert len(result) == 1
         assert result[0].agent_name == "reviewer"
+
+    def test_on_complete_callback_received(self, agent_configs):
+        """on_complete is stored and accessible."""
+        callback = MagicMock()
+        reg = AgentRegistry(
+            agents=agent_configs,
+            parent_config=MagicMock(),
+            project_ctx=MagicMock(),
+            process_manager=MagicMock(),
+            permissions={"r"},
+            agent_timeout=300,
+            on_complete=callback,
+        )
+        assert reg._on_complete is callback
+
+    def test_active_count_empty(self, registry):
+        assert registry.active_count == 0
+
+    def test_active_count_with_runners(self, registry):
+        registry._active["reviewer"] = MagicMock()
+        registry._active["writer"] = MagicMock()
+        assert registry.active_count == 2

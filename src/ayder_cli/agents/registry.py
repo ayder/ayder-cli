@@ -34,6 +34,7 @@ class AgentRegistry:
         permissions: set[str],
         agent_timeout: int = 300,
         on_progress: Callable[[str, str, Any], None] | None = None,
+        on_complete: Callable[[AgentSummary], None] | None = None,
     ) -> None:
         self.agents = agents
         self._parent_config = parent_config
@@ -42,6 +43,7 @@ class AgentRegistry:
         self._permissions = permissions
         self._agent_timeout = agent_timeout
         self._on_progress = on_progress
+        self._on_complete = on_complete
         self._loop: asyncio.AbstractEventLoop | None = None
         self._active: dict[str, AgentRunner] = {}
         self._summary_queue: asyncio.Queue[AgentSummary] = asyncio.Queue()
@@ -52,6 +54,11 @@ class AgentRegistry:
         Must be called after the event loop is running (e.g., in on_mount).
         """
         self._loop = loop
+
+    @property
+    def active_count(self) -> int:
+        """Number of currently running agents."""
+        return len(self._active)
 
     def get_status(self, name: str) -> str | None:
         """Get agent status: 'idle', 'running', 'completed', 'error', or None if unknown."""
