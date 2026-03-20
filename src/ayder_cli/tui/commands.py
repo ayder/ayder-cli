@@ -945,7 +945,11 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         lines = ["Configured agents:"]
         for name in agents:
             status = app._agent_registry.get_status(name)
-            lines.append(f"  {name}: {status}")
+            count = app._agent_registry.get_running_count(name)
+            if count > 1:
+                lines.append(f"  {name}: {status} ({count} instances)")
+            else:
+                lines.append(f"  {name}: {status}")
         chat_view.add_system_message("\n".join(lines))
         return
 
@@ -972,14 +976,26 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         return
 
     # Show agent in panel and dispatch (sync, fire-and-forget)
-    try:
-        agent_panel = app.query_one("#agent-panel", AgentPanel)
-        agent_panel.add_agent(agent_name)
-    except Exception:
-        pass
-
     result = app._agent_registry.dispatch(agent_name, task)
-    chat_view.add_system_message(result)
+
+    if isinstance(result, int):
+        # Success — run_id returned
+        run_id = result
+        try:
+            agent_panel = app.query_one("#agent-panel", AgentPanel)
+            agent_panel.add_agent(agent_name, run_id)
+        except Exception:
+            pass
+
+        task_preview = task[:80] + "..." if len(task) > 80 else task
+        chat_view.add_system_message(
+            f"Agent '{agent_name}' dispatched with task: {task_preview}\n"
+            f"The agent is running in the background. "
+            f"You will receive its summary when it completes."
+        )
+    else:
+        # Error — error string returned
+        chat_view.add_system_message(result)
 
     # Update activity bar with agent count and start timer
     try:

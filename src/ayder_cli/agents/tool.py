@@ -52,6 +52,14 @@ def create_call_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
     """
 
     def handle_call_agent(*, name: str, task: str) -> str:
-        return registry.dispatch(name, task)
+        result = registry.dispatch(name, task)
+        if isinstance(result, int):
+            task_preview = task[:80] + "..." if len(task) > 80 else task
+            return (
+                f"Agent '{name}' dispatched successfully with task: {task_preview}\n"
+                f"The agent is running in the background. "
+                f"You will receive its summary when it completes."
+            )
+        return result  # error string
 
     return handle_call_agent
