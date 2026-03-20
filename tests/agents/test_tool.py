@@ -60,3 +60,15 @@ class TestCallAgentHandler:
         result = handler(name="writer", task="Write tests for auth.py")
 
         assert result == "Agent 'writer' dispatched with task: Write tests..."
+
+    def test_handler_converts_int_run_id_to_success_string(self):
+        """When dispatch succeeds (returns int run_id), handler returns a success string."""
+        mock_registry = MagicMock()
+        mock_registry.dispatch.return_value = 1  # int run_id
+
+        handler = create_call_agent_handler(mock_registry)
+        result = handler(name="reviewer", task="Review auth.py")
+
+        assert isinstance(result, str)
+        assert "dispatched" in result.lower()
+        assert "reviewer" in result
