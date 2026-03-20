@@ -2,6 +2,7 @@
 
 import pytest
 from ayder_cli.agents.config import AgentConfig
+from ayder_cli.core.config import Config
 
 
 class TestAgentConfig:
@@ -35,9 +36,6 @@ class TestAgentConfig:
         """system_prompt defaults to empty string."""
         cfg = AgentConfig(name="test")
         assert cfg.system_prompt == ""
-
-
-from ayder_cli.core.config import Config
 
 
 class TestConfigAgentParsing:

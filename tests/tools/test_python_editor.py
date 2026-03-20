@@ -7,7 +7,7 @@ import pytest
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError, ToolSuccess
-from ayder_cli.tools.builtins.python_editor import PythonEditorBackend, python_editor
+from ayder_cli.tools.builtins.python_editor import python_editor
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -318,10 +318,10 @@ class TestAddImport:
         content = sample_file.read_text()
         lines = content.splitlines()
         # Find the import sys line
-        sys_idx = next(i for i, l in enumerate(lines) if "import sys" in l)
+        sys_idx = next(i for i, line in enumerate(lines) if "import sys" in line)
         # It should be after the existing "from pathlib import Path" line
         pathlib_idx = next(
-            i for i, l in enumerate(lines) if "from pathlib import Path" in l
+            i for i, line in enumerate(lines) if "from pathlib import Path" in line
         )
         assert sys_idx > pathlib_idx
 

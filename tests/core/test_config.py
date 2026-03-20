@@ -3,9 +3,6 @@
 from pathlib import Path
 import pytest
 
-# Defer these tests as they interact with the actual ~/.ayder/config.toml
-pytestmark = pytest.mark.skip(reason="Deferred: overwrites local config file. Fix with filesystem mocking.")
-
 from ayder_cli.core.config import (
     DEFAULTS,
     _DEFAULT_TOML,
@@ -14,6 +11,9 @@ from ayder_cli.core.config import (
     Config,
     load_config,
 )
+
+# Defer these tests as they interact with the actual ~/.ayder/config.toml
+pytestmark = pytest.mark.skip(reason="Deferred: overwrites local config file. Fix with filesystem mocking.")
 
 
 class TestDefaultValues:

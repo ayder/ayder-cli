@@ -42,7 +42,7 @@ class TestServiceBoundary:
                     if node.module == "ayder_cli":
                         for alias in node.names:
                             if alias.name == "ui":
-                                imports.append(f"from ayder_cli import ui")
+                                imports.append("from ayder_cli import ui")
         except SyntaxError:
             # Skip files with syntax errors
             pass
@@ -69,8 +69,8 @@ class TestServiceBoundary:
         
         # Assertion should fail if any UI imports found
         assert not violations, (
-            f"Service modules must not import ayder_cli.ui.\n"
-            f"Found violations in:\n" + "\n".join(f"  - {v}" for v in violations)
+            "Service modules must not import ayder_cli.ui.\n"
+            "Found violations in:\n" + "\n".join(f"  - {v}" for v in violations)
         )
 
     def test_tool_executor_has_no_ui_imports(self):

@@ -137,7 +137,7 @@ class TestCreateAgentRuntime:
             mock_load.return_value = Config()
             mock_orch.create.return_value = MagicMock()
 
-            rt = create_agent_runtime(
+            create_agent_runtime(
                 agent_config=agent_cfg,
                 parent_config=parent_cfg,
                 project_ctx=project_ctx,

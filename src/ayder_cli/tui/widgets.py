@@ -334,7 +334,7 @@ class ActivityBar(Horizontal):
 
         # Determine the LLM activity label and spinner
         label: Text | None = None
-        spinner = None
+        spinner: Spinner | None = None
 
         if self._thinking and self._tools_working:
             label = Text.assemble(
@@ -362,11 +362,11 @@ class ActivityBar(Horizontal):
             if self._agents_running > 0 else None
         )
 
-        if label and agent_prefix:
+        if label and agent_prefix and spinner:
             # Both agent and LLM activity
             spinner.text = Text.assemble(agent_prefix, ("| ", "dim"), label)
             self._widget.update(spinner)
-        elif label:
+        elif label and spinner:
             # LLM activity only
             spinner.text = label
             self._widget.update(spinner)

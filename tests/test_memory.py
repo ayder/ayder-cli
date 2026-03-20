@@ -2,7 +2,6 @@
 
 import json
 import pytest
-from unittest.mock import Mock
 
 from ayder_cli.tools.builtins.memory import save_memory, load_memory
 from ayder_cli.core.context import ProjectContext

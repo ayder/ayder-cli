@@ -112,12 +112,6 @@ class TestDescribeToolAction:
         result = ui.describe_tool_action("file_explorer", {"path": "."})
         assert "." in result
 
-    def test_file_editor(self):
-        """Test description for file_editor tool."""
-        result = ui.describe_tool_action("file_editor", {"file_path": "/tmp/modify.py"})
-        assert "/tmp/modify.py" in result
-        assert "will be modified" in result
-
     def test_run_shell_command(self):
         """Test description for run_shell_command tool."""
         result = ui.describe_tool_action("run_shell_command", {"command": "ls -la"})

@@ -1,9 +1,7 @@
 """Tests for TuiChatLoop — the async chat loop for the Textual TUI."""
 
-import asyncio
 import json
-from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

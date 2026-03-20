@@ -157,7 +157,7 @@ class TestManageEnvironmentVarsGenerate:
         content = env_path.read_text()
         assert "JWT_SECRET=" in content
         # Check that value is hex (32 chars)
-        lines = [l for l in content.split("\n") if l.startswith("JWT_SECRET=")]
+        lines = [line for line in content.split("\n") if line.startswith("JWT_SECRET=")]
         assert len(lines) == 1
         value = lines[0].split("=", 1)[1]
         # Remove quotes if present (python-dotenv may add them)
@@ -419,8 +419,8 @@ class TestManageEnvironmentVarsIntegration:
         content = env_path.read_text()
         lines = content.strip().split("\n")
         
-        secret1_line = [l for l in lines if l.startswith("SECRET1=")]
-        secret2_line = [l for l in lines if l.startswith("SECRET2=")]
+        secret1_line = [line for line in lines if line.startswith("SECRET1=")]
+        secret2_line = [line for line in lines if line.startswith("SECRET2=")]
         
         assert len(secret1_line) == 1
         assert len(secret2_line) == 1

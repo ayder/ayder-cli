@@ -19,10 +19,6 @@ class TestIsToolBlockedInSafeMode:
         """file_editor should be blocked in safe mode."""
         assert is_tool_blocked_in_safe_mode("file_editor", True) is True
 
-    def test_file_editor_blocked_in_safe_mode(self):
-        """file_editor should be blocked in safe mode."""
-        assert is_tool_blocked_in_safe_mode("file_editor", True) is True
-
     def test_run_shell_command_blocked_in_safe_mode(self):
         """run_shell_command should be blocked in safe mode."""
         assert is_tool_blocked_in_safe_mode("run_shell_command", True) is True

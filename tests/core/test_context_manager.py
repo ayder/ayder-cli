@@ -1,4 +1,3 @@
-import pytest
 from ayder_cli.core.context_manager import ContextManager
 
 from ayder_cli.core.config import ContextManagerConfigSection

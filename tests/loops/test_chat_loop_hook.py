@@ -1,8 +1,7 @@
 """Tests for ChatLoop pre-iteration hook."""
 
-import asyncio
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 

@@ -1,6 +1,5 @@
 """Integration test for the multi-agent system end-to-end."""
 
-import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
