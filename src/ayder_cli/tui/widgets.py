@@ -288,6 +288,7 @@ class ActivityBar(Horizontal):
         self._thinking = False
         self._generating = False
         self._tools_working = False
+        self._agents_running = 0
         self._thinking_spinner = Spinner("dots2", style="bold yellow")
         self._generating_spinner = Spinner("dots2", style="bold green")
         self._tools_spinner = Spinner("aesthetic", style="bold yellow")
@@ -314,9 +315,15 @@ class ActivityBar(Horizontal):
         self._tools_working = active
         self._refresh_display()
 
+    def set_agents_running(self, count: int) -> None:
+        """Show or hide the agents running indicator."""
+        self._agents_running = count
+        self._refresh_display()
+
     def update_spinners(self) -> None:
         """Re-render spinners (call on a timer)."""
-        if not self._thinking and not self._generating and not self._tools_working:
+        if (not self._thinking and not self._generating
+                and not self._tools_working and self._agents_running == 0):
             return
         self._refresh_display()
 
@@ -325,39 +332,57 @@ class ActivityBar(Horizontal):
         if not self._widget:
             return
 
+        # Determine the LLM activity label and spinner
+        label: Text | None = None
+        spinner = None
+
         if self._thinking and self._tools_working:
-            self._thinking_spinner.text = Text.assemble(
-                ("Thinking... ", "bold yellow"),
-                ("| ", "dim"),
-                ("Tools Working...", "bold yellow"),
+            label = Text.assemble(
+                ("Thinking... ", "bold yellow"), ("| ", "dim"), ("Tools Working...", "bold yellow"),
             )
-            self._widget.update(self._thinking_spinner)
+            spinner = self._thinking_spinner
         elif self._thinking:
-            self._thinking_spinner.text = "Thinking..."
-            self._widget.update(self._thinking_spinner)
+            label = Text("Thinking...")
+            spinner = self._thinking_spinner
         elif self._generating and self._tools_working:
-            self._tools_spinner.text = Text.assemble(
-                ("Generating... ", "bold green"),
-                ("| ", "dim"),
-                ("Tools Working...", "bold yellow"),
+            label = Text.assemble(
+                ("Generating... ", "bold green"), ("| ", "dim"), ("Tools Working...", "bold yellow"),
             )
-            self._widget.update(self._tools_spinner)
+            spinner = self._tools_spinner
         elif self._generating:
-            self._generating_spinner.text = "Generating..."
-            self._widget.update(self._generating_spinner)
+            label = Text("Generating...")
+            spinner = self._generating_spinner
         elif self._tools_working:
-            self._tools_spinner.text = "Tools Working..."
-            self._widget.update(self._tools_spinner)
+            label = Text("Tools Working...")
+            spinner = self._tools_spinner
+
+        # Build agent prefix
+        agent_prefix = (
+            Text(f"Agents running ({self._agents_running}) ", style="bold cyan")
+            if self._agents_running > 0 else None
+        )
+
+        if label and agent_prefix:
+            # Both agent and LLM activity
+            spinner.text = Text.assemble(agent_prefix, ("| ", "dim"), label)
+            self._widget.update(spinner)
+        elif label:
+            # LLM activity only
+            spinner.text = label
+            self._widget.update(spinner)
+        elif agent_prefix:
+            # Agents only, no LLM — show with spinner
+            self._thinking_spinner.text = agent_prefix
+            self._widget.update(self._thinking_spinner)
         else:
             self._widget.update("")
 
     def clear(self) -> None:
-        """Reset all activity state."""
+        """Reset LLM activity state. Agent indicator preserved via _refresh_display."""
         self._thinking = False
         self._generating = False
         self._tools_working = False
-        if self._widget:
-            self._widget.update("")
+        self._refresh_display()
 
 
 class AutoCompleteInput(Input):
@@ -679,9 +704,9 @@ class AgentPanel(Container):
     def add_agent(self, name: str) -> None:
         """Show a new agent as running."""
         text = Text()
-        text.append(f"  Agent ", style="dim")
+        text.append("  Agent ", style="dim")
         text.append(f"{name}", style="bold magenta")
-        text.append(f" running...", style="dim")
+        text.append(" running...", style="dim")
 
         widget = Static(text, classes="agent-item running")
         self._agents[name] = widget
@@ -718,7 +743,7 @@ class AgentPanel(Container):
             self.add_agent(name)
         widget = self._agents[name]
         text = Text()
-        text.append(f"  Agent ", style="dim")
+        text.append("  Agent ", style="dim")
         text.append(f"{name}", style="bold magenta")
         text.append(f" — {status_text}", style="dim")
         widget.update(text)
