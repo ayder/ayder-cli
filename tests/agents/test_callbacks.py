@@ -10,38 +10,38 @@ class TestAgentCallbacks:
     def test_implements_protocol(self):
         """AgentCallbacks must satisfy the ChatCallbacks protocol."""
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         assert isinstance(cb, ChatCallbacks)
 
     def test_on_assistant_content(self):
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         # Should not raise — just collects content
         cb.on_assistant_content("Hello world")
         assert cb.last_content == "Hello world"
 
     def test_on_assistant_content_accumulates(self):
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         cb.on_assistant_content("Hello ")
         cb.on_assistant_content("world")
         assert cb.last_content == "Hello world"
 
     def test_is_cancelled_false_by_default(self):
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         assert cb.is_cancelled() is False
 
     def test_is_cancelled_true_when_event_set(self):
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         cancel_event.set()
         assert cb.is_cancelled() is True
 
     @pytest.mark.anyio
     async def test_request_confirmation_auto_approves(self):
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         result = await cb.request_confirmation("run_shell_command", {"command": "ls"})
         assert result is not None
         assert getattr(result, "action", None) == "approve"
@@ -49,7 +49,7 @@ class TestAgentCallbacks:
     def test_noop_methods_dont_raise(self):
         """All no-op callbacks should not raise."""
         cancel_event = asyncio.Event()
-        cb = AgentCallbacks(agent_name="test", cancel_event=cancel_event)
+        cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
         cb.on_thinking_start()
         cb.on_thinking_stop()
         cb.on_thinking_content("thinking...")
@@ -59,16 +59,18 @@ class TestAgentCallbacks:
         cb.on_tools_cleanup()
         cb.on_system_message("System message")
 
-    def test_on_progress_callback(self):
-        """If on_progress is provided, it receives agent events."""
+    def test_on_progress_callback_includes_run_id(self):
+        """on_progress receives (run_id, name, event, data)."""
         events = []
         cancel_event = asyncio.Event()
         cb = AgentCallbacks(
             agent_name="test",
+            run_id=42,
             cancel_event=cancel_event,
-            on_progress=lambda name, event, data: events.append((name, event, data)),
+            on_progress=lambda rid, name, event, data: events.append((rid, name, event, data)),
         )
         cb.on_tool_start("id1", "read_file", {"path": "test.py"})
         assert len(events) == 1
-        assert events[0][0] == "test"
-        assert events[0][1] == "tool_start"
+        assert events[0][0] == 42       # run_id
+        assert events[0][1] == "test"   # agent_name
+        assert events[0][2] == "tool_start"

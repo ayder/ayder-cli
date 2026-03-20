@@ -32,17 +32,19 @@ class AgentCallbacks:
     def __init__(
         self,
         agent_name: str,
+        run_id: int,
         cancel_event: asyncio.Event,
-        on_progress: Callable[[str, str, Any], None] | None = None,
+        on_progress: Callable[[int, str, str, Any], None] | None = None,
     ) -> None:
         self.agent_name = agent_name
+        self.run_id = run_id
         self._cancel_event = cancel_event
         self._on_progress = on_progress
         self.last_content: str = ""
 
     def _emit(self, event: str, data: Any = None) -> None:
         if self._on_progress:
-            self._on_progress(self.agent_name, event, data)
+            self._on_progress(self.run_id, self.agent_name, event, data)
 
     # -- ChatCallbacks protocol methods --
 
