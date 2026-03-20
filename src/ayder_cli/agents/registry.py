@@ -80,6 +80,14 @@ class AgentRegistry:
             "You can delegate tasks to specialized agents using the call_agent tool.",
             "Each agent runs independently with its own context and may use a different LLM.",
             "",
+            "**Batch behavior:** When you dispatch multiple agents, you will receive",
+            "all their summaries together after the last agent completes.",
+            "Do not respond until you have all results.",
+            "",
+            "**On agent failure:** If an agent fails (error/timeout), do NOT re-dispatch it.",
+            "Handle the failed task yourself. Agents that completed successfully CAN be",
+            "re-dispatched if needed (e.g., to re-run tests after fixing code).",
+            "",
         ]
         for name, cfg in self.agents.items():
             desc = cfg.system_prompt[:100] if cfg.system_prompt else "(no description)"

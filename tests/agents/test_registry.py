@@ -79,6 +79,12 @@ class TestAgentRegistry:
             if line.startswith("- verbose:"):
                 assert len(line) < 120  # name + truncated prompt
 
+    def test_capability_prompts_mention_batch_behavior(self, registry):
+        """Capability prompts explain batch completion and no-retry for failures."""
+        prompts = registry.get_capability_prompts()
+        assert "all agents complete" in prompts.lower() or "batch" in prompts.lower()
+        assert "failed" in prompts.lower() or "error" in prompts.lower()
+
     def test_dispatch_unknown_agent(self, registry):
         """Dispatching unknown agent returns error string."""
         result = registry.dispatch("nonexistent", "do something")
