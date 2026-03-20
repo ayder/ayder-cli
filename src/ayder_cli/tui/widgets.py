@@ -1,5 +1,6 @@
 """TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar, AgentPanel."""
 
+from dataclasses import dataclass
 from typing import Any
 
 from textual.app import ComposeResult
@@ -671,80 +672,158 @@ class StatusBar(Horizontal):
         label.update(f" | skill: {skill_name}" if skill_name else "")
 
 
-class AgentPanel(Container):
-    """Panel for displaying active and completed agent runs.
+@dataclass
+class _AgentEntry:
+    """Internal data for one agent run in the panel.
 
-    Shows agent name, status, elapsed time, and summary.
-    Placed below ToolPanel in the layout. Hidden when no agents active.
+    No Container wrapper — status and detail are mounted as siblings
+    in the panel for simplicity (per user request).
     """
+    status_widget: Static   # Status line (updated in real-time)
+    detail_widget: Static | None  # Full output (added on completion)
+    name: str
+    completed: bool = False
+
+
+class AgentPanel(Container):
+    """Scrollable panel for agent runs. Toggled with Ctrl+G.
+
+    Never auto-shows. Content updates silently regardless of visibility.
+    The ActivityBar spinner provides ambient status.
+    """
+
+    MAX_ENTRIES = 50
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._agents: dict[str, Static] = {}
+        self._user_visible: bool = False
+        self._run_counter: int = 0
+        self._entries: dict[int, _AgentEntry] = {}
+        self._active_run: dict[str, int] = {}  # agent_name -> current run_id
 
     def compose(self) -> ComposeResult:
+        # Empty generator — widgets mounted dynamically
         return
         yield
 
     def on_mount(self) -> None:
         self.display = False
 
-    def update_agent(self, name: str, event: str, data: Any = None) -> None:
-        """Handle an agent progress event."""
-        if event == "tool_start" and isinstance(data, dict):
-            tool_name = data.get("name", "?")
-            self._update_widget(name, f"Running tool: {tool_name}")
-        elif event == "assistant_content":
-            pass  # Don't update on every content chunk
-        elif event == "thinking_start":
-            self._update_widget(name, "Thinking...")
-        elif event == "tools_cleanup":
-            self._update_widget(name, "Processing...")
+    def toggle(self) -> bool:
+        """Toggle panel visibility. Returns new visibility state."""
+        self._user_visible = not self._user_visible
+        self.display = self._user_visible
+        return self._user_visible
 
     def add_agent(self, name: str) -> None:
-        """Show a new agent as running."""
+        """Add a new agent run entry. Never auto-shows the panel."""
+        self._prune_if_needed()
+        self._run_counter += 1
+        run_id = self._run_counter
+
         text = Text()
-        text.append("  Agent ", style="dim")
+        text.append("  ▶ ", style="bold yellow")
         text.append(f"{name}", style="bold magenta")
         text.append(" running...", style="dim")
 
-        widget = Static(text, classes="agent-item running")
-        self._agents[name] = widget
-        self.mount(widget)
-        self.display = True
+        status_widget = Static(text, classes="agent-status running")
+        entry = _AgentEntry(
+            status_widget=status_widget,
+            detail_widget=None,
+            name=name,
+        )
+        self._entries[run_id] = entry
+        self._active_run[name] = run_id
+        self.mount(status_widget)
 
     def complete_agent(self, name: str, summary: str, status: str = "completed") -> None:
-        """Mark agent as completed with summary."""
-        if name in self._agents:
-            widget = self._agents[name]
-            text = Text()
-            if status == "completed":
-                text.append("  ✓ ", style="bold green")
-            elif status == "timeout":
-                text.append("  ⏱ ", style="bold yellow")
-            else:
-                text.append("  ✗ ", style="bold red")
-            text.append(f"{name}", style="bold")
-            preview = summary[:80] + "..." if len(summary) > 80 else summary
-            text.append(f" — {preview}", style="dim")
-            widget.update(text)
-            widget.remove_class("running")
+        """Mark agent as completed with full summary."""
+        run_id = self._active_run.get(name)
+        if run_id is None or run_id not in self._entries:
+            return
+        entry = self._entries[run_id]
+        if entry.completed:
+            return
+        entry.completed = True
+
+        # Update status line
+        text = Text()
+        if status == "completed":
+            text.append("  ✓ ", style="bold green")
+        elif status == "timeout":
+            text.append("  ⏱ ", style="bold yellow")
+        else:
+            text.append("  ✗ ", style="bold red")
+        text.append(f"{name}", style="bold")
+        preview = summary[:80] + "..." if len(summary) > 80 else summary
+        text.append(f" — {preview}", style="dim")
+        entry.status_widget.update(text)
+        entry.status_widget.remove_class("running")
+        status_class = "completed" if status == "completed" else status
+        entry.status_widget.add_class(status_class)
+
+        # Add detail block with full summary
+        detail = Static(
+            Text(f"    {summary}", style="dim"),
+            classes="agent-detail",
+        )
+        entry.detail_widget = detail
+        self.mount(detail, after=entry.status_widget)
+        self.scroll_end(animate=False)
+
+    def update_agent(self, name: str, event: str, data: Any = None) -> None:
+        """Handle an agent progress event."""
+        if name not in self._active_run:
+            self.add_agent(name)
+
+        run_id = self._active_run[name]
+        entry = self._entries.get(run_id)
+        if entry is None or entry.completed:
+            return
+
+        if event == "tool_start" and isinstance(data, dict):
+            tool_name = data.get("name", "?")
+            self._update_status(entry, f"Running tool: {tool_name}")
+        elif event == "thinking_start":
+            self._update_status(entry, "Thinking...")
+        elif event == "tools_cleanup":
+            self._update_status(entry, "Processing...")
 
     def remove_agent(self, name: str) -> None:
-        """Remove agent widget."""
-        if name in self._agents:
-            self._agents[name].remove()
-            del self._agents[name]
-        if not self._agents:
-            self.display = False
+        """Remove an agent entry from the panel. Does not affect panel visibility."""
+        run_id = self._active_run.get(name)
+        if run_id is not None and run_id in self._entries:
+            entry = self._entries[run_id]
+            entry.status_widget.remove()
+            if entry.detail_widget:
+                entry.detail_widget.remove()
+            del self._entries[run_id]
+            if self._active_run.get(name) == run_id:
+                del self._active_run[name]
 
-    def _update_widget(self, name: str, status_text: str) -> None:
-        if name not in self._agents:
-            self.add_agent(name)
-        widget = self._agents[name]
+    def _update_status(self, entry: _AgentEntry, status_text: str) -> None:
+        """Update the status line text for a running agent."""
         text = Text()
-        text.append("  Agent ", style="dim")
-        text.append(f"{name}", style="bold magenta")
+        text.append("  ▶ ", style="bold yellow")
+        text.append(f"{entry.name}", style="bold magenta")
         text.append(f" — {status_text}", style="dim")
-        widget.update(text)
+        entry.status_widget.update(text)
+
+    def _prune_if_needed(self) -> None:
+        """Remove oldest completed entry if at capacity."""
+        if len(self._entries) < self.MAX_ENTRIES:
+            return
+        to_prune = None
+        for run_id, entry in self._entries.items():
+            if entry.completed:
+                to_prune = run_id
+                break
+        if to_prune is not None:
+            entry = self._entries[to_prune]
+            entry.status_widget.remove()
+            if entry.detail_widget:
+                entry.detail_widget.remove()
+            if self._active_run.get(entry.name) == to_prune:
+                del self._active_run[entry.name]
+            del self._entries[to_prune]
 
