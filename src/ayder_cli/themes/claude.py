@@ -479,6 +479,47 @@ ToolPanel .tool-item.completed {
     color: #5cb870;
 }
 
+/* AgentPanel - Scrollable panel for agent run history.
+   Toggled with Ctrl+G. Targets 'AgentPanel' in widgets.py. */
+AgentPanel {
+    layout: vertical;
+    height: auto;
+    max-height: 40%;
+    background: #0a0a18;
+    border-top: solid #333350;
+    padding: 1 1;
+    overflow-y: scroll;
+    display: none;
+}
+
+AgentPanel .agent-status {
+    height: auto;
+    color: #d4a043;
+    padding: 0 1;
+}
+
+AgentPanel .agent-status.running {
+    color: #d4a043;
+}
+
+AgentPanel .agent-status.completed {
+    color: #5cb870;
+}
+
+AgentPanel .agent-status.error {
+    color: #ff5555;
+}
+
+AgentPanel .agent-status.timeout {
+    color: #d4a043;
+}
+
+AgentPanel .agent-detail {
+    height: auto;
+    color: #666680;
+    padding: 0 0 0 4;
+}
+
 /* AyderApp - The root application screen. */
 Screen {
     layout: vertical;
@@ -506,6 +547,12 @@ Screen:inline {
     height: auto;
     min-height: 0;
     max-height: 20%;
+    width: 100%;
+}
+
+#agent-panel {
+    min-height: 0;
+    max-height: 40%;
     width: 100%;
 }
 
