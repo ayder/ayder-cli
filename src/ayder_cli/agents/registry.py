@@ -47,6 +47,7 @@ class AgentRegistry:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._active: dict[str, AgentRunner] = {}
         self._summary_queue: asyncio.Queue[AgentSummary] = asyncio.Queue()
+        self._settled: dict[str, str] = {}
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the event loop for scheduling agent runs.
@@ -96,6 +97,12 @@ class AgentRegistry:
             return f"Error: Agent '{name}' not found in configured agents"
         if name in self._active:
             return f"Error: Agent '{name}' is already running"
+        # Re-dispatch guard: block agents that failed in this cycle
+        if name in self._settled and self._settled[name] in ("error", "timeout"):
+            return (
+                f"Error: Agent '{name}' failed in this cycle "
+                f"(status: {self._settled[name]}). Handle the task directly."
+            )
 
         runner = AgentRunner(
             agent_config=self.agents[name],
@@ -117,6 +124,8 @@ class AgentRegistry:
                 # These two operations must stay together without an await between
                 # them to ensure active_count is accurate when on_complete fires
                 self._active.pop(name, None)
+                if result is not None:
+                    self._settled[name] = result.status
                 if self._on_complete is not None and result is not None:
                     try:
                         self._on_complete(result)
@@ -142,6 +151,10 @@ class AgentRegistry:
         if runner is None:
             return False
         return runner.cancel()
+
+    def reset_settled(self) -> None:
+        """Clear the settled tracker. Call on new user message cycle."""
+        self._settled = {}
 
     def drain_summaries(self) -> list[AgentSummary]:
         """Drain all completed summaries from the queue (non-blocking)."""

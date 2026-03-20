@@ -189,3 +189,33 @@ class TestAgentRegistry:
         callback.assert_called_once_with(summary)
         # Agent should be removed from _active
         assert "reviewer" not in reg._active
+
+    def test_settled_blocks_failed_agent_redispatch(self, registry):
+        """Cannot re-dispatch an agent that errored in this cycle."""
+        registry._settled = {"reviewer": "error"}
+        result = registry.dispatch("reviewer", "try again")
+        assert "failed in this cycle" in result.lower() and "handle the task directly" in result.lower()
+
+    def test_settled_blocks_timed_out_agent_redispatch(self, registry):
+        """Cannot re-dispatch an agent that timed out in this cycle."""
+        registry._settled = {"reviewer": "timeout"}
+        result = registry.dispatch("reviewer", "try again")
+        assert "failed in this cycle" in result.lower() and "handle the task directly" in result.lower()
+
+    def test_settled_allows_completed_agent_redispatch(self, registry):
+        """Can re-dispatch an agent that completed successfully."""
+        registry._settled = {"reviewer": "completed"}
+        mock_loop = MagicMock()
+        registry.set_loop(mock_loop)
+
+        with patch("ayder_cli.agents.registry.AgentRunner"), \
+             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
+            result = registry.dispatch("reviewer", "run again")
+
+        assert "dispatched" in result.lower()
+
+    def test_reset_settled(self, registry):
+        """reset_settled clears the settled tracker."""
+        registry._settled = {"reviewer": "error", "writer": "completed"}
+        registry.reset_settled()
+        assert registry._settled == {}
