@@ -133,6 +133,7 @@ class AyderApp(App):
         ("ctrl+l", "clear", "Clear Chat"),
         ("ctrl+o", "toggle_tools", "Toggle Tools"),
         ("ctrl+t", "toggle_thinking", "Toggle Thinking"),
+        ("ctrl+g", "toggle_agents", "Toggle Agents"),
         ("pageup", "scroll_chat_up", "Scroll Up"),
         ("pagedown", "scroll_chat_down", "Scroll Down"),
     ]
@@ -244,19 +245,12 @@ class AyderApp(App):
                 # agents complete while _is_processing == True. Do not add a second drain here.
                 if self._agent_registry and self._agent_registry.active_count == 0:
                     if not self._is_processing:
-                        # Drain summaries and inject into messages
+                        # Drain summaries and inject into messages for LLM context.
+                        # AgentPanel already shows completion status visually via
+                        # complete_agent above, so no need for add_system_message.
                         summaries = self._agent_registry.drain_summaries()
                         for s in summaries:
                             self.messages.append({"role": "system", "content": s.format_for_injection()})
-                            try:
-                                chat_view = self.query_one("#chat-view", ChatView)
-                                self.call_later(
-                                    lambda ss=s: chat_view.add_system_message(
-                                        f"Agent '{ss.agent_name}' {ss.status}: {ss.summary[:100]}"
-                                    )
-                                )
-                            except Exception:
-                                pass
                         # Wake the main LLM
                         self.call_later(lambda: self.start_llm_processing())
 
@@ -709,6 +703,14 @@ class AyderApp(App):
         chat_view.set_thinking_visible(self._show_thinking)
         state = "visible" if self._show_thinking else "hidden"
         chat_view.add_system_message(f"Thinking blocks {state} (Ctrl+T to toggle)")
+
+    def action_toggle_agents(self) -> None:
+        """Toggle the agent panel."""
+        agent_panel = self.query_one("#agent-panel", AgentPanel)
+        visible = agent_panel.toggle()
+        chat_view = self.query_one("#chat-view", ChatView)
+        state = "visible" if visible else "hidden"
+        chat_view.add_system_message(f"Agent panel {state} (Ctrl+G to toggle)")
 
     def action_scroll_chat_up(self) -> None:
         """Scroll chat view up one page."""
