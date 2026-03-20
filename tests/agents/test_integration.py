@@ -111,3 +111,47 @@ class TestAgentIntegration:
 
         # Queue is now empty
         assert registry.drain_summaries() == []
+
+
+@pytest.mark.anyio
+async def test_batch_wakeup_pattern_only_fires_when_all_agents_complete():
+    """Validates the batch wake-up pattern: only trigger when active_count == 0."""
+    from ayder_cli.agents.config import AgentConfig
+    from ayder_cli.agents.registry import AgentRegistry
+    from ayder_cli.agents.summary import AgentSummary
+    from unittest.mock import MagicMock
+
+    wakeup_calls = []
+
+    def on_complete(summary):
+        # This is the pattern app.py will use
+        if reg.active_count == 0:
+            wakeup_calls.append(summary)
+
+    configs = {
+        "a": AgentConfig(name="a", system_prompt="agent a"),
+        "b": AgentConfig(name="b", system_prompt="agent b"),
+    }
+    reg = AgentRegistry(
+        agents=configs,
+        parent_config=MagicMock(),
+        project_ctx=MagicMock(),
+        process_manager=MagicMock(),
+        permissions={"r"},
+        on_complete=on_complete,
+    )
+
+    reg._active["a"] = MagicMock()
+    reg._active["b"] = MagicMock()
+
+    summary_a = AgentSummary(agent_name="a", status="completed", summary="done a", error=None)
+    await reg._summary_queue.put(summary_a)
+    reg._active.pop("a")
+    on_complete(summary_a)
+    assert len(wakeup_calls) == 0  # b is still running
+
+    summary_b = AgentSummary(agent_name="b", status="completed", summary="done b", error=None)
+    await reg._summary_queue.put(summary_b)
+    reg._active.pop("b")
+    on_complete(summary_b)
+    assert len(wakeup_calls) == 1  # Now all done, wake up fires

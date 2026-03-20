@@ -205,12 +205,57 @@ class AyderApp(App):
         self._agent_registry: AgentRegistry | None = None
         if hasattr(self.config, 'agents') and isinstance(self.config.agents, dict) and self.config.agents:
             def _agent_progress(name, event, data):
-                """Forward agent events to AgentPanel."""
+                """Forward agent events to AgentPanel and sync activity bar."""
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
                     self.call_later(lambda: panel.update_agent(name, event, data))
                 except Exception:
                     pass
+                # Keep activity bar agent count in sync and ensure spinner animates
+                try:
+                    activity = self.query_one("#activity-bar", ActivityBar)
+                    count = self._agent_registry.active_count if self._agent_registry else 0
+                    self.call_later(lambda: activity.set_agents_running(count))
+                    self.call_later(self._start_activity_timer)
+                except Exception:
+                    pass
+
+            def _agent_complete(summary):
+                """Handle agent completion: update UI and wake LLM if all done."""
+                try:
+                    panel = self.query_one("#agent-panel", AgentPanel)
+                    self.call_later(
+                        lambda: panel.complete_agent(summary.agent_name, summary.summary, summary.status)
+                    )
+                except Exception:
+                    pass
+
+                # Update activity bar
+                try:
+                    activity = self.query_one("#activity-bar", ActivityBar)
+                    count = self._agent_registry.active_count if self._agent_registry else 0
+                    self.call_later(lambda: activity.set_agents_running(count))
+                except Exception:
+                    pass
+
+                # Batch wake-up: only trigger LLM when ALL agents are done
+                if self._agent_registry and self._agent_registry.active_count == 0:
+                    if not self._is_processing:
+                        # Drain summaries and inject into messages
+                        summaries = self._agent_registry.drain_summaries()
+                        for s in summaries:
+                            self.messages.append({"role": "system", "content": s.format_for_injection()})
+                            try:
+                                chat_view = self.query_one("#chat-view", ChatView)
+                                self.call_later(
+                                    lambda ss=s: chat_view.add_system_message(
+                                        f"Agent '{ss.agent_name}' {ss.status}: {ss.summary[:100]}"
+                                    )
+                                )
+                            except Exception:
+                                pass
+                        # Wake the main LLM
+                        self.call_later(lambda: self.start_llm_processing())
 
             self._agent_registry = AgentRegistry(
                 agents=self.config.agents,
@@ -220,6 +265,7 @@ class AyderApp(App):
                 permissions=self.permissions,
                 agent_timeout=getattr(self.config, 'agent_timeout', 300),
                 on_progress=_agent_progress,
+                on_complete=_agent_complete,
             )
 
             # Register call_agent tool
@@ -287,22 +333,6 @@ class AyderApp(App):
                 summaries = self._agent_registry.drain_summaries()
                 for s in summaries:
                     messages.append({"role": "system", "content": s.format_for_injection()})
-                    try:
-                        chat_view = self.query_one("#chat-view", ChatView)
-                        self.call_later(
-                            lambda ss=s: chat_view.add_system_message(
-                                f"Agent '{ss.agent_name}' {ss.status}: {ss.summary[:100]}"
-                            )
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        panel = self.query_one("#agent-panel", AgentPanel)
-                        self.call_later(
-                            lambda ss=s: panel.complete_agent(ss.agent_name, ss.summary, ss.status)
-                        )
-                    except Exception:
-                        pass
 
             self.chat_loop.config.pre_iteration_hook = _inject_summaries
 
@@ -382,7 +412,8 @@ class AyderApp(App):
     def _maybe_stop_activity_timer(self) -> None:
         """Stop the activity timer if nothing is active."""
         activity = self.query_one("#activity-bar", ActivityBar)
-        if not activity._thinking and not activity._tools_working:
+        if (not activity._thinking and not activity._generating
+                and not activity._tools_working and activity._agents_running == 0):
             if self._activity_timer:
                 self._activity_timer.stop()
                 self._activity_timer = None
@@ -548,6 +579,10 @@ class AyderApp(App):
         """Handle user input submission."""
         user_input = event.value
 
+        # New user message = new cycle, reset re-dispatch guard
+        if self._agent_registry and not user_input.startswith("/"):
+            self._agent_registry.reset_settled()
+
         if user_input.startswith("/"):
             self._handle_command(user_input)
             return
@@ -617,9 +652,7 @@ class AyderApp(App):
 
     def _finish_processing(self) -> None:
         """Finish processing - clear activity bar and process next message."""
-        if self._activity_timer:
-            self._activity_timer.stop()
-            self._activity_timer = None
+        self._maybe_stop_activity_timer()  # Agent-aware: won't stop timer if agents still running
 
         activity = self.query_one("#activity-bar", ActivityBar)
         activity.clear()

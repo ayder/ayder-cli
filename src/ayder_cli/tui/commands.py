@@ -14,7 +14,7 @@ from ayder_cli.core.config import list_provider_profiles
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
 from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEditScreen
-from ayder_cli.tui.widgets import AgentPanel, ChatView, StatusBar
+from ayder_cli.tui.widgets import AgentPanel, ActivityBar, ChatView, StatusBar
 
 if TYPE_CHECKING:
     from ayder_cli.tui.app import AyderApp
@@ -980,6 +980,15 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
 
     result = app._agent_registry.dispatch(agent_name, task)
     chat_view.add_system_message(result)
+
+    # Update activity bar with agent count and start timer
+    try:
+        activity = app.query_one("#activity-bar", ActivityBar)
+        count = app._agent_registry.active_count if app._agent_registry else 0
+        activity.set_agents_running(count)
+        app._start_activity_timer()
+    except Exception:
+        pass
 
 
 # Command dispatch map: command name -> handler function
