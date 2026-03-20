@@ -55,6 +55,7 @@ class AgentRunner:
 
     def cancel(self) -> bool:
         """Cancel the running agent."""
+        logger.debug("cancel requested: agent='%s' run_id=%d", self.agent_name, self.run_id)
         self._cancel_event.set()
         self.status = "cancelled"
         return True
@@ -69,6 +70,13 @@ class AgentRunner:
     async def run(self, task: str) -> AgentSummary:
         """Execute the agent task and return a summary."""
         self.status = "running"
+        task_preview = task[:120] + "..." if len(task) > 120 else task
+        logger.debug(
+            "run started: agent='%s' run_id=%d model='%s' timeout=%ds task='%s'",
+            self.agent_name, self.run_id,
+            self._agent_config.model or "(default)",
+            self._timeout, task_preview,
+        )
 
         try:
             rt = create_agent_runtime(
@@ -119,6 +127,10 @@ class AgentRunner:
                 self._cancel_event.set()
                 self.status = "timeout"
                 summary_text = self._parse_summary(callbacks.last_content)
+                logger.debug(
+                    "run timeout: agent='%s' run_id=%d after %ds",
+                    self.agent_name, self.run_id, self._timeout,
+                )
                 return AgentSummary(
                     agent_name=self.agent_name,
                     status="timeout",
@@ -129,6 +141,11 @@ class AgentRunner:
             # Completed successfully
             self.status = "completed"
             summary_text = self._parse_summary(callbacks.last_content)
+            summary_preview = (summary_text[:200] + "...") if summary_text and len(summary_text) > 200 else summary_text
+            logger.debug(
+                "run completed: agent='%s' run_id=%d summary='%s'",
+                self.agent_name, self.run_id, summary_preview or "(empty)",
+            )
             return AgentSummary(
                 agent_name=self.agent_name,
                 status="completed",

@@ -110,9 +110,14 @@ class AgentRegistry:
         Returns run_id (int) on success, error message (str) on failure.
         """
         if name not in self.agents:
+            logger.debug("dispatch rejected: agent '%s' not found", name)
             return f"Error: Agent '{name}' not found in configured agents"
         # Re-dispatch guard: block agents that failed in this cycle
         if name in self._settled and self._settled[name] in ("error", "timeout"):
+            logger.debug(
+                "dispatch blocked by _settled guard: agent='%s' status='%s'",
+                name, self._settled[name],
+            )
             return (
                 f"Error: Agent '{name}' failed in this cycle "
                 f"(status: {self._settled[name]}). Handle the task directly."
@@ -132,6 +137,11 @@ class AgentRegistry:
             on_progress=self._on_progress,
         )
         self._active[run_id] = runner
+        task_preview = task[:120] + "..." if len(task) > 120 else task
+        logger.debug(
+            "dispatch: agent='%s' run_id=%d task='%s' active_count=%d",
+            name, run_id, task_preview, self.active_count,
+        )
 
         async def _run_and_queue():
             result: AgentSummary | None = None
@@ -142,6 +152,18 @@ class AgentRegistry:
                 self._active.pop(run_id, None)
                 if result is not None:
                     self._settled[name] = result.status
+                    logger.debug(
+                        "agent finished: agent='%s' run_id=%d status='%s' "
+                        "active_count=%d settled='%s'",
+                        name, run_id, result.status,
+                        self.active_count, result.status,
+                    )
+                else:
+                    logger.debug(
+                        "agent finished with no result: agent='%s' run_id=%d "
+                        "active_count=%d",
+                        name, run_id, self.active_count,
+                    )
                 if self._on_complete is not None and result is not None:
                     try:
                         self._on_complete(run_id, result)
@@ -161,6 +183,10 @@ class AgentRegistry:
         to_cancel = [rid for rid, r in self._active.items() if r.agent_name == name]
         for rid in to_cancel:
             self._active[rid].cancel()
+        if to_cancel:
+            logger.debug("cancel: agent='%s' cancelled %d instance(s): %s", name, len(to_cancel), to_cancel)
+        else:
+            logger.debug("cancel: agent='%s' — no running instances", name)
         return len(to_cancel) > 0
 
     def reset_settled(self) -> None:
@@ -175,4 +201,7 @@ class AgentRegistry:
                 summaries.append(self._summary_queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
+        if summaries:
+            agents = [(s.agent_name, s.status) for s in summaries]
+            logger.debug("drain_summaries: %d summaries drained: %s", len(summaries), agents)
         return summaries

@@ -62,12 +62,25 @@ class AgentCallbacks:
         self._emit("thinking_content", text)
 
     def on_token_usage(self, total_tokens: int) -> None:
+        logger.debug(
+            "agent token_usage: agent='%s' run_id=%d tokens=%d",
+            self.agent_name, self.run_id, total_tokens,
+        )
         self._emit("token_usage", total_tokens)
 
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
+        logger.debug(
+            "agent tool_start: agent='%s' run_id=%d tool='%s' call_id='%s'",
+            self.agent_name, self.run_id, name, call_id,
+        )
         self._emit("tool_start", {"call_id": call_id, "name": name, "arguments": arguments})
 
     def on_tool_complete(self, call_id: str, result: str) -> None:
+        result_preview = (result[:200] + "...") if len(result) > 200 else result
+        logger.debug(
+            "agent tool_complete: agent='%s' run_id=%d call_id='%s' result='%s'",
+            self.agent_name, self.run_id, call_id, result_preview,
+        )
         self._emit("tool_complete", {"call_id": call_id, "result": result})
 
     def on_tools_cleanup(self) -> None:
