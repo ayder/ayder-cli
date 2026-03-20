@@ -205,11 +205,11 @@ class AyderApp(App):
         # Initialize agent registry if agents are configured (Part 1)
         self._agent_registry: AgentRegistry | None = None
         if hasattr(self.config, 'agents') and isinstance(self.config.agents, dict) and self.config.agents:
-            def _agent_progress(name, event, data):
+            def _agent_progress(run_id, name, event, data):
                 """Forward agent events to AgentPanel and sync activity bar."""
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
-                    self.call_later(lambda: panel.update_agent(name, event, data))
+                    self.call_later(lambda: panel.update_agent(run_id, name, event, data))
                 except Exception:
                     pass
                 # Keep activity bar agent count in sync and ensure spinner animates
@@ -221,12 +221,12 @@ class AyderApp(App):
                 except Exception:
                     pass
 
-            def _agent_complete(summary):
+            def _agent_complete(run_id, summary):
                 """Handle agent completion: update UI and wake LLM if all done."""
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
                     self.call_later(
-                        lambda: panel.complete_agent(summary.agent_name, summary.summary, summary.status)
+                        lambda: panel.complete_agent(run_id, summary.summary, summary.status)
                     )
                 except Exception:
                     pass
@@ -240,18 +240,11 @@ class AyderApp(App):
                     pass
 
                 # Batch wake-up: only trigger LLM when ALL agents are done.
-                # Dual-drain contract: this path drains the queue and kicks off a new LLM
-                # run. pre_iteration_hook (_inject_summaries) covers the in-flight case where
-                # agents complete while _is_processing == True. Do not add a second drain here.
                 if self._agent_registry and self._agent_registry.active_count == 0:
                     if not self._is_processing:
-                        # Drain summaries and inject into messages for LLM context.
-                        # AgentPanel already shows completion status visually via
-                        # complete_agent above, so no need for add_system_message.
                         summaries = self._agent_registry.drain_summaries()
                         for s in summaries:
                             self.messages.append({"role": "system", "content": s.format_for_injection()})
-                        # Wake the main LLM
                         self.call_later(lambda: self.start_llm_processing())
 
             self._agent_registry = AgentRegistry(

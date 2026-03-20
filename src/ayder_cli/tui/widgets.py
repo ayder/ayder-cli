@@ -697,9 +697,7 @@ class AgentPanel(Container):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._user_visible: bool = False
-        self._run_counter: int = 0
         self._entries: dict[int, _AgentEntry] = {}
-        self._active_run: dict[str, int] = {}  # agent_name -> current run_id
 
     def compose(self) -> ComposeResult:
         # Empty generator — widgets mounted dynamically
@@ -715,11 +713,9 @@ class AgentPanel(Container):
         self.display = self._user_visible
         return self._user_visible
 
-    def add_agent(self, name: str) -> None:
+    def add_agent(self, name: str, run_id: int) -> None:
         """Add a new agent run entry. Never auto-shows the panel."""
         self._prune_if_needed()
-        self._run_counter += 1
-        run_id = self._run_counter
 
         text = Text()
         text.append("  ▶ ", style="bold yellow")
@@ -733,13 +729,11 @@ class AgentPanel(Container):
             name=name,
         )
         self._entries[run_id] = entry
-        self._active_run[name] = run_id
         self.mount(status_widget)
 
-    def complete_agent(self, name: str, summary: str, status: str = "completed") -> None:
-        """Mark agent as completed with full summary."""
-        run_id = self._active_run.get(name)
-        if run_id is None or run_id not in self._entries:
+    def complete_agent(self, run_id: int, summary: str, status: str = "completed") -> None:
+        """Mark agent as completed with full summary. Lookup by run_id."""
+        if run_id not in self._entries:
             return
         entry = self._entries[run_id]
         if entry.completed:
@@ -754,7 +748,7 @@ class AgentPanel(Container):
             text.append("  ⏱ ", style="bold yellow")
         else:
             text.append("  ✗ ", style="bold red")
-        text.append(f"{name}", style="bold")
+        text.append(f"{entry.name}", style="bold")
         preview = summary[:80] + "..." if len(summary) > 80 else summary
         text.append(f" — {preview}", style="dim")
         entry.status_widget.update(text)
@@ -771,12 +765,11 @@ class AgentPanel(Container):
         self.mount(detail, after=entry.status_widget)
         self.scroll_end(animate=False)
 
-    def update_agent(self, name: str, event: str, data: Any = None) -> None:
-        """Handle an agent progress event."""
-        if name not in self._active_run:
-            self.add_agent(name)
+    def update_agent(self, run_id: int, name: str, event: str, data: Any = None) -> None:
+        """Handle an agent progress event. Lookup by run_id."""
+        if run_id not in self._entries:
+            self.add_agent(name, run_id)
 
-        run_id = self._active_run[name]
         entry = self._entries.get(run_id)
         if entry is None or entry.completed:
             return
@@ -789,17 +782,14 @@ class AgentPanel(Container):
         elif event == "tools_cleanup":
             self._update_status(entry, "Processing...")
 
-    def remove_agent(self, name: str) -> None:
-        """Remove an agent entry from the panel. Does not affect panel visibility."""
-        run_id = self._active_run.get(name)
-        if run_id is not None and run_id in self._entries:
+    def remove_agent(self, run_id: int) -> None:
+        """Remove an agent entry from the panel by run_id. Does not affect visibility."""
+        if run_id in self._entries:
             entry = self._entries[run_id]
             entry.status_widget.remove()
             if entry.detail_widget:
                 entry.detail_widget.remove()
             del self._entries[run_id]
-            if self._active_run.get(name) == run_id:
-                del self._active_run[name]
 
     def _update_status(self, entry: _AgentEntry, status_text: str) -> None:
         """Update the status line text for a running agent."""
@@ -823,7 +813,5 @@ class AgentPanel(Container):
             entry.status_widget.remove()
             if entry.detail_widget:
                 entry.detail_widget.remove()
-            if self._active_run.get(entry.name) == to_prune:
-                del self._active_run[entry.name]
             del self._entries[to_prune]
 
