@@ -90,37 +90,54 @@ class TestAgentRegistry:
         result = registry.dispatch("nonexistent", "do something")
         assert "not found" in result.lower()
 
-    def test_dispatch_returns_status_string(self, registry):
-        """dispatch() returns immediately with a status string."""
-        # Set a mock loop so dispatch doesn't fail
+    def test_dispatch_returns_run_id(self, registry):
+        """dispatch() returns int run_id on success."""
         mock_loop = MagicMock()
         registry.set_loop(mock_loop)
 
         with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
-             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe") as mock_rcts:
+             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
             mock_runner = MockRunner.return_value
             mock_runner.agent_name = "reviewer"
 
             result = registry.dispatch("reviewer", "Review this")
 
-        assert isinstance(result, str)
-        assert "dispatched" in result.lower() or "reviewer" in result.lower()
-        mock_rcts.assert_called_once()
+        assert isinstance(result, int)
+        assert result == 1  # first dispatch
 
-    def test_dispatch_rejects_duplicate(self, registry):
-        """Cannot dispatch same agent while it's already running."""
-        registry._active["reviewer"] = MagicMock()
-        result = registry.dispatch("reviewer", "another task")
-        assert "already running" in result.lower()
+    def test_dispatch_allows_same_agent_twice(self, registry):
+        """Same agent can be dispatched concurrently — no duplicate guard."""
+        mock_loop = MagicMock()
+        registry.set_loop(mock_loop)
 
-    def test_cancel(self, registry):
-        """cancel() delegates to the active AgentRunner."""
-        mock_runner = MagicMock()
-        mock_runner.cancel.return_value = True
-        registry._active["reviewer"] = mock_runner
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
+             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+
+            run1 = registry.dispatch("reviewer", "task 1")
+            run2 = registry.dispatch("reviewer", "task 2")
+
+        assert isinstance(run1, int)
+        assert isinstance(run2, int)
+        assert run1 != run2
+        assert registry.active_count == 2
+
+    def test_cancel_all_by_name(self, registry):
+        """cancel() cancels all instances with the given name."""
+        mock1 = MagicMock()
+        mock1.agent_name = "reviewer"
+        mock1.cancel.return_value = True
+        mock2 = MagicMock()
+        mock2.agent_name = "reviewer"
+        mock2.cancel.return_value = True
+
+        registry._active[1] = mock1
+        registry._active[2] = mock2
 
         assert registry.cancel("reviewer") is True
-        mock_runner.cancel.assert_called_once()
+        mock1.cancel.assert_called_once()
+        mock2.cancel.assert_called_once()
 
     def test_cancel_not_running(self, registry):
         assert registry.cancel("reviewer") is False
@@ -158,9 +175,36 @@ class TestAgentRegistry:
         assert registry.active_count == 0
 
     def test_active_count_with_runners(self, registry):
-        registry._active["reviewer"] = MagicMock()
-        registry._active["writer"] = MagicMock()
+        mock1 = MagicMock()
+        mock1.agent_name = "reviewer"
+        mock2 = MagicMock()
+        mock2.agent_name = "writer"
+        registry._active[1] = mock1
+        registry._active[2] = mock2
         assert registry.active_count == 2
+
+    def test_get_running_count(self, registry):
+        """get_running_count returns count of active instances by name."""
+        mock1 = MagicMock()
+        mock1.agent_name = "reviewer"
+        mock2 = MagicMock()
+        mock2.agent_name = "reviewer"
+        registry._active[1] = mock1
+        registry._active[2] = mock2
+        assert registry.get_running_count("reviewer") == 2
+        assert registry.get_running_count("writer") == 0
+
+    def test_get_status_running_aggregate(self, registry):
+        """get_status returns 'running' if any instance is active."""
+        mock1 = MagicMock()
+        mock1.agent_name = "reviewer"
+        registry._active[1] = mock1
+        assert registry.get_status("reviewer") == "running"
+
+    def test_get_status_settled(self, registry):
+        """get_status returns settled status when not running."""
+        registry._settled["reviewer"] = "error"
+        assert registry.get_status("reviewer") == "error"
 
     @pytest.mark.anyio
     async def test_on_complete_called_after_agent_finishes(self, agent_configs):
@@ -192,9 +236,9 @@ class TestAgentRegistry:
             # Allow the scheduled coroutine to run
             await asyncio.sleep(0.1)
 
-        callback.assert_called_once_with(summary)
+        callback.assert_called_once_with(1, summary)
         # Agent should be removed from _active
-        assert "reviewer" not in reg._active
+        assert 1 not in reg._active
 
     def test_settled_blocks_failed_agent_redispatch(self, registry):
         """Cannot re-dispatch an agent that errored in this cycle."""
@@ -218,7 +262,7 @@ class TestAgentRegistry:
              patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
             result = registry.dispatch("reviewer", "run again")
 
-        assert "dispatched" in result.lower()
+        assert isinstance(result, int)
 
     def test_reset_settled(self, registry):
         """reset_settled clears the settled tracker."""

@@ -33,8 +33,8 @@ class AgentRegistry:
         process_manager: Any,
         permissions: set[str],
         agent_timeout: int = 300,
-        on_progress: Callable[[str, str, Any], None] | None = None,
-        on_complete: Callable[[AgentSummary], None] | None = None,
+        on_progress: Callable[[int, str, str, Any], None] | None = None,
+        on_complete: Callable[[int, AgentSummary], None] | None = None,
     ) -> None:
         self.agents = agents
         self._parent_config = parent_config
@@ -45,7 +45,8 @@ class AgentRegistry:
         self._on_progress = on_progress
         self._on_complete = on_complete
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._active: dict[str, AgentRunner] = {}
+        self._active: dict[int, AgentRunner] = {}  # run_id -> runner
+        self._run_counter: int = 0
         self._summary_queue: asyncio.Queue[AgentSummary] = asyncio.Queue()
         self._settled: dict[str, str] = {}
 
@@ -62,13 +63,21 @@ class AgentRegistry:
         return len(self._active)
 
     def get_status(self, name: str) -> str | None:
-        """Get agent status: 'idle', 'running', 'completed', 'error', or None if unknown."""
+        """Get agent status: aggregate across all instances."""
         if name not in self.agents:
             return None
-        runner = self._active.get(name)
-        if runner is None:
-            return "idle"
-        return runner.status
+        # Check for any running instance
+        for runner in self._active.values():
+            if runner.agent_name == name:
+                return "running"
+        # Check settled status
+        if name in self._settled:
+            return self._settled[name]
+        return "idle"
+
+    def get_running_count(self, name: str) -> int:
+        """Count of currently active instances of the named agent."""
+        return sum(1 for r in self._active.values() if r.agent_name == name)
 
     def get_capability_prompts(self) -> str:
         """Generate capability prompt text for the main LLM's system prompt."""
@@ -95,22 +104,22 @@ class AgentRegistry:
 
         return "\n".join(lines)
 
-    def dispatch(self, name: str, task: str) -> str:
-        """Fire-and-forget agent dispatch. Thread-safe. Returns status message.
+    def dispatch(self, name: str, task: str) -> int | str:
+        """Fire-and-forget agent dispatch. Thread-safe.
 
-        Schedules the agent run on the event loop via run_coroutine_threadsafe.
-        Both call_agent tool handler and /agent command use this same method.
+        Returns run_id (int) on success, error message (str) on failure.
         """
         if name not in self.agents:
             return f"Error: Agent '{name}' not found in configured agents"
-        if name in self._active:
-            return f"Error: Agent '{name}' is already running"
         # Re-dispatch guard: block agents that failed in this cycle
         if name in self._settled and self._settled[name] in ("error", "timeout"):
             return (
                 f"Error: Agent '{name}' failed in this cycle "
                 f"(status: {self._settled[name]}). Handle the task directly."
             )
+
+        self._run_counter += 1
+        run_id = self._run_counter
 
         runner = AgentRunner(
             agent_config=self.agents[name],
@@ -119,9 +128,10 @@ class AgentRegistry:
             process_manager=self._process_manager,
             permissions=self._permissions,
             timeout=self._agent_timeout,
+            run_id=run_id,
             on_progress=self._on_progress,
         )
-        self._active[name] = runner
+        self._active[run_id] = runner
 
         async def _run_and_queue():
             result: AgentSummary | None = None
@@ -129,36 +139,29 @@ class AgentRegistry:
                 result = await runner.run(task)
                 await self._summary_queue.put(result)
             finally:
-                # These two operations must stay together without an await between
-                # them to ensure active_count is accurate when on_complete fires
-                self._active.pop(name, None)
+                self._active.pop(run_id, None)
                 if result is not None:
                     self._settled[name] = result.status
                 if self._on_complete is not None and result is not None:
                     try:
-                        self._on_complete(result)
+                        self._on_complete(run_id, result)
                     except Exception:
                         logger.exception("on_complete callback failed")
 
         # Schedule on event loop (thread-safe)
         if self._loop is None:
-            self._active.pop(name, None)
+            self._active.pop(run_id, None)
             return "Error: Agent registry not initialized (event loop not set)"
         asyncio.run_coroutine_threadsafe(_run_and_queue(), self._loop)
 
-        task_preview = task[:80] + "..." if len(task) > 80 else task
-        return (
-            f"Agent '{name}' dispatched with task: {task_preview}\n"
-            f"The agent is running in the background. "
-            f"You will receive its summary when it completes."
-        )
+        return run_id
 
     def cancel(self, name: str) -> bool:
-        """Cancel a running agent. Returns True if cancelled, False if not running."""
-        runner = self._active.get(name)
-        if runner is None:
-            return False
-        return runner.cancel()
+        """Cancel all running instances of the named agent. Returns True if any cancelled."""
+        to_cancel = [rid for rid, r in self._active.items() if r.agent_name == name]
+        for rid in to_cancel:
+            self._active[rid].cancel()
+        return len(to_cancel) > 0
 
     def reset_settled(self) -> None:
         """Clear the settled tracker. Call on new user message cycle."""
