@@ -44,8 +44,13 @@ class TestToolDefinitions:
     """Test tool definition properties."""
 
     def test_all_tools_in_schema(self):
-        """Verify tools_schema contains all defined tools."""
-        expected_tools = {
+        """Verify tools_schema contains all defined tools (builtins + any installed plugins)."""
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS
+        expected_tools = {td.name for td in TOOL_DEFINITIONS}
+        names = {s["function"]["name"] for s in schemas.tools_schema}
+        assert names == expected_tools
+        # Verify all 17 builtin tools are always present
+        builtin_tools = {
             "file_explorer", "read_file", "file_editor",
             "run_shell_command", "search_codebase", "get_project_structure",
             "create_note", "save_memory", "load_memory",
@@ -53,15 +58,9 @@ class TestToolDefinitions:
             "kill_background_process", "list_background_processes",
             "list_tasks", "show_task",
             "manage_environment_vars",
-            "create_virtualenv", "install_requirements",
-            "list_virtualenvs", "activate_virtualenv", "remove_virtualenv",
-            "temporal_workflow",
             "fetch_web",
-            "dbs_tool",
-            "python_editor",
         }
-        names = {s["function"]["name"] for s in schemas.tools_schema}
-        assert names == expected_tools
+        assert builtin_tools.issubset(names)
 
     def test_no_exposed_to_llm_field(self):
         """Verify exposed_to_llm attribute no longer exists on ToolDefinition."""

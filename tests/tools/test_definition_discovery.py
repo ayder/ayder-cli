@@ -271,20 +271,13 @@ class TestBackwardCompatibility:
         # Shell tools
         assert 'run_shell_command' in tool_names
         assert 'fetch_web' in tool_names
-        assert 'dbs_tool' in tool_names
-        
+
         # Memory tools
         assert 'save_memory' in tool_names
         assert 'load_memory' in tool_names
-        
+
         # Environment tools
         assert 'manage_environment_vars' in tool_names
-
-        # Temporal tools
-        assert 'temporal_workflow' in tool_names
-        
-        # Virtualenv tools
-        assert 'create_virtualenv' in tool_names
 
     def test_all_tools_have_required_fields(self):
         """Test that all tools have required fields."""
@@ -305,14 +298,3 @@ class TestBackwardCompatibility:
             assert "function" in schema
             assert schema["function"]["name"] == td.name
 
-    def test_temporal_workflow_has_action_enum(self):
-        """Temporal tool schema should define the expected action enum."""
-        temporal = next(td for td in TOOL_DEFINITIONS if td.name == "temporal_workflow")
-        schema = temporal.to_openai_schema()
-        actions = schema["function"]["parameters"]["properties"]["action"]["enum"]
-        assert "start_workflow" in actions
-        assert "query_workflow" in actions
-        assert "signal_workflow" in actions
-        assert "escalate" in actions
-        assert "cancel_workflow" in actions
-        assert "report_phase_result" in actions

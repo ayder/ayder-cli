@@ -261,7 +261,17 @@ def _run_temporal_queue_cli(
     permissions=None,
 ) -> int:
     """Start a Temporal worker queue session."""
-    from ayder_cli.services.temporal_worker import TemporalWorker, TemporalWorkerConfig
+    from ayder_cli.tools.plugin_manager import _find_plugin_module, PluginError
+
+    try:
+        temporal_worker = _find_plugin_module("temporal-tools", "temporal_worker")
+        TemporalWorker = getattr(temporal_worker, "TemporalWorker")
+        TemporalWorkerConfig = getattr(temporal_worker, "TemporalWorkerConfig")
+    except (ImportError, PluginError) as exc:
+        raise RuntimeError(
+            "temporal-tools plugin is not installed. "
+            "Run: ayder plugin install temporal-tools"
+        ) from exc
 
     worker_config = TemporalWorkerConfig(
         queue_name=queue_name,

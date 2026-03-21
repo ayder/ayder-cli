@@ -157,7 +157,22 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
 # See filesystem_definitions.py, search_definitions.py, etc.
 # To add a new tool: create a *_definitions.py file with TOOL_DEFINITIONS tuple.
 
-TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = _discover_definitions()
+_BUILTIN_DEFINITIONS: Tuple[ToolDefinition, ...] = _discover_definitions()
+
+# Phase 1: Merge global plugins at import time
+_GLOBAL_PLUGIN_DEFS: Tuple[ToolDefinition, ...] = ()
+_PLUGIN_HANDLERS: Dict[str, Any] = {}
+
+try:
+    from ayder_cli.tools.plugin_manager import discover_global_plugins
+
+    _GLOBAL_PLUGIN_DEFS, _PLUGIN_HANDLERS = discover_global_plugins()
+except Exception as e:
+    logger.warning(f"Failed to load global plugins: {e}")
+
+TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
+    _BUILTIN_DEFINITIONS + _GLOBAL_PLUGIN_DEFS
+)
 TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {
     td.name: td for td in TOOL_DEFINITIONS
 }

@@ -348,26 +348,26 @@ class TestMainFunction:
 
         parser = create_parser()
 
-        # Test -w flag
-        args = parser.parse_args(['-w', 'test command'])
+        # Test -w flag (no positional command needed to verify flag parsing)
+        args = parser.parse_args(['-w'])
         assert args.w is True
         assert args.x is False
         assert args.http is False
 
         # Test -x flag
-        args = parser.parse_args(['-x', 'test command'])
+        args = parser.parse_args(['-x'])
         assert args.x is True
         assert args.w is False
         assert args.http is False
 
         # Test --http flag
-        args = parser.parse_args(['--http', 'test command'])
+        args = parser.parse_args(['--http'])
         assert args.http is True
         assert args.w is False
         assert args.x is False
 
         # Test both flags
-        args = parser.parse_args(['-w', '-x', 'test command'])
+        args = parser.parse_args(['-w', '-x'])
         assert args.w is True
         assert args.x is True
         assert args.http is False
@@ -574,43 +574,6 @@ class TestMainTaskOptions:
 
             mock_run_all.assert_called_once_with(permissions={'r'})
 
-    def test_main_temporal_task_queue_flag(self):
-        """Test --temporal-task-queue calls _run_temporal_queue_cli."""
-        from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False,
-        )
-
-        with patch.object(
-            sys,
-            "argv",
-            [
-                "ayder",
-                "--temporal-task-queue",
-                "dev-team",
-                "--prompt",
-                "prompts/dev.md",
-            ],
-        ), patch.object(sys.stdin, "isatty", return_value=True), patch(
-            "ayder_cli.core.config.load_config", return_value=mock_config
-        ), patch(
-            "ayder_cli.cli_runner._run_temporal_queue_cli", return_value=0
-        ) as mock_temporal_run:
-            with pytest.raises(SystemExit):
-                main()
-
-            mock_temporal_run.assert_called_once_with(
-                queue_name="dev-team",
-                prompt_path="prompts/dev.md",
-                permissions={"r"},
-            )
-
 
 class TestMainTUIAndInteractive:
     """Test main() function TUI mode."""
@@ -693,15 +656,6 @@ class TestCreateParser:
         assert args.x is True
         assert args.http is True
 
-    def test_parser_temporal_task_queue_flag(self):
-        """Test --temporal-task-queue flag."""
-        from ayder_cli.cli import create_parser
-
-        parser = create_parser()
-
-        args = parser.parse_args(["--temporal-task-queue", "dev-team"])
-        assert args.temporal_task_queue == "dev-team"
-
     def test_parser_prompt_flag(self):
         """Test --prompt flag."""
         from ayder_cli.cli import create_parser
@@ -727,10 +681,10 @@ class TestCreateParser:
             parser.parse_args(["--verbose", "trace"])
 
     def test_parser_command_argument(self):
-        """Test positional command argument."""
-        from ayder_cli.cli import create_parser
+        """Test positional command argument via the base (non-subcommand) parser."""
+        from ayder_cli.cli import _create_base_parser
 
-        parser = create_parser()
+        parser = _create_base_parser()
 
         args = parser.parse_args(['hello world'])
         assert args.command == 'hello world'

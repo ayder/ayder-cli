@@ -8,6 +8,7 @@ Responsibilities (after Phase 2 decomposition):
 
 import importlib
 import logging
+from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 from ayder_cli.core.context import ProjectContext
@@ -118,8 +119,69 @@ def create_default_registry(
     project_ctx: ProjectContext, process_manager: Any = None
 ) -> ToolRegistry:
     """Create a ToolRegistry with all tools from TOOL_DEFINITIONS auto-registered."""
+    from ayder_cli.tools.definition import _PLUGIN_HANDLERS
+
     reg = ToolRegistry(project_ctx, process_manager=process_manager)
     for td in TOOL_DEFINITIONS:
-        func = _resolve_func_ref(td.func_ref)
-        reg.register(td.name, func)
+        if td.name in _PLUGIN_HANDLERS:
+            # External plugin — use pre-resolved handler
+            reg.register(td.name, _PLUGIN_HANDLERS[td.name])
+        else:
+            # Builtin — resolve func_ref as before
+            func = _resolve_func_ref(td.func_ref)
+            reg.register(td.name, func)
+
+    # Phase 2: Load project-local plugins
+    project_path = project_ctx.root
+    _load_project_plugins(reg, project_path)
+
     return reg
+
+
+def _load_project_plugins(reg: ToolRegistry, project_path: Path) -> None:
+    """Load project-local plugins and register them dynamically."""
+    from ayder_cli.tools.plugin_manager import (
+        load_plugin_definitions,
+        PROJECT_PLUGINS_DIR_NAME,
+        GLOBAL_PLUGINS_DIR,
+    )
+
+    plugins_dir = project_path / PROJECT_PLUGINS_DIR_NAME
+    if not plugins_dir.exists():
+        return
+
+    for plugin_dir in sorted(plugins_dir.iterdir()):
+        if not plugin_dir.is_dir() or plugin_dir.name == "plugins.json":
+            continue
+        toml_path = plugin_dir / "plugin.toml"
+        if not toml_path.exists():
+            continue
+
+        try:
+            # Check for plugin-name conflict with global plugins
+            if GLOBAL_PLUGINS_DIR.exists() and (GLOBAL_PLUGINS_DIR / plugin_dir.name).exists():
+                raise ValueError(
+                    f"Plugin name conflict: '{plugin_dir.name}' exists in both "
+                    f"global and project-local plugins"
+                )
+
+            defs, handlers = load_plugin_definitions(plugin_dir)
+
+            # Pre-check all names before registering any
+            existing_names = set(reg.get_registered_tools())
+            for td in defs:
+                if td.name in existing_names:
+                    raise ValueError(
+                        f"Tool name conflict: '{td.name}' from project plugin "
+                        f"'{plugin_dir.name}' conflicts with an existing tool"
+                    )
+
+            # All checks passed — register all
+            for td in defs:
+                reg.register_dynamic_tool(td, handlers[td.name])
+
+            logger.info(
+                f"Loaded project plugin '{plugin_dir.name}' ({len(defs)} tools)"
+            )
+        except Exception as e:
+            logger.warning(f"Skipping project plugin '{plugin_dir.name}': {e}")

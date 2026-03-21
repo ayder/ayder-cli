@@ -165,9 +165,10 @@ class TestCreateDefaultRegistryAutoDiscovery:
 
     def test_registers_all_tools(self, project_context):
         """Test that all TOOL_DEFINITIONS are registered."""
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS
         reg = registry.create_default_registry(project_context)
-        # Originally 29 tools, down to 25 after consolidating filesystem tools
-        assert len(reg.get_registered_tools()) == 25
+        # Count must match TOOL_DEFINITIONS (includes any installed plugins at import time)
+        assert len(reg.get_registered_tools()) == len(TOOL_DEFINITIONS)
 
     def test_registered_names_match_definitions(self, project_context):
         """Test that registered tool names match TOOL_DEFINITIONS names."""

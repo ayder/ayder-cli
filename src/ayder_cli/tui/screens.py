@@ -399,6 +399,108 @@ class CLISelectScreen(ModalScreen[str | None]):
             self.dismiss(None)
 
 
+class CLIMultiSelectScreen(ModalScreen[set[str] | None]):
+    """
+    CLI-style multi-selection screen with toggle support.
+    Returns a set of selected values on confirm, or None on cancel.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        items: list[tuple[str, str]],
+        selected: set[str] | None = None,
+        description: str = "",
+    ):
+        super().__init__()
+        self.title_text = title
+        self.items = items
+        self.selected = set(selected) if selected else set()
+        self.description = description
+        self.selected_index = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(f"? {self.title_text}", classes="prompt", markup=False)
+            if self.description:
+                yield Label(self.description, classes="description", markup=False)
+            list_content = self._render_list()
+            yield Static(list_content, id="select-list", classes="select-list")
+            yield Label(
+                "↑↓ navigate, Space to toggle, Enter to confirm, Esc to cancel",
+                classes="hint",
+            )
+
+    MAX_VISIBLE = 15
+
+    def _render_list(self) -> Text:
+        result = Text()
+        total = len(self.items)
+        half = self.MAX_VISIBLE // 2
+        start = max(0, self.selected_index - half)
+        end = min(total, start + self.MAX_VISIBLE)
+        start = max(0, end - self.MAX_VISIBLE)
+
+        if start > 0:
+            result.append(f"  ↑ {start} more above\n", style="dim")
+
+        for i in range(start, end):
+            value, display = self.items[i]
+            is_highlighted = i == self.selected_index
+            is_checked = value in self.selected
+            mark = "x" if is_checked else " "
+
+            if is_highlighted:
+                result.append(" → ", style="bold cyan")
+                result.append(f"[{mark}] {display}", style="bold white")
+            else:
+                result.append("   ", style="dim")
+                result.append(f"[{mark}] {display}", style="white")
+            result.append("\n")
+
+        remaining = total - end
+        if remaining > 0:
+            result.append(f"  ↓ {remaining} more below\n", style="dim")
+
+        return result
+
+    def _update_display(self) -> None:
+        list_widget = self.query_one("#select-list", Static)
+        list_widget.update(self._render_list())
+
+    def _toggle_current(self) -> None:
+        if not self.items:
+            return
+        value = self.items[self.selected_index][0]
+        if value in self.selected:
+            self.selected.discard(value)
+        else:
+            self.selected.add(value)
+
+    def on_key(self, event) -> None:
+        key = event.key.lower()
+        if key in ("up", "k"):
+            event.stop()
+            self.selected_index = max(0, self.selected_index - 1)
+            self._update_display()
+        elif key in ("down", "j"):
+            event.stop()
+            self.selected_index = min(
+                len(self.items) - 1, self.selected_index + 1
+            )
+            self._update_display()
+        elif key == "space":
+            event.stop()
+            self._toggle_current()
+            self._update_display()
+        elif key in ("enter", "return"):
+            event.stop()
+            self.dismiss(self.selected.copy())
+        elif key in ("escape", "q"):
+            event.stop()
+            self.dismiss(None)
+
+
 class TaskEditScreen(ModalScreen[str | None]):
     """
     In-app task editor screen with a TextArea.

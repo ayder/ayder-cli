@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Callable
 from ayder_cli.core.config import list_provider_profiles
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
-from ayder_cli.tui.screens import CLISelectScreen, CLIPermissionScreen, TaskEditScreen
+from ayder_cli.tui.screens import CLISelectScreen, CLIMultiSelectScreen, CLIPermissionScreen, TaskEditScreen
 from ayder_cli.tui.widgets import AgentPanel, ActivityBar, ChatView, StatusBar
 
 if TYPE_CHECKING:
@@ -722,7 +722,17 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /temporal command - start/status local temporal queue runner."""
-    from ayder_cli.services.temporal_worker import TemporalWorker, TemporalWorkerConfig
+    try:
+        from ayder_cli.tools.plugin_manager import _find_plugin_module
+        temporal_worker = _find_plugin_module("temporal-tools", "temporal_worker")
+        TemporalWorker = getattr(temporal_worker, "TemporalWorker")
+        TemporalWorkerConfig = getattr(temporal_worker, "TemporalWorkerConfig")
+    except Exception:
+        chat_view.add_system_message(
+            "Temporal plugin not installed. Install with: "
+            "ayder install-plugin <path-to-temporal-tools>"
+        )
+        return
 
     queue_name = args.strip()
     current_queue = getattr(app, "_temporal_queue_name", None)
@@ -863,62 +873,70 @@ def do_clear(app: AyderApp, chat_view: ChatView) -> None:
 def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
     """Toggle dynamic tool plugins (e.g. venv, http, background, temporal)."""
     from ayder_cli.tools.definition import TOOL_DEFINITIONS
-    
+
     # Discover available non-core tags
     available_plugins = set()
     for td in TOOL_DEFINITIONS:
         for tag in td.tags:
             if tag not in ("core", "metadata"):
                 available_plugins.add(tag)
-                
+
     available_plugins_list = sorted(list(available_plugins))
-    
+
     # Initialize tool_tags if needed
     if app.chat_loop.config.tool_tags is None:
         app.chat_loop.config.tool_tags = frozenset({"core", "metadata"})
-        
+
     current_tags = set(app.chat_loop.config.tool_tags)
-    
+
     if args.strip():
         plugin_name = args.strip().lower()
         if plugin_name not in available_plugins_list:
-            chat_view.add_system_message(f"Unknown plugin: '{plugin_name}'. Available: {', '.join(available_plugins_list)}")
+            chat_view.add_system_message(
+                f"Unknown plugin: '{plugin_name}'. "
+                f"Available: {', '.join(available_plugins_list)}"
+            )
             return
-            
+
         if plugin_name in current_tags:
             current_tags.remove(plugin_name)
             status = "disabled"
         else:
             current_tags.add(plugin_name)
             status = "enabled"
-            
+
         app.chat_loop.config.tool_tags = frozenset(current_tags)
         chat_view.add_system_message(f"Plugin '{plugin_name}' {status}.")
     else:
-        # Show interactive select screen
+        # Show multi-select screen
         items = []
         for p in available_plugins_list:
-            mark = "✓" if p in current_tags else " "
-            items.append((p, f"[{mark}] {p}"))
-            
-        def on_plugin_selected(selected: str | None) -> None:
-            if selected:
-                if selected in current_tags:
-                    current_tags.remove(selected)
-                    status = "disabled"
-                else:
-                    current_tags.add(selected)
-                    status = "enabled"
-                app.chat_loop.config.tool_tags = frozenset(current_tags)
-                chat_view.add_system_message(f"Plugin '{selected}' {status}.")
+            items.append((p, p))
+
+        currently_selected = {
+            p for p in available_plugins_list if p in current_tags
+        }
+
+        def on_plugins_confirmed(result: set[str] | None) -> None:
+            if result is None:
+                return  # Cancelled
+            # Apply the new set of enabled plugins
+            base_tags = {"core", "metadata"}
+            new_tags = base_tags | result
+            app.chat_loop.config.tool_tags = frozenset(new_tags)
+            enabled = sorted(result)
+            chat_view.add_system_message(
+                f"Plugins updated: {', '.join(enabled) if enabled else 'none enabled'}"
+            )
 
         app.push_screen(
-            CLISelectScreen(
+            CLIMultiSelectScreen(
                 title="Toggle Tool Plugins",
                 items=items,
-                description="Select a plugin to toggle • Esc to close",
+                selected=currently_selected,
+                description="Space to toggle, Enter to confirm, Esc to cancel",
             ),
-            on_plugin_selected,
+            on_plugins_confirmed,
         )
 
 

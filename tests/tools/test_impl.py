@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
-from ayder_cli.tools.builtins import filesystem, search, shell, utils_tools, venv
+from ayder_cli.tools.builtins import filesystem, search, shell, utils_tools
 
 # Create a namespace object that mimicks the old 'impl' module
 class ImplNamespace:
@@ -31,12 +31,6 @@ impl.run_shell_command = shell.run_shell_command
 
 impl.get_project_structure = utils_tools.get_project_structure
 impl.manage_environment_vars = utils_tools.manage_environment_vars
-
-impl.create_virtualenv = venv.create_virtualenv
-impl.install_requirements = venv.install_requirements
-impl.list_virtualenvs = venv.list_virtualenvs
-impl.activate_virtualenv = venv.activate_virtualenv
-impl.remove_virtualenv = venv.remove_virtualenv
 
 
 @pytest.fixture

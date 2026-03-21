@@ -3,7 +3,6 @@
 
 import pytest
 
-from ayder_cli.application.temporal_metadata import persist_temporal_run_metadata
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.tools.builtins.tasks import (
@@ -330,31 +329,3 @@ class TestTemporalMetadata:
         assert "completed" in text
         assert "wf-old" not in text
 
-    def test_persist_temporal_run_metadata_success(self, project_context):
-        result = persist_temporal_run_metadata(
-            project_ctx=project_context,
-            metadata_dir=".ayder/metadata",
-            workflow_id="wf/unsafe:id",
-            payload={"status": "completed", "queue": "q-dev"},
-        )
-
-        assert isinstance(result, ToolSuccess)
-        rel_path = str(result)
-        assert rel_path.startswith(".ayder/metadata/runs/")
-
-        out_file = project_context.root / rel_path
-        assert out_file.exists()
-        body = out_file.read_text(encoding="utf-8")
-        assert '"completed"' in body
-        assert '"q-dev"' in body
-
-    def test_persist_temporal_run_metadata_empty_workflow_id(self, project_context):
-        result = persist_temporal_run_metadata(
-            project_ctx=project_context,
-            metadata_dir=".ayder/metadata",
-            workflow_id="   ",
-            payload={"status": "failed"},
-        )
-
-        assert isinstance(result, ToolError)
-        assert "workflow_id" in str(result)

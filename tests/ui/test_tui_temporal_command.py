@@ -15,6 +15,15 @@ def _make_app() -> SimpleNamespace:
     )
 
 
+def _make_temporal_module():
+    """Return a fake temporal_worker module with TemporalWorker and TemporalWorkerConfig."""
+    mod = SimpleNamespace(
+        TemporalWorker=MagicMock(),
+        TemporalWorkerConfig=MagicMock(),
+    )
+    return mod
+
+
 def test_temporal_command_registered():
     assert "/temporal" in COMMAND_MAP
 
@@ -23,7 +32,11 @@ def test_handle_temporal_without_args_shows_usage_when_inactive():
     app = _make_app()
     chat_view = MagicMock()
 
-    handle_temporal(app, "", chat_view)
+    with patch(
+        "ayder_cli.tools.plugin_manager._find_plugin_module",
+        return_value=_make_temporal_module(),
+    ):
+        handle_temporal(app, "", chat_view)
 
     chat_view.add_system_message.assert_called_once()
     assert "No temporal queue active" in chat_view.add_system_message.call_args[0][0]
@@ -35,7 +48,11 @@ def test_handle_temporal_without_args_shows_current_queue_status():
     app._temporal_worker_task = SimpleNamespace(is_finished=False)
     chat_view = MagicMock()
 
-    handle_temporal(app, "", chat_view)
+    with patch(
+        "ayder_cli.tools.plugin_manager._find_plugin_module",
+        return_value=_make_temporal_module(),
+    ):
+        handle_temporal(app, "", chat_view)
 
     chat_view.add_system_message.assert_called_once_with(
         "Temporal queue: dev-team (running)"
@@ -46,20 +63,27 @@ def test_handle_temporal_starts_new_worker_for_queue():
     app = _make_app()
     chat_view = MagicMock()
 
-    with patch("ayder_cli.tui.commands.TemporalWorker", create=True) as _:
-        # Patch at import target location in function
-        with patch("ayder_cli.services.temporal_worker.TemporalWorker") as mock_worker_cls:
-            mock_worker = MagicMock()
-            mock_worker.run_async.return_value = object()
-            mock_worker_cls.return_value = mock_worker
+    mock_worker = MagicMock()
+    mock_worker.run_async.return_value = object()
+    mock_worker_cls = MagicMock(return_value=mock_worker)
+    mock_config_cls = MagicMock()
 
-            handle_temporal(app, "qa-team", chat_view)
+    temporal_mod = SimpleNamespace(
+        TemporalWorker=mock_worker_cls,
+        TemporalWorkerConfig=mock_config_cls,
+    )
 
-            mock_worker_cls.assert_called_once()
-            app.run_worker.assert_called_once()
-            assert app._temporal_queue_name == "qa-team"
-            chat_view.add_system_message.assert_called_once()
-            assert "runner started: qa-team" in chat_view.add_system_message.call_args[0][0]
+    with patch(
+        "ayder_cli.tools.plugin_manager._find_plugin_module",
+        return_value=temporal_mod,
+    ):
+        handle_temporal(app, "qa-team", chat_view)
+
+    mock_worker_cls.assert_called_once()
+    app.run_worker.assert_called_once()
+    assert app._temporal_queue_name == "qa-team"
+    chat_view.add_system_message.assert_called_once()
+    assert "runner started: qa-team" in chat_view.add_system_message.call_args[0][0]
 
 
 def test_handle_temporal_switches_queue_stops_previous_worker():
@@ -70,13 +94,22 @@ def test_handle_temporal_switches_queue_stops_previous_worker():
     app._temporal_worker_task = old_task
     chat_view = MagicMock()
 
-    with patch("ayder_cli.services.temporal_worker.TemporalWorker") as mock_worker_cls:
-        mock_worker = MagicMock()
-        mock_worker.run_async.return_value = object()
-        mock_worker_cls.return_value = mock_worker
+    mock_worker = MagicMock()
+    mock_worker.run_async.return_value = object()
+    mock_worker_cls = MagicMock(return_value=mock_worker)
+    mock_config_cls = MagicMock()
 
+    temporal_mod = SimpleNamespace(
+        TemporalWorker=mock_worker_cls,
+        TemporalWorkerConfig=mock_config_cls,
+    )
+
+    with patch(
+        "ayder_cli.tools.plugin_manager._find_plugin_module",
+        return_value=temporal_mod,
+    ):
         handle_temporal(app, "arch-team", chat_view)
 
-        old_worker.stop.assert_called_once()
-        old_task.cancel.assert_called_once()
-        assert app._temporal_queue_name == "arch-team"
+    old_worker.stop.assert_called_once()
+    old_task.cancel.assert_called_once()
+    assert app._temporal_queue_name == "arch-team"
