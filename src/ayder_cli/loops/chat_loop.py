@@ -243,6 +243,13 @@ class ChatLoop:
                                 if tc.arguments:
                                     existing_tc["function"]["arguments"] += tc.arguments
 
+                # Some models pack multiple parallel tool calls into one entry
+                # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
+                # these into individual tool calls before normalizing.
+                raw_tool_calls_for_history = _expand_concatenated_tool_calls(
+                    raw_tool_calls_for_history
+                )
+
                 # Now that streaming is done, build the normalized objects for execution
                 for raw_tc in raw_tool_calls_for_history:
                     tool_call_obj = _ToolCall(
@@ -581,6 +588,14 @@ def _parse_arguments(arguments) -> dict:
         try:
             return json.loads(arguments)
         except (json.JSONDecodeError, ValueError):
+            # Try extracting just the first JSON object (handles concatenated
+            # JSON like '{...}{...}' that slipped past expansion).
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
             repaired = _repair_truncated_json(arguments)
             if repaired is not None:
                 return repaired
@@ -634,6 +649,49 @@ def _unwrap_exec_result(exec_result) -> str:
     if hasattr(exec_result, "success"):
         return exec_result.result if exec_result.success else str(exec_result.error)
     return str(exec_result)
+
+
+def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
+    """Split tool calls whose arguments contain multiple concatenated JSON objects.
+
+    Some models emit all parallel tool calls as a single native tool call with
+    arguments like '{...}{...}{...}' instead of separate tool call entries.
+    Uses json.JSONDecoder.raw_decode to extract each object without loading the
+    whole string at once.
+    """
+    result = []
+    decoder = json.JSONDecoder()
+    for raw_tc in raw_tool_calls:
+        args_str = raw_tc["function"].get("arguments", "")
+        if not isinstance(args_str, str):
+            result.append(raw_tc)
+            continue
+        objects: list[str] = []
+        pos = 0
+        stripped = args_str.strip()
+        while pos < len(stripped):
+            try:
+                obj, end_pos = decoder.raw_decode(stripped, pos)
+                objects.append(json.dumps(obj))
+                pos = end_pos
+                while pos < len(stripped) and stripped[pos] in " \t\n\r":
+                    pos += 1
+            except json.JSONDecodeError:
+                break
+        if len(objects) > 1:
+            logger.debug(
+                f"Expanding concatenated tool call '{raw_tc['function']['name']}' "
+                f"into {len(objects)} separate calls"
+            )
+            for i, args in enumerate(objects):
+                result.append({
+                    "id": f"{raw_tc['id']}_split_{i}",
+                    "type": "function",
+                    "function": {"name": raw_tc["function"]["name"], "arguments": args},
+                })
+        else:
+            result.append(raw_tc)
+    return result
 
 
 def _is_escalation_result(result_text: str) -> bool:

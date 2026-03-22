@@ -35,6 +35,7 @@ This document provides coding standards, tool configurations, and workflows for 
 | **pytest-cov** | Code coverage | >=7.0.0 |
 | **ruff** | Fast Python linter | latest |
 | **mypy** | Static type checker | latest |
+| **pyright** | Static type checker (Microsoft) | >=1.1.0 |
 | **uv** | Fast Python package manager | >=0.10.0 |
 | **poethepoet** | Task runner | >=0.24.0 |
 
@@ -346,6 +347,10 @@ uv run poe typecheck
 # Using uv run (Fallback)
 uv run mypy src/
 ```
+
+## Type Checking with Pyright
+
+Use the **pyright-lsp LSP server** for Pyright diagnostics — do not run `pyright` as a CLI command. The LSP tool provides real-time type errors directly from the language server.
 
 ### Type Annotation Standards
 
