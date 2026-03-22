@@ -12,9 +12,9 @@ from ayder_cli.providers import (
     _ToolCall,
     _FunctionCall,
 )
-from ayder_cli.tui.chat_loop import (
-    TuiChatLoop,
-    TuiLoopConfig,
+from ayder_cli.loops.chat_loop import (
+    ChatLoop as TuiChatLoop,
+    ChatLoopConfig as TuiLoopConfig,
 )
 
 

@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
 
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.core.context_manager import ContextManager
-from ayder_cli.loops.base import AgentLoopBase
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 
 logger = logging.getLogger(__name__)
@@ -67,10 +66,9 @@ class ChatCallbacks(Protocol):
     def is_cancelled(self) -> bool: ...
 
 
-class ChatLoop(AgentLoopBase):
+class ChatLoop:
     """Async chat loop that drives LLM agent interactions.
 
-    Extends AgentLoopBase for shared escalation detection.
     Does NOT own any UI widgets.
     """
 
@@ -82,7 +80,6 @@ class ChatLoop(AgentLoopBase):
         config: ChatLoopConfig,
         callbacks: ChatCallbacks,
     ) -> None:
-        super().__init__(config)
         self.llm = llm
         self.registry = registry
         self.messages = messages

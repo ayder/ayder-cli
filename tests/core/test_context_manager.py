@@ -79,7 +79,44 @@ def test_truncate_tool_result():
     cm = ContextManager(config)
     long_content = "word " * 1000
     truncated = cm.truncate_tool_result(long_content, max_tokens=50)
-    
+
     assert "TRUNCATED" in truncated
     # Use internal counter for token count in test
     assert cm._counter._estimate_string(truncated) <= 100
+
+
+def test_add_message_does_not_share_reference_with_caller():
+    """C4: add_message must copy the dict so caller mutations don't corrupt history."""
+    config = ContextManagerConfigSection(max_context_tokens=1000)
+    cm = ContextManager(config)
+
+    msg = {"role": "user", "content": "original"}
+    cm.add_message(msg)
+
+    # Mutate the caller's dict after storing
+    msg["content"] = "mutated by caller"
+
+    stored = cm._messages[0]
+    assert stored["content"] == "original", (
+        "Stored message was corrupted by caller mutation — add_message must copy the dict"
+    )
+
+
+def test_old_user_messages_not_assigned_old_assistant_tier():
+    """H1: _assign_tier must not assign OLD_ASSISTANT to old user messages."""
+    from ayder_cli.core.context_manager import MessageTier
+
+    config = ContextManagerConfigSection(max_context_tokens=1000)
+    cm = ContextManager(config)
+
+    # Simulate a large conversation already in progress
+    # so that message_index=1 gives age = len(20) - 1 + 1 = 20 (> 3)
+    cm._messages = [{"role": "user", "content": f"filler {i}"} for i in range(20)]
+
+    old_user_msg = {"role": "user", "content": "an old user message"}
+    tier = cm._assign_tier(old_user_msg, message_index=1)
+
+    assert tier != MessageTier.OLD_ASSISTANT, (
+        "_assign_tier returned OLD_ASSISTANT for a user message — "
+        "old user messages must keep a user-appropriate tier"
+    )

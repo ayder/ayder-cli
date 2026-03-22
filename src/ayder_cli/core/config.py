@@ -250,7 +250,7 @@ class Config(BaseModel):
     logging_retention: str = Field(default="7 days")
     max_background_processes: int = Field(default=5)
     max_output_tokens: int = Field(default=4096)
-    max_history_messages: int = Field(default=-1)
+    max_history_messages: int = Field(default=30)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     stop_sequences: list[str] = Field(default_factory=list)
@@ -259,13 +259,6 @@ class Config(BaseModel):
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
     agent_timeout: int = Field(default=300)
     agents: dict[str, Any] = Field(default_factory=dict)  # dict[str, AgentConfig] — Any to avoid circular import
-
-    @model_validator(mode="after")
-    def set_max_history_default(self) -> "Config":
-        if self.max_history_messages == -1:
-            # Default to 30 to prevent unbounded exponential context growth
-            object.__setattr__(self, "max_history_messages", 30)
-        return self
 
     @model_validator(mode="before")
     @classmethod

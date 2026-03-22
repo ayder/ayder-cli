@@ -85,7 +85,7 @@ ayder-cli/
 │   │
 │   ├── providers/              # LLM provider implementations
 │   │   ├── base.py             # AIProvider protocol, NormalizedStreamChunk
-│   │   ├── provider_orchestrator.py  # Factory: create(config) → provider
+│   │   ├── orchestrator.py  # Factory: create(config) → provider
 │   │   └── impl/               # Individual provider drivers
 │   │       ├── openai.py       # OpenAIProvider (base for most drivers)
 │   │       ├── ollama.py       # OllamaProvider (native + XML fallback)
@@ -96,9 +96,7 @@ ayder-cli/
 │   │       └── glm.py          # GLMNativeProvider (ZhipuAI SDK)
 │   │
 │   ├── services/               # Service layer
-│   │   ├── interactions.py     # InteractionSink, ConfirmationPolicy protocols
-│   │   └── tools/
-│   │       └── executor.py     # ToolExecutor (CLI confirmation + diff preview)
+│   │   └── interactions.py     # InteractionSink protocol (LLM debug events)
 │   │
 │   ├── tools/                  # Tool framework + implementations (25 tools)
 │   │   ├── definition.py       # ToolDefinition dataclass + auto-discovery
@@ -179,7 +177,7 @@ ayder-cli/
 | `tools/registry.py` | ToolRegistry: schemas, execution, system prompts, tag filtering |
 | `core/config.py` | Configuration with Pydantic validation |
 | `core/context.py` | ProjectContext for path sandboxing |
-| `providers/provider_orchestrator.py` | Factory dispatching to correct driver |
+| `providers/orchestrator.py` | Factory dispatching to correct driver |
 
 ## Environment Setup
 

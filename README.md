@@ -601,6 +601,17 @@ RECOMMENDATIONS: Parameterize all DB queries; add Pydantic validators to all end
 
 This summary is injected into the main LLM's context as a system message so the main agent can act on it, summarize it for you, or chain it to further work.
 
+## Plugins
+
+Official plugins (venv, python, dbs, mcp, temporal) are maintained in the **[ayder/ayder-plugins](https://github.com/ayder/ayder-plugins)** repository. Install any plugin directly from GitHub:
+
+```bash
+ayder install-plugin https://github.com/ayder/ayder-plugins/tree/main/venv-tools
+ayder install-plugin https://github.com/ayder/ayder-plugins/tree/main/python-tools
+```
+
+Plugins can also be hosted in any public GitHub repository — point `install-plugin` at any repo or subdirectory containing a `plugin.toml`.
+
 ## License
 
 MIT

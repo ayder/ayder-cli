@@ -168,7 +168,7 @@ class TestToolNeedsConfirmation:
 
     def test_read_tool_auto_approved_with_default_permissions(self):
         """Test that read tools are auto-approved with default permissions."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})
@@ -177,7 +177,7 @@ class TestToolNeedsConfirmation:
 
     def test_write_tool_needs_confirmation_with_default_permissions(self):
         """Test that write tools need confirmation with default permissions."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})
@@ -186,7 +186,7 @@ class TestToolNeedsConfirmation:
 
     def test_execute_tool_needs_confirmation_with_default_permissions(self):
         """Test that execute tools need confirmation with default permissions."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})
@@ -194,7 +194,7 @@ class TestToolNeedsConfirmation:
 
     def test_write_tool_auto_approved_with_w_permission(self):
         """Test that write tools are auto-approved with w permission."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "w"})
@@ -203,7 +203,7 @@ class TestToolNeedsConfirmation:
 
     def test_execute_tool_auto_approved_with_x_permission(self):
         """Test that execute tools are auto-approved with x permission."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "x"})
@@ -211,7 +211,7 @@ class TestToolNeedsConfirmation:
 
     def test_http_tool_needs_confirmation_without_http_permission(self):
         """Test that fetch_web needs confirmation without http permission."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "x"})
@@ -219,7 +219,7 @@ class TestToolNeedsConfirmation:
 
     def test_http_tool_auto_approved_with_http_permission(self):
         """Test that fetch_web is auto-approved with http permission."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "http"})
@@ -227,7 +227,7 @@ class TestToolNeedsConfirmation:
 
     def test_all_tools_auto_approved_with_full_permissions(self):
         """Test that all tools are auto-approved with rwx permissions."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "w", "x"})
@@ -237,7 +237,7 @@ class TestToolNeedsConfirmation:
 
     def test_unknown_tool_auto_approved(self):
         """Test that unknown tools default to 'r' permission and are auto-approved."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})

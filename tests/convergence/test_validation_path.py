@@ -240,7 +240,7 @@ class TestValidationCentralization:
     def test_old_bypass_paths_removed(self):
         """Old bypass paths are removed or delegate to authority."""
         try:
-            from ayder_cli.tui.chat_loop import TuiChatLoop
+            from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop
         except ImportError:
             pytest.skip("Implementation not yet available")
 

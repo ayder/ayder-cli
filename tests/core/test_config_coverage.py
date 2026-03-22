@@ -170,3 +170,21 @@ class TestConfigValidationTemporal:
         assert "temporal host/namespace/metadata_dir must be non-empty" in str(
             exc_info.value
         )
+
+
+class TestConfigMaxHistoryDefault:
+    """H2: max_history_messages default must be 30 directly, no model_validator magic."""
+
+    def test_default_is_30_not_minus_one(self):
+        """H2: The field default itself is 30, not -1 converted by a model_validator."""
+        from ayder_cli.core.config import Config as C
+        default_val = C.model_fields["max_history_messages"].default
+        assert default_val == 30, (
+            f"max_history_messages default is {default_val!r}, expected 30 — "
+            "the sentinel -1 pattern should be eliminated"
+        )
+
+    def test_config_default_resolves_to_30(self):
+        """H2: Config() without specifying max_history_messages gives 30."""
+        config = Config()
+        assert config.max_history_messages == 30

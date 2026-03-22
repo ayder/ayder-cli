@@ -12,6 +12,7 @@ _DRIVER_BY_PROVIDER: dict[str, str] = {
     "openai": "openai",
     "anthropic": "anthropic",
     "gemini": "google",
+    "ollama": "ollama",
 }
 
 _MIGRATION_NOTICE = (
@@ -79,7 +80,7 @@ def render_v2_config(
 
     if app["provider"] not in llm_profiles:
         llm_profiles[app["provider"]] = {
-            "driver": "openai",
+            "driver": _DRIVER_BY_PROVIDER.get(app["provider"], "openai"),
             "base_url": str(defaults["openai"]["base_url"]),
             "api_key": str(defaults["openai"]["api_key"]),
             "model": str(defaults["openai"]["model"]),

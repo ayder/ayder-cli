@@ -1,6 +1,5 @@
-from ayder_cli.services.interactions import ConfirmationPolicy, InteractionSink
+from ayder_cli.services.interactions import InteractionSink
 
 __all__ = [
-	"InteractionSink",
-	"ConfirmationPolicy",
+    "InteractionSink",
 ]

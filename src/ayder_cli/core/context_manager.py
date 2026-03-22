@@ -291,7 +291,7 @@ class ContextManager:
         return content[:max_chars] + f"\n... ({len(content) - max_chars} chars omitted for context efficiency)"
 
     def add_message(self, message: dict) -> None:
-        self._messages.append(message)
+        self._messages.append(dict(message))
         
         tier = self._assign_tier(message, len(self._messages))
         token_count = self._counter.estimate(message)
@@ -411,7 +411,7 @@ class ContextManager:
         if role == "system":
             return MessageTier.SYSTEM
         if role == "user":
-            return MessageTier.RECENT_USER if age <= 3 else MessageTier.OLD_ASSISTANT
+            return MessageTier.RECENT_USER
         if role == "assistant":
             return MessageTier.RECENT_ASSISTANT if age <= 3 else MessageTier.OLD_ASSISTANT
         if role == "tool":

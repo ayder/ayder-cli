@@ -20,9 +20,6 @@ from ayder_cli.tools.normalization import normalize_arguments
 
 logger = logging.getLogger(__name__)
 
-# Deprecated module-level alias (callers that import this name still work)
-normalize_tool_arguments = normalize_arguments
-
 
 class ToolRegistry:
     """Registry for tool functions with schema queries and execution dispatch."""

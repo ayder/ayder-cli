@@ -69,7 +69,7 @@ def create_runtime(
 
     # Format the final prompt (protocol injection now handled dynamically by chat_loop and protocols)
     base_prompt = get_system_prompt(cfg.prompt)
-    tool_tags = frozenset(cfg.tool_tags) if getattr(cfg, "tool_tags", None) else None
+    tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = base_prompt + tool_prompts + macro
 
@@ -134,7 +134,7 @@ def create_agent_runtime(
         "RECOMMENDATIONS: [any follow-up actions]\n"
         "</agent-summary>"
     )
-    tool_tags = frozenset(cfg.tool_tags) if getattr(cfg, "tool_tags", None) else None
+    tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = agent_config.system_prompt + tool_prompts + summary_suffix
 

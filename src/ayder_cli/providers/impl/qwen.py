@@ -2,6 +2,7 @@
 Qwen Native Provider implementation using DashScope SDK.
 """
 
+import asyncio
 import os
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from loguru import logger
@@ -38,12 +39,13 @@ class QwenNativeProvider(AIProvider):
         from dashscope import Generation
         
         # Qwen prefers 'result_format="message"' for tool calling
-        response = Generation.call(
+        response = await asyncio.to_thread(
+            Generation.call,
             model=model,
             api_key=self.api_key,
             messages=messages,
             tools=tools,
-            result_format='message'
+            result_format='message',
         )
         
         if response.status_code != 200:
@@ -61,14 +63,15 @@ class QwenNativeProvider(AIProvider):
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         from dashscope import Generation
         
-        responses = Generation.call(
+        responses = await asyncio.to_thread(
+            Generation.call,
             model=model,
             api_key=self.api_key,
             messages=messages,
             tools=tools,
             result_format='message',
             stream=True,
-            incremental_output=True # Qwen specific streaming
+            incremental_output=True,  # Qwen specific streaming
         )
 
         for response in responses:

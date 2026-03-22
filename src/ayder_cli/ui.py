@@ -5,68 +5,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.markdown import Markdown
 from rich.status import Status
 from rich.text import Text
 from ayder_cli.console import console
-
-
-def print_markdown(
-    text: str, title: str | None = None, width: int | None = None, color_code: str | None = None
-) -> None:
-    """Print markdown text in a styled box.
-
-    Args:
-        text: Markdown text to display
-        title: Optional title for the panel
-        width: Optional width for the panel
-        color_code: Optional ANSI color code for border (36=cyan, 32=green, etc.)
-    """
-    border_style: str = "white"
-    if color_code:
-        color_map = {
-            "36": "cyan",
-            "32": "green",
-            "33": "yellow",
-            "35": "magenta",
-            "31": "red",
-        }
-        border_style = color_map.get(color_code, "white")
-
-    console.print(
-        Panel(Markdown(text), title=title, width=width, border_style=border_style)
-    )
-
-
-def print_user_message(text: str) -> None:
-    """Print a user message in a styled box.
-
-    Args:
-        text: The message text to display
-    """
-    console.print(Panel(text, title="You", border_style="cyan"))
-
-
-def print_assistant_message(text: str) -> None:
-    """Print an assistant message in a styled box.
-
-    Args:
-        text: The message text to display
-    """
-    console.print(Panel(text, title="Assistant", border_style="green"))
-
-
-def print_code_block(code: str, language: str = "text", title: str | None = None) -> None:
-    """Print a code block with syntax highlighting.
-
-    Args:
-        code: The code string to display
-        language: The programming language for syntax highlighting
-        title: Optional title for the panel
-    """
-    syntax = Syntax(code, language)
-    console.print(Panel(syntax, title=title, border_style="green"))
 
 
 def print_tool_call(function_name: str, arguments: str) -> None:
@@ -407,42 +348,6 @@ def describe_tool_action(fname, args):
             pass
 
     return f"{fname} will be called"
-
-
-@contextmanager
-def agent_working_status(
-    message: str = "Agent is working...",
-) -> Generator[Status, None, None]:
-    """
-    Context manager for showing agent working status.
-
-    Usage:
-        with agent_working_status("Processing..."):
-            result = call_llm(...)
-
-    Args:
-        message: Status message to display
-
-    Yields:
-        Rich Status object
-    """
-    with console.status(f"[bold green]{message}") as status:
-        yield status
-
-
-def print_running_rich(message: str = "Running...") -> None:
-    """
-    Print a Rich-styled running indicator.
-
-    Args:
-        message: Message to display
-    """
-    console.print(f"[yellow]{message}[/yellow]")
-
-
-def print_running() -> None:
-    """Print a running indicator with a leading newline."""
-    console.print("\n[yellow]Running...[/yellow]")
 
 
 @contextmanager

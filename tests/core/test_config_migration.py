@@ -107,3 +107,33 @@ num_ctx = 65536
     assert notice is None
     assert not (config_dir / "config.toml.bak").exists()
 
+
+def test_migrates_legacy_ollama_config_with_correct_driver(tmp_path):
+    """H3: Legacy config with provider='ollama' must migrate with driver='ollama', not 'openai'."""
+    import tomllib
+
+    config_dir = tmp_path / ".ayder"
+    config_dir.mkdir()
+    config_path = config_dir / "config.toml"
+    config_path.write_text(
+        """provider = "ollama"
+
+[ollama]
+base_url = "http://localhost:11434/v1"
+api_key = "ollama"
+model = "qwen3-coder:latest"
+num_ctx = 65536
+""",
+        encoding="utf-8",
+    )
+
+    ensure_latest_config(config_path, defaults=DEFAULTS, notify=True, output=lambda _: None)
+
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert data["config_version"] == "2.0"
+    assert data["app"]["provider"] == "ollama"
+    assert data["llm"]["ollama"]["driver"] == "ollama", (
+        "Ollama migration set driver='openai' instead of 'ollama' — "
+        "_DRIVER_BY_PROVIDER in config_migration.py is missing 'ollama' entry"
+    )
+

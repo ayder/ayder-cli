@@ -28,22 +28,12 @@ class TestExecutionPolicyWiring:
 
     def test_tui_exec_tool_uses_execute_with_registry(self):
         """TuiChatLoop._exec_tool_async calls ExecutionPolicy.execute_with_registry."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop
 
         source = inspect.getsource(TuiChatLoop._exec_tool_async)
 
         assert "execute_with_registry" in source
         assert "registry.execute" not in source  # No direct bypass
-
-    def test_cli_executor_uses_execution_policy(self):
-        """ToolExecutor._execute_single_call routes post-confirm through execute_with_registry."""
-        from ayder_cli.services.tools.executor import ToolExecutor
-
-        source = inspect.getsource(ToolExecutor._execute_single_call)
-
-        assert "ExecutionPolicy" in source
-        assert "execute_with_registry" in source
-        assert "self.tool_registry.execute" not in source  # No direct bypass post-confirm
 
     def test_execute_with_registry_is_single_call_site(self):
         """ExecutionPolicy.execute_with_registry is the only place registry.execute is called."""
@@ -64,7 +54,7 @@ class TestExecutionPolicyCalledAtRuntime:
 
     def test_tui_exec_tool_calls_execute_with_registry(self):
         """TuiChatLoop._exec_tool_async calls ExecutionPolicy.execute_with_registry."""
-        from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop, ChatLoopConfig as TuiLoopConfig
         from ayder_cli.application.execution_policy import ExecutionResult
 
         registry = MagicMock()
@@ -92,35 +82,12 @@ class TestExecutionPolicyCalledAtRuntime:
         mock_exec.assert_called_once()
         assert result["result"] == "done"
 
-    def test_cli_executor_calls_execute_with_registry(self):
-        """ToolExecutor._execute_single_call routes post-confirm through execute_with_registry."""
-        from ayder_cli.services.tools.executor import ToolExecutor
-        from ayder_cli.application.execution_policy import ExecutionResult
-
-        registry = MagicMock()
-        registry.normalize_args.return_value = {"file_path": "/tmp/t.txt"}
-
-        executor = ToolExecutor(tool_registry=registry)
-        fake_result = ExecutionResult(success=True, result="ok")
-
-        with patch(
-            "ayder_cli.application.execution_policy.ExecutionPolicy.execute_with_registry",
-            return_value=fake_result,
-        ) as mock_exec:
-            outcome, value = executor._execute_single_call(
-                "read_file", {"file_path": "/tmp/t.txt"}, granted_permissions={"r"}, verbose=False
-            )
-
-        mock_exec.assert_called_once()
-        assert outcome == "success"
-        assert value == "ok"
-
 
 class TestConvergenceIntegration:
     """End-to-end convergence: same services, same behavior."""
 
     def test_tui_and_cli_use_same_permission_source(self):
-        """Both TUI ExecutionPolicy and CLI ToolExecutor use TOOL_PERMISSIONS."""
+        """Both TUI and CLI execution paths use TOOL_PERMISSIONS."""
         from ayder_cli.application.execution_policy import _required_permission
         from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 

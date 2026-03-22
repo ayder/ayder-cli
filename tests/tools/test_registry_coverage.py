@@ -157,7 +157,7 @@ class TestNormalizeToolArgumentsEdgeCases:
     def test_normalize_with_empty_arguments(self, tmp_path):
         """Normalize with empty arguments."""
         ctx = ProjectContext(str(tmp_path))
-        result = registry.normalize_tool_arguments("read_file", {}, ctx)
+        result = registry.normalize_arguments("read_file", {}, ctx)
         assert result == {}
 
     def test_normalize_path_resolution(self, tmp_path):
@@ -169,7 +169,7 @@ class TestNormalizeToolArgumentsEdgeCases:
         ctx = ProjectContext(str(tmp_path))
         
         args = {"file_path": "test.txt"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = registry.normalize_arguments("read_file", args, ctx)
         
         assert normalized["file_path"] == str(tmp_path / "test.txt")
 
@@ -179,7 +179,7 @@ class TestNormalizeToolArgumentsEdgeCases:
         ctx = ProjectContext(str(tmp_path))
         
         args = {"start_line": "10"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = registry.normalize_arguments("read_file", args, ctx)
         
         assert isinstance(normalized["start_line"], int)
         assert normalized["start_line"] == 10
@@ -190,7 +190,7 @@ class TestNormalizeToolArgumentsEdgeCases:
         ctx = ProjectContext(str(tmp_path))
         
         args = {"start_line": "invalid"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = registry.normalize_arguments("read_file", args, ctx)
         
         assert normalized["start_line"] == "invalid"
 
@@ -204,7 +204,7 @@ class TestParameterAliases:
         ctx = ProjectContext(str(tmp_path))
         
         args = {"path": "test.txt"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = registry.normalize_arguments("read_file", args, ctx)
         
         assert "file_path" in normalized
         assert "path" not in normalized
@@ -214,7 +214,7 @@ def test_filepath_alias_for_file_editor(tmp_path):
     ctx = ProjectContext(str(tmp_path))
 
     args = {"filepath": "test.txt", "operation": "write"}
-    normalized = registry.normalize_tool_arguments("file_editor", args, ctx)
+    normalized = registry.normalize_arguments("file_editor", args, ctx)
 
     assert "file_path" in normalized
     assert "filepath" not in normalized
@@ -225,7 +225,7 @@ def test_dir_alias_for_file_explorer(tmp_path):
     ctx = ProjectContext(str(tmp_path))
 
     args = {"dir": "."}
-    normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+    normalized = registry.normalize_arguments("file_explorer", args, ctx)
 
     assert "path" in normalized
     assert "dir" not in normalized

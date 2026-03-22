@@ -4,7 +4,7 @@ This module contains the logic for running the CLI in different modes:
 - Single command execution (run_command)
 - Task management commands (_run_tasks_cli, _run_implement_cli, _run_implement_all_cli)
 
-All CLI paths drive TuiChatLoop via CliCallbacks, sharing the same async
+All CLI paths drive ChatLoop via CliCallbacks, sharing the same async
 execution engine used by the TUI.
 """
 
@@ -14,29 +14,14 @@ from pathlib import Path
 
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.cli_callbacks import CliCallbacks
-from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
-
-
-def _build_services(config=None, project_root="."):
-    """Build the service dependency graph via the shared runtime factory.
-
-    Returns:
-        Tuple of (config, llm_provider, project_ctx, enhanced_system)
-    """
-    rt = create_runtime(config=config, project_root=project_root)
-    return (
-        rt.config,
-        rt.llm_provider,
-        rt.project_ctx,
-        rt.system_prompt,
-    )
+from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
 
 def _run_loop(
     prompt: str,
     permissions: set | None = None,
 ) -> int:
-    """Create a TuiChatLoop with CliCallbacks and run it.
+    """Create a ChatLoop with CliCallbacks and run it.
 
     Shared helper used by CommandRunner, TaskRunner._execute_task, and
     TaskRunner.implement_all.
@@ -55,23 +40,19 @@ def _run_loop(
         {"role": "user", "content": prompt},
     ]
 
-    config = TuiLoopConfig(
+    config = ChatLoopConfig(
         model=rt.config.model,
         provider=rt.config.provider,
         num_ctx=rt.config.num_ctx,
-        max_output_tokens=getattr(rt.config, "max_output_tokens", 4096),
-        stop_sequences=list(getattr(rt.config, "stop_sequences", [])),
+        max_output_tokens=rt.config.max_output_tokens,
+        stop_sequences=list(rt.config.stop_sequences),
         permissions=set(permissions or {"r"}),
-        tool_tags=(
-            frozenset(rt.config.tool_tags)
-            if getattr(rt.config, "tool_tags", None)
-            else None
-        ),
-        max_history=getattr(rt.config, "max_history_messages", 30),
+        tool_tags=frozenset(rt.config.tool_tags) if rt.config.tool_tags else None,
+        max_history=rt.config.max_history_messages,
     )
 
-    cb = CliCallbacks(verbose=getattr(rt.config, "verbose", False))
-    loop = TuiChatLoop(
+    cb = CliCallbacks(verbose=rt.config.verbose)
+    loop = ChatLoop(
         llm=rt.llm_provider,
         registry=rt.tool_registry,
         messages=messages,

@@ -9,25 +9,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
+from ayder_cli.application.validation import ToolRequest, ValidationError  # noqa: F401
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 @dataclass
 class RuntimeContext:
     """Interface context — accepted by orchestrator but does not alter behavior."""
     interface: str  # "cli" | "tui"
-
-
-# ---------------------------------------------------------------------------
-# DTOs
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ToolRequest:
-    """A request to execute a tool."""
-
-    name: str
-    arguments: dict
 
 
 # ---------------------------------------------------------------------------
@@ -62,18 +50,6 @@ class ToolExecutionError:
 
     def __str__(self) -> str:
         return f"[{self.tool_name}] {self.message} (exit {self.exit_code})"
-
-
-@dataclass
-class ValidationError:
-    """Structured validation error."""
-
-    tool_name: str
-    field: str
-    message: str
-
-    def __str__(self) -> str:
-        return f"Validation error for '{self.tool_name}.{self.field}': {self.message}"
 
 
 # ---------------------------------------------------------------------------
@@ -190,10 +166,10 @@ class ExecutionPolicy:
             pre_approved: If True, skip the permission check (user already
                 confirmed via the confirmation dialog).
         """
-        from ayder_cli.application.validation import ValidationAuthority, ToolRequest as VToolRequest
+        from ayder_cli.application.validation import ValidationAuthority
 
         authority = ValidationAuthority()
-        v_request = VToolRequest(name=request.name, arguments=request.arguments)
+        v_request = ToolRequest(name=request.name, arguments=request.arguments)
         valid, err = authority.validate(v_request)
         if not valid:
             return ExecutionResult(success=False, error=err)

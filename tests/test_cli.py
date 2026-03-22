@@ -1,114 +1,10 @@
-"""Tests for cli.py — coverage for _build_services, run_command, main(), and task runners."""
+"""Tests for cli.py — coverage for run_command, main(), and task runners."""
 
 import sys
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from io import StringIO
 
-
-class TestBuildServices:
-    """Test _build_services function."""
-
-    def test_build_services_with_exception_in_structure_macro(self):
-        """Test that _build_services handles exception when getting project structure."""
-        from ayder_cli.cli_runner import _build_services
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False
-        )
-
-        mock_registry = MagicMock()
-        mock_registry.execute.side_effect = Exception("Structure error")
-        mock_registry.get_system_prompts.return_value = ""
-
-        with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
-             patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
-             patch('openai.OpenAI'):
-            services = _build_services()
-            cfg, llm_provider, project_ctx, system_prompt = services
-
-            assert cfg == mock_config
-            assert llm_provider is not None
-            assert project_ctx is not None
-
-    def test_build_services_success_with_structure_macro(self):
-        """Test _build_services successfully returns 4-tuple."""
-        from ayder_cli.cli_runner import _build_services
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False
-        )
-
-        mock_registry = MagicMock()
-        mock_registry.execute.return_value = "src/\n  main.py\n  utils.py"
-        mock_registry.get_system_prompts.return_value = ""
-
-        with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
-             patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
-             patch('openai.OpenAI'):
-            services = _build_services()
-            cfg, llm_provider, project_ctx, system_prompt = services
-
-            assert cfg == mock_config
-            assert llm_provider is not None
-            assert project_ctx is not None
-            assert system_prompt is not None
-
-    def test_build_services_with_custom_config(self):
-        """Test _build_services accepts custom config parameter."""
-        from ayder_cli.cli_runner import _build_services
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://custom:8080/v1",
-            api_key="custom-key",
-            model="custom-model",
-            num_ctx=2048,
-            verbose=True
-        )
-
-        mock_registry = MagicMock()
-        mock_registry.execute.return_value = "project/"
-
-        with patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
-             patch('openai.OpenAI'):
-            services = _build_services(config=mock_config)
-            cfg = services[0]
-
-            assert cfg == mock_config
-
-    def test_build_services_with_custom_project_root(self):
-        """Test _build_services accepts custom project root."""
-        from ayder_cli.cli_runner import _build_services
-        from ayder_cli.core.config import Config
-
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False
-        )
-
-        mock_registry = MagicMock()
-
-        with patch('ayder_cli.application.runtime_factory.load_config', return_value=mock_config), \
-             patch('ayder_cli.application.runtime_factory.ProjectContext') as mock_project_ctx_class, \
-             patch('ayder_cli.application.runtime_factory.create_default_registry', return_value=mock_registry), \
-             patch('openai.OpenAI'):
-            _build_services(project_root="/custom/path")
-
-            mock_project_ctx_class.assert_called_once_with("/custom/path")
 
 
 class TestRunCommand:
@@ -150,10 +46,10 @@ class TestRunCommand:
 
 
 class TestRunLoop:
-    """Test _run_loop helper — the shared CLI→TuiChatLoop bridge."""
+    """Test _run_loop helper — the shared CLI→ChatLoop bridge."""
 
-    def test_run_loop_creates_tui_chat_loop(self):
-        """_run_loop must create a TuiChatLoop with CliCallbacks and call asyncio.run."""
+    def test_run_loop_creates_chat_loop(self):
+        """_run_loop must create a ChatLoop with CliCallbacks and call asyncio.run."""
         from ayder_cli.cli_runner import _run_loop
 
         mock_rt = MagicMock()
@@ -187,12 +83,12 @@ class TestRunLoop:
         mock_rt.system_prompt = "You are a helpful assistant."
 
         with patch('ayder_cli.cli_runner.create_runtime', return_value=mock_rt), \
-             patch('ayder_cli.cli_runner.TuiChatLoop') as MockLoop, \
+             patch('ayder_cli.cli_runner.ChatLoop') as MockLoop, \
              patch('ayder_cli.cli_runner.asyncio.run'):
             MockLoop.return_value.run = AsyncMock()
             _run_loop("test prompt", permissions={"r"})
 
-        # Verify TuiChatLoop was constructed with correct messages
+        # Verify ChatLoop was constructed with correct messages
         call_kwargs = MockLoop.call_args[1]
         messages = call_kwargs["messages"]
         assert messages[0] == {"role": "system", "content": "You are a helpful assistant."}

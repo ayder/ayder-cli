@@ -6,34 +6,6 @@ from unittest.mock import patch
 from ayder_cli import ui
 
 
-class TestPrintUserMessage:
-    """Tests for print_user_message() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_print_user_message(self, mock_print):
-        """Test user message printing."""
-        from rich.panel import Panel
-        ui.print_user_message("Hello user")
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-        assert panel.title == "You"
-
-
-class TestPrintAssistantMessage:
-    """Tests for print_assistant_message() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_print_assistant_message(self, mock_print):
-        """Test assistant message printing."""
-        from rich.panel import Panel
-        ui.print_assistant_message("Hello from assistant")
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-        assert panel.title == "Assistant"
-
-
 class TestPrintToolCall:
     """Tests for print_tool_call() function."""
 
@@ -71,19 +43,6 @@ class TestPrintToolResult:
         assert "..." in call_args
         # Should be truncated to 300 chars (300 + "...")
         assert len([c for c in call_args if c == "A"]) <= 300
-
-
-class TestPrintRunning:
-    """Tests for print_running() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_print_running(self, mock_print):
-        """Test running indicator printing."""
-        ui.print_running()
-        mock_print.assert_called_once()
-        call_args = mock_print.call_args[0][0]
-        assert "Running..." in call_args
-        assert "\n" in call_args  # Has leading newline
 
 
 class TestDescribeToolAction:

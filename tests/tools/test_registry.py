@@ -106,7 +106,7 @@ class TestNormalizeToolArguments:
         """Test ValueError propagation for paths outside sandbox - Lines 71-73."""
         # Try to access a path outside the project root
         with pytest.raises(ValueError) as exc_info:
-            registry.normalize_tool_arguments(
+            registry.normalize_arguments(
                 "read_file", 
                 {"file_path": "/etc/passwd"}, 
                 project_context
@@ -119,7 +119,7 @@ class TestNormalizeToolArguments:
         (tmp_path / "test.txt").write_text("content")
         
         # Pass a non-numeric string for start_line - should keep as string
-        result = registry.normalize_tool_arguments(
+        result = registry.normalize_arguments(
             "read_file", 
             {"file_path": "test.txt", "start_line": "not_a_number"},
             project_context

@@ -1,7 +1,7 @@
 """
 Tests for diff preview functionality in ayder_cli.ui
 
-Tests colorize_diff, truncate_diff, generate_diff_preview, and confirm_with_diff.
+Tests colorize_diff, truncate_diff, and generate_diff_preview.
 """
 import unittest
 from pathlib import Path
@@ -12,7 +12,6 @@ from ayder_cli.ui import (
     colorize_diff,
     truncate_diff,
     generate_diff_preview,
-    confirm_with_diff,
 )
 from ayder_cli.tools.utils import prepare_new_content
 from ayder_cli.core.context import ProjectContext
@@ -225,70 +224,6 @@ class TestGenerateDiffPreview(unittest.TestCase):
         self.assertIsNotNone(result)
         # Should contain truncation message
         self.assertIn("omitted", result)
-
-
-@pytest.mark.skip(reason="TODO: Update for Rich UI")
-class TestConfirmWithDiff(unittest.TestCase):
-    """Test confirm_with_diff function (with mocking)"""
-
-    def setUp(self):
-        """Create temporary directory for test files"""
-        import tempfile
-        self.temp_dir = Path(tempfile.mkdtemp())
-
-    def tearDown(self):
-        """Clean up temporary files"""
-        import shutil
-        shutil.rmtree(self.temp_dir)
-
-    @patch('builtins.input', return_value='y')
-    @patch('builtins.print')
-    def test_diff_printed_before_confirmation(self, mock_print, mock_input):
-        """Verify diff is printed before confirmation prompt"""
-        file_path = self.temp_dir / "test.txt"
-        new_content = "new content"
-
-        result = confirm_with_diff(file_path, new_content, "Test file")
-
-        self.assertTrue(result)
-        # Verify print was called (diff output)
-        self.assertGreater(mock_print.call_count, 0)
-
-    @patch('builtins.input', return_value='y')
-    @patch('builtins.print')
-    def test_confirmation_returns_true_on_yes(self, mock_print, mock_input):
-        """Verify function returns True when user confirms"""
-        file_path = self.temp_dir / "test.txt"
-        result = confirm_with_diff(file_path, "content", "Test")
-
-        self.assertTrue(result)
-
-    @patch('builtins.input', return_value='n')
-    @patch('builtins.print')
-    def test_confirmation_returns_false_on_no(self, mock_print, mock_input):
-        """Verify function returns False when user declines"""
-        file_path = self.temp_dir / "test.txt"
-        result = confirm_with_diff(file_path, "content", "Test")
-
-        self.assertFalse(result)
-
-    @patch('builtins.input', return_value='')
-    @patch('builtins.print')
-    def test_confirmation_returns_true_on_empty(self, mock_print, mock_input):
-        """Verify function returns True when user presses enter"""
-        file_path = self.temp_dir / "test.txt"
-        result = confirm_with_diff(file_path, "content", "Test")
-
-        self.assertTrue(result)
-
-    @patch('builtins.input', side_effect=KeyboardInterrupt)
-    @patch('builtins.print')
-    def test_keyboard_interrupt_returns_false(self, mock_print, mock_input):
-        """Verify function handles keyboard interrupt gracefully"""
-        file_path = self.temp_dir / "test.txt"
-        result = confirm_with_diff(file_path, "content", "Test")
-
-        self.assertFalse(result)
 
 
 class TestPrepareNewContent(unittest.TestCase):

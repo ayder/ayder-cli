@@ -464,30 +464,3 @@ class ContentProcessor:
 content_processor = ContentProcessor()
 
 
-# =============================================================================
-# Backward-compatible module-level functions
-# (preserved for existing callers; prefer using content_processor directly)
-# =============================================================================
-
-
-def parse_custom_tool_calls(content: str) -> list[dict[str, Any]]:
-    """Parse XML-format tool calls from LLM output.
-
-    Deprecated: use ``content_processor.parse_tool_calls()`` instead.
-    """
-    return content_processor.parse_tool_calls(content)
-
-
-def _infer_parameter_name(func_name: str) -> str:
-    """Infer parameter for single-param tools only."""
-    return _SINGLE_PARAM_TOOLS.get(func_name, "")
-
-
-def _normalize_dsml_markup(content: str) -> str:
-    """Normalize DeepSeek DSML-prefixed tags to standard DeepSeek format."""
-    return content_processor._normalize_dsml(content)
-
-
-def _normalize_tool_call_markup(content: str) -> str:
-    """Normalize model-specific tool call markup variations."""
-    return content_processor._normalize_markup(content)

@@ -76,7 +76,3 @@ def normalize_arguments(
                     pass  # keep as string; validation will catch it later
 
     return normalized
-
-
-# Deprecated alias — preserved for callers that import the old name
-normalize_tool_arguments = normalize_arguments

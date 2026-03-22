@@ -9,7 +9,6 @@ from ayder_cli.tools.schemas import tools_schema, TOOL_PERMISSIONS
 from ayder_cli.tools.registry import (
     ToolRegistry,
     create_default_registry,
-    normalize_tool_arguments,   # deprecated alias — use normalize_arguments
 )
 from ayder_cli.tools.normalization import normalize_arguments, PARAMETER_ALIASES, PATH_PARAMETERS
 from ayder_cli.tools.hooks import (
@@ -36,7 +35,6 @@ __all__ = [
     "create_default_registry",
     # Normalization
     "normalize_arguments",
-    "normalize_tool_arguments",     # deprecated alias
     "PARAMETER_ALIASES",
     "PATH_PARAMETERS",
     # Hooks

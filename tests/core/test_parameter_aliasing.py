@@ -3,7 +3,7 @@
 import tempfile
 import os
 
-from ayder_cli.tools import registry
+from ayder_cli.tools.normalization import normalize_arguments
 from ayder_cli.core.context import ProjectContext
 
 
@@ -15,19 +15,19 @@ def test_parameter_aliases_file_path():
         ctx = ProjectContext(tmp_dir)
         
         args = {"path": "test.txt", "start_line": 10}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         assert "file_path" in normalized
         assert os.path.realpath(normalized["file_path"]) == os.path.realpath(os.path.join(tmp_dir, "test.txt"))
         assert "path" not in normalized
         
         args = {"absolute_path": "test.txt"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         assert "file_path" in normalized
         assert os.path.realpath(normalized["file_path"]) == os.path.realpath(os.path.join(tmp_dir, "test.txt"))
         assert "absolute_path" not in normalized
         
         args = {"filepath": "test.txt"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         assert "file_path" in normalized
         assert os.path.realpath(normalized["file_path"]) == os.path.realpath(os.path.join(tmp_dir, "test.txt"))
         assert "filepath" not in normalized
@@ -41,18 +41,18 @@ def test_parameter_aliases_file_explorer():
         ctx = ProjectContext(tmp_dir)
         
         args = {"dir": "."}
-        normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+        normalized = normalize_arguments("file_explorer", args, ctx)
         assert "path" in normalized
         assert os.path.realpath(normalized["path"]) == os.path.realpath(tmp_dir)
         assert "dir" not in normalized
         
         args = {"path": "."}
-        normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+        normalized = normalize_arguments("file_explorer", args, ctx)
         assert "path" in normalized
         assert os.path.realpath(normalized["path"]) == os.path.realpath(tmp_dir)
         
         args = {"folder": "."}
-        normalized = registry.normalize_tool_arguments("file_explorer", args, ctx)
+        normalized = normalize_arguments("file_explorer", args, ctx)
         assert "path" in normalized
         assert os.path.realpath(normalized["path"]) == os.path.realpath(tmp_dir)
 
@@ -65,7 +65,7 @@ def test_path_resolution_to_absolute():
         ctx = ProjectContext(tmp_dir)
         
         args = {"file_path": "."}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         assert os.path.realpath(normalized["file_path"]) == os.path.realpath(tmp_dir)
 
 
@@ -77,7 +77,7 @@ def test_type_coercion_line_numbers():
         ctx = ProjectContext(tmp_dir)
         
         args = {"file_path": "test.txt", "start_line": "10", "end_line": "20"}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         
         assert isinstance(normalized["start_line"], int)
         assert normalized["start_line"] == 10
@@ -100,7 +100,7 @@ def test_validation_wrong_type():
         args = {"file_path": "test.txt", "start_line": "invalid"}
         
         # Should not raise error during normalization, but conversion might fail or be skipped
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         
         # It keeps it as string if conversion fails
         assert normalized["start_line"] == "invalid"
@@ -121,7 +121,7 @@ def test_combined_alias_and_normalization():
         ctx = ProjectContext(tmp_dir)
         
         args = {"path": ".", "start_line": "5"}  # Using alias and relative path
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         
         assert "file_path" in normalized
         assert os.path.realpath(normalized["file_path"]) == os.path.realpath(tmp_dir)  # Resolved absolute path
@@ -136,7 +136,7 @@ def test_backward_compatibility():
         ctx = ProjectContext(tmp_dir)
 
         args = {"file_path": "test.txt", "start_line": 10}
-        normalized = registry.normalize_tool_arguments("read_file", args, ctx)
+        normalized = normalize_arguments("read_file", args, ctx)
         
         assert os.path.realpath(normalized["file_path"]) == os.path.realpath(os.path.join(tmp_dir, "test.txt"))
         assert normalized["start_line"] == 10

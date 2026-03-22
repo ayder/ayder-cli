@@ -43,15 +43,15 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                   CLI Mode                                │  │
-│  │  cli_runner.py → client.py (Agent) → chat_loop.py        │  │
-│  │  (ChatLoop — sync, extends AgentLoopBase)                 │  │
+│  │  cli_runner.py → loops/chat_loop.py (ChatLoop)           │  │
+│  │  (ChatLoop — async via asyncio.run)                       │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │            Shared Application Modules                     │  │
 │  │  application/execution_policy.py   (ExecutionPolicy)      │  │
 │  │  application/validation.py         (ValidationAuthority)  │  │
 │  │  application/runtime_factory.py    (create_runtime())     │  │
-│  │  loops/base.py                     (AgentLoopBase)        │  │
+│  │  loops/chat_loop.py                (ChatLoop)             │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                             │
@@ -59,9 +59,10 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 ┌────────────────────────────────────────────────────────────────┐
 │                     Service Layer                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐    │
-│  │services/llm. │  │services/tools│  │process_manager.py  │    │
-│  │py (OpenAI    │  │  /executor.py│  │(Background Process)│    │
-│  │  Provider)   │  │(ToolExecutor)│  │                    │    │
+│  │services/inter│  │              │  │process_manager.py  │    │
+│  │actions.py    │  │              │  │(Background Process)│    │
+│  │(Interaction- │  │              │  │                    │    │
+│  │Sink protocol)│  │              │  │                    │    │
 │  └──────────────┘  └──────────────┘  └────────────────────┘    │
 └────────────────────────────────────────────────────────────────┘
                             │
@@ -89,9 +90,9 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 ### Key Architectural Principles
 
 1. **Layered Architecture**: Clear separation between entry → app → service → core → tools
-2. **Protocol-Based**: `TuiCallbacks` protocol decouples TUI from business logic; `InteractionSink`/`ConfirmationPolicy` decouple `ToolExecutor` from UI
+2. **Protocol-Based**: `TuiCallbacks` protocol decouples TUI from business logic; `InteractionSink` decouples LLM providers from UI for debug events
 3. **Single Composition Root**: `application/runtime_factory.create_runtime()` assembles all dependencies — no duplicated wiring between CLI and TUI
-4. **Shared Loop Base**: `AgentLoopBase` (in `loops/base.py`) owns tool-call routing and escalation detection; `ChatLoop` (in `loops/chat_loop.py`) extends it with the full async LLM + tool execution loop
+4. **Single Loop**: `ChatLoop` (in `loops/chat_loop.py`) owns the full async LLM + tool execution loop; both CLI and TUI route through it
 5. **Single Execution Path**: `ExecutionPolicy.execute_with_registry()` is the sole tool execution entry point; validation → permission → execute, no inline policy in loop code
 6. **Single Validation Path**: `ValidationAuthority → SchemaValidator` is the only validation stage; schema derived from live `TOOL_DEFINITIONS` registry (no hardcoded lists)
 7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security
@@ -155,7 +156,6 @@ cli.py:main()
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `cli.py` | Entry point, argument parsing | `main()`, `create_parser()` |
-| `client.py` | LLM client and chat session | `ChatSession`, `Agent`, `call_llm_async()` |
 | `cli_runner.py` | Command execution | `CommandRunner`, `TaskRunner`, `run_command()` |
 
 
@@ -213,8 +213,7 @@ cli.py:main()
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `services/llm.py` | LLM provider | `LLMProvider`, `OpenAIProvider` |
-| `services/interactions.py` | UI-decoupling protocols | `InteractionSink`, `ConfirmationPolicy`, `NullInteractionSink`, `AutoApproveConfirmationPolicy` |
-| `services/tools/executor.py` | CLI tool execution with diff preview | `ToolExecutor` |
+| `services/interactions.py` | LLM debug event protocol | `InteractionSink` |
 
 ### Tool Modules
 
@@ -360,7 +359,7 @@ from ayder_cli.console import console
 
 # Services
 from ayder_cli.services.llm import OpenAIProvider, LLMProvider
-from ayder_cli.services.tools.executor import ToolExecutor
+from ayder_cli.services.interactions import InteractionSink
 
 # Tools
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
@@ -427,14 +426,13 @@ class AppCallbacks:
 ### Building Services
 
 ```python
-# From cli_runner.py
-def _build_services(config=None, project_root="."):
-    cfg = config or load_config()
-    llm_provider = OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key)
-    project_ctx = ProjectContext(project_root)
+# From application/runtime_factory.py
+def create_runtime():
+    cfg = load_config()
+    project_ctx = ProjectContext(".")
     tool_registry = create_default_registry(project_ctx)
-    tool_executor = ToolExecutor(tool_registry)
-    # ... returns tuple of services
+    llm_provider = create_provider(cfg)
+    # Returns RuntimeContext with all assembled services
 ```
 
 ### Path Security Pattern

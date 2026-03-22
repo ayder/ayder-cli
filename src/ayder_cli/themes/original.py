@@ -160,6 +160,45 @@ CLISelectScreen .hint {
     margin-top: 1;
 }
 
+/* CLIMultiSelectScreen - Multi-selection modal (used for /plugin command, etc.) */
+CLIMultiSelectScreen {
+    align: center bottom;
+}
+
+CLIMultiSelectScreen > Vertical {
+    width: 100%;
+    max-height: 60%;
+    height: auto;
+    background: $surface;
+    border-top: solid $primary;
+    padding: 1 2;
+}
+
+CLIMultiSelectScreen .prompt {
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+CLIMultiSelectScreen .description {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+CLIMultiSelectScreen .select-list {
+    height: auto;
+    max-height: 20;
+    overflow-y: auto;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+CLIMultiSelectScreen .hint {
+    color: $text-muted;
+    text-style: dim;
+    margin-top: 1;
+}
+
 /* TaskEditScreen - In-app task editor */
 TaskEditScreen {
     align: center bottom;

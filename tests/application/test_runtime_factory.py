@@ -103,46 +103,6 @@ class TestRuntimeFactoryAssembly:
         assert components.config.model == "qwen3-coder:latest"
 
 
-class TestFactoryCLIIntegration:
-    """Test CLI uses factory-built dependencies."""
-
-    def test_cli_uses_factory_components(self):
-        """CLI runner uses factory-built dependencies.
-        
-        Validates that cli_runner._build_services() delegates to create_runtime()
-        and returns components in the expected order for backward compatibility.
-        """
-        pytest.importorskip(
-            "ayder_cli.application.runtime_factory",
-            reason="Runtime factory not yet implemented by DEV-02.1"
-        )
-        from ayder_cli.cli_runner import _build_services
-
-        services = _build_services()
-
-        # Return order: (config, llm, project_ctx, enhanced_system)
-        assert len(services) == 4
-        cfg, llm, project_ctx, system_prompt = services
-
-        assert cfg is not None
-        assert llm is not None
-        assert project_ctx is not None
-        assert system_prompt is not None
-
-    def test_cli_factory_integration_preserves_behavior(self):
-        """CLI factory integration preserves existing behavior."""
-        pytest.importorskip(
-            "ayder_cli.application.runtime_factory",
-            reason="Runtime factory not yet implemented by DEV-02.1"
-        )
-        from ayder_cli.cli_runner import _build_services
-
-        services = _build_services()
-        cfg, llm, project_ctx, system_prompt = services
-
-        # System prompt should contain expected content
-        assert "model" in system_prompt.lower() or "ayder" in system_prompt.lower()
-
 
 class TestFactoryTUIIntegration:
     """Test TUI uses factory-built dependencies."""

@@ -461,10 +461,11 @@ class OllamaProvider(OpenAIProvider):
 
         tool_calls = [
             ToolCallDef(
-                id=tc["id"],
-                name=tc["function"]["name"],
-                arguments=tc["function"]["arguments"]
-            ) for tc in calls
+                id=tc.get("id", f"xml_{i}"),
+                name=tc["name"],
+                arguments=json.dumps(tc["arguments"]) if isinstance(tc["arguments"], dict) else tc["arguments"],
+            )
+            for i, tc in enumerate(calls)
         ]
         
         # Strip XML from content for final normalized response

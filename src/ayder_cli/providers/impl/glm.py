@@ -2,6 +2,7 @@
 GLM Native Provider implementation using ZhipuAI SDK.
 """
 
+import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from ayder_cli.core.config import Config
@@ -35,7 +36,8 @@ class GLMNativeProvider(AIProvider):
     ) -> NormalizedStreamChunk:
         
         # GLM-5/4 support OpenAI-like tools parameter
-        response = self.client.chat.completions.create(
+        response = await asyncio.to_thread(
+            self.client.chat.completions.create,
             model=model,
             messages=messages,
             tools=tools,
@@ -52,7 +54,8 @@ class GLMNativeProvider(AIProvider):
         verbose: bool = False,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         
-        response_stream = self.client.chat.completions.create(
+        response_stream = await asyncio.to_thread(
+            self.client.chat.completions.create,
             model=model,
             messages=messages,
             tools=tools,

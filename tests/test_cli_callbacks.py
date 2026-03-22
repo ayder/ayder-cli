@@ -9,14 +9,14 @@ class TestCliCallbacksProtocol:
     """CliCallbacks must satisfy the TuiCallbacks runtime-checkable protocol."""
 
     def test_isinstance_tui_callbacks(self):
-        from ayder_cli.tui.chat_loop import TuiCallbacks
+        from ayder_cli.loops.chat_loop import ChatCallbacks as TuiCallbacks
 
         cb = CliCallbacks()
         assert isinstance(cb, TuiCallbacks)
 
     def test_all_protocol_methods_present(self):
         """Every method in TuiCallbacks protocol must exist on CliCallbacks."""
-        from ayder_cli.tui.chat_loop import TuiCallbacks
+        from ayder_cli.loops.chat_loop import ChatCallbacks as TuiCallbacks
         import inspect
 
         protocol_methods = {

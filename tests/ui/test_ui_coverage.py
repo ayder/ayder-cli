@@ -227,34 +227,6 @@ class TestTruncateDiffEdgeCases:
 # New tests for uncovered lines in ui.py
 # =============================================================================
 
-class TestPrintUserMessage:
-    """Tests for print_user_message() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_prints_panel_with_you_title(self, mock_print):
-        """Verify panel with 'You' title is printed."""
-        from rich.panel import Panel
-        ui.print_user_message("hello")
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-        assert panel.title == "You"
-
-
-class TestPrintAssistantMessage:
-    """Tests for print_assistant_message() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_prints_panel_with_assistant_title(self, mock_print):
-        """Verify panel with 'Assistant' title is printed."""
-        from rich.panel import Panel
-        ui.print_assistant_message("response")
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-        assert panel.title == "Assistant"
-
-
 class TestPrintToolCall:
     """Tests for print_tool_call() function."""
 
@@ -290,56 +262,8 @@ class TestPrintFileContentRich:
         assert panel.title == "Error"
 
 
-class TestPrintMarkdown:
-    """Tests for print_markdown() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_without_title(self, mock_print):
-        """Test without title parameter."""
-        ui.print_markdown("# Hello")
-        mock_print.assert_called_once()
-
-    @patch("ayder_cli.ui.console.print")
-    def test_with_title(self, mock_print):
-        """Test with title parameter."""
-        from rich.panel import Panel
-        ui.print_markdown("# Hello", title="Docs")
-        mock_print.assert_called_once()
-        panel = mock_print.call_args[0][0]
-        assert isinstance(panel, Panel)
-
-
-class TestPrintCodeBlock:
-    """Tests for print_code_block() function."""
-
-    @patch("ayder_cli.ui.console.print")
-    def test_basic_code_block(self, mock_print):
-        """Test basic code block printing."""
-        ui.print_code_block("x = 1", language="python")
-        mock_print.assert_called_once()
-
-    @patch("ayder_cli.ui.console.print")
-    def test_code_block_with_title(self, mock_print):
-        """Test code block with title."""
-        ui.print_code_block("x = 1", title="Example")
-        mock_print.assert_called_once()
-
-
 class TestContextManagers:
     """Tests for context manager functions."""
-
-    @patch("ayder_cli.ui.console.status")
-    def test_agent_working_status(self, mock_status):
-        """Test agent_working_status context manager."""
-        with ui.agent_working_status("Processing..."):
-            pass
-        mock_status.assert_called_once()
-
-    @patch("ayder_cli.ui.console.print")
-    def test_print_running_rich(self, mock_print):
-        """Test print_running_rich function."""
-        ui.print_running_rich("Working...")
-        mock_print.assert_called_once()
 
     @patch("ayder_cli.ui.console.status")
     def test_tool_execution_status(self, mock_status):
