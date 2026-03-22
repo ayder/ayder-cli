@@ -269,3 +269,26 @@ class TestAgentRegistry:
         registry._settled = {"reviewer": "error", "writer": "completed"}
         registry.reset_settled()
         assert registry._settled == {}
+
+    def test_has_pending_summaries_empty(self, registry):
+        """Returns False when no summaries are queued."""
+        assert registry.has_pending_summaries() is False
+
+    @pytest.mark.anyio
+    async def test_has_pending_summaries_with_item(self, registry):
+        """Returns True when a summary is in the queue."""
+        summary = AgentSummary(
+            agent_name="reviewer", status="completed", summary="Done.", error=None
+        )
+        await registry._summary_queue.put(summary)
+        assert registry.has_pending_summaries() is True
+
+    @pytest.mark.anyio
+    async def test_has_pending_summaries_false_after_drain(self, registry):
+        """Returns False after drain_summaries empties the queue."""
+        summary = AgentSummary(
+            agent_name="reviewer", status="completed", summary="Done.", error=None
+        )
+        await registry._summary_queue.put(summary)
+        registry.drain_summaries()
+        assert registry.has_pending_summaries() is False

@@ -8,6 +8,7 @@ from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.summary import AgentSummary
 from ayder_cli.agents.tool import create_call_agent_handler
 from ayder_cli.core.config import Config
+from ayder_cli.tui.app import _wake_for_pending_agents
 
 
 class TestAgentIntegration:
@@ -158,3 +159,83 @@ async def test_batch_wakeup_pattern_only_fires_when_all_agents_complete():
     reg._active.pop(2)
     on_complete(2, summary_b)
     assert len(wakeup_calls) == 1  # Now all done, wake up fires
+
+
+@pytest.mark.anyio
+async def test_wake_for_pending_agents_injects_summary_and_starts_llm():
+    """
+    _wake_for_pending_agents triggers LLM restart when agent summary is waiting.
+
+    This is the race condition scenario: agent completed while _is_processing==True,
+    so _agent_complete's fast path skipped. _finish_processing calls this helper
+    to recover.
+    """
+    registry = AgentRegistry(
+        agents={"reviewer": AgentConfig(name="reviewer", system_prompt="Review code.")},
+        parent_config=MagicMock(),
+        project_ctx=MagicMock(),
+        process_manager=MagicMock(),
+        permissions={"r"},
+        agent_timeout=300,
+    )
+    summary = AgentSummary(
+        agent_name="reviewer", status="completed", summary="Found 3 issues.", error=None
+    )
+    await registry._summary_queue.put(summary)
+
+    messages = []
+    start_calls = []
+
+    result = _wake_for_pending_agents(registry, messages, lambda: start_calls.append(1))
+
+    assert result is True, "Should return True when wake-up fires"
+    assert start_calls == [1], "LLM start function should be called once"
+    assert len(messages) == 1
+    assert "reviewer" in messages[0]["content"]
+    assert "Found 3 issues" in messages[0]["content"]
+    assert not registry.has_pending_summaries(), "Queue should be drained"
+
+
+@pytest.mark.anyio
+async def test_wake_for_pending_agents_skips_when_agents_still_running():
+    """Returns False and does not start LLM if agents are still active."""
+    registry = AgentRegistry(
+        agents={"reviewer": AgentConfig(name="reviewer", system_prompt="Review.")},
+        parent_config=MagicMock(),
+        project_ctx=MagicMock(),
+        process_manager=MagicMock(),
+        permissions={"r"},
+        agent_timeout=300,
+    )
+    # Put a summary in the queue but leave an agent in _active
+    summary = AgentSummary(agent_name="reviewer", status="completed", summary="done", error=None)
+    await registry._summary_queue.put(summary)
+    registry._active[99] = MagicMock()  # agent still running
+
+    messages = []
+    start_calls = []
+
+    result = _wake_for_pending_agents(registry, messages, lambda: start_calls.append(1))
+
+    assert result is False
+    assert start_calls == []
+    assert messages == []
+
+
+def test_wake_for_pending_agents_skips_when_no_summaries():
+    """Returns False when queue is empty — nothing to do."""
+    registry = AgentRegistry(
+        agents={},
+        parent_config=MagicMock(),
+        project_ctx=MagicMock(),
+        process_manager=MagicMock(),
+        permissions={"r"},
+        agent_timeout=300,
+    )
+    messages = []
+    start_calls = []
+
+    result = _wake_for_pending_agents(registry, messages, lambda: start_calls.append(1))
+
+    assert result is False
+    assert start_calls == []

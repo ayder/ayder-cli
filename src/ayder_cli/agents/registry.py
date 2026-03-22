@@ -205,3 +205,11 @@ class AgentRegistry:
             agents = [(s.agent_name, s.status) for s in summaries]
             logger.debug("drain_summaries: %d summaries drained: %s", len(summaries), agents)
         return summaries
+
+    def has_pending_summaries(self) -> bool:
+        """Return True if any completed agent summaries are waiting to be drained.
+
+        Non-destructive — does not remove items from the queue.
+        Safe to call from the event loop thread.
+        """
+        return not self._summary_queue.empty()

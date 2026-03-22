@@ -2,7 +2,7 @@
 AyderApp — main Textual application for ayder-cli TUI.
 
 Contains init, compose, AppCallbacks, and UI actions.
-LLM pipeline and tool execution are delegated to TuiChatLoop.
+LLM pipeline and tool execution are delegated to ChatLoop.
 Command handlers are in tui.commands.
 """
 
@@ -13,6 +13,7 @@ from textual.timer import Timer
 from textual import on
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
 import asyncio
 import difflib
 
@@ -38,7 +39,32 @@ from ayder_cli.tui.widgets import (
     StatusBar,
 )
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
-from ayder_cli.tui.chat_loop import TuiChatLoop, TuiLoopConfig
+from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
+
+
+def _wake_for_pending_agents(
+    registry: AgentRegistry,
+    messages: list[dict],
+    start_llm_fn: Callable[[], None],
+) -> bool:
+    """Drain pending agent summaries and trigger an LLM restart.
+
+    Called from _finish_processing when the LLM turn ends but agent(s) completed
+    during that turn (the _agent_complete fast path skipped because _is_processing
+    was True). Returns True if a restart was triggered, False otherwise.
+
+    Args:
+        registry: AgentRegistry instance.
+        messages: The shared conversation message list (mutated in-place).
+        start_llm_fn: Callable that starts a new LLM processing turn.
+    """
+    if registry.active_count != 0 or not registry.has_pending_summaries():
+        return False
+    summaries = registry.drain_summaries()
+    for s in summaries:
+        messages.append({"role": "system", "content": s.format_for_injection()})
+    start_llm_fn()
+    return True
 
 
 class AppCallbacks:
@@ -299,11 +325,11 @@ class AyderApp(App):
             raw_tags = getattr(self.config, "tool_tags", ["core", "metadata"])
             tool_tags_list = list(raw_tags) if raw_tags is not None else []
         tool_tags = frozenset(tool_tags_list) if tool_tags_list else None
-        self.chat_loop = TuiChatLoop(
+        self.chat_loop = ChatLoop(
             llm=self.llm,
             registry=self.registry,
             messages=self.messages,
-            config=TuiLoopConfig(
+            config=ChatLoopConfig(
                 model=self.model,
                 provider=self.config.provider,
                 num_ctx=num_ctx,
@@ -429,11 +455,8 @@ class AyderApp(App):
             self.registry.add_middleware(safe_mode_check)
 
     def _is_tool_blocked_in_safe_mode(self, tool_name: str) -> bool:
-        """Check if a tool should be blocked in safe mode."""
-        from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
-
-        tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
-        return tool_def.safe_mode_blocked if tool_def else False
+        from ayder_cli.tui.helpers import is_tool_blocked_in_safe_mode
+        return is_tool_blocked_in_safe_mode(tool_name, self.safe_mode)
 
     def _generate_diff(self, tool_name: str, arguments: dict) -> str | None:
         """Generate a diff preview for file-modifying tools."""
@@ -652,6 +675,11 @@ class AyderApp(App):
 
         if self._pending_messages:
             self._process_next_message()
+        elif self._agent_registry:
+            # Agent(s) may have completed while the LLM was processing.
+            # _is_processing must be False before start_llm_processing() is called.
+            self._is_processing = False
+            _wake_for_pending_agents(self._agent_registry, self.messages, self.start_llm_processing)
         else:
             self._is_processing = False
 
