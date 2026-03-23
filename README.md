@@ -314,22 +314,34 @@ echo "fix the bug" | ayder -r -w -x
 
 ### Context Management
 
-As conversations grow, LLM performance degrades due to context bloat — long tool results, stale history, and repeated context eat into the model's usable window. ayder-cli includes a built-in context manager that solves this automatically. Every message is assigned an importance tier (system > recent user > recent assistant > tool results > old history), and when the conversation approaches the token budget the manager compresses old tool results (JSON outputs are structurally summarized, large text is head/tail truncated) and prunes the lowest-priority messages first. Tool call + tool result pairs are kept as atomic units so the model never sees orphaned results. If `tiktoken` is installed, token counts are exact; otherwise a character-based heuristic is used (~4 chars/token for text, ~3.5 for code).
+ayder-cli includes a context manager that automatically keeps your conversation within the model's token budget. The implementation is **driver-aware** — Ollama gets a specialized KV-cache-optimized manager, while cloud providers (Anthropic, OpenAI, Gemini) use a general-purpose tiered manager.
 
-The context manager is enabled by default and configured under `[context_manager]` in `config.toml`. The defaults work well for most setups, but here are the knobs you can tune:
+**Ollama-specific optimizations** (automatic when `driver = "ollama"`):
+
+- **KV-cache-aware**: Messages are append-only and never reordered. The system prompt is frozen at session start. This preserves Ollama's KV-cache prefix between calls — subsequent prompts process only new tokens instead of recomputing everything.
+- **Real token counts**: Uses Ollama's `prompt_eval_count` and `eval_count` from native API responses instead of estimates. Compaction decisions are based on actual usage, not heuristics.
+- **Cache monitoring**: Tracks `prompt_eval_duration / prompt_eval_count` ratio to detect KV-cache hits (hot/warm/miss). When the cache is hot, compaction is delayed (threshold raised from 70% to 90%) to avoid invalidating it.
+- **Auto-detected context length**: On startup, queries `/api/show` to get the model's real context length instead of relying on `num_ctx`. Falls back to `num_ctx` if detection fails.
+- **Heuristic compaction**: When the context fills up, oldest message units are replaced with a text summary — no LLM call needed.
+- **Native SDK**: Uses `ollama.AsyncClient` directly (not the OpenAI compatibility layer) for full timing data, native thinking support, and `keep_alive=-1` to prevent model unloading.
+
+**General-purpose manager** (Anthropic, OpenAI, Gemini, and other drivers):
+
+Every message is assigned an importance tier (system > recent user > recent assistant > tool results > old history). When the conversation approaches the token budget, old tool results are compressed (JSON structurally summarized, large text head/tail truncated) and the lowest-priority messages are pruned. Tool call + result pairs are kept as atomic units.
+
+The context manager is configured under `[context_manager]` in `config.toml`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `enabled` | `true` | Master switch. Set `false` to disable all automatic management. |
-| `max_context_tokens` | `8192` | Total token budget for the conversation. Set this to match your model's context window (e.g., `65536` for qwen3-coder, `200000` for Claude). |
-| `reserve_ratio` | `0.30` | Fraction of the budget reserved for the LLM response. A 30% reserve on 65k tokens means ~45k tokens are available for history. |
-| `summarization_threshold` | `0.70` | When utilization exceeds this ratio, the manager triggers summarization. |
-| `compression_threshold` | `0.50` | When utilization exceeds this ratio, old tool results are compressed. |
+| `enabled` | `true` | Master switch. |
+| `max_context_tokens` | `8192` | Fallback token budget (Ollama auto-detects from model). |
+| `reserve_ratio` | `0.30` | Fraction reserved for the LLM response. |
+| `compaction_threshold` | `0.70` | Utilization ratio that triggers compaction. |
 | `tool_result_compress_age` | `5` | Tool results older than N messages are eligible for compression. |
 | `max_tool_result_length` | `2048` | Maximum character length for a compressed tool result. |
 | `compress_tool_results` | `true` | Enable automatic tool result compression. |
 
-For small local models (7B-14B), lower `max_context_tokens` to match the model's actual window and reduce `reserve_ratio` to `0.20` so more history fits. For large cloud models, increase `max_context_tokens` and raise `summarization_threshold` to `0.80` to delay summarization and let the model use its full reasoning capacity. You can also manually manage context with `/save-memory`, `/load-memory`, and `/compact`.
+You can also manually manage context with `/save-memory`, `/load-memory`, and `/compact`.
 
 ### Slash Commands
 

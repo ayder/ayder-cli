@@ -84,23 +84,34 @@ class AgentRegistry:
         if not self.agents:
             return ""
 
+        agent_names = list(self.agents.keys())
+
         lines = [
-            "\n## Available Agents",
-            "You can delegate tasks to specialized agents using the call_agent tool.",
-            "Each agent runs independently with its own context and may use a different LLM.",
+            "\n## Registered Agents",
             "",
-            "**Batch behavior:** When you dispatch multiple agents, you will receive",
-            "all their summaries together after the last agent completes.",
-            "Do not respond until you have all results.",
+            "You have specialized agents available. To use them, call the `call_agent` tool",
+            f"with the `name` parameter set to one of: {', '.join(repr(n) for n in agent_names)}.",
             "",
-            "**On agent failure:** If an agent fails (error/timeout), do NOT re-dispatch it.",
-            "Handle the failed task yourself. Agents that completed successfully CAN be",
-            "re-dispatched if needed (e.g., to re-run tests after fixing code).",
+            "Each agent runs in the background with its own LLM and tools.",
+            "You will receive the agent's summary when it completes.",
+            "",
+            "When asked to list agents, list the names below — do NOT search the codebase.",
             "",
         ]
         for name, cfg in self.agents.items():
-            desc = cfg.system_prompt[:100] if cfg.system_prompt else "(no description)"
-            lines.append(f"- {name}: {desc}")
+            provider = cfg.provider or "(inherited)"
+            model = cfg.model or "(inherited)"
+            desc = cfg.system_prompt[:150] if cfg.system_prompt else "(no description)"
+            lines.append(f"- **{name}** (provider: {provider}, model: {model}): {desc}")
+
+        lines.extend([
+            "",
+            "**Usage rules:**",
+            "- You CAN dispatch the same agent multiple times with different tasks.",
+            "- Only use the agent whose specialty matches the task. Do NOT use unrelated agents.",
+            "- Batch behavior: you will receive all agent summaries after all agents complete.",
+            "- On agent failure, handle the task yourself. Do NOT re-dispatch failed agents.",
+        ])
 
         return "\n".join(lines)
 

@@ -9,12 +9,17 @@ execution engine used by the TUI.
 """
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
+from ayder_cli.agents.registry import AgentRegistry
+from ayder_cli.agents.tool import AGENT_TOOL_DEFINITION, create_call_agent_handler
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.cli_callbacks import CliCallbacks
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _run_loop(
@@ -40,6 +45,24 @@ def _run_loop(
         {"role": "user", "content": prompt},
     ]
 
+    # Initialize agents if configured
+    if hasattr(rt.config, "agents") and isinstance(rt.config.agents, dict) and rt.config.agents:
+        agent_registry = AgentRegistry(
+            agents=rt.config.agents,
+            parent_config=rt.config,
+            project_ctx=rt.project_ctx,
+            process_manager=rt.process_manager,
+            permissions=set(permissions or {"r"}),
+            agent_timeout=getattr(rt.config, "agent_timeout", 300),
+        )
+        handler = create_call_agent_handler(agent_registry)
+        rt.tool_registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
+
+        cap_prompts = agent_registry.get_capability_prompts()
+        if cap_prompts and messages[0].get("role") == "system":
+            messages[0]["content"] += cap_prompts
+            logger.info(f"Registered {len(rt.config.agents)} agent(s): {', '.join(rt.config.agents.keys())}")
+
     config = ChatLoopConfig(
         model=rt.config.model,
         provider=rt.config.provider,
@@ -58,6 +81,7 @@ def _run_loop(
         messages=messages,
         config=config,
         callbacks=cb,
+        context_manager=rt.context_manager,
     )
 
     asyncio.run(loop.run())

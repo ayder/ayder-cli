@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "1.2.4"
+version = "1.6.1"
 description = "AI agent for any LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,7 +23,7 @@ dependencies = [
     "openai",
     "anthropic",
     "google-genai",
-    "ollama>=0.4.0",
+    "ollama>=0.6.1",
     "loguru",
     "httpx",
     "rich>=13.0.0",
@@ -51,6 +51,7 @@ dev = [
     "pytest-xdist>=3.5.0",
     "pytest-timeout>=2.2.0",
     "pytest-instafail>=0.5.0",
+    "pytest-asyncio>=1.0.0",
     "poethepoet>=0.24.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",

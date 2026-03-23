@@ -6,10 +6,11 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from ayder_cli.core.config import Config, load_config, load_config_for_provider
+from ayder_cli.core.context_manager_factory import context_manager_factory
 
 if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
@@ -33,6 +34,7 @@ class RuntimeComponents:
     project_ctx: ProjectContext
     tool_registry: ToolRegistry
     system_prompt: str
+    context_manager: Any = field(default=None)  # ContextManagerProtocol
 
 
 def create_runtime(
@@ -73,6 +75,11 @@ def create_runtime(
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = base_prompt + tool_prompts + macro
 
+    # Create context manager and freeze system prompt
+    context_mgr = context_manager_factory.create(cfg)
+    tool_schemas = tool_registry.get_schemas(tags=tool_tags)
+    context_mgr.freeze_system_prompt(system_prompt, tool_schemas)
+
     return RuntimeComponents(
         config=cfg,
         llm_provider=llm_provider,
@@ -80,6 +87,7 @@ def create_runtime(
         project_ctx=project_ctx,
         tool_registry=tool_registry,
         system_prompt=system_prompt,
+        context_manager=context_mgr,
     )
 
 
@@ -138,6 +146,11 @@ def create_agent_runtime(
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = agent_config.system_prompt + tool_prompts + summary_suffix
 
+    # Create context manager and freeze agent system prompt
+    context_mgr = context_manager_factory.create(cfg)
+    tool_schemas = tool_registry.get_schemas(tags=tool_tags)
+    context_mgr.freeze_system_prompt(system_prompt, tool_schemas)
+
     return RuntimeComponents(
         config=cfg,
         llm_provider=llm_provider,
@@ -145,4 +158,5 @@ def create_agent_runtime(
         project_ctx=project_ctx,
         tool_registry=tool_registry,
         system_prompt=system_prompt,
+        context_manager=context_mgr,
     )

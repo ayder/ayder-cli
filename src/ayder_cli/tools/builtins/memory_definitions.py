@@ -61,4 +61,45 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         },
         permission="r",
     ),
+    ToolDefinition(
+        name="save_context_memory",
+        description="Save a conversation context summary to persistent storage for later retrieval.",
+        description_template="Context memory '{name}' will be saved",
+        tags=("core",),
+        func_ref="ayder_cli.tools.builtins.memory:save_context_memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name/key for the context memory (e.g., 'session-summary', 'project-state')",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The context content to save",
+                },
+            },
+            "required": ["name", "content"],
+        },
+        permission="w",
+        safe_mode_blocked=False,
+    ),
+    ToolDefinition(
+        name="load_context_memory",
+        description="Load a previously saved context memory by name.",
+        description_template="Context memory '{name}' will be loaded",
+        tags=("core",),
+        func_ref="ayder_cli.tools.builtins.memory:load_context_memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name/key of the context memory to load",
+                },
+            },
+            "required": ["name"],
+        },
+        permission="r",
+    ),
 )

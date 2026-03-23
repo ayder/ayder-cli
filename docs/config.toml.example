@@ -1,0 +1,313 @@
+# =============================================================================
+# ayder-cli Configuration (Schema v2.0)
+# =============================================================================
+#
+# Location: ~/.ayder/config.toml
+#
+# This file configures ayder-cli's LLM providers, agents, context management,
+# and application behavior. Copy this file to ~/.ayder/config.toml and
+# customize to your needs.
+#
+# Key concepts:
+#   - "provider" selects which [llm.*] profile is active
+#   - "driver" determines the SDK used (openai, ollama, anthropic, google)
+#   - Agents can use different providers/models than the main config
+#   - Context manager behavior adapts per driver (Ollama gets KV-cache awareness)
+
+config_version = "2.0"
+
+
+# =============================================================================
+# Application Settings
+# =============================================================================
+
+[app]
+# Which LLM profile to use (must match a key under [llm.*] below)
+provider = "openai"
+
+# System editor for file editing operations
+editor = "vim"
+
+# Enable verbose debug output
+verbose = false
+
+# Maximum concurrent background tool processes (1-20)
+max_background_processes = 5
+
+# Maximum conversation history messages (0 = unlimited)
+max_history_messages = 30
+
+# Agent execution timeout in seconds
+agent_timeout = 300
+
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+[logging]
+file_enabled = true
+file_path = ".ayder/log/ayder.log"
+rotation = "10 MB"
+retention = "7 days"
+# Optional: NONE, ERROR, WARNING, INFO, DEBUG
+# level = "INFO"
+
+
+# =============================================================================
+# LLM Provider Profiles
+# =============================================================================
+#
+# Each [llm.<name>] section defines a provider profile. Set [app].provider
+# to the profile name you want to use.
+#
+# Required fields per profile:
+#   driver    - SDK backend: "openai", "ollama", "anthropic", "google"
+#   model     - Model identifier
+#
+# Optional fields:
+#   base_url  - API endpoint (required for openai/ollama drivers)
+#   api_key   - Authentication key
+#   num_ctx   - Context window size in tokens
+#   max_output_tokens - Maximum response length
+#   chat_protocol     - "ollama" (native tool calls) or "xml" (XML fallback)
+#   stop_sequences    - Custom stop tokens
+#   tool_tags         - Which tool groups to expose: ["core", "metadata"]
+
+
+# -----------------------------------------------------------------------------
+# Ollama (Local LLMs)
+# -----------------------------------------------------------------------------
+# Driver: "ollama" — uses native ollama SDK with full timing/cache observability
+#
+# Prerequisites:
+#   1. Install Ollama: https://ollama.com
+#   2. Pull a model: ollama pull qwen3-coder
+#   3. Ollama runs on localhost:11434 by default
+#
+# The "ollama" driver provides:
+#   - KV-cache-aware context management (stable prefix, no reordering)
+#   - Real token counts from prompt_eval_count (not estimates)
+#   - Cache hit detection via timing data (prompt_eval_duration)
+#   - Adaptive compaction that preserves hot cache
+#   - Native thinking support (message.thinking field)
+#   - keep_alive=-1 to prevent model unloading mid-session
+
+[llm.openai]
+driver       = "ollama"
+base_url     = "http://localhost:11434"
+api_key      = "ollama"                 # Ollama ignores this, but field is required
+model        = "qwen3-coder:latest"
+num_ctx      = 65536                    # Context window — match your model's max
+max_output_tokens = 4096
+chat_protocol = "ollama"                # "ollama" = native tool calls, "xml" = fallback
+tool_tags     = ["core", "metadata"]
+
+# Alternative Ollama models:
+# model = "deepseek-r1:14b"            # Strong reasoning, uses <think> tags
+# model = "llama3.3:70b"               # Large, high quality
+# model = "codellama:13b"              # Code-focused
+# model = "qwen3:32b"                  # Good balance of speed and quality
+# model = "gemma3:27b"                 # Google's open model
+
+
+# -----------------------------------------------------------------------------
+# OpenAI
+# -----------------------------------------------------------------------------
+# Driver: "openai" — standard OpenAI SDK
+#
+# Get your API key: https://platform.openai.com/api-keys
+# The openai driver also works with any OpenAI-compatible API (vLLM, LM Studio,
+# Together AI, Groq, etc.) — just change base_url.
+
+[llm.openai-cloud]
+driver       = "openai"
+base_url     = "https://api.openai.com/v1"
+api_key      = "sk-..."                 # Your OpenAI API key
+model        = "gpt-4o"
+num_ctx      = 128000
+max_output_tokens = 4096
+
+# OpenAI-compatible endpoints (same driver, different base_url):
+#
+# [llm.deepseek]
+# driver    = "openai"
+# base_url  = "https://api.deepseek.com/v1"
+# api_key   = "sk-..."
+# model     = "deepseek-chat"
+# num_ctx   = 65536
+#
+# [llm.together]
+# driver    = "openai"
+# base_url  = "https://api.together.xyz/v1"
+# api_key   = "..."
+# model     = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+# num_ctx   = 131072
+#
+# [llm.groq]
+# driver    = "openai"
+# base_url  = "https://api.groq.com/openai/v1"
+# api_key   = "gsk_..."
+# model     = "llama-3.3-70b-versatile"
+# num_ctx   = 131072
+#
+# [llm.lmstudio]
+# driver    = "openai"
+# base_url  = "http://localhost:1234/v1"
+# api_key   = "lm-studio"
+# model     = "local-model"
+# num_ctx   = 32768
+
+
+# -----------------------------------------------------------------------------
+# Anthropic (Claude)
+# -----------------------------------------------------------------------------
+# Driver: "anthropic" — native Anthropic SDK with prompt caching
+#
+# Get your API key: https://console.anthropic.com/settings/keys
+# Claude models handle context management server-side (prompt caching,
+# 200K+ context windows), so the local context manager uses DefaultContextManager.
+
+[llm.anthropic]
+driver       = "anthropic"
+api_key      = "sk-ant-..."             # Your Anthropic API key
+model        = "claude-sonnet-4-5-20250929"
+num_ctx      = 200000                   # Claude supports up to 200K tokens
+max_output_tokens = 8192
+
+# Other Claude models:
+# model = "claude-opus-4-5-20250929"    # Most capable, highest cost
+# model = "claude-haiku-4-5-20250929"   # Fastest, lowest cost
+
+
+# -----------------------------------------------------------------------------
+# Google (Gemini)
+# -----------------------------------------------------------------------------
+# Driver: "google" — native Google Generative AI SDK
+#
+# Get your API key: https://aistudio.google.com/apikey
+# Gemini models support very large context windows (1M+ tokens).
+
+[llm.gemini]
+driver       = "google"
+api_key      = "AIza..."               # Your Google AI API key
+model        = "gemini-2.5-flash"
+num_ctx      = 1048576                  # Gemini supports up to 1M tokens
+max_output_tokens = 8192
+
+# Other Gemini models:
+# model = "gemini-2.5-pro"             # Most capable
+# model = "gemini-2.0-flash-lite"      # Fastest, lowest cost
+
+
+# =============================================================================
+# Context Manager
+# =============================================================================
+#
+# Controls how conversation history is managed within the context window.
+#
+# Behavior varies by driver:
+#   - "ollama" driver  → OllamaContextManager (KV-cache aware, stable prefix)
+#   - All other drivers → DefaultContextManager (tiered trimming)
+#
+# The factory automatically selects the right implementation based on driver.
+
+[context_manager]
+enabled               = true
+max_context_tokens    = 8192            # Fallback if provider doesn't report
+reserve_ratio         = 0.30            # Reserve 30% for response generation
+compaction_threshold  = 0.70            # Trigger compaction at 70% utilization
+tool_result_compress_age = 5            # Compress tool results older than N turns
+max_tool_result_length   = 2048         # Max chars per tool result before truncation
+compress_tool_results    = true         # Enable automatic tool result compression
+
+# Per-model overrides (optional)
+# [context_manager.model_overrides."gpt-4o"]
+# max_context_tokens = 128000
+# reserve_ratio = 0.20
+
+
+# =============================================================================
+# Agents
+# =============================================================================
+#
+# Agents are autonomous sub-tasks that can use different LLM providers/models.
+# Each agent inherits from [app].provider unless overridden.
+#
+# Fields:
+#   provider       - LLM profile name (optional, inherits from app)
+#   model          - Model override (optional, inherits from provider profile)
+#   system_prompt  - Agent-specific instructions (required)
+
+[agents.code-reviewer]
+provider      = "anthropic"
+model         = "claude-sonnet-4-5-20250929"
+system_prompt = """You are a senior code reviewer. Review the code for:
+- Correctness and edge cases
+- Security vulnerabilities (OWASP top 10)
+- Performance issues
+- Code style and readability
+Provide specific, actionable feedback with file:line references."""
+
+[agents.test-writer]
+# Inherits provider and model from [app].provider
+system_prompt = """You are a test engineer. Write comprehensive unit tests that:
+- Cover happy paths and edge cases
+- Use appropriate mocking for external dependencies
+- Follow the existing test patterns in the codebase
+- Include clear test names that describe the expected behavior"""
+
+[agents.doc-generator]
+provider      = "gemini"
+model         = "gemini-2.5-flash"
+system_prompt = """You generate clear technical documentation. Focus on:
+- API usage examples with realistic inputs/outputs
+- Architecture decisions and trade-offs
+- Setup and configuration instructions
+Keep documentation concise and scannable."""
+
+[agents.quick-fix]
+provider      = "openai"               # Uses the Ollama local profile
+model         = "qwen3-coder:latest"
+system_prompt = """You are a quick bug fixer. Given a bug report:
+1. Identify the root cause
+2. Propose a minimal fix
+3. Write the fix and a regression test
+Stay focused — fix the bug, nothing else."""
+
+# Example: Agent using a cloud OpenAI model
+# [agents.architect]
+# provider      = "openai-cloud"
+# model         = "gpt-4o"
+# system_prompt = "You are a software architect..."
+
+# Example: Agent using DeepSeek for reasoning-heavy tasks
+# [agents.researcher]
+# provider      = "deepseek"
+# model         = "deepseek-reasoner"
+# system_prompt = "You research codebases and produce analysis reports..."
+
+
+# =============================================================================
+# Temporal (Optional — Workflow Orchestration)
+# =============================================================================
+#
+# Temporal enables durable workflow execution for long-running agent tasks.
+# Requires a running Temporal server. Most users can skip this section.
+
+[temporal]
+enabled       = false
+host          = "localhost:7233"
+namespace     = "default"
+metadata_dir  = ".ayder/temporal"
+
+[temporal.timeouts]
+workflow_schedule_to_close_seconds = 7200
+activity_start_to_close_seconds   = 900
+activity_heartbeat_seconds        = 30
+
+[temporal.retry]
+initial_interval_seconds  = 5
+backoff_coefficient       = 2.0
+maximum_interval_seconds  = 60
+maximum_attempts          = 3

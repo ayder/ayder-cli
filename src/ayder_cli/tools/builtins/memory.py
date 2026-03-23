@@ -117,3 +117,39 @@ def load_memory(
 
     except Exception as e:
         return ToolError(f"Error loading memories: {str(e)}", "execution")
+
+
+def save_context_memory(project_ctx: ProjectContext, name: str = "", content: str = "") -> str:
+    """Save conversation context summary to .ayder/memory/<name>.json."""
+    if not name:
+        return ToolError("name is required", "validation")
+    if not content:
+        return ToolError("content is required", "validation")
+
+    memory_dir = _get_memory_dir(project_ctx)
+    memory_dir.mkdir(parents=True, exist_ok=True)
+
+    data = {
+        "name": name,
+        "content": content,
+        "saved_at": datetime.now().isoformat(),
+    }
+
+    file_path = memory_dir / f"{name}.json"
+    file_path.write_text(json.dumps(data, indent=2))
+    return ToolSuccess(f"Context memory saved to {file_path}")
+
+
+def load_context_memory(project_ctx: ProjectContext, name: str = "") -> str:
+    """Load a saved context memory file."""
+    if not name:
+        return ToolError("name is required", "validation")
+
+    memory_dir = _get_memory_dir(project_ctx)
+    file_path = memory_dir / f"{name}.json"
+
+    if not file_path.exists():
+        return ToolError(f"Memory file not found: {file_path}", "execution")
+
+    data = json.loads(file_path.read_text())
+    return ToolSuccess(data.get("content", ""))

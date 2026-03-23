@@ -22,18 +22,19 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
     name="call_agent",
     description=(
         "Delegate a task to a specialized agent. The agent runs in the background "
-        "with its own context and tools. You will receive its summary when it completes."
+        "with its own context and tools. You will receive its summary when it completes. "
+        "Use the exact agent name from the 'Registered Agents' list in your system prompt."
     ),
     parameters={
         "type": "object",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Agent name from config (e.g., 'code-reviewer', 'test-writer')",
+                "description": "Exact agent name from the Registered Agents list",
             },
             "task": {
                 "type": "string",
-                "description": "Task description for the agent to execute",
+                "description": "Clear task description for the agent to execute",
             },
         },
         "required": ["name", "task"],

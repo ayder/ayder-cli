@@ -149,6 +149,11 @@ cli.py:main()
 | `core/config.py` | Configuration management | `Config`, `load_config()` |
 | `core/context.py` | Project sandboxing | `ProjectContext` |
 | `core/result.py` | Tool result types | `ToolSuccess`, `ToolError` |
+| `core/context_manager.py` | ContextManager Protocol + shared utilities | `ContextManagerProtocol`, `ContextStats`, `truncate_tool_result()` |
+| `core/default_context_manager.py` | Tiered context manager for non-Ollama providers | `DefaultContextManager`, `TokenCounter`, `MessageTier` |
+| `core/ollama_context_manager.py` | KV-cache-aware context manager for Ollama | `OllamaContextManager`, `OllamaContextStats` |
+| `core/context_manager_factory.py` | Registry-based factory (OCP) | `ContextManagerFactory`, `context_manager_factory` |
+| `core/cache_monitor.py` | Timing-based KV-cache hit detection | `CacheMonitor`, `CacheStatus`, `CacheSample` |
 | `console.py` | Rich console singleton | `console` |
 
 ### Application Modules
@@ -214,6 +219,8 @@ cli.py:main()
 |--------|---------|----------------------|
 | `services/llm.py` | LLM provider | `LLMProvider`, `OpenAIProvider` |
 | `services/interactions.py` | LLM debug event protocol | `InteractionSink` |
+| `providers/impl/ollama.py` | Native Ollama provider (ollama SDK) | `OllamaProvider`, `ToolStreamParser`, `XMLParserAdapter` |
+| `providers/impl/ollama_inspector.py` | Ollama model introspection | `OllamaInspector`, `ModelInfo`, `RuntimeState` |
 
 ### Tool Modules
 

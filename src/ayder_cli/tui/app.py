@@ -205,6 +205,7 @@ class AyderApp(App):
         self.llm = rt.llm_provider
         self._process_manager = rt.process_manager
         self.registry = rt.tool_registry
+        self.context_manager = rt.context_manager
 
         # Wire up debug logging for verbose mode
         from ayder_cli.tui.adapter import TUIInteractionSink
@@ -340,6 +341,7 @@ class AyderApp(App):
                 max_history=getattr(self.config, 'max_history_messages', 30),
             ),
             callbacks=self._callbacks,
+            context_manager=self.context_manager,
         )
 
         # Wire pre-iteration hook for agent summary injection (Part 2)

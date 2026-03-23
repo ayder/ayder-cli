@@ -163,44 +163,26 @@ class TemporalRetryConfig(BaseModel):
         return v
 
 
-class ContextManagerTierWeightsConfig(BaseModel):
-    """Tier weight configuration for message prioritization."""
-    model_config = ConfigDict(frozen=True)
-    
-    system: int = Field(default=100)
-    recent_user: int = Field(default=90)
-    recent_assistant: int = Field(default=80)
-    tool_result_critical: int = Field(default=70)
-    recent_tool_result: int = Field(default=60)
-    old_assistant: int = Field(default=40)
-    old_tool_result: int = Field(default=20)
-    compressed: int = Field(default=10)
-
-
 class ContextManagerConfigSection(BaseModel):
     """Context manager configuration section."""
     model_config = ConfigDict(frozen=True)
-    
+
     enabled: bool = Field(default=True)
     max_context_tokens: int = Field(default=8192)
     reserve_ratio: float = Field(default=0.30)
-    summarization_threshold: float = Field(default=0.70)
-    compression_threshold: float = Field(default=0.50)
+    compaction_threshold: float = Field(default=0.70)
     tool_result_compress_age: int = Field(default=5)
     max_tool_result_length: int = Field(default=2048)
     compress_tool_results: bool = Field(default=True)
-    tier_weights: ContextManagerTierWeightsConfig = Field(
-        default_factory=ContextManagerTierWeightsConfig
-    )
     model_overrides: dict[str, dict] = Field(default_factory=dict)
-    
-    @field_validator("reserve_ratio", "summarization_threshold", "compression_threshold")
+
+    @field_validator("reserve_ratio", "compaction_threshold")
     @classmethod
     def validate_ratio(cls, v: float) -> float:
         if not 0.0 < v < 1.0:
             raise ValueError("ratio must be between 0 and 1")
         return v
-    
+
     @field_validator("max_context_tokens")
     @classmethod
     def validate_positive(cls, v: int) -> int:

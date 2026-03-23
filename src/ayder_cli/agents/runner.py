@@ -116,6 +116,7 @@ class AgentRunner:
                 messages=messages,
                 config=loop_config,
                 callbacks=callbacks,
+                context_manager=rt.context_manager,
             )
 
             try:

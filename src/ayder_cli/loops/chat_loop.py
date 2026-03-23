@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
 
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
-from ayder_cli.core.context_manager import ContextManager
+from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,7 @@ class ChatLoop:
         messages: list[dict],
         config: ChatLoopConfig,
         callbacks: ChatCallbacks,
+        context_manager=None,  # Optional — backward compat for tests
     ) -> None:
         self.llm = llm
         self.registry = registry
@@ -86,7 +87,11 @@ class ChatLoop:
         self.config = config
         self.cb = callbacks
         self._total_tokens = 0
-        self.context_manager = ContextManager(config=config, model=config.model)
+        if context_manager is not None:
+            self.context_manager = context_manager
+        else:
+            # Backward compat: create one from ChatLoopConfig (legacy path)
+            self.context_manager = ContextManager(config=config, model=config.model)
 
     # -- public API ----------------------------------------------------------
 
@@ -96,6 +101,10 @@ class ChatLoop:
 
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
+        # Lazy init: detect real context length for Ollama models
+        if hasattr(self.context_manager, "detect_context_length"):
+            await self.context_manager.detect_context_length()
+
         while True:
             if self.cb.is_cancelled():
                 return
@@ -112,15 +121,8 @@ class ChatLoop:
             )
 
             # Use ContextManager to trim history based on token budget
-            system_msg = (
-                self.messages[0] if self.messages else {"role": "system", "content": ""}
-            )
-            system_content = system_msg.get("content", "")
-
             llm_messages = self.context_manager.prepare_messages(
                 self.messages,
-                system_tokens=self.context_manager.count_tokens(system_content),
-                schema_tokens=self.context_manager.count_schema_tokens(tool_schemas),
                 max_history=self.config.max_history,
             )
 
@@ -292,13 +294,10 @@ class ChatLoop:
                 # Use provider-reported token count if available
                 tokens = usage_obj.get("total_tokens", 0)
                 self._total_tokens += tokens
+                self.context_manager.update_from_response(usage_obj)
             else:
-                # Fallback: count tokens ourselves using ContextManager
-                input_tokens = self.context_manager.count_message_tokens(llm_messages)
-                output_tokens = self.context_manager.count_tokens(final_content)
-                if final_reasoning:
-                    output_tokens += self.context_manager.count_tokens(final_reasoning)
-                self._total_tokens += input_tokens + output_tokens
+                # No usage data from provider — estimate total tokens
+                self._total_tokens += len(str(final_content)) // 4 + len(str(final_reasoning)) // 4
             self.cb.on_token_usage(self._total_tokens)
 
             logger.debug(f"LLM Response Content Length: {len(final_content)}")
@@ -335,6 +334,10 @@ class ChatLoop:
                         try:
                             json.loads(raw_args)
                         except (json.JSONDecodeError, ValueError):
+                            logger.warning(
+                                f"Malformed tool arguments for '{tc_entry['function'].get('name', '?')}': "
+                                f"{raw_args!r:.200s} — repairing before storing in history"
+                            )
                             parsed = _parse_arguments(raw_args)
                             tc_entry["function"]["arguments"] = json.dumps(parsed)
 
@@ -440,8 +443,10 @@ class ChatLoop:
                 try:
                     return tc_obj, await self._exec_tool_async(tc_obj)
                 except asyncio.CancelledError:
+                    logger.warning(f"Tool execution cancelled: {tc_obj.function.name}")
                     return tc_obj, RuntimeError("Tool execution cancelled")
                 except Exception as e:
+                    logger.warning(f"Tool execution failed for '{tc_obj.function.name}': {e}")
                     return tc_obj, e
 
             tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
@@ -455,7 +460,7 @@ class ChatLoop:
                     tid = rd["tool_call_id"]
                     name = rd["name"]
                     result = str(rd["result"])
-                    result = self.context_manager.truncate_tool_result(result)
+                    result = truncate_tool_result(result)
                     self.cb.on_tool_complete(tid, result)
                 else:
                     self.cb.on_tool_complete(tc.id, f"Error: {rd}")
@@ -588,17 +593,21 @@ def _parse_arguments(arguments) -> dict:
         try:
             return json.loads(arguments)
         except (json.JSONDecodeError, ValueError):
+            logger.warning(f"Tool arguments JSON parse failed: {arguments!r:.200s}")
             # Try extracting just the first JSON object (handles concatenated
             # JSON like '{...}{...}' that slipped past expansion).
             try:
                 obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
                 if isinstance(obj, dict):
+                    logger.warning("Recovered tool arguments via raw_decode")
                     return obj
             except (json.JSONDecodeError, ValueError):
                 pass
             repaired = _repair_truncated_json(arguments)
             if repaired is not None:
+                logger.warning("Recovered tool arguments via truncated JSON repair")
                 return repaired
+            logger.warning("Could not recover tool arguments — using empty dict")
             return {}
     return {}
 
@@ -623,7 +632,7 @@ def _repair_truncated_json(raw: str) -> dict | None:
                 if isinstance(result, dict):
                     return result
             except (json.JSONDecodeError, ValueError):
-                continue
+                continue  # Expected: trying multiple repair suffixes
     return None
 
 
@@ -677,6 +686,10 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
                 while pos < len(stripped) and stripped[pos] in " \t\n\r":
                     pos += 1
             except json.JSONDecodeError:
+                if pos > 0:
+                    logger.warning(
+                        f"Concatenated tool call JSON parse stopped at pos {pos}/{len(stripped)}"
+                    )
                 break
         if len(objects) > 1:
             logger.debug(
@@ -699,7 +712,7 @@ def _is_escalation_result(result_text: str) -> bool:
     try:
         payload = json.loads(result_text)
     except (json.JSONDecodeError, TypeError, ValueError):
-        return False
+        return False  # Not JSON — normal for most tool results, not an error
     if not isinstance(payload, dict):
         return False
 
