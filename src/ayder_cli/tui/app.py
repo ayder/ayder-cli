@@ -27,7 +27,7 @@ from ayder_cli.logging_config import (
 from ayder_cli.tui.helpers import create_tui_banner
 from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
-from ayder_cli.tui.screens import CLIConfirmScreen
+from ayder_cli.tui.screens import CLIConfirmScreen, CLIHelpScreen
 from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.tool import AGENT_TOOL_DEFINITION, create_call_agent_handler
 from ayder_cli.tui.widgets import (
@@ -160,6 +160,7 @@ class AyderApp(App):
         ("ctrl+o", "toggle_tools", "Toggle Tools"),
         ("ctrl+t", "toggle_thinking", "Toggle Thinking"),
         ("ctrl+g", "toggle_agents", "Toggle Agents"),
+        ("ctrl+h", "show_help", "Help"),
         ("pageup", "scroll_chat_up", "Scroll Up"),
         ("pagedown", "scroll_chat_down", "Scroll Down"),
     ]
@@ -735,17 +736,32 @@ class AyderApp(App):
         state = "visible" if visible else "hidden"
         chat_view.add_system_message(f"Agent panel {state} (Ctrl+G to toggle)")
 
+    def action_show_help(self) -> None:
+        """Show help modal with keybindings."""
+        self.push_screen(CLIHelpScreen())
+
     def action_scroll_chat_up(self) -> None:
         """Scroll chat view up one page."""
         chat_view = self.query_one("#chat-view", ChatView)
+        chat_view.disable_follow_mode()
         chat_view.scroll_page_up(animate=False)
 
     def action_scroll_chat_down(self) -> None:
         """Scroll chat view down one page."""
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.scroll_page_down(animate=False)
+        if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
+            chat_view.enable_follow_mode()
 
     def action_clear(self) -> None:
         """Clear chat history."""
         chat_view = self.query_one("#chat-view", ChatView)
         do_clear(self, chat_view)
+
+    def on_app_focus(self) -> None:
+        """Restore input focus when terminal window regains focus (e.g. after Cmd+Tab)."""
+        try:
+            input_bar = self.query_one("#input-bar", CLIInputBar)
+            input_bar.focus_input()
+        except Exception:
+            pass

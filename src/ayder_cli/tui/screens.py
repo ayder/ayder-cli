@@ -1,4 +1,4 @@
-"""Modal screens for the TUI: confirm, permission, safe mode, select, task edit."""
+"""Modal screens for the TUI: confirm, permission, safe mode, select, task edit, help."""
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -6,6 +6,7 @@ from textual.widgets import Static, Input, Label, TextArea
 from textual.screen import ModalScreen
 from rich.text import Text
 
+from ayder_cli.tui.keybindings import get_keybindings_by_category
 from ayder_cli.tui.types import ConfirmResult
 
 
@@ -533,4 +534,33 @@ class TaskEditScreen(ModalScreen[str | None]):
         self.dismiss(editor.text)
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class CLIHelpScreen(ModalScreen[None]):
+    """Centered help modal showing all keybindings, dynamically generated."""
+
+    BINDINGS = [
+        ("escape", "dismiss_help", "Close"),
+        ("ctrl+h", "dismiss_help", "Close"),
+    ]
+
+    def _build_help_text(self) -> str:
+        """Build formatted help text from keybinding registry."""
+        grouped = get_keybindings_by_category()
+        lines: list[str] = []
+        for category, entries in grouped.items():
+            lines.append(f"  {category}")
+            for key, desc in entries:
+                lines.append(f"    {key:<16}{desc}")
+            lines.append("")
+        lines.append("          Press Esc to close")
+        return "\n".join(lines)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Help", classes="prompt")
+            yield Static(self._build_help_text(), id="help-content")
+
+    def action_dismiss_help(self) -> None:
         self.dismiss(None)

@@ -246,6 +246,34 @@ TaskEditScreen .hint {
     margin-top: 1;
 }
 
+/* CLIHelpScreen - Centered help modal showing keybindings.
+   Targets 'CLIHelpScreen' in screens.py. */
+CLIHelpScreen {
+    align: center middle;
+}
+
+CLIHelpScreen > Vertical {
+    width: 50;
+    height: auto;
+    max-height: 80%;
+    background: #12122a;
+    border: solid #5eaff5;
+    padding: 1 2;
+}
+
+CLIHelpScreen .prompt {
+    text-style: bold;
+    color: #5eaff5;
+    text-align: center;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+CLIHelpScreen #help-content {
+    color: #b8b8c8;
+    height: auto;
+}
+
 /* Generic text selection highlight color. */
 .selection {
     background: #264f78;

@@ -11,6 +11,7 @@ Provides a clean, terminal-like interface:
 from ayder_cli.tui.types import MessageType, ConfirmResult
 from ayder_cli.tui.screens import (
     CLIConfirmScreen,
+    CLIHelpScreen,
     CLIPermissionScreen,
     CLISafeModeScreen,
     CLISelectScreen,
@@ -61,6 +62,7 @@ __all__ = [
     "MessageType",
     "ConfirmResult",
     "CLIConfirmScreen",
+    "CLIHelpScreen",
     "CLIPermissionScreen",
     "CLISafeModeScreen",
     "CLISelectScreen",

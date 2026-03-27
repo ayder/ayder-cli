@@ -29,6 +29,15 @@ class ChatView(VerticalScroll):
         super().__init__(**kwargs)
         self._message_widgets: list[Static] = []
         self._thinking_visible: bool = False
+        self._follow_mode: bool = True
+
+    def disable_follow_mode(self) -> None:
+        """Disable auto-scroll on new messages (user is reading history)."""
+        self._follow_mode = False
+
+    def enable_follow_mode(self) -> None:
+        """Re-enable auto-scroll on new messages."""
+        self._follow_mode = True
 
     def _create_text(
         self, content: str, msg_type: MessageType, metadata: dict | None = None
@@ -103,7 +112,8 @@ class ChatView(VerticalScroll):
                     text = self._create_text(full_content, msg_type, metadata)
                     if text:
                         last_widget.update(text)
-                self.scroll_end(animate=False)
+                if self._follow_mode:
+                    self.scroll_end(animate=False)
                 return
 
         self.messages.append(
@@ -128,7 +138,8 @@ class ChatView(VerticalScroll):
                 if msg_type == MessageType.THINKING and not self._thinking_visible:
                     msg_widget.display = False
 
-        self.scroll_end(animate=False)
+        if self._follow_mode:
+            self.scroll_end(animate=False)
 
     def add_user_message(self, content: str) -> None:
         """Add a user message."""
@@ -424,12 +435,15 @@ class _SubmitTextArea(TextArea):
             self.value = value
             super().__init__()
 
+    _PASTE_THRESHOLD = 3
+
     def __init__(self, commands: list[str] | None = None, **kwargs):
         super().__init__(soft_wrap=True, show_line_numbers=False, **kwargs)
         self._commands = commands or []
         self._tab_cycle_matches: list[str] = []
         self._tab_cycle_index = -1
         self._placeholder_widget: Static | None = None
+        self._pasted_content: str | None = None
 
     def on_mount(self) -> None:
         self._placeholder_widget = Static(
@@ -440,6 +454,29 @@ class _SubmitTextArea(TextArea):
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if self._placeholder_widget:
             self._placeholder_widget.display = not bool(self.text)
+
+    def _should_collapse_paste(self, text: str) -> bool:
+        """Return True if pasted text should be collapsed."""
+        if not text:
+            return False
+        return text.count("\n") >= self._PASTE_THRESHOLD
+
+    def _collapse_display_text(self, text: str) -> str:
+        """Return the collapsed display string for pasted text."""
+        line_count = text.count("\n") + (1 if not text.endswith("\n") else 0)
+        return f"[pasted: {line_count} lines]"
+
+    def _store_paste(self, content: str) -> None:
+        """Store pasted content for later submission."""
+        self._pasted_content = content
+
+    def _get_submit_value(self) -> str | None:
+        """Return stored paste content if any, else None."""
+        return self._pasted_content
+
+    def _clear_paste(self) -> None:
+        """Clear stored paste state."""
+        self._pasted_content = None
 
     def _reset_tab_cycle(self) -> None:
         """Reset slash-command tab cycle state."""
@@ -467,13 +504,32 @@ class _SubmitTextArea(TextArea):
 
     def _on_key(self, event) -> None:  # type: ignore[override]
         if event.key == "enter":
-            # Plain Enter → submit (Shift+Enter comes as "shift+enter")
             event.prevent_default()
             event.stop()
-            value = self.text.strip()
-            if value:
-                self.post_message(self.Submitted(value))
+            paste_value = self._get_submit_value()
+            if paste_value:
+                self.post_message(self.Submitted(paste_value))
+                self._clear_paste()
                 self.clear()
+            else:
+                value = self.text.strip()
+                if value:
+                    self.post_message(self.Submitted(value))
+                    self.clear()
+            return
+
+        if event.key == "escape" and self._pasted_content is not None:
+            event.prevent_default()
+            event.stop()
+            self._clear_paste()
+            self.clear()
+            return
+
+        if event.key == "backspace" and self._pasted_content is not None:
+            event.prevent_default()
+            event.stop()
+            self._clear_paste()
+            self.clear()
             return
 
         if event.key == "tab" and self.text.startswith("/"):
@@ -489,16 +545,64 @@ class _SubmitTextArea(TextArea):
         if event.key == "pageup":
             event.prevent_default()
             event.stop()
-            self.app.query_one("#chat-view", ChatView).scroll_page_up(animate=False)
+            chat_view = self.app.query_one("#chat-view", ChatView)
+            chat_view.disable_follow_mode()
+            chat_view.scroll_page_up(animate=False)
             return
 
         if event.key == "pagedown":
             event.prevent_default()
             event.stop()
-            self.app.query_one("#chat-view", ChatView).scroll_page_down(animate=False)
+            chat_view = self.app.query_one("#chat-view", ChatView)
+            chat_view.scroll_page_down(animate=False)
+            if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
+                chat_view.enable_follow_mode()
+            return
+
+        if event.key == "ctrl+pageup":
+            event.prevent_default()
+            event.stop()
+            chat_view = self.app.query_one("#chat-view", ChatView)
+            chat_view.disable_follow_mode()
+            chat_view.scroll_up(animate=False)
+            return
+
+        if event.key == "ctrl+pagedown":
+            event.prevent_default()
+            event.stop()
+            chat_view = self.app.query_one("#chat-view", ChatView)
+            chat_view.scroll_down(animate=False)
+            if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
+                chat_view.enable_follow_mode()
+            return
+
+        if event.key == "home":
+            event.prevent_default()
+            event.stop()
+            chat_view = self.app.query_one("#chat-view", ChatView)
+            chat_view.disable_follow_mode()
+            chat_view.scroll_home(animate=False)
+            return
+
+        if event.key == "end":
+            event.prevent_default()
+            event.stop()
+            chat_view = self.app.query_one("#chat-view", ChatView)
+            chat_view.enable_follow_mode()
+            chat_view.scroll_end(animate=False)
             return
 
         self._reset_tab_cycle()
+
+    async def _on_paste(self, event) -> None:
+        """Handle bracketed paste — collapse multi-line pastes."""
+        text = event.text
+        if self._should_collapse_paste(text):
+            event.prevent_default()
+            event.stop()
+            self._store_paste(text)
+            self.clear()
+            self.insert(self._collapse_display_text(text))
 
 
 class CLIInputBar(Horizontal):
@@ -570,15 +674,22 @@ class CLIInputBar(Horizontal):
             self.app.post_message(self.Submitted(value))
 
     def on_key(self, event) -> None:
-        """Handle history navigation."""
+        """Handle history navigation with smart multiline cursor support.
+
+        Up/Down navigate command history only when input is empty or cursor
+        is at the edge (first line for Up, last line for Down). Otherwise,
+        the TextArea handles cursor movement within multiline text.
+        """
         if event.key == "up":
-            event.prevent_default()
-            event.stop()
-            self._history_navigate(-1)
+            if not self._input or not self._input.text or self._input.cursor_location[0] == 0:
+                event.prevent_default()
+                event.stop()
+                self._history_navigate(-1)
         elif event.key == "down":
-            event.prevent_default()
-            event.stop()
-            self._history_navigate(1)
+            if not self._input or not self._input.text or self._input.cursor_location[0] >= self._input.document.line_count - 1:
+                event.prevent_default()
+                event.stop()
+                self._history_navigate(1)
 
     def focus_input(self) -> None:
         """Focus the input field."""
@@ -639,7 +750,7 @@ class StatusBar(Horizontal):
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
         yield Static(classes="spacer")
-        yield Label("^C:cancel ^L:clear ^O:tools ^T:think ^G:agents PgUp/Dn:scroll ^Q:quit", classes="key-hint")
+        yield Label("Ctrl+H Help", classes="key-hint")
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""
