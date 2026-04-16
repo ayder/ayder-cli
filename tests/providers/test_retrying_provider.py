@@ -189,3 +189,49 @@ async def test_empty_stream_after_budget_yields_final_usage_chunk():
 
 def _meaningful(chunk):
     return bool(chunk.content) or bool(chunk.reasoning) or bool(chunk.tool_calls)
+
+
+@pytest.mark.anyio
+async def test_on_reconnect_called_once_per_retry():
+    """Hook must fire after each successful sleep between attempts."""
+    import httpx
+    err = httpx.ConnectError("x")
+    inner = _FakeProvider([
+        [err],                                # attempt 0 fails
+        [err],                                # attempt 1 fails
+        [NormalizedStreamChunk(content="ok")],  # attempt 2 succeeds
+    ])
+    calls: list[int] = []
+
+    def on_reconnect() -> None:
+        calls.append(len(calls))
+
+    retry_cfg = RetryConfig(max_attempts=3, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(
+        inner, retry_cfg, on_reconnect=on_reconnect, sleep=_noop_sleep
+    )
+
+    got = [c async for c in wrapped.stream_with_tools(messages=[], model="m")]
+
+    assert [g.content for g in got] == ["ok"]
+    # 2 retries → 2 reconnect calls (one before attempt 1, one before attempt 2).
+    assert calls == [0, 1]
+
+
+@pytest.mark.anyio
+async def test_on_reconnect_exception_does_not_break_retry():
+    """A raising hook must be swallowed so the retry still proceeds."""
+    import httpx
+    err = httpx.ConnectError("x")
+    inner = _FakeProvider([[err], [NormalizedStreamChunk(content="ok")]])
+
+    def bad_hook() -> None:
+        raise RuntimeError("hook exploded")
+
+    retry_cfg = RetryConfig(max_attempts=2, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(
+        inner, retry_cfg, on_reconnect=bad_hook, sleep=_noop_sleep
+    )
+
+    got = [c async for c in wrapped.stream_with_tools(messages=[], model="m")]
+    assert [g.content for g in got] == ["ok"]  # retry succeeded despite hook
