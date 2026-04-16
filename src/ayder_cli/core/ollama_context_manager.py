@@ -186,6 +186,20 @@ class OllamaContextManager:
         if self.should_compact() and history:
             history, compaction_summary = self._compact(history)
 
+        # Apply max_history cap — trim from the head on unit boundaries so
+        # assistant+tool_calls stays atomic with its tool_result responses.
+        # See opus47.md finding #3.
+        if max_history > 0 and len(history) > max_history:
+            units = self._group_into_units(history)
+            kept: list[list[dict]] = []
+            msg_count = 0
+            for unit in reversed(units):
+                if msg_count + len(unit) > max_history and kept:
+                    break
+                kept.insert(0, unit)
+                msg_count += len(unit)
+            history = [m for unit in kept for m in unit]
+
         # Build the output — stable prefix order
         result: list[dict] = []
         if system_msg:
