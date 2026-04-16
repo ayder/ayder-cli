@@ -30,6 +30,9 @@ def _make_cfg(model="test-model", max_background_processes=5):
     cfg = MagicMock()
     cfg.model = model
     cfg.max_background_processes = max_background_processes
+    # These tests predate the retry wrapper; disable it so they continue to
+    # assert identity against the raw provider returned by the orchestrator.
+    cfg.retry.enabled = False
     return cfg
 
 
@@ -113,7 +116,10 @@ class TestCreateAgentRuntime:
             )
 
         assert rt.config is not None
-        assert rt.llm_provider == mock_provider
+        # Provider is wrapped with RetryingProvider by default — unwrap for identity check.
+        from ayder_cli.providers.retry import RetryingProvider
+        inner = rt.llm_provider._inner if isinstance(rt.llm_provider, RetryingProvider) else rt.llm_provider
+        assert inner == mock_provider
         assert rt.process_manager == pm
         assert rt.project_ctx == project_ctx
         assert rt.system_prompt != ""
