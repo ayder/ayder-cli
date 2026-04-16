@@ -206,7 +206,16 @@ class DefaultContextManager:
         self._cache_valid = False
 
     def should_compact(self) -> bool:
-        """Whether compaction/trimming should be triggered."""
+        """Whether compaction/trimming should be triggered.
+
+        Prefers provider-reported prompt tokens (from update_from_response)
+        over the TokenCounter estimator, which systematically under-counts
+        JSON and tool payloads. Falls back to the estimator before the first
+        response arrives. See opus47.md finding #6.
+        """
+        if self._last_prompt_tokens:
+            ceiling = self._config.max_context_tokens
+            return self._last_prompt_tokens >= ceiling * self._config.compaction_threshold
         return self.should_trigger_summarization()
 
     def get_stats(self) -> "ContextStats":
