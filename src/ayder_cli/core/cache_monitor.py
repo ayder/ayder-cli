@@ -61,14 +61,15 @@ class CacheMonitor:
 
         hit_ratio = max(0.0, 1.0 - (ns_per_token / self._baseline_ns_per_token))
 
-        # Detect unexpected invalidation
+        # Detect unexpected invalidation (hot → miss transition means the
+        # prefix changed since the last call).
         if self._last_status and self._last_status.state == "hot" and state == "miss":
             logger.warning(
                 f"KV-cache invalidated: was {self._history[-1].ns_per_token:.0f} ns/tok, "
                 f"now {ns_per_token:.0f} ns/tok. Prefix likely changed."
             )
         elif state == "hot":
-            logger.warning(f"KV-cache hot: {hit_ratio:.0%} reuse, {ns_per_token:.0f} ns/tok")
+            logger.debug(f"KV-cache hot: {hit_ratio:.0%} reuse, {ns_per_token:.0f} ns/tok")
 
         status = CacheStatus(hit_ratio=hit_ratio, state=state)
         self._append_sample(prompt_eval_count, ns_per_token, status)

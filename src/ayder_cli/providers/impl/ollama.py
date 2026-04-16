@@ -530,21 +530,27 @@ class OllamaProvider(AIProvider):
             raw_content_acc += content_text
             raw_thinking_acc += thinking_text
 
-            if content_text or thinking_text:
-                events = list(parser._process_text(content_text))
+            usage = None
+            if chunk.done:
+                usage = {
+                    "total_tokens": (chunk.prompt_eval_count or 0) + (chunk.eval_count or 0),
+                    "prompt_tokens": chunk.prompt_eval_count or 0,
+                    "completion_tokens": chunk.eval_count or 0,
+                    "prompt_eval_ns": chunk.prompt_eval_duration or 0,
+                    "eval_ns": chunk.eval_duration or 0,
+                    "load_ns": chunk.load_duration or 0,
+                }
+
+            # Emit a chunk when there is visible text, thinking, or we're done.
+            # Prior behavior gated on content/thinking only — dropping usage on
+            # empty-done chunks. That corrupted context-manager token accounting.
+            # See opus47.md finding #5.
+            if content_text or thinking_text or chunk.done:
+                events: list[StreamEvent] = []
+                if content_text:
+                    events.extend(parser._process_text(content_text))
                 if thinking_text:
                     events.extend(parser._process_text(thinking_text, is_reasoning=True))
-
-                usage = None
-                if chunk.done:
-                    usage = {
-                        "total_tokens": (chunk.prompt_eval_count or 0) + (chunk.eval_count or 0),
-                        "prompt_tokens": chunk.prompt_eval_count or 0,
-                        "completion_tokens": chunk.eval_count or 0,
-                        "prompt_eval_ns": chunk.prompt_eval_duration or 0,
-                        "eval_ns": chunk.eval_duration or 0,
-                        "load_ns": chunk.load_duration or 0,
-                    }
 
                 yield NormalizedStreamChunk(
                     content="".join(e.text for e in events if e.type == "content"),
