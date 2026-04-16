@@ -78,7 +78,7 @@ class OllamaContextManager:
         self._compaction_count: int = 0
         self._messages_compacted: int = 0
 
-        self._cache_monitor: CacheMonitor | None = None
+        self._cache_monitor: CacheMonitor = CacheMonitor()
 
     # ------------------------------------------------------------------
     # Protocol: freeze_system_prompt
@@ -215,7 +215,7 @@ class OllamaContextManager:
             if self._last_prompt_eval_ns else "n/a"
         )
         cache_state = ""
-        if self._cache_monitor and usage.get("prompt_eval_ns"):
+        if usage.get("prompt_eval_ns"):
             status = self._cache_monitor.record(
                 prompt_eval_count=usage.get("prompt_tokens", 0),
                 prompt_eval_ns=usage.get("prompt_eval_ns", 0),
@@ -239,6 +239,7 @@ class OllamaContextManager:
         available = max(0, ceiling - used)
         utilization = (used / ceiling * 100.0) if ceiling > 0 else 0.0
 
+        last_status = self._cache_monitor.last_status
         return OllamaContextStats(
             total_tokens=used,
             available_tokens=available,
@@ -249,7 +250,7 @@ class OllamaContextManager:
             actual_context_length=ceiling,
             real_prompt_tokens=self._real_prompt_tokens,
             real_completion_tokens=self._real_completion_tokens,
-            cache_hit_ratio=None,  # Populated by CacheMonitor in Task 10
+            cache_hit_ratio=last_status.hit_ratio if last_status else None,
         )
 
     # ------------------------------------------------------------------
@@ -270,10 +271,9 @@ class OllamaContextManager:
         budget = ceiling - reserve
 
         threshold = self._compaction_threshold
-        # Adaptive: when cache is hot, push threshold to 0.90
-        if (self._cache_monitor
-                and self._cache_monitor.last_status
-                and self._cache_monitor.last_status.state == "hot"):
+        # Adaptive: when cache is hot, push threshold to 0.90 to defer compaction
+        # and preserve the KV-cache prefix longer.
+        if self._cache_monitor.last_status and self._cache_monitor.last_status.state == "hot":
             threshold = max(threshold, 0.90)
 
         should = used >= budget * threshold
