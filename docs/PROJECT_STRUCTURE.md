@@ -38,13 +38,13 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 │                    Application Layer                            │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                  TUI Mode (Default)                       │  │
-│  │  tui/app.py (AyderApp) → tui/chat_loop.py (TuiChatLoop)  │  │
-│  │  AppCallbacks implements TuiCallbacks protocol            │  │
+│  │  tui/app.py (AyderApp) → loops/chat_loop.py (ChatLoop)    │  │
+│  │  AppCallbacks implements ChatCallbacks protocol           │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                   CLI Mode                                │  │
-│  │  cli_runner.py → loops/chat_loop.py (ChatLoop)           │  │
-│  │  (ChatLoop — async via asyncio.run)                       │  │
+│  │  cli_runner.py → loops/chat_loop.py (ChatLoop)            │  │
+│  │  CliCallbacks (cli_callbacks.py) implements ChatCallbacks │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │            Shared Application Modules                     │  │
@@ -57,46 +57,50 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
                             │
                             ▼
 ┌────────────────────────────────────────────────────────────────┐
-│                     Service Layer                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐    │
-│  │services/inter│  │              │  │process_manager.py  │    │
-│  │actions.py    │  │              │  │(Background Process)│    │
-│  │(Interaction- │  │              │  │                    │    │
-│  │Sink protocol)│  │              │  │                    │    │
-│  └──────────────┘  └──────────────┘  └────────────────────┘    │
+│                  Service / Provider Layer                      │
+│  services/interactions.py  (InteractionSink protocol)          │
+│  process_manager.py        (ProcessManager — background procs) │
+│  providers/base.py         (AIProvider, NormalizedStreamChunk) │
+│  providers/orchestrator.py (driver → provider factory)         │
+│  providers/impl/<driver>.py (ollama, openai, claude, gemini,   │
+│                              deepseek, qwen, glm)              │
 └────────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌────────────────────────────────────────────────────────────────┐
 │                      Core Layer                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ core/config. │  │core/context. │  │ core/result. │          │
-│  │ py (Pydantic │  │ py (Project  │  │ py (ToolSucc-│          │
-│  │   Config)    │  │   Context)   │  │ ess/Error)   │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  core/config.py              (Pydantic Config)                 │
+│  core/context.py             (ProjectContext, sandboxing)      │
+│  core/result.py              (ToolSuccess, ToolError)          │
+│  core/context_manager.py     (ContextManagerProtocol)          │
+│  core/default_context_manager.py                               │
+│  core/ollama_context_manager.py  (KV-cache-aware)              │
+│  core/context_manager_factory.py (driver → manager factory)    │
+│  core/cache_monitor.py       (timing-based KV-cache detection) │
 └────────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌────────────────────────────────────────────────────────────────┐
 │                     Tools Layer                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │tools/builtins│  │tools/registry│  │tools/schemas.│          │
-│  │ filesys.py   │  │   .py (with  │  │ py (OpenAI   │          │
-│  │ search.py    │  │ middleware)  │  │   schemas)   │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  tools/definition.py  (ToolDefinition + auto-discovery)        │
+│  tools/registry.py    (ToolRegistry + middleware + DI)         │
+│  tools/execution.py / normalization.py / hooks.py              │
+│  tools/schemas.py     (generated OpenAI schemas)               │
+│  tools/plugin_*.py    (external plugin system)                 │
+│  tools/builtins/<domain>.py + <domain>_definitions.py          │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Architectural Principles
 
 1. **Layered Architecture**: Clear separation between entry → app → service → core → tools
-2. **Protocol-Based**: `TuiCallbacks` protocol decouples TUI from business logic; `InteractionSink` decouples LLM providers from UI for debug events
+2. **Protocol-Based**: `ChatCallbacks` protocol decouples the chat loop from UI concerns; `InteractionSink` decouples LLM providers from UI for debug events
 3. **Single Composition Root**: `application/runtime_factory.create_runtime()` assembles all dependencies — no duplicated wiring between CLI and TUI
 4. **Single Loop**: `ChatLoop` (in `loops/chat_loop.py`) owns the full async LLM + tool execution loop; both CLI and TUI route through it
 5. **Single Execution Path**: `ExecutionPolicy.execute_with_registry()` is the sole tool execution entry point; validation → permission → execute, no inline policy in loop code
 6. **Single Validation Path**: `ValidationAuthority → SchemaValidator` is the only validation stage; schema derived from live `TOOL_DEFINITIONS` registry (no hardcoded lists)
 7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security
-8. **Async-First**: TUI uses async/await with Textual workers; CLI is synchronous via `llm.chat()`
+8. **Single Execution Engine**: Both TUI and CLI drive `ChatLoop.run()` through the `ChatCallbacks` protocol (`AppCallbacks` and `CliCallbacks` respectively); CLI runs it via `asyncio.run`
 
 ---
 
@@ -146,7 +150,8 @@ cli.py:main()
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `core/config.py` | Configuration management | `Config`, `load_config()` |
+| `core/config.py` | Configuration management | `Config`, `load_config()`, `load_config_for_provider()` |
+| `core/config_migration.py` | TOML config migration helpers | migration routines for schema changes |
 | `core/context.py` | Project sandboxing | `ProjectContext` |
 | `core/result.py` | Tool result types | `ToolSuccess`, `ToolError` |
 | `core/context_manager.py` | ContextManager Protocol + shared utilities | `ContextManagerProtocol`, `ContextStats`, `truncate_tool_result()` |
@@ -155,13 +160,18 @@ cli.py:main()
 | `core/context_manager_factory.py` | Registry-based factory (OCP) | `ContextManagerFactory`, `context_manager_factory` |
 | `core/cache_monitor.py` | Timing-based KV-cache hit detection | `CacheMonitor`, `CacheStatus`, `CacheSample` |
 | `console.py` | Rich console singleton | `console` |
+| `logging_config.py` | Logger setup (loguru + stdlib bridge) | `setup_logging()` |
+| `version.py` | Package version constant | `__version__` |
 
-### Application Modules
+### Root-Level Application Modules
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `cli.py` | Entry point, argument parsing | `main()`, `create_parser()` |
 | `cli_runner.py` | Command execution | `CommandRunner`, `TaskRunner`, `run_command()` |
+| `cli_callbacks.py` | `ChatCallbacks` adapter for one-shot CLI mode | `CliCallbacks` |
+| `ui.py` | Rich-based non-TUI rendering helpers | progress, panels, confirmations |
+| `__main__.py` | `python -m ayder_cli` entry | delegates to `cli.main()` |
 
 
 ### Agent System Modules (`agents/`)
@@ -193,56 +203,84 @@ cli.py:main()
 | `application/runtime_factory.py` | Single composition root | `create_runtime()`, `create_agent_runtime()`, `RuntimeComponents` |
 | `application/message_contract.py` | LLM message format contracts | DTOs for message interchange |
 
-### Shared Loop Modules (`loops/`)
+### Loop Module (`loops/`)
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `loops/base.py` | Shared agent loop base class | `AgentLoopBase` — iteration, tool routing, escalation |
-| `loops/config.py` | Shared loop configuration | `LoopConfig` dataclass |
+| `loops/chat_loop.py` | Async agent chat loop — LLM + tool execution driver | `ChatLoop`, `ChatCallbacks` (Protocol), `ChatLoopConfig` |
+
+> Note: earlier refactors split out `loops/base.py` (`AgentLoopBase`) and `loops/config.py` (`LoopConfig`); both were merged back into `loops/chat_loop.py`. `ChatLoopConfig` now lives at the top of `chat_loop.py`, and iteration/tool-routing helpers are private methods on `ChatLoop`.
 
 ### TUI Modules (Textual-based)
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `tui/app.py` | Main TUI application | `AyderApp`, `AppCallbacks` |
-| `tui/chat_loop.py` | Backward-compat re-exports | `TuiChatLoop` → `ChatLoop`, `TuiLoopConfig` → `ChatLoopConfig` |
+| `tui/adapter.py` | Adapter glue between `AyderApp` and `ChatLoop` | callback wiring helpers |
 | `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()` |
-| `tui/widgets.py` | Custom widgets | `ChatView`, `ToolPanel`, `CLIInputBar` |
-| `tui/screens.py` | Modal screens | `CLIConfirmScreen`, `CLISelectScreen` |
+| `tui/widgets.py` | Custom widgets | `ChatView`, `ToolPanel`, `CLIInputBar`, `StatusBar`, `AutoCompleteInput` |
+| `tui/screens.py` | Modal screens | `CLIConfirmScreen`, `CLIHelpScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `TaskEditScreen` |
 | `tui/parser.py` | TUI-specific parsing | `content_processor()` |
 | `tui/helpers.py` | UI helpers | `create_tui_banner()` |
+| `tui/keybindings.py` | Keybinding declarations | `BINDINGS` |
 | `tui/theme_manager.py` | Theme/CSS management | `get_theme_css()` |
+| `tui/types.py` | Shared TUI enums/dataclasses | `MessageType`, `ConfirmResult` |
 
 ### Service Modules
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `services/llm.py` | LLM provider | `LLMProvider`, `OpenAIProvider` |
 | `services/interactions.py` | LLM debug event protocol | `InteractionSink` |
+
+### Provider Modules (`providers/`)
+
+All LLM provider implementations live here. Previously some sat under `services/`; the `services/llm.py` module was retired in favor of per-provider modules.
+
+| Module | Purpose | Key Classes/Functions |
+|--------|---------|----------------------|
+| `providers/__init__.py` | Re-exports | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `provider_orchestrator` |
+| `providers/base.py` | Provider protocol + shared DTOs | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `_ToolCall`, `_FunctionCall` |
+| `providers/orchestrator.py` | Driver-keyed provider factory | `ProviderOrchestrator`, `provider_orchestrator` |
 | `providers/impl/ollama.py` | Native Ollama provider (ollama SDK) | `OllamaProvider`, `ToolStreamParser`, `XMLParserAdapter` |
 | `providers/impl/ollama_inspector.py` | Ollama model introspection | `OllamaInspector`, `ModelInfo`, `RuntimeState` |
+| `providers/impl/openai.py` | OpenAI / OpenAI-compatible backend | `OpenAIProvider` |
+| `providers/impl/claude.py` | Anthropic Claude backend | `ClaudeProvider` |
+| `providers/impl/gemini.py` | Google Gemini backend | `GeminiProvider` |
+| `providers/impl/deepseek.py` | DeepSeek backend | `DeepseekProvider` |
+| `providers/impl/qwen.py` | Qwen backend | `QwenProvider` |
+| `providers/impl/glm.py` | GLM backend | `GLMProvider` |
 
 ### Tool Modules
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `tools/definition.py` | Tool definitions + auto-discovery | `ToolDefinition`, `TOOL_DEFINITIONS`, `_discover_definitions()` |
-| `tools/registry.py` | Tool registry with middleware | `ToolRegistry`, `create_default_registry()` |
+| `tools/definition.py` | Tool definitions + auto-discovery | `ToolDefinition`, `TOOL_DEFINITIONS`, `TOOL_DEFINITIONS_BY_NAME`, `_discover_definitions()` |
+| `tools/registry.py` | Tool registry with middleware + DI | `ToolRegistry`, `create_default_registry()` |
+| `tools/execution.py` | Low-level tool execution primitives | argument normalization + invocation |
+| `tools/normalization.py` | Parameter aliasing + path resolution | normalization helpers shared by registry |
+| `tools/hooks.py` | Pre/post execution callback scaffolding | hook registration + invocation |
 | `tools/schemas.py` | Generated OpenAI schemas | `tools_schema`, `TOOL_PERMISSIONS` |
 | `tools/utils.py` | Tool utilities | `prepare_new_content()` |
-| `tools/builtins/filesystem.py` | File system tool impls | `read_file()`, `write_file()`, `replace_string()` |
-| `tools/builtins/python_editor.py` | CST-based Python structural editor | `python_editor()`, `PythonEditorBackend` |
+| `tools/plugin_api.py` | Public plugin entry-point contract | Plugin protocol |
+| `tools/plugin_manager.py` | Plugin discovery + lifecycle | `PluginManager` |
+| `tools/plugin_github.py` | GitHub-sourced plugin fetcher | remote-plugin loader |
+| `tools/builtins/filesystem.py` | File system tool impls | `file_explorer()`, `read_file()`, `file_editor()` |
 | `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
 | `tools/builtins/shell.py` | Shell execution impl | `run_shell_command()` |
-| `tools/builtins/*_definitions.py` | Per-domain tool definitions (12 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
+| `tools/builtins/memory.py` | Long-term memory tools | `save_memory`, `load_memory`, `save_context_memory`, `load_context_memory` |
+| `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
+| `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
+| `tools/builtins/web.py` | HTTP fetch tool | `fetch_web()` |
+| `tools/builtins/utils_tools.py` | Misc utility tools | `manage_environment_vars()` |
+| `tools/builtins/*_definitions.py` | Per-domain tool definitions (9 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
 
 ### Feature Modules
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `process_manager.py` | Background processes | `ProcessManager`, `run_background_process()` |
-| `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE` |
-| `parser.py` | XML parsing | `parse_custom_tool_calls()` |
+| `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()`, `PROJECT_STRUCTURE_MACRO_TEMPLATE` |
+| `parser.py` | XML tool-call parsing | `parse_custom_tool_calls()` |
 
 ### Theme Modules
 
@@ -276,7 +314,7 @@ AyderApp (Textual App)
 │   └── TaskEditScreen ← In-app task editor
 │
 └── Workers:
-    └── _process_message_worker() ← Runs TuiChatLoop
+    └── _process_message_worker() ← Runs ChatLoop.run()
 ```
 
 ### TUI Data Flow
@@ -292,34 +330,33 @@ User Input → CLIInputBar
          AyderApp._process_message()    handle_*(app, args, chat_view)
                 │
                 ▼
-         TuiChatLoop.process_message()
+         ChatLoop.run()                 (loops/chat_loop.py)
                 │
-                ├── LLM Call ──→ services/llm.py
+                ├── LLM Call ──→ providers/impl/<driver>.py
                 │
                 ├── Tool Parse ──→ parser.py
                 │
-                └── Tool Exec ──→ services/tools/executor.py
+                └── Tool Exec ──→ ExecutionPolicy.execute_with_registry()
                         │
                         ▼
-                ToolRegistry.execute()
+                ToolRegistry.execute()  (validate → permission → execute)
                         │
                         ▼
-                tools/impl.py (actual tool)
+                tools/builtins/<domain>.py (actual tool)
 ```
 
-### TuiCallbacks Protocol
+### ChatCallbacks Protocol
 
-The `ChatCallbacks` protocol in `loops/chat_loop.py` (aliased as `TuiCallbacks` in `tui/chat_loop.py`) decouples `ChatLoop` from all UI concerns:
+The `ChatCallbacks` protocol lives in `loops/chat_loop.py` and decouples `ChatLoop` from all UI concerns:
 
 ```python
 @runtime_checkable
-class TuiCallbacks(Protocol):
+class ChatCallbacks(Protocol):
     def on_thinking_start(self) -> None: ...
     def on_thinking_stop(self) -> None: ...
     def on_assistant_content(self, text: str) -> None: ...
     def on_thinking_content(self, text: str) -> None: ...
     def on_token_usage(self, total_tokens: int) -> None: ...
-    def on_iteration_update(self, current: int, maximum: int) -> None: ...
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None: ...
     def on_tool_complete(self, call_id: str, result: str) -> None: ...
     def on_tools_cleanup(self) -> None: ...
@@ -328,9 +365,11 @@ class TuiCallbacks(Protocol):
     def is_cancelled(self) -> bool: ...
 ```
 
-**`AppCallbacks`** (in `tui/app.py`) implements this protocol to update Textual widgets.
+Implementations:
+- **`AppCallbacks`** (in `tui/app.py`) updates Textual widgets.
+- **`CliCallbacks`** (in `cli_callbacks.py`) prints to the Rich console for one-shot CLI mode.
 
-Because the protocol is `@runtime_checkable`, `isinstance(cb, TuiCallbacks)` can be used to verify any adapter at construction time.
+Because the protocol is `@runtime_checkable`, `isinstance(cb, ChatCallbacks)` verifies any adapter at construction time.
 
 ### Command Dispatch
 
@@ -360,18 +399,29 @@ Each handler receives `(app: AyderApp, args: str, chat_view: ChatView)`.
 from ayder_cli.core.config import load_config, Config
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.core.context_manager import ContextManagerProtocol, truncate_tool_result
+from ayder_cli.core.context_manager_factory import context_manager_factory
 
-# Console (Rich)
+# Console + logging
 from ayder_cli.console import console
+from ayder_cli.logging_config import setup_logging
 
-# Services
-from ayder_cli.services.llm import OpenAIProvider, LLMProvider
+# Services + providers
 from ayder_cli.services.interactions import InteractionSink
+from ayder_cli.providers import AIProvider, provider_orchestrator
+
+# Loop
+from ayder_cli.loops.chat_loop import ChatLoop, ChatCallbacks, ChatLoopConfig
+
+# Application layer
+from ayder_cli.application.runtime_factory import create_runtime, RuntimeComponents
+from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 
 # Tools
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.tools.schemas import tools_schema, TOOL_PERMISSIONS
-from ayder_cli.tools.builtins.filesystem import read_file, write_file
+from ayder_cli.tools.definition import TOOL_DEFINITIONS, TOOL_DEFINITIONS_BY_NAME
+from ayder_cli.tools.builtins.filesystem import read_file, file_editor
 
 # TUI
 from ayder_cli.tui.app import AyderApp
@@ -414,15 +464,21 @@ if TYPE_CHECKING:
 The TUI uses protocols to avoid circular imports:
 
 ```python
-# loops/chat_loop.py (aliased as TuiCallbacks in tui/chat_loop.py)
-from typing import Protocol
+# loops/chat_loop.py
+from typing import Protocol, runtime_checkable
 
+@runtime_checkable
 class ChatCallbacks(Protocol):
     ...
 
 # tui/app.py
 class AppCallbacks:
-    """Implements TuiCallbacks"""
+    """Implements ChatCallbacks for the Textual TUI."""
+    ...
+
+# cli_callbacks.py
+class CliCallbacks:
+    """Implements ChatCallbacks for one-shot CLI mode."""
     ...
 ```
 
@@ -505,7 +561,7 @@ AyderApp is the main Textual application implementing a chat-style interface:
   - Tool confirmation with diff previews
   - Activity animations and status updates
   - Safe mode with middleware checks
-- **Architecture**: Uses AppCallbacks to implement TuiCallbacks protocol, decoupling business logic from UI
+- **Architecture**: Uses `AppCallbacks` to implement the `ChatCallbacks` protocol, decoupling business logic from UI
 
 The application manages:
 - LLM provider setup and configuration
@@ -515,18 +571,21 @@ The application manages:
 
 ### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)
 
-`ChatLoop` (extends `AgentLoopBase`) implements the core async agentic process:
+`ChatLoop` implements the core async agentic process in a single class (the
+previously-split `AgentLoopBase` and `LoopConfig` were merged back in):
 - Handles repeated LLM calls with tool execution until completion
 - Supports multiple tool call formats: OpenAI native (`tool_calls`), XML custom, JSON fallback
-- Manages iteration counting via `AgentLoopBase._increment_iteration()`
-- Communicates with UI exclusively through `TuiCallbacks` protocol (no Textual imports)
+- Private helpers `_route_tool_calls()`, `_increment_iteration()`, `_is_escalation_result()` encapsulate routing, counting, and escalation detection
+- Communicates with UI exclusively through the `ChatCallbacks` protocol; no Textual imports
 - Extracts and emits `<think>` blocks separately from display content
+- Routes *every* LLM response through the injected `ContextManagerProtocol` (`prepare_messages()` / `update_from_response()`); tool outputs are truncated at insertion time via `truncate_tool_result()` so the KV-cache prefix remains stable
 
 Key features:
 - Auto-approved tools run in parallel (`asyncio.gather`); confirmation-required tools run sequentially
 - Confirmation gate applies to **both** OpenAI-format and XML/JSON custom tool calls
 - `ExecutionPolicy.execute_with_registry()` is the single execution entry (validate → permission → execute)
 - Token usage tracking and iteration limiting
+- Pre-iteration hook (`pre_iteration_hook`) used by the agent system to inject summaries
 - Graceful cancellation via `is_cancelled()`
 
 ### Tool Registry Summary (src/ayder_cli/tools/registry.py)
@@ -553,16 +612,26 @@ Supports both synchronous tool execution and integrated with asyncio for TUI.
 Schema-driven tool definitions with auto-discovery:
 - **Auto-discovery**: `_discover_definitions()` scans all `*_definitions.py` files in `tools/builtins/` at import time — no manual registration
 - **Duplicate detection**: Tracks `(definition, source_module)` pairs; raises `ValueError` with accurate module names if a tool name appears twice
-- **Required-tool validation**: Raises `ImportError` if core tools (`list_files`, `read_file`, `write_file`, `run_shell_command`) are absent
+- **Required-tool validation**: Raises `ImportError` if core tools (`file_explorer`, `read_file`, `file_editor`, `run_shell_command`) are absent
 - **Permissions**: `"r"` (read), `"w"` (write), `"x"` (execute), `"http"` (network)
 - **Safety flags**: `safe_mode_blocked`, `is_terminal` per definition
 - **Path parameters**: Names listed in `path_parameters` are automatically resolved via `ProjectContext`
 - **Aliases**: `parameter_aliases` tuples for common name normalisation
 - **Schema generation**: `to_openai_schema()` returns the OpenAI function-calling dict
+- **Plugin loading**: `tools/plugin_manager.py` can augment `TOOL_DEFINITIONS` at runtime from local or GitHub-sourced plugins
 
-28 tools across 12 definition files:
-- Filesystem (7), Python editor (1), Search (2), Shell (1), Memory (2), Notes (1)
-- Background Processes (4), Tasks (2), Environment (1), Virtual Environments (5), Web (1), Temporal (1)
+19 built-in tools across 9 definition files:
+- Filesystem (3): `file_explorer`, `read_file`, `file_editor`
+- Search (2): `search_codebase`, `get_project_structure`
+- Shell (1): `run_shell_command`
+- Memory (4): `save_memory`, `load_memory`, `save_context_memory`, `load_context_memory`
+- Notes (1): `create_note`
+- Background Processes (4): `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes`
+- Tasks (2): `list_tasks`, `show_task`
+- Environment (1): `manage_environment_vars`
+- Web (1): `fetch_web`
+
+> The authoritative count comes from `len(TOOL_DEFINITIONS)`; run `python -c "from ayder_cli.tools.definition import TOOL_DEFINITIONS; print(len(TOOL_DEFINITIONS))"` to verify.
 
 ---
 
@@ -592,13 +661,9 @@ Schema-driven tool definitions with auto-discovery:
 | `chat_loop._extract_think_blocks` wrapper | Delegated to `tui.parser` content_processor |
 | `chat_loop._strip_tool_markup` wrapper | Delegated to `tui.parser` content_processor |
 
-### Phase — Shared Agent Loop Base (`loops/base.py`)
+### Phase — Shared Agent Loop Base (reverted)
 
-`AgentLoopBase` extracted to `loops/base.py`. `ChatLoop` (in `loops/chat_loop.py`) extends it:
-
-- `_increment_iteration()` / `_reset_iterations()` — shared iteration counting
-- `_route_tool_calls()` — shared OpenAI / XML / JSON / none routing logic
-- `_is_escalation()` — shared escalation detection
+`AgentLoopBase` was briefly extracted to `loops/base.py` with `LoopConfig` in `loops/config.py`, then flattened back into `loops/chat_loop.py` (the indirection was paying no rent). The helpers (`_increment_iteration`, `_reset_iterations`, `_route_tool_calls`, `_is_escalation_result`) now live as private methods on `ChatLoop`; `ChatLoopConfig` is a dataclass at the top of the same file.
 
 ### Phase — Validation Unification (Phase 4)
 
@@ -614,11 +679,34 @@ Schema-driven tool definitions with auto-discovery:
 | Stale loop variable in `_discover_definitions()` | Collect `(definition, source_module)` tuples; unpack in duplicate-check loop |
 | XML tool calls bypass confirmation gate | `_execute_custom_tool_calls()` now calls `_tool_needs_confirmation()` before `execute_with_registry()` |
 | Silent post-execute callback failure | Added `logger.warning()` in `registry.py` post-execute exception handler |
-| Dead `FileDiffConfirmation` + `confirm_file_diff()` | Removed from `execution_policy.py`; real confirmation goes through `TuiCallbacks.request_confirmation()` |
+| Dead `FileDiffConfirmation` + `confirm_file_diff()` | Removed from `execution_policy.py`; real confirmation goes through `ChatCallbacks.request_confirmation()` |
+| Agents mishandling raw JSON tool calls | Fixed in `chat_loop.py` — raw_json path now normalizes through the same tool-call routing as OpenAI / XML |
 
-### Pending: CLI → TUI Loop Unification
+### Phase — Provider Orchestration
 
-See `chat_loop_integration_refactor_plan.md` in the project root.
+`services/llm.py` retired. All provider implementations moved to `providers/impl/*.py`, with a shared base at `providers/base.py` and a driver-keyed factory at `providers/orchestrator.py` (singleton `provider_orchestrator`). Adding a new provider is a one-file drop plus a factory registration.
 
-Goal: replace sync `ChatLoop` with `TuiChatLoop` driven by a `CliCallbacks` adapter so
-there is one execution engine instead of two. Phases A–E are defined and awaiting review.
+### Phase — Ollama KV-Cache-Aware Context Management
+
+`ContextManagerProtocol` extracted in `core/context_manager.py`; concrete implementations split into:
+- `DefaultContextManager` (`core/default_context_manager.py`) — tiered/heuristic compaction for estimator-driven providers.
+- `OllamaContextManager` (`core/ollama_context_manager.py`) — stable-prefix + real-token accounting, uses `prompt_eval_count` / `prompt_eval_duration` directly.
+- `CacheMonitor` (`core/cache_monitor.py`) — timing-based KV-cache hit detection driving adaptive compaction thresholds.
+
+Selection lives in `core/context_manager_factory.py` (driver → class path registry). `create_runtime()` owns instantiation and calls `freeze_system_prompt()` once.
+
+### Phase — opus47 critical fixes (2026-04-16)
+
+Landed on main after an audit of context / KV-cache wiring. See `opus47.md` for the full report. Headline fixes:
+
+| Finding | File | Fix |
+|---------|------|-----|
+| #1 Tool results stored untruncated | `loops/chat_loop.py` | Truncate at the single source of truth — overwrite `rd["result"]` before both UI notification and history append |
+| #2 `CacheMonitor` never instantiated | `core/ollama_context_manager.py` | Instantiated in `__init__`; `cache_hit_ratio` populated; adaptive hot-cache threshold wired |
+| #3 `max_history` ignored by Ollama manager | `core/ollama_context_manager.py` | Honored after compaction, trimming from the head on unit boundaries |
+| #5 XML fallback dropped usage on empty done chunk | `providers/impl/ollama.py` | Yield unconditionally when `chunk.done`, attaching usage |
+| #6 `should_compact` used estimator over real tokens | `core/default_context_manager.py` | Prefer `_last_prompt_tokens` when present |
+
+### Phase — Plugin System
+
+`tools/plugin_api.py`, `tools/plugin_manager.py`, `tools/plugin_github.py` introduced an extension mechanism for additional tools sourced from local files or GitHub-hosted packages. Loaded plugins feed into the same `TOOL_DEFINITIONS` auto-discovery pipeline.
