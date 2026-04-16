@@ -455,12 +455,14 @@ class ChatLoop:
                 tc, rd = await completed_task
                 tool_results_map[tc.id] = rd
 
-                # Notify UI immediately
+                # Truncate at the single source of truth — overwrite rd["result"]
+                # so both the UI notification and the later history append read the
+                # same bounded form. See opus47.md finding #1.
                 if isinstance(rd, dict):
                     tid = rd["tool_call_id"]
                     name = rd["name"]
-                    result = str(rd["result"])
-                    result = truncate_tool_result(result)
+                    result = truncate_tool_result(str(rd["result"]))
+                    rd["result"] = result
                     self.cb.on_tool_complete(tid, result)
                 else:
                     self.cb.on_tool_complete(tc.id, f"Error: {rd}")
@@ -481,7 +483,7 @@ class ChatLoop:
                     self.registry,
                     pre_approved=True,
                 )
-                result = _unwrap_exec_result(exec_result)
+                result = truncate_tool_result(_unwrap_exec_result(exec_result))
                 rd = {"tool_call_id": tc.id, "name": name, "result": result}
                 tool_results_map[tc.id] = rd
 
