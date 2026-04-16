@@ -153,9 +153,45 @@ class RetryingProvider(AIProvider):
                 yield chunk
             return
 
-        # Minimal pass-through — full retry/empty-recovery loop expanded in
-        # Tasks 3-4. This is sufficient for the happy-path tests in Task 2.
-        async for chunk in self._inner.stream_with_tools(
-            messages, model, tools=tools, options=options, verbose=verbose
-        ):
-            yield chunk
+        last_error: Optional[BaseException] = None
+        for attempt in range(self._retry.max_attempts):
+            committed = False  # once True, subsequent errors must propagate
+            try:
+                async for chunk in self._inner.stream_with_tools(
+                    messages, model, tools=tools, options=options, verbose=verbose
+                ):
+                    if not committed and _is_meaningful(chunk):
+                        committed = True
+                    yield chunk
+                # Stream finished cleanly.
+                return
+            except BaseException as exc:  # noqa: BLE001 — we re-classify below
+                if committed:
+                    # Point of no return — cannot replay after emitting data.
+                    raise
+                verdict = classify_error(exc, self._retry.retry_on_names)
+                if verdict is RetryVerdict.FATAL:
+                    raise
+                last_error = exc
+                remaining = self._retry.max_attempts - attempt - 1
+                if remaining <= 0:
+                    logger.warning(
+                        f"Provider retry budget exhausted after {attempt + 1} "
+                        f"attempts; raising {type(exc).__name__}: {exc}"
+                    )
+                    raise
+                delay = compute_delay(self._retry, attempt)
+                logger.info(
+                    f"Provider stream failed ({type(exc).__name__}: {exc}); "
+                    f"retrying in {delay:.2f}s ({remaining} attempts left)"
+                )
+                await self._sleep(delay)
+                if self._on_reconnect is not None:
+                    try:
+                        self._on_reconnect()
+                    except Exception as hook_exc:  # noqa: BLE001
+                        logger.debug(f"on_reconnect hook raised: {hook_exc}")
+                continue
+
+        if last_error is not None:
+            raise last_error

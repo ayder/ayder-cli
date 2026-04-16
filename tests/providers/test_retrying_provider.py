@@ -74,3 +74,77 @@ async def test_list_models_delegates_to_inner():
     inner = _Listable([])
     wrapped = RetryingProvider(inner, RetryConfig())
     assert await wrapped.list_models() == ["m1", "m2"]
+
+
+async def _noop_sleep(delay: float) -> None:
+    """Test helper: swallow sleep calls so tests don't wait."""
+    return None
+
+
+@pytest.mark.anyio
+async def test_retryable_error_before_emit_triggers_retry():
+    """httpx.ConnectError before any meaningful chunk → retry succeeds."""
+    import httpx
+    err = httpx.ConnectError("dropped")
+    good = [NormalizedStreamChunk(content="ok")]
+    inner = _FakeProvider([[err], good])  # attempt 0 raises, attempt 1 succeeds
+    retry_cfg = RetryConfig(
+        max_attempts=3, initial_delay_seconds=0.0, jitter=False
+    )
+    wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
+
+    got = [c async for c in wrapped.stream_with_tools(messages=[], model="m")]
+
+    assert [g.content for g in got] == ["ok"]
+    assert inner.calls == 2
+
+
+@pytest.mark.anyio
+async def test_fatal_error_raises_without_retry():
+    """ValueError is not retryable — propagate immediately."""
+    err = ValueError("bad")
+    inner = _FakeProvider([[err]])
+    retry_cfg = RetryConfig(max_attempts=3, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
+
+    with pytest.raises(ValueError, match="bad"):
+        async for _ in wrapped.stream_with_tools(messages=[], model="m"):
+            pass
+    assert inner.calls == 1
+
+
+@pytest.mark.anyio
+async def test_error_after_emit_propagates_without_retry():
+    """Once a meaningful chunk has been yielded, errors must NOT retry."""
+    import httpx
+    err = httpx.ConnectError("mid-stream drop")
+    script = [
+        NormalizedStreamChunk(content="partial"),  # meaningful — commits stream
+        err,
+    ]
+    inner = _FakeProvider([script, [NormalizedStreamChunk(content="recovered")]])
+    retry_cfg = RetryConfig(max_attempts=3, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
+
+    received: list[str] = []
+    with pytest.raises(httpx.ConnectError):
+        async for c in wrapped.stream_with_tools(messages=[], model="m"):
+            received.append(c.content)
+
+    assert received == ["partial"]
+    assert inner.calls == 1  # did NOT retry
+
+
+@pytest.mark.anyio
+async def test_retry_budget_exhausted_raises_last_error():
+    """After max_attempts failures, raise the last exception."""
+    import httpx
+    errs = [httpx.ConnectError(f"drop-{i}") for i in range(3)]
+    inner = _FakeProvider([[errs[0]], [errs[1]], [errs[2]]])
+    retry_cfg = RetryConfig(max_attempts=3, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
+
+    with pytest.raises(httpx.ConnectError, match="drop-2"):
+        async for _ in wrapped.stream_with_tools(messages=[], model="m"):
+            pass
+    assert inner.calls == 3
