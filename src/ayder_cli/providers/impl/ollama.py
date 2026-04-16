@@ -546,7 +546,7 @@ class OllamaProvider(AIProvider):
             # empty-done chunks. That corrupted context-manager token accounting.
             # See opus47.md finding #5.
             if content_text or thinking_text or chunk.done:
-                events = []
+                events: list[StreamEvent] = []
                 if content_text:
                     events.extend(parser._process_text(content_text))
                 if thinking_text:
