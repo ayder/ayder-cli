@@ -155,19 +155,55 @@ class RetryingProvider(AIProvider):
 
         last_error: Optional[BaseException] = None
         for attempt in range(self._retry.max_attempts):
-            committed = False  # once True, subsequent errors must propagate
+            committed = False
+            usage_only_this_attempt: List[NormalizedStreamChunk] = []
             try:
                 async for chunk in self._inner.stream_with_tools(
                     messages, model, tools=tools, options=options, verbose=verbose
                 ):
-                    if not committed and _is_meaningful(chunk):
+                    if _is_meaningful(chunk):
                         committed = True
-                    yield chunk
-                # Stream finished cleanly.
-                return
+                        # Flush any usage-only prelude from this attempt first,
+                        # then yield the meaningful chunk.
+                        for pending in usage_only_this_attempt:
+                            yield pending
+                        usage_only_this_attempt = []
+                        yield chunk
+                    else:
+                        if committed:
+                            yield chunk
+                        else:
+                            usage_only_this_attempt.append(chunk)
+
+                if committed:
+                    return  # stream committed and completed cleanly
+
+                # Attempt produced no meaningful chunks — treat as empty response.
+                remaining = self._retry.max_attempts - attempt - 1
+                if remaining <= 0:
+                    logger.warning(
+                        "Provider returned empty response after "
+                        f"{attempt + 1} attempts; yielding final usage-only chunk"
+                    )
+                    # Yield the final usage-only chunk so token accounting survives.
+                    if usage_only_this_attempt:
+                        yield usage_only_this_attempt[-1]
+                    return
+                delay = compute_delay(self._retry, attempt)
+                logger.info(
+                    f"Empty response from provider; retrying in {delay:.2f}s "
+                    f"({remaining} attempts left)"
+                )
+                await self._sleep(delay)
+                if self._on_reconnect is not None:
+                    try:
+                        self._on_reconnect()
+                    except Exception as hook_exc:  # noqa: BLE001
+                        logger.debug(f"on_reconnect hook raised: {hook_exc}")
+                continue
+
             except BaseException as exc:  # noqa: BLE001 — we re-classify below
                 if committed:
-                    # Point of no return — cannot replay after emitting data.
                     raise
                 verdict = classify_error(exc, self._retry.retry_on_names)
                 if verdict is RetryVerdict.FATAL:

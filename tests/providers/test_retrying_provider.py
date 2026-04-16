@@ -148,3 +148,44 @@ async def test_retry_budget_exhausted_raises_last_error():
         async for _ in wrapped.stream_with_tools(messages=[], model="m"):
             pass
     assert inner.calls == 3
+
+
+@pytest.mark.anyio
+async def test_empty_stream_triggers_retry():
+    """A stream that closes without emitting a meaningful chunk is treated
+    as 'empty response' and retried."""
+    empty = [NormalizedStreamChunk(usage={"total_tokens": 0})]
+    recovered = [NormalizedStreamChunk(content="finally", usage={"total_tokens": 3})]
+    inner = _FakeProvider([empty, recovered])
+    retry_cfg = RetryConfig(max_attempts=2, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
+
+    got = [c async for c in wrapped.stream_with_tools(messages=[], model="m")]
+
+    assert any(c.content == "finally" for c in got)
+    assert inner.calls == 2
+
+
+@pytest.mark.anyio
+async def test_empty_stream_after_budget_yields_final_usage_chunk():
+    """If all retries produce empty streams, yield the most recent usage-only
+    chunk so token accounting isn't lost, then let the outer consumer handle
+    the empty-response message."""
+    empty1 = [NormalizedStreamChunk(usage={"total_tokens": 1})]
+    empty2 = [NormalizedStreamChunk(usage={"total_tokens": 2})]
+    inner = _FakeProvider([empty1, empty2])
+    retry_cfg = RetryConfig(max_attempts=2, initial_delay_seconds=0.0, jitter=False)
+    wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
+
+    got = [c async for c in wrapped.stream_with_tools(messages=[], model="m")]
+
+    # Final usage from the last attempt must survive.
+    assert got, "expected at least one chunk to pass through"
+    assert got[-1].usage == {"total_tokens": 2}
+    # But no meaningful content / tool_calls.
+    assert all(not _meaningful(c) for c in got)
+    assert inner.calls == 2
+
+
+def _meaningful(chunk):
+    return bool(chunk.content) or bool(chunk.reasoning) or bool(chunk.tool_calls)
