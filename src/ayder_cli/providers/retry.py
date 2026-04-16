@@ -1,10 +1,16 @@
 """Retry wrapper for AIProvider — exponential backoff with jitter + mid-stream recovery."""
 from __future__ import annotations
 
+import asyncio
 import enum
+import logging
 import random
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional
+
+from ayder_cli.providers.base import AIProvider, NormalizedStreamChunk
+
+logger = logging.getLogger(__name__)
 
 
 class RetryVerdict(enum.Enum):
@@ -94,3 +100,62 @@ def compute_delay(cfg: RetryConfig, attempt: int) -> float:
     if not cfg.jitter:
         return base
     return random.uniform(base / 2.0, base)
+
+
+def _is_meaningful(chunk: NormalizedStreamChunk) -> bool:
+    """A chunk counts as meaningful (point-of-no-return for retries) if it
+    carries content, reasoning, or tool-call deltas. Usage-only chunks are
+    NOT meaningful — an empty-response stream consists entirely of them."""
+    return bool(chunk.content) or bool(chunk.reasoning) or bool(chunk.tool_calls)
+
+
+class RetryingProvider(AIProvider):
+    """Decorator that wraps an inner AIProvider with retry + empty-response
+    recovery. Transparent w.r.t. chat / list_models.
+
+    Retry invariant: we only retry while no meaningful chunk has been emitted
+    to the outer consumer. Once a meaningful chunk passes through, the stream
+    is committed and subsequent errors propagate unchanged.
+    """
+
+    def __init__(
+        self,
+        inner: AIProvider,
+        retry_config: RetryConfig,
+        *,
+        on_reconnect: Optional[Callable[[], None]] = None,
+        sleep: Callable[[float], Any] = asyncio.sleep,
+    ) -> None:
+        # Deliberately bypass AIProvider.__init__ — we delegate to `inner`.
+        self._inner = inner
+        self._retry = retry_config
+        self._on_reconnect = on_reconnect
+        self._sleep = sleep
+
+    async def list_models(self) -> List[str]:
+        return await self._inner.list_models()
+
+    async def chat(self, *args, **kwargs) -> NormalizedStreamChunk:
+        return await self._inner.chat(*args, **kwargs)
+
+    async def stream_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        options: Optional[Dict[str, Any]] = None,
+        verbose: bool = False,
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        if not self._retry.enabled:
+            async for chunk in self._inner.stream_with_tools(
+                messages, model, tools=tools, options=options, verbose=verbose
+            ):
+                yield chunk
+            return
+
+        # Minimal pass-through — full retry/empty-recovery loop expanded in
+        # Tasks 3-4. This is sufficient for the happy-path tests in Task 2.
+        async for chunk in self._inner.stream_with_tools(
+            messages, model, tools=tools, options=options, verbose=verbose
+        ):
+            yield chunk
