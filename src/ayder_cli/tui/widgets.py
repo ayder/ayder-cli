@@ -55,10 +55,10 @@ class ChatView(VerticalScroll):
         elif msg_type == MessageType.THINKING:
             text = Text()
             text.append("  ... ", style="dim italic")
-            # Truncate long thinking blocks
+            # Tail the last N lines so streaming tokens stay pinned at the bottom.
             lines = content.strip().splitlines()
             if len(lines) > 4:
-                preview = "\n".join(lines[:4]) + f"\n    ({len(lines) - 4} more lines)"
+                preview = f"    ({len(lines) - 4} more lines)\n" + "\n".join(lines[-4:])
             else:
                 preview = content.strip()
             text.append(preview, style="dim italic")
