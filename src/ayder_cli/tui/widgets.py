@@ -14,7 +14,24 @@ from rich.markdown import Markdown
 from rich.spinner import Spinner
 from pathlib import Path
 
+from ayder_cli.parser import content_processor
 from ayder_cli.tui.types import MessageType
+
+
+def _sanitize_for_assistant_render(content: str) -> str:
+    """Strip tool-call XML markup from assistant content before it is rendered
+    as Markdown in the TUI.
+
+    Defense-in-depth: Ollama's XML-fallback matcher
+    (`_requires_xml_fallback` in providers/impl/ollama.py) cannot enumerate
+    every current and future model that emits XML tool calls inside
+    msg.content. When a provider leaks such tags, this helper removes them
+    from the rendered view so the chat display stays clean. Stored message
+    history is never mutated — only the rendered form.
+    """
+    if not content:
+        return content
+    return content_processor.strip_for_display(content)
 
 
 class ChatView(VerticalScroll):
@@ -55,10 +72,10 @@ class ChatView(VerticalScroll):
         elif msg_type == MessageType.THINKING:
             text = Text()
             text.append("  ... ", style="dim italic")
-            # Truncate long thinking blocks
+            # Tail the last N lines so streaming tokens stay pinned at the bottom.
             lines = content.strip().splitlines()
             if len(lines) > 4:
-                preview = "\n".join(lines[:4]) + f"\n    ({len(lines) - 4} more lines)"
+                preview = f"    ({len(lines) - 4} more lines)\n" + "\n".join(lines[-4:])
             else:
                 preview = content.strip()
             text.append(preview, style="dim italic")
@@ -107,7 +124,9 @@ class ChatView(VerticalScroll):
                 last_widget = self._message_widgets[-1]
 
                 if msg_type == MessageType.ASSISTANT:
-                    last_widget.update(Markdown(full_content.strip()))
+                    last_widget.update(
+                        Markdown(_sanitize_for_assistant_render(full_content).strip())
+                    )
                 else:
                     text = self._create_text(full_content, msg_type, metadata)
                     if text:
@@ -121,7 +140,7 @@ class ChatView(VerticalScroll):
         )
 
         if msg_type == MessageType.ASSISTANT:
-            content = content.strip()
+            content = _sanitize_for_assistant_render(content).strip()
 
             content_widget = Static(
                 Markdown(content), classes=f"message {msg_type.value}"

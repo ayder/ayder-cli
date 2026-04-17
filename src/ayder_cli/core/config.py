@@ -191,6 +191,47 @@ class ContextManagerConfigSection(BaseModel):
         return v
 
 
+class RetryConfigSection(BaseModel):
+    """Provider retry / backoff configuration."""
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = Field(default=True)
+    max_attempts: int = Field(default=3)
+    initial_delay_seconds: float = Field(default=0.5)
+    max_delay_seconds: float = Field(default=30.0)
+    backoff_coefficient: float = Field(default=2.0)
+    jitter: bool = Field(default=True)
+    retry_on_names: tuple[str, ...] = Field(default_factory=tuple)
+
+    @field_validator("max_attempts")
+    @classmethod
+    def validate_max_attempts(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_attempts must be positive")
+        return v
+
+    @field_validator("initial_delay_seconds", "max_delay_seconds")
+    @classmethod
+    def validate_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("delay seconds must be non-negative")
+        return v
+
+    @field_validator("backoff_coefficient")
+    @classmethod
+    def validate_backoff_coefficient(cls, v: float) -> float:
+        if v < 1.0:
+            raise ValueError("backoff_coefficient must be >= 1.0")
+        return v
+
+    @field_validator("retry_on_names", mode="before")
+    @classmethod
+    def coerce_tuple(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            return tuple(v)
+        return v
+
+
 class TemporalConfig(BaseModel):
     """Optional Temporal runtime configuration."""
 
@@ -239,6 +280,7 @@ class Config(BaseModel):
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
+    retry: RetryConfigSection = Field(default_factory=RetryConfigSection)
     agent_timeout: int = Field(default=300)
     agents: dict[str, Any] = Field(default_factory=dict)  # dict[str, AgentConfig] — Any to avoid circular import
 

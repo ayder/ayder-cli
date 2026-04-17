@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.providers import AIProvider, provider_orchestrator
+from ayder_cli.providers.retry import RetryConfig, RetryingProvider
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
 from ayder_cli.prompts import (
@@ -58,7 +59,7 @@ def create_runtime(
     if model_name:
         cfg = cfg.model_copy(update={"model": model_name})
 
-    llm_provider = provider_orchestrator.create(cfg)
+    llm_provider: AIProvider = provider_orchestrator.create(cfg)
     project_ctx = ProjectContext(project_root)
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
     tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
@@ -80,6 +81,8 @@ def create_runtime(
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
     context_mgr.freeze_system_prompt(system_prompt, tool_schemas)
 
+    llm_provider = _maybe_wrap_with_retry(llm_provider, cfg, context_mgr)
+
     return RuntimeComponents(
         config=cfg,
         llm_provider=llm_provider,
@@ -89,6 +92,32 @@ def create_runtime(
         system_prompt=system_prompt,
         context_manager=context_mgr,
     )
+
+
+def _maybe_wrap_with_retry(
+    provider: AIProvider, cfg: Config, context_mgr: Any
+) -> AIProvider:
+    """Wrap provider with RetryingProvider when cfg.retry.enabled.
+
+    Wires CacheMonitor.reset() as the on_reconnect hook for drivers whose
+    context manager exposes ``_cache_monitor`` (currently OllamaContextManager).
+    """
+    if not cfg.retry.enabled:
+        return provider
+    retry_cfg = RetryConfig(
+        enabled=cfg.retry.enabled,
+        max_attempts=cfg.retry.max_attempts,
+        initial_delay_seconds=cfg.retry.initial_delay_seconds,
+        max_delay_seconds=cfg.retry.max_delay_seconds,
+        backoff_coefficient=cfg.retry.backoff_coefficient,
+        jitter=cfg.retry.jitter,
+        retry_on_names=cfg.retry.retry_on_names,
+    )
+    on_reconnect = None
+    monitor = getattr(context_mgr, "_cache_monitor", None)
+    if monitor is not None and hasattr(monitor, "reset"):
+        on_reconnect = monitor.reset
+    return RetryingProvider(provider, retry_cfg, on_reconnect=on_reconnect)
 
 
 def create_agent_runtime(
@@ -150,6 +179,8 @@ def create_agent_runtime(
     context_mgr = context_manager_factory.create(cfg)
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
     context_mgr.freeze_system_prompt(system_prompt, tool_schemas)
+
+    llm_provider = _maybe_wrap_with_retry(llm_provider, cfg, context_mgr)
 
     return RuntimeComponents(
         config=cfg,

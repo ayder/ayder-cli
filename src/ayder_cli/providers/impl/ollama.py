@@ -3,6 +3,7 @@ Ollama Provider implementation with native and XML fallback protocols.
 """
 
 import json
+import re as _re
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, Iterator, List, Literal, Optional
 
@@ -15,6 +16,37 @@ from ayder_cli.providers.base import (
     NormalizedStreamChunk,
     ToolCallDef,
 )
+
+# Model families whose Ollama integration emits tool calls as XML text inside
+# msg.content rather than through the native msg.tool_calls channel. For these
+# models, stream_with_tools routes through _stream_xml_fallback even when the
+# user has the default chat_protocol="ollama".
+#
+# Patterns are matched case-insensitively as substrings against the model name,
+# so they accept tags (":7b", ":latest"), registry prefixes (e.g. "hf.co/..."),
+# and owner paths. Extend this list when a new family is reported to leak XML.
+_MODEL_REQUIRES_XML_FALLBACK_PATTERNS: tuple[str, ...] = (
+    r"deepseek-r1",
+    r"deepseek-v3",
+    r"deepseek-coder",
+    r"minimax-m1",
+)
+
+_MODEL_REQUIRES_XML_FALLBACK_RE = _re.compile(
+    "|".join(_MODEL_REQUIRES_XML_FALLBACK_PATTERNS),
+    _re.IGNORECASE,
+)
+
+
+def _requires_xml_fallback(model: str) -> bool:
+    """Return True if `model` belongs to a family that emits XML tool calls.
+
+    Substring match on the normalized model string so the matcher works for
+    tagged, qualified, or registry-prefixed model names alike.
+    """
+    if not model:
+        return False
+    return _MODEL_REQUIRES_XML_FALLBACK_RE.search(model) is not None
 
 XML_INSTRUCTION = """
 ### TOOL PROTOCOL:
@@ -438,11 +470,27 @@ class OllamaProvider(AIProvider):
         opts = options or {}
         num_ctx = opts.get("num_ctx", 65536)
 
-        if self.config.chat_protocol != "ollama":
+        # Decide effective protocol. User-selected chat_protocol="xml" always
+        # forces XML. With the default chat_protocol="ollama", auto-upgrade to
+        # XML for model families known to emit tool calls as XML in msg.content
+        # rather than on the native msg.tool_calls channel (e.g. DeepSeek).
+        use_xml_fallback = self.config.chat_protocol != "ollama"
+        if not use_xml_fallback and _requires_xml_fallback(model):
+            use_xml_fallback = True
             logger.info(
-                f"Ollama using XML fallback protocol (chat_protocol={self.config.chat_protocol!r})"
+                f"Ollama auto-routing to XML fallback for model={model!r} "
+                f"(family emits XML tool calls inside msg.content)"
             )
-            async for chunk in self._stream_xml_fallback(messages, model, tools, opts, verbose):
+
+        if use_xml_fallback:
+            if self.config.chat_protocol != "ollama":
+                logger.info(
+                    f"Ollama using XML fallback protocol "
+                    f"(chat_protocol={self.config.chat_protocol!r})"
+                )
+            async for chunk in self._stream_xml_fallback(
+                messages, model, tools, opts, verbose
+            ):
                 yield chunk
             return
 
