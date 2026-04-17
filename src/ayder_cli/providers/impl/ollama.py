@@ -470,11 +470,27 @@ class OllamaProvider(AIProvider):
         opts = options or {}
         num_ctx = opts.get("num_ctx", 65536)
 
-        if self.config.chat_protocol != "ollama":
+        # Decide effective protocol. User-selected chat_protocol="xml" always
+        # forces XML. With the default chat_protocol="ollama", auto-upgrade to
+        # XML for model families known to emit tool calls as XML in msg.content
+        # rather than on the native msg.tool_calls channel (e.g. DeepSeek).
+        use_xml_fallback = self.config.chat_protocol != "ollama"
+        if not use_xml_fallback and _requires_xml_fallback(model):
+            use_xml_fallback = True
             logger.info(
-                f"Ollama using XML fallback protocol (chat_protocol={self.config.chat_protocol!r})"
+                f"Ollama auto-routing to XML fallback for model={model!r} "
+                f"(family emits XML tool calls inside msg.content)"
             )
-            async for chunk in self._stream_xml_fallback(messages, model, tools, opts, verbose):
+
+        if use_xml_fallback:
+            if self.config.chat_protocol != "ollama":
+                logger.info(
+                    f"Ollama using XML fallback protocol "
+                    f"(chat_protocol={self.config.chat_protocol!r})"
+                )
+            async for chunk in self._stream_xml_fallback(
+                messages, model, tools, opts, verbose
+            ):
                 yield chunk
             return
 
