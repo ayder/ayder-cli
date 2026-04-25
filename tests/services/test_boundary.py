@@ -144,3 +144,41 @@ class TestImportGuard:
         except ImportError:
             # This is the desired end state after decoupling
             pass
+
+
+class TestTUIAdapterBoundary:
+    """Architectural guards for TUI adapter boundaries."""
+
+    def test_tui_adapter_not_imported_by_services(self):
+        """services/ must not import adapter modules (no circular deps)."""
+        project_root = Path(__file__).parent.parent.parent
+        services_dir = project_root / "src" / "ayder_cli" / "services"
+        for py_file in services_dir.rglob("*.py"):
+            if py_file.name == "__init__.py":
+                continue
+            tree = ast.parse(py_file.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        assert "adapter" not in alias.name, f"{py_file} imports adapter"
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        assert "adapter" not in node.module, f"{py_file} imports from adapter"
+
+    def test_tui_adapter_exists_in_tui_layer(self):
+        """TUI adapter module exists in the TUI layer."""
+        project_root = Path(__file__).parent.parent.parent
+        assert (project_root / "src" / "ayder_cli" / "tui" / "adapter.py").exists()
+
+    def test_cli_adapter_removed_from_ui_layer(self):
+        """cli_adapter.py was deleted — the TUI path is the only live adapter."""
+        project_root = Path(__file__).parent.parent.parent
+        assert not (project_root / "src" / "ayder_cli" / "ui" / "cli_adapter.py").exists()
+
+
+class TestInteractionSinkExports:
+    """Verify InteractionSink is properly exported from services package."""
+
+    def test_services_exports_interaction_sink(self):
+        from ayder_cli import services
+        assert hasattr(services, "InteractionSink")

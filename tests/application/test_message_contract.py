@@ -4,8 +4,14 @@ These tests validate that message handling works correctly for both
 dict messages and provider object messages with attributes.
 """
 
-import pytest
 from unittest.mock import Mock
+
+from ayder_cli.application.message_contract import (
+    get_message_role,
+    get_message_content,
+    get_message_tool_calls,
+    to_message_dict,
+)
 
 
 class TestGetMessageRole:
@@ -13,12 +19,6 @@ class TestGetMessageRole:
 
     def test_get_message_role_from_dict(self):
         """Extract role from dict message."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_role
-
         message = {"role": "user", "content": "hello"}
         result = get_message_role(message)
 
@@ -26,12 +26,6 @@ class TestGetMessageRole:
 
     def test_get_message_role_from_object(self):
         """Extract role from object message with .role attribute."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_role
-
         message = Mock()
         message.role = "assistant"
 
@@ -41,12 +35,6 @@ class TestGetMessageRole:
 
     def test_get_message_role_missing_field(self):
         """Handle missing role field gracefully."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_role
-
         message = {"content": "hello"}  # No role
         result = get_message_role(message)
 
@@ -54,12 +42,6 @@ class TestGetMessageRole:
 
     def test_get_message_role_empty_string(self):
         """Handle empty role string."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_role
-
         message = {"role": "", "content": "hello"}
         result = get_message_role(message)
 
@@ -67,12 +49,6 @@ class TestGetMessageRole:
 
     def test_get_message_role_various_roles(self):
         """Handle all standard message roles."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_role
-
         roles = ["system", "user", "assistant", "tool"]
         for role in roles:
             dict_msg = {"role": role}
@@ -88,12 +64,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_from_dict(self):
         """Extract content from dict message."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         message = {"role": "user", "content": "hello world"}
         result = get_message_content(message)
 
@@ -101,12 +71,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_from_object(self):
         """Extract content from object message with .content attribute."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         message = Mock()
         message.content = "assistant response"
 
@@ -116,12 +80,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_missing_field(self):
         """Return empty string when content missing."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         message = {"role": "user"}  # No content
         result = get_message_content(message)
 
@@ -129,12 +87,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_none_value(self):
         """Return empty string when content is None."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         message = {"role": "assistant", "content": None}
         result = get_message_content(message)
 
@@ -142,12 +94,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_non_string(self):
         """Coerce non-string content to string."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         # Test with integer
         message = {"role": "user", "content": 42}
         result = get_message_content(message)
@@ -157,12 +103,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_empty_string(self):
         """Handle empty content string."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         message = {"role": "user", "content": ""}
         result = get_message_content(message)
 
@@ -170,12 +110,6 @@ class TestGetMessageContent:
 
     def test_get_message_content_multiline(self):
         """Handle multiline content."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         content = "Line 1\nLine 2\nLine 3"
         message = {"role": "assistant", "content": content}
         result = get_message_content(message)
@@ -188,12 +122,6 @@ class TestGetMessageToolCalls:
 
     def test_get_message_tool_calls_from_dict(self):
         """Extract tool_calls from dict message."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_tool_calls
-
         tool_calls = [{"id": "call_1", "function": {"name": "read_file"}}]
         message = {"role": "assistant", "tool_calls": tool_calls}
         result = get_message_tool_calls(message)
@@ -202,12 +130,6 @@ class TestGetMessageToolCalls:
 
     def test_get_message_tool_calls_from_object(self):
         """Extract tool_calls from object message with .tool_calls attribute."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_tool_calls
-
         tool_calls = [{"id": "call_1", "function": {"name": "read_file"}}]
         message = Mock()
         message.tool_calls = tool_calls
@@ -218,12 +140,6 @@ class TestGetMessageToolCalls:
 
     def test_get_message_tool_calls_missing(self):
         """Return empty list when tool_calls missing."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_tool_calls
-
         message = {"role": "assistant", "content": "hello"}
         result = get_message_tool_calls(message)
 
@@ -231,12 +147,6 @@ class TestGetMessageToolCalls:
 
     def test_get_message_tool_calls_none(self):
         """Return empty list when tool_calls is None."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_tool_calls
-
         message = {"role": "assistant", "tool_calls": None}
         result = get_message_tool_calls(message)
 
@@ -244,12 +154,6 @@ class TestGetMessageToolCalls:
 
     def test_get_message_tool_calls_empty_list(self):
         """Return empty list when tool_calls is empty."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_tool_calls
-
         message = {"role": "assistant", "tool_calls": []}
         result = get_message_tool_calls(message)
 
@@ -257,12 +161,6 @@ class TestGetMessageToolCalls:
 
     def test_get_message_tool_calls_multiple(self):
         """Handle multiple tool calls."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_tool_calls
-
         tool_calls = [
             {"id": "call_1", "function": {"name": "read_file"}},
             {"id": "call_2", "function": {"name": "write_file"}},
@@ -280,12 +178,6 @@ class TestToMessageDict:
 
     def test_to_message_dict_from_dict(self):
         """Passthrough for already-dict message."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import to_message_dict
-
         message = {"role": "user", "content": "hello"}
         result = to_message_dict(message)
 
@@ -297,12 +189,6 @@ class TestToMessageDict:
 
     def test_to_message_dict_from_object(self):
         """Convert object message to dict."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import to_message_dict
-
         message = Mock()
         message.role = "assistant"
         message.content = "response"
@@ -316,12 +202,6 @@ class TestToMessageDict:
 
     def test_to_message_dict_preserves_tool_calls(self):
         """Preserve tool_calls when converting object to dict."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import to_message_dict
-
         tool_calls = [{"id": "call_1", "function": {"name": "read_file"}}]
         message = Mock()
         message.role = "assistant"
@@ -332,14 +212,21 @@ class TestToMessageDict:
 
         assert result["tool_calls"] == tool_calls
 
+    def test_to_message_dict_preserves_name(self):
+        """Preserve name field on tool-result-like objects."""
+        message = Mock()
+        message.role = "tool"
+        message.content = "ok"
+        message.name = "write_file"
+        message.tool_call_id = None
+        message.tool_calls = None
+
+        result = to_message_dict(message)
+
+        assert result["name"] == "write_file"
+
     def test_to_message_dict_handles_optional_fields(self):
         """Handle objects without optional fields."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import to_message_dict
-
         message = Mock()
         message.role = "user"
         message.content = "hello"
@@ -357,12 +244,6 @@ class TestMessageContractMixed:
 
     def test_get_message_role_dict_and_object(self):
         """Role extraction works for both formats."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_role
-
         dict_msg = {"role": "user", "content": "dict message"}
         obj_msg = Mock()
         obj_msg.role = "assistant"
@@ -372,12 +253,6 @@ class TestMessageContractMixed:
 
     def test_get_message_content_dict_and_object(self):
         """Content extraction works for both formats."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         dict_msg = {"role": "user", "content": "dict content"}
         obj_msg = Mock()
         obj_msg.content = "object content"
@@ -391,18 +266,10 @@ class TestCheckpointSummaryIntegration:
 
     def test_checkpoint_summary_with_mixed_messages(self):
         """Summary generation works with dict/object messages.
-        
+
         This validates the message contract integration in memory.py
         and checkpoint flows.
         """
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import (
-            get_message_role, get_message_content
-        )
-
         # Mixed message list
         dict_msg = {"role": "user", "content": "Hello from dict"}
         obj_msg = Mock()
@@ -425,14 +292,6 @@ class TestCheckpointSummaryIntegration:
 
     def test_checkpoint_summary_with_tool_calls(self):
         """Summary handles messages with tool calls."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import (
-            get_message_role, get_message_content, get_message_tool_calls
-        )
-
         tool_calls = [{"id": "call_1", "function": {"name": "read_file"}}]
         dict_msg = {
             "role": "assistant",
@@ -458,12 +317,6 @@ class TestCheckpointSummaryIntegration:
 
     def test_checkpoint_summary_with_missing_content(self):
         """Summary handles messages with missing/None content gracefully."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         # Dict with None content
         dict_msg = {"role": "assistant", "content": None}
         # Object with no content attribute
@@ -480,14 +333,6 @@ class TestMessageContractEdgeCases:
 
     def test_empty_dict_message(self):
         """Handle completely empty dict."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import (
-            get_message_role, get_message_content, get_message_tool_calls
-        )
-
         message = {}
 
         assert get_message_role(message) == "unknown"
@@ -496,19 +341,11 @@ class TestMessageContractEdgeCases:
 
     def test_object_with_nested_attributes(self):
         """Handle object with nested message attributes."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import (
-            get_message_role, get_message_content
-        )
-
         # Provider-specific format with nested message
         message = Mock()
         message.role = "assistant"
         message.content = None
-        
+
         # Some providers nest content
         inner_message = Mock()
         inner_message.content = "nested content"
@@ -523,12 +360,6 @@ class TestMessageContractEdgeCases:
 
     def test_unicode_content(self):
         """Handle unicode content correctly."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         unicode_content = "Hello 世界 🌍 ñoño"
         dict_msg = {"role": "user", "content": unicode_content}
         obj_msg = Mock()
@@ -539,12 +370,6 @@ class TestMessageContractEdgeCases:
 
     def test_very_long_content(self):
         """Handle very long content."""
-        pytest.importorskip(
-            "ayder_cli.application.message_contract",
-            reason="Message contract not yet implemented by DEV-02.4"
-        )
-        from ayder_cli.application.message_contract import get_message_content
-
         long_content = "x" * 10000
         message = {"role": "assistant", "content": long_content}
 
