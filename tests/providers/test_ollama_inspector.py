@@ -21,6 +21,11 @@ def inspector(mock_client):
         return OllamaInspector(host="http://localhost:11434")
 
 
+def test_model_info_has_name_field_with_empty_default():
+    info = ModelInfo()
+    assert info.name == ""
+
+
 @pytest.mark.asyncio
 async def test_get_model_info_extracts_context_length(inspector, mock_client):
     """Should find context_length from family-prefixed key in modelinfo."""
@@ -34,6 +39,7 @@ async def test_get_model_info_extracts_context_length(inspector, mock_client):
 
     info = await inspector.get_model_info("qwen3-coder:latest")
 
+    assert info.name == "qwen3-coder:latest"
     assert info.max_context_length == 131072
     assert info.family == "qwen2"
     assert info.quantization == "Q4_K_M"

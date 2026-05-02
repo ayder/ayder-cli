@@ -14,6 +14,7 @@ from ollama import AsyncClient
 @dataclass
 class ModelInfo:
     """Model metadata from /api/show."""
+    name: str = ""
     max_context_length: int = 0
     capabilities: list[str] = field(default_factory=list)
     quantization: str = ""
@@ -53,6 +54,7 @@ class OllamaInspector:
         quantization = getattr(details, "quantization_level", "") or ""
 
         return ModelInfo(
+            name=model,
             max_context_length=max_ctx,
             capabilities=capabilities,
             quantization=quantization,
