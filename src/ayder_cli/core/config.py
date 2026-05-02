@@ -277,10 +277,10 @@ class Config(BaseModel):
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     use_chat_drivers: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "When True, OllamaProvider routes through the per-family ChatDriver "
-            "registry instead of the legacy regex-based XML fallback."
+            "Routes OllamaProvider through the per-family ChatDriver registry. "
+            "Disable to fall back to the legacy regex-based XML fallback."
         ),
     )
     stop_sequences: list[str] = Field(default_factory=list)

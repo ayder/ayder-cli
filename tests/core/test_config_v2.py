@@ -63,9 +63,9 @@ def test_invalid_driver_raises_descriptive_error():
         )
 
 
-def test_use_chat_drivers_defaults_to_false():
+def test_use_chat_drivers_defaults_to_true():
     cfg = Config(driver="ollama", base_url="http://localhost:11434", model="x")
-    assert cfg.use_chat_drivers is False
+    assert cfg.use_chat_drivers is True
 
 
 def test_use_chat_drivers_can_be_enabled():
