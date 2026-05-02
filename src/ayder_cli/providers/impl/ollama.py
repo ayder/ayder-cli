@@ -30,6 +30,12 @@ _MODEL_REQUIRES_XML_FALLBACK_PATTERNS: tuple[str, ...] = (
     r"deepseek-v3",
     r"deepseek-coder",
     r"minimax-m1",
+    # qwen2/qwen3 emit <tool_call> XML in msg.content; recent Ollama servers
+    # try to extract these server-side and crash with "XML syntax error: unexpected
+    # EOF" on truncated/malformed output (ollama/ollama#14834, #14570). Routing
+    # through the in-house XML fallback bypasses the broken server-side parser.
+    r"qwen2",
+    r"qwen3",
 )
 
 _MODEL_REQUIRES_XML_FALLBACK_RE = _re.compile(

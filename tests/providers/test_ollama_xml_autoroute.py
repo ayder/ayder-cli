@@ -25,9 +25,19 @@ from ayder_cli.providers.impl.ollama import _requires_xml_fallback
     "deepseek-coder-v2:16b",
     "minimax-m1",
     "minimax-m1:latest",
+    # qwen2/qwen3 server-side XML extractor crashes on truncated tool calls
+    # ("XML syntax error: unexpected EOF") — must route through in-house parser.
+    "qwen3",
+    "qwen3:6b",
+    "qwen3.6",
+    "qwen3.6:latest",
+    "qwen3-coder:latest",
+    "qwen2",
+    "qwen2.5-coder:7b",
     # Case insensitive — Ollama model tags often mix cases
     "DeepSeek-R1",
     "MiniMax-M1",
+    "Qwen3-Coder",
 ])
 def test_requires_xml_fallback_matches_known_families(model):
     assert _requires_xml_fallback(model) is True, (
@@ -36,8 +46,6 @@ def test_requires_xml_fallback_matches_known_families(model):
 
 
 @pytest.mark.parametrize("model", [
-    "qwen3-coder:latest",  # Qwen3 has working native tool calling on Ollama
-    "qwen2.5-coder:7b",
     "llama3.1:8b",
     "llama3.3:70b",
     "mistral-nemo:latest",
