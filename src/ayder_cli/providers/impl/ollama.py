@@ -1,6 +1,4 @@
-"""
-Ollama Provider implementation with native and XML fallback protocols.
-"""
+"""Ollama provider routed through per-family chat drivers."""
 
 import json
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -17,18 +15,19 @@ from ayder_cli.providers.impl.ollama_drivers._errors import (
     OllamaServerToolBug,
     classify_ollama_error,
 )
-from ayder_cli.providers.impl.ollama_drivers.base import DriverMode
+from ayder_cli.providers.impl.ollama_drivers.base import ChatDriver, DriverMode
 from ayder_cli.providers.impl.ollama_drivers.registry import DriverRegistry
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
 
 class OllamaProvider(AIProvider):
-    """
-    Native provider for local Ollama models.
-    Supports both native tool calling (chat_protocol = "ollama")
-    and an XML-based prompt fallback (chat_protocol = "xml").
+    """Native wire-protocol provider for local Ollama models.
 
-    Built on ollama.AsyncClient for full observability (timing, token counts).
+    Family-specific prompt rendering and tool-call parsing live in
+    ollama_drivers. DriverRegistry resolves the active driver via explicit
+    chat_protocol override, matrix lookup, driver self-claim, then the native
+    default. Reactive fallback runs only for classified Ollama server tool bugs
+    before the stream has committed user-visible output.
     """
 
     def __init__(self, config: Any, interaction_sink: Any = None) -> None:
@@ -119,11 +118,11 @@ class OllamaProvider(AIProvider):
 
     async def _stream_with_driver(
         self,
-        driver: Any,
-        messages: List[Dict[str, Any]],
+        driver: ChatDriver,
+        messages: list[dict[str, Any]],
         model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         try:
             if driver.mode is DriverMode.NATIVE:
@@ -142,10 +141,10 @@ class OllamaProvider(AIProvider):
 
     async def _stream_native(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         opts = options or {}
         num_ctx = opts.get("num_ctx", 65536)
@@ -200,11 +199,11 @@ class OllamaProvider(AIProvider):
 
     async def _stream_in_content(
         self,
-        driver: Any,
-        messages: List[Dict[str, Any]],
+        driver: ChatDriver,
+        messages: list[dict[str, Any]],
         model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         opts = options or {}
         num_ctx = opts.get("num_ctx", 65536)

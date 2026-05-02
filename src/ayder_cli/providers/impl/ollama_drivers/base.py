@@ -10,7 +10,6 @@ See docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md section 6.1.
 from __future__ import annotations
 
 from abc import ABC
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -21,14 +20,6 @@ from ayder_cli.providers.impl.ollama_inspector import ModelInfo
 class DriverMode(Enum):
     NATIVE = "native"
     IN_CONTENT = "in_content"
-
-
-@dataclass
-class StreamEvent:
-    """Optional driver display-filter output."""
-
-    type: str
-    text: str = ""
 
 
 class ChatDriver(ABC):

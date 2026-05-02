@@ -75,6 +75,26 @@ async def test_resolve_falls_back_to_generic_native_when_inspector_fails():
 
 
 @pytest.mark.asyncio
+async def test_resolve_uses_driver_self_claim_when_matrix_does_not_match():
+    inspector = _stub_inspector(ModelInfo(family="custom-family", name="custom:latest"))
+    registry = DriverRegistry(inspector)
+
+    class _CustomDriver(ChatDriver):
+        name = "custom_self_claim"
+        mode = DriverMode.IN_CONTENT
+
+        @classmethod
+        def supports(cls, model_info: ModelInfo) -> bool:
+            return model_info.family == "custom-family"
+
+    registry._drivers.insert(0, _CustomDriver())
+
+    driver = await registry.resolve("custom:latest")
+
+    assert driver.name == "custom_self_claim"
+
+
+@pytest.mark.asyncio
 async def test_get_returns_driver_by_name():
     inspector = _stub_inspector(ModelInfo(family="llama"))
     registry = DriverRegistry(inspector)
