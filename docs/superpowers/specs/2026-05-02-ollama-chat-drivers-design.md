@@ -42,7 +42,7 @@ The user's explicit constraints, captured during brainstorm:
 
 ## 3. Non-Goals
 
-- **Solving Ollama's upstream tool-extraction bug.** That is a separate concern, optionally addressed by an upstream PR. The client-side workaround in this spec ships independently and remains useful regardless of upstream timeline.
+- **Solving Ollama's upstream tool-extraction bug.** The client-side workaround in this spec is independent and remains useful regardless of upstream state.
 - **Rewriting the project in Go.** Considered and rejected as scope expansion. The chat-driver pattern is implementable in Python at ~10% of a rewrite's cost.
 - **Replacing `XML_INSTRUCTION` everywhere.** The universal XML instruction survives as the *content* of `GenericXMLDriver` — used only as a last-resort fallback for unknown families that aren't tools-capable. It is no longer the primary or default path for any known family.
 - **Touching non-Ollama providers** (OpenAI, Claude, Gemini, DashScope/Qwen, GLM, DeepSeek HTTP). Their wire-level tool calling already works. This redesign is scoped to `OllamaProvider`.
@@ -59,7 +59,6 @@ The user's explicit constraints, captured during brainstorm:
 | Q5 | Implementation cost vs ideal | **Practical hybrid (B)**: per-family system-message snippets and per-family parsers, selected via `OllamaInspector.family`. ~95% of an ideal Go-template-rendering solution at ~10% of the cost. |
 | extra | Driver registration mechanism | Auto-discovery from `ollama_drivers/` package; new file dropped in is auto-registered. |
 | extra | Resolution mechanism | **Two-tier**: a small declarative matrix (data file) for tested mappings, with `ChatDriver.supports()` self-claim as the open-extension hook for custom-trained variants. |
-| extra | Upstream Ollama PR | Out-of-scope optional follow-up, not on this spec's critical path. |
 
 ## 5. Architecture
 
@@ -566,15 +565,7 @@ Backward compatibility:
 | Fallback loops indefinitely | Fallback runs once per turn (no recursive fallback); `generic_xml.fallback_driver = None` is the terminal state; classification is one-shot. |
 | Reactive fallback masks a genuine model failure | Logged at INFO (not DEBUG). Persistent fallback firing is observable in operator logs. |
 
-## 12. Future Work
-
-- **Upstream Ollama PR** for issue #14834 — addresses the root cause of the qwen3 native-path crash. Independent timeline; reduces our maintenance burden once shipped and propagated to user-installed Ollama versions.
-- **Server-version-gated matrix rules** — when an Ollama fix lands, gate the qwen3 matrix row on `ollama_server_version < "0.X.Y"`. Requires a small `OllamaInspector.server_version()` helper. Out of scope for v1.
-- **Capability-scoring resolver** — replace hard `matches()` with a graded `score(info)` per driver. Useful when multiple drivers could plausibly handle the same model. Migration trigger: matrix grows to ~30 rows OR a row needs OR/regex semantics.
-- **YAML/TOML matrix loading** — externalize the matrix to a config file so ops can ship hotfixes without code changes. Migration trigger: first ops-driven hotfix request.
-- **Pure self-claim resolution** — drop the matrix entirely once driver `supports()` methods cover the field. Migration trigger: matrix entries fully duplicated by `supports()` overrides.
-
-## 13. References
+## 12. References
 
 - Ollama issue [#14834](https://github.com/ollama/ollama/issues/14834): "qwen tool call parsing failed XML syntax error".
 - Ollama issue [#14570](https://github.com/ollama/ollama/issues/14570): "qwen3 tool call parser returns 500 when output truncated".
@@ -583,7 +574,7 @@ Backward compatibility:
 - Existing tests: `tests/providers/test_ollama_xml_autoroute.py` (will be re-targeted at matrix).
 - Brainstorm conversation: 2026-05-02 session, Q1–Q5 + matrix refinement.
 
-## 14. Open Questions for Implementation Plan
+## 13. Open Questions for Implementation Plan
 
 These are deferred to the writing-plans phase, not blockers for spec approval:
 
