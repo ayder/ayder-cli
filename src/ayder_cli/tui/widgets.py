@@ -22,12 +22,11 @@ def _sanitize_for_assistant_render(content: str) -> str:
     """Strip tool-call XML markup from assistant content before it is rendered
     as Markdown in the TUI.
 
-    Defense-in-depth: Ollama's XML-fallback matcher
-    (`_requires_xml_fallback` in providers/impl/ollama.py) cannot enumerate
-    every current and future model that emits XML tool calls inside
-    msg.content. When a provider leaks such tags, this helper removes them
-    from the rendered view so the chat display stays clean. Stored message
-    history is never mutated — only the rendered form.
+    Defense-in-depth: per-family Ollama chat drivers should strip or parse
+    tool-call markup before display, but future model variants can still leak
+    XML tags in msg.content. When a provider leaks such tags, this helper
+    removes them from the rendered view so the chat display stays clean.
+    Stored message history is never mutated — only the rendered form.
     """
     if not content:
         return content
@@ -944,4 +943,3 @@ class AgentPanel(Container):
             if entry.detail_widget:
                 entry.detail_widget.remove()
             del self._entries[to_prune]
-

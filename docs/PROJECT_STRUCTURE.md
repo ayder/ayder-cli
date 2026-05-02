@@ -241,7 +241,7 @@ All LLM provider implementations live here. Previously some sat under `services/
 | `providers/__init__.py` | Re-exports | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `provider_orchestrator` |
 | `providers/base.py` | Provider protocol + shared DTOs | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `_ToolCall`, `_FunctionCall` |
 | `providers/orchestrator.py` | Driver-keyed provider factory | `ProviderOrchestrator`, `provider_orchestrator` |
-| `providers/impl/ollama.py` | Native Ollama provider (ollama SDK) | `OllamaProvider`, `ToolStreamParser`, `XMLParserAdapter` |
+| `providers/impl/ollama.py` | Native Ollama provider (ollama SDK) | `OllamaProvider` |
 | `providers/impl/ollama_inspector.py` | Ollama model introspection | `OllamaInspector`, `ModelInfo`, `RuntimeState` |
 | `providers/impl/openai.py` | OpenAI / OpenAI-compatible backend | `OpenAIProvider` |
 | `providers/impl/claude.py` | Anthropic Claude backend | `ClaudeProvider` |
@@ -249,6 +249,28 @@ All LLM provider implementations live here. Previously some sat under `services/
 | `providers/impl/deepseek.py` | DeepSeek backend | `DeepseekProvider` |
 | `providers/impl/qwen.py` | Qwen backend | `QwenProvider` |
 | `providers/impl/glm.py` | GLM backend | `GLMProvider` |
+
+#### `providers/impl/ollama_drivers/` — Per-family Ollama chat drivers
+
+Each driver owns one model family's prompt template, parser, and detection.
+Adding a new family is one file plus its paired test in
+`tests/providers/ollama_drivers/test_<family>.py`. No edits to existing
+drivers, the registry, or `OllamaProvider` are required.
+
+| File | Purpose |
+|------|---------|
+| `base.py` | `ChatDriver` ABC, `DriverMode` enum |
+| `matrix.py` | `RESOLUTION_MATRIX` data table with add/remove rules in the module docstring |
+| `registry.py` | `DriverRegistry` with auto-discovery and matrix-first resolution |
+| `_errors.py` | `OllamaServerToolBug` and `classify_ollama_error` |
+| `generic_native.py` | Trusts Ollama's native `tools=[...]` extraction |
+| `generic_xml.py` | Universal `IN_CONTENT` XML fallback |
+| `qwen3.py` | qwen2/qwen3 trained format |
+| `deepseek.py` | deepseek-r1/v3/coder `<function_calls><invoke>` format |
+| `minimax.py` | MiniMax-M1 namespaced `<minimax:tool_call>` format |
+
+See `docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md` for
+the design rationale.
 
 ### Tool Modules
 
