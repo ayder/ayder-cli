@@ -51,6 +51,30 @@ async def test_resolve_uses_user_override_first():
 
 
 @pytest.mark.asyncio
+async def test_resolve_caches_on_repeat_call():
+    inspector = _stub_inspector(
+        ModelInfo(family="llama", name="llama3.1:8b", capabilities=["tools"])
+    )
+    registry = DriverRegistry(inspector)
+
+    first = await registry.resolve("llama3.1:8b")
+    second = await registry.resolve("llama3.1:8b")
+
+    assert first is second
+    assert first.name == "generic_native"
+    inspector.get_model_info.assert_called_once_with("llama3.1:8b")
+
+
+@pytest.mark.asyncio
+async def test_resolve_falls_back_to_generic_native_when_inspector_fails():
+    inspector = _stub_inspector(RuntimeError("boom"))
+    registry = DriverRegistry(inspector)
+
+    driver = await registry.resolve("any-model")
+    assert driver.name == "generic_native"
+
+
+@pytest.mark.asyncio
 async def test_get_returns_driver_by_name():
     inspector = _stub_inspector(ModelInfo(family="llama"))
     registry = DriverRegistry(inspector)
