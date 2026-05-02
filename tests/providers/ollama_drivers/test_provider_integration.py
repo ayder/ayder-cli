@@ -36,7 +36,7 @@ def _mock_chunk(content="", thinking="", done=False, tool_calls=None):
 
 @pytest.mark.asyncio
 async def test_provider_uses_legacy_path_when_flag_is_false():
-    cfg = _config("qwen3.6:latest", use_chat_drivers=False)
+    cfg = _config("qwen3.6:latest", use_chat_drivers=False, chat_protocol="xml")
     captured_kwargs: dict = {}
 
     async def fake_stream():
