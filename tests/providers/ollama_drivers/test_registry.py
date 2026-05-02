@@ -1,0 +1,71 @@
+"""Tests for DriverRegistry auto-discovery and resolve()."""
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from ayder_cli.providers.impl.ollama_drivers.base import ChatDriver, DriverMode
+from ayder_cli.providers.impl.ollama_drivers.registry import DriverRegistry
+from ayder_cli.providers.impl.ollama_inspector import ModelInfo
+
+
+def _stub_inspector(info_or_exc):
+    inspector = AsyncMock()
+    if isinstance(info_or_exc, Exception):
+        inspector.get_model_info.side_effect = info_or_exc
+    else:
+        inspector.get_model_info.return_value = info_or_exc
+    return inspector
+
+
+@pytest.mark.asyncio
+async def test_auto_discovery_constructs_registry():
+    inspector = _stub_inspector(ModelInfo(family="llama"))
+    registry = DriverRegistry(inspector)
+    assert registry is not None
+    assert hasattr(registry, "_drivers")
+
+
+@pytest.mark.asyncio
+async def test_auto_discovery_skips_abstract_bases():
+    inspector = _stub_inspector(ModelInfo(family="llama"))
+    registry = DriverRegistry(inspector)
+    assert "ChatDriver" not in (d.__class__.__name__ for d in registry._drivers)
+
+
+@pytest.mark.asyncio
+async def test_resolve_uses_user_override_first():
+    inspector = _stub_inspector(ModelInfo(family="qwen3"))
+    registry = DriverRegistry(inspector)
+
+    class _FakeOverride(ChatDriver):
+        name = "fake_override"
+        mode = DriverMode.NATIVE
+
+    registry._by_name["fake_override"] = _FakeOverride()
+    registry._drivers.append(_FakeOverride())
+
+    driver = await registry.resolve("any-model", override="fake_override")
+    assert driver.name == "fake_override"
+    inspector.get_model_info.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_returns_driver_by_name():
+    inspector = _stub_inspector(ModelInfo(family="llama"))
+    registry = DriverRegistry(inspector)
+
+    class _FakeDriver(ChatDriver):
+        name = "fake_x"
+        mode = DriverMode.NATIVE
+
+    registry._by_name["fake_x"] = _FakeDriver()
+    assert registry.get("fake_x").name == "fake_x"
+
+
+@pytest.mark.asyncio
+async def test_get_raises_keyerror_on_unknown_name():
+    inspector = _stub_inspector(ModelInfo(family="llama"))
+    registry = DriverRegistry(inspector)
+    with pytest.raises(KeyError):
+        registry.get("not_registered")
