@@ -16,6 +16,13 @@ from ayder_cli.providers.base import (
     NormalizedStreamChunk,
     ToolCallDef,
 )
+from ayder_cli.providers.impl.ollama_drivers._errors import (
+    OllamaServerToolBug,
+    classify_ollama_error,
+)
+from ayder_cli.providers.impl.ollama_drivers.base import DriverMode
+from ayder_cli.providers.impl.ollama_drivers.registry import DriverRegistry
+from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
 # Model families whose Ollama integration emits tool calls as XML text inside
 # msg.content rather than through the native msg.tool_calls channel. For these
@@ -436,7 +443,9 @@ class OllamaProvider(AIProvider):
         # Strip /v1 suffix if present (legacy config)
         if host.rstrip("/").endswith("/v1"):
             host = host.rstrip("/")[:-3]
+        self._host = host
         self._client = AsyncClient(host=host)
+        self._registry: DriverRegistry | None = None
 
     async def list_models(self) -> List[str]:
         try:
@@ -473,6 +482,25 @@ class OllamaProvider(AIProvider):
         options: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        if getattr(self.config, "use_chat_drivers", False) is True:
+            async for chunk in self._stream_via_drivers(
+                messages, model, tools, options, verbose
+            ):
+                yield chunk
+            return
+
+        async for chunk in self._stream_legacy(messages, model, tools, options, verbose):
+            yield chunk
+
+    async def _stream_legacy(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        options: Optional[Dict[str, Any]],
+        verbose: bool,
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        """Pre-driver implementation kept for the migration flag."""
         opts = options or {}
         num_ctx = opts.get("num_ctx", 65536)
 
@@ -547,6 +575,202 @@ class OllamaProvider(AIProvider):
                 raw_chunk=chunk,
                 usage=usage,
             )
+
+    async def _stream_via_drivers(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        options: Optional[Dict[str, Any]],
+        verbose: bool,
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        if self._registry is None:
+            inspector = OllamaInspector(host=self._host)
+            self._registry = DriverRegistry(inspector)
+
+        driver_override_name = (
+            None if self.config.chat_protocol == "ollama" else "generic_xml"
+        )
+        if (
+            driver_override_name is not None
+            and self.config.chat_protocol not in {"ollama", "xml"}
+        ):
+            logger.warning(
+                f"Ollama chat_protocol={self.config.chat_protocol!r} is not "
+                "recognized; forcing generic_xml fallback"
+            )
+
+        driver = await self._registry.resolve(model, override=driver_override_name)
+        logger.debug(f"Ollama driver={driver.name} mode={driver.mode.value} for {model!r}")
+
+        committed = False
+        try:
+            async for chunk in self._stream_with_driver(
+                driver, messages, model, tools, options
+            ):
+                if chunk.content or chunk.reasoning or chunk.tool_calls:
+                    committed = True
+                yield chunk
+        except OllamaServerToolBug as exc:
+            if committed or not driver.fallback_driver:
+                raise
+            fallback = self._registry.get(driver.fallback_driver)
+            logger.info(
+                f"{driver.name} ({driver.mode.value}) failed mid-stream: {exc!r}; "
+                f"transparently retrying with {fallback.name} ({fallback.mode.value})"
+            )
+            async for chunk in self._stream_with_driver(
+                fallback, messages, model, tools, options
+            ):
+                yield chunk
+
+    async def _stream_with_driver(
+        self,
+        driver: Any,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        options: Optional[Dict[str, Any]],
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        try:
+            if driver.mode is DriverMode.NATIVE:
+                async for chunk in self._stream_native(messages, model, tools, options):
+                    yield chunk
+            else:
+                async for chunk in self._stream_in_content(
+                    driver, messages, model, tools, options
+                ):
+                    yield chunk
+        except BaseException as exc:
+            classified = classify_ollama_error(exc)
+            if classified is exc:
+                raise
+            raise classified from exc
+
+    async def _stream_native(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        options: Optional[Dict[str, Any]],
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        opts = options or {}
+        num_ctx = opts.get("num_ctx", 65536)
+        ollama_tools = self._convert_tools(tools) if tools else None
+        ollama_messages = self._convert_messages(messages)
+
+        stream = await self._client.chat(
+            model=model,
+            messages=ollama_messages,
+            tools=ollama_tools,
+            options={"num_ctx": num_ctx},
+            keep_alive=-1,
+            think=True,
+            stream=True,
+        )
+
+        async for chunk in stream:
+            msg = chunk.message
+            usage = None
+            if chunk.done:
+                usage = {
+                    "total_tokens": (chunk.prompt_eval_count or 0)
+                    + (chunk.eval_count or 0),
+                    "prompt_tokens": chunk.prompt_eval_count or 0,
+                    "completion_tokens": chunk.eval_count or 0,
+                    "prompt_eval_ns": chunk.prompt_eval_duration or 0,
+                    "eval_ns": chunk.eval_duration or 0,
+                    "load_ns": chunk.load_duration or 0,
+                }
+
+            tool_calls = []
+            if msg.tool_calls:
+                for i, tc in enumerate(msg.tool_calls):
+                    args = tc.function.arguments
+                    if isinstance(args, dict):
+                        args = json.dumps(args)
+                    tool_calls.append(
+                        ToolCallDef(
+                            id=f"call_{i}",
+                            name=tc.function.name,
+                            arguments=args,
+                        )
+                    )
+
+            yield NormalizedStreamChunk(
+                content=msg.content or "",
+                reasoning=msg.thinking or "",
+                tool_calls=tool_calls,
+                raw_chunk=chunk,
+                usage=usage,
+            )
+
+    async def _stream_in_content(
+        self,
+        driver: Any,
+        messages: List[Dict[str, Any]],
+        model: str,
+        tools: Optional[List[Dict[str, Any]]],
+        options: Optional[Dict[str, Any]],
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        opts = options or {}
+        num_ctx = opts.get("num_ctx", 65536)
+        formatted_messages = driver.render_tools_into_messages(messages, tools or [])
+        ollama_messages = self._convert_messages(formatted_messages)
+
+        stream = await self._client.chat(
+            model=model,
+            messages=ollama_messages,
+            tools=None,
+            options={"num_ctx": num_ctx},
+            keep_alive=-1,
+            think=True,
+            stream=True,
+        )
+
+        raw_content = ""
+        raw_thinking = ""
+        display_filter = driver.display_filter()
+
+        async for chunk in stream:
+            msg = chunk.message
+            content_text = msg.content or ""
+            thinking_text = msg.thinking or ""
+            raw_content += content_text
+            raw_thinking += thinking_text
+
+            usage = None
+            if chunk.done:
+                usage = {
+                    "total_tokens": (chunk.prompt_eval_count or 0)
+                    + (chunk.eval_count or 0),
+                    "prompt_tokens": chunk.prompt_eval_count or 0,
+                    "completion_tokens": chunk.eval_count or 0,
+                    "prompt_eval_ns": chunk.prompt_eval_duration or 0,
+                    "eval_ns": chunk.eval_duration or 0,
+                    "load_ns": chunk.load_duration or 0,
+                }
+
+            if content_text or thinking_text or chunk.done:
+                if display_filter is not None:
+                    visible_content, visible_thinking = display_filter.feed(
+                        content_text, thinking_text
+                    )
+                else:
+                    visible_content = content_text
+                    visible_thinking = thinking_text
+
+                yield NormalizedStreamChunk(
+                    content=visible_content,
+                    reasoning=visible_thinking,
+                    tool_calls=[],
+                    raw_chunk=chunk,
+                    usage=usage,
+                )
+
+        final_calls = driver.parse_tool_calls(raw_content, raw_thinking)
+        if final_calls:
+            yield NormalizedStreamChunk(tool_calls=final_calls)
 
     async def _stream_xml_fallback(
         self,
