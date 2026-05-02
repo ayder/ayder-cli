@@ -63,6 +63,21 @@ def test_invalid_driver_raises_descriptive_error():
         )
 
 
+def test_use_chat_drivers_defaults_to_false():
+    cfg = Config(driver="ollama", base_url="http://localhost:11434", model="x")
+    assert cfg.use_chat_drivers is False
+
+
+def test_use_chat_drivers_can_be_enabled():
+    cfg = Config(
+        driver="ollama",
+        base_url="http://localhost:11434",
+        model="x",
+        use_chat_drivers=True,
+    )
+    assert cfg.use_chat_drivers is True
+
+
 def test_load_config_for_provider_uses_v2_profile(tmp_path, monkeypatch):
     config_dir = tmp_path / ".ayder"
     config_path = config_dir / "config.toml"
