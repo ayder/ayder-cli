@@ -1638,12 +1638,19 @@ from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
             inspector = OllamaInspector(host=self._client._client.base_url.host)
             self._registry = DriverRegistry(inspector)
 
-        override = (
-            self.config.chat_protocol
-            if self.config.chat_protocol in ("xml",)  # only "xml" forces a driver today
-            else None
+        # Preserve legacy semantics: chat_protocol="ollama" means
+        # auto-detect (matrix); anything else forces generic_xml.
+        # This matches the pre-Phase-1 behavior at ollama.py:483.
+        driver_override_name = (
+            None if self.config.chat_protocol == "ollama" else "generic_xml"
         )
-        driver_override_name = "generic_xml" if override == "xml" else None
+        if (driver_override_name is not None
+                and self.config.chat_protocol != "xml"):
+            logger.warning(
+                f"Unknown chat_protocol={self.config.chat_protocol!r}; "
+                f"treating as 'xml' (forces generic_xml driver). "
+                f"Set chat_protocol='ollama' for matrix-based auto-routing."
+            )
 
         driver = await self._registry.resolve(model, override=driver_override_name)
         logger.debug(
@@ -2816,7 +2823,7 @@ def _requires_xml_fallback(model: str) -> bool:
 
 - [ ] **Step 2: Update `_stream_legacy` to drop the regex check**
 
-The legacy method still uses `_requires_xml_fallback`. Since `_stream_legacy` is a deprecated path only triggered when `use_chat_drivers=False`, simplify it to always use `chat_protocol="xml"` to engage the XML path:
+The legacy method still uses `_requires_xml_fallback`. Since `_stream_legacy` is a deprecated path only triggered when `use_chat_drivers=False`, simplify it to drop the regex check while preserving the `!= "ollama"` rule for `chat_protocol`:
 
 In `_stream_legacy`, replace:
 
@@ -2830,9 +2837,10 @@ In `_stream_legacy`, replace:
 With:
 
 ```python
-        # Legacy path: only "xml" forces fallback. Family auto-routing now
-        # lives in DriverRegistry (use_chat_drivers=True).
-        use_xml_fallback = self.config.chat_protocol == "xml"
+        # Legacy path: any non-"ollama" chat_protocol forces XML fallback
+        # (matches pre-refactor semantics). Family auto-routing now lives
+        # in DriverRegistry (use_chat_drivers=True).
+        use_xml_fallback = self.config.chat_protocol != "ollama"
 ```
 
 - [ ] **Step 3: Drop the `_re` import if unused**
@@ -2888,10 +2896,11 @@ Now that the legacy in-content path can use the new `GenericXMLDriver`, replace 
         options: Optional[Dict[str, Any]],
         verbose: bool,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
-        """Legacy path. Now delegates to the same code as use_chat_drivers=True
-        but always forces generic_xml when chat_protocol == 'xml'.
-        Kept temporarily so a user with use_chat_drivers=False set explicitly
-        in their config doesn't break. Removed in Task 17."""
+        """Legacy path. Now delegates to the same code as use_chat_drivers=True;
+        chat_protocol semantics are preserved by _stream_via_drivers
+        (any non-"ollama" value forces generic_xml). Kept temporarily so a
+        user with use_chat_drivers=False set explicitly in their config
+        doesn't break. Removed in Task 16."""
         async for chunk in self._stream_via_drivers(
             messages, model, tools, options, verbose
         ):
@@ -2976,9 +2985,19 @@ Replace `stream_with_tools` body:
             inspector = OllamaInspector(host=self._client._client.base_url.host)
             self._registry = DriverRegistry(inspector)
 
+        # Preserve legacy semantics: chat_protocol="ollama" means
+        # auto-detect via matrix; any other value forces generic_xml.
         driver_override_name = (
-            "generic_xml" if self.config.chat_protocol == "xml" else None
+            None if self.config.chat_protocol == "ollama" else "generic_xml"
         )
+        if (driver_override_name is not None
+                and self.config.chat_protocol != "xml"):
+            logger.warning(
+                f"Unknown chat_protocol={self.config.chat_protocol!r}; "
+                f"treating as 'xml' (forces generic_xml driver). "
+                f"Set chat_protocol='ollama' for matrix-based auto-routing."
+            )
+
         driver = await self._registry.resolve(model, override=driver_override_name)
         logger.debug(
             f"Ollama driver={driver.name} mode={driver.mode.value} for {model!r}"
@@ -3148,7 +3167,7 @@ After Task 18:
 - `src/ayder_cli/providers/impl/ollama_drivers/` exists with `base.py`, `matrix.py`, `registry.py`, `_errors.py`, and 5 driver files.
 - `tests/providers/ollama_drivers/` has paired test files for every driver plus `test_matrix.py`, `test_registry.py`, `test_errors.py`, `test_fallback.py`, `test_provider_integration.py`.
 - The full test suite is green: roughly `1110 passed, 18 skipped` (1052 baseline + ~60 new).
-- `chat_protocol="xml"` user override still works (forces `GenericXMLDriver`).
+- `chat_protocol="ollama"` (default) → matrix-based auto-routing. Any other value (canonically `"xml"`, but any non-"ollama" string) → forces `GenericXMLDriver`. This matches pre-refactor semantics; a WARNING is logged for values other than `"ollama"` or `"xml"`.
 - qwen3.6 + Ollama 0.22+ no longer triggers `XML syntax error: unexpected EOF`. Verified by running the app interactively against a local Ollama with qwen3.6 and reading at least one tool call from the assistant.
 
 ---
