@@ -13,7 +13,6 @@ def _config():
     cfg.base_url = "http://localhost:11434"
     cfg.api_key = ""
     cfg.chat_protocol = "ollama"
-    cfg.use_chat_drivers = True
     return cfg
 
 

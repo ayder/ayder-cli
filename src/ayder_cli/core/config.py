@@ -276,13 +276,6 @@ class Config(BaseModel):
     max_history_messages: int = Field(default=30)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
-    use_chat_drivers: bool = Field(
-        default=True,
-        description=(
-            "Routes OllamaProvider through the per-family ChatDriver registry. "
-            "Disable to fall back to the legacy regex-based XML fallback."
-        ),
-    )
     stop_sequences: list[str] = Field(default_factory=list)
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)

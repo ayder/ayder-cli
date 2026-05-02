@@ -7,13 +7,12 @@ import pytest
 from ayder_cli.providers.impl.ollama import OllamaProvider
 
 
-def _config(model: str, use_chat_drivers: bool, chat_protocol: str = "ollama"):
+def _config(model: str, chat_protocol: str = "ollama"):
     cfg = MagicMock()
     cfg.base_url = "http://localhost:11434"
     cfg.api_key = ""
     cfg.model = model
     cfg.chat_protocol = chat_protocol
-    cfg.use_chat_drivers = use_chat_drivers
     return cfg
 
 
@@ -35,8 +34,8 @@ def _mock_chunk(content="", thinking="", done=False, tool_calls=None):
 
 
 @pytest.mark.asyncio
-async def test_provider_uses_driver_path_when_flag_is_true():
-    cfg = _config("llama3.1:8b", use_chat_drivers=True)
+async def test_provider_routes_through_drivers():
+    cfg = _config("llama3.1:8b")
     captured_kwargs: dict = {}
 
     async def fake_stream():
