@@ -23,4 +23,6 @@ def classify_ollama_error(exc: BaseException) -> Exception:
     message = str(exc).lower()
     if any(signature in message for signature in _BUG_SIGNATURES):
         return OllamaServerToolBug(str(exc))
+    if "eof" in message and "status code: -1" in message:
+        return OllamaServerToolBug(str(exc))
     return exc

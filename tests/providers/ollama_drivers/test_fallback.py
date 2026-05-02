@@ -43,7 +43,14 @@ def _show(family: str = "qwen3"):
 
 
 @pytest.mark.asyncio
-async def test_fallback_engages_when_uncommitted_xml_error():
+@pytest.mark.parametrize(
+    "error_message",
+    [
+        "XML syntax error on line 43: unexpected EOF",
+        "EOF (status code: -1)",
+    ],
+)
+async def test_fallback_engages_when_uncommitted_tool_bug(error_message):
     cfg = _config()
     call_count = {"chat": 0}
 
@@ -51,7 +58,7 @@ async def test_fallback_engages_when_uncommitted_xml_error():
         call_count["chat"] += 1
         if call_count["chat"] == 1:
             async def boom():
-                raise ResponseError("XML syntax error on line 43: unexpected EOF")
+                raise ResponseError(error_message)
                 yield
 
             return boom()
