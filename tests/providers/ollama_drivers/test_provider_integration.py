@@ -35,34 +35,6 @@ def _mock_chunk(content="", thinking="", done=False, tool_calls=None):
 
 
 @pytest.mark.asyncio
-async def test_provider_uses_legacy_path_when_flag_is_false():
-    cfg = _config("qwen3.6:latest", use_chat_drivers=False, chat_protocol="xml")
-    captured_kwargs: dict = {}
-
-    async def fake_stream():
-        yield _mock_chunk(content="ok", done=True)
-
-    async def fake_chat(*args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return fake_stream()
-
-    with patch("ayder_cli.providers.impl.ollama.AsyncClient") as mock_client:
-        instance = AsyncMock()
-        instance.chat.side_effect = fake_chat
-        mock_client.return_value = instance
-
-        provider = OllamaProvider(cfg)
-        async for _ in provider.stream_with_tools(
-            messages=[{"role": "user", "content": "hi"}],
-            model="qwen3.6:latest",
-            tools=[{"type": "function", "function": {"name": "read_file"}}],
-        ):
-            pass
-
-    assert captured_kwargs.get("tools") is None
-
-
-@pytest.mark.asyncio
 async def test_provider_uses_driver_path_when_flag_is_true():
     cfg = _config("llama3.1:8b", use_chat_drivers=True)
     captured_kwargs: dict = {}

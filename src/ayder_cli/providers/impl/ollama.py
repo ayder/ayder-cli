@@ -77,38 +77,6 @@ class OllamaProvider(AIProvider):
         options: Optional[Dict[str, Any]] = None,
         verbose: bool = False,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
-        if getattr(self.config, "use_chat_drivers", False) is True:
-            async for chunk in self._stream_via_drivers(
-                messages, model, tools, options, verbose
-            ):
-                yield chunk
-            return
-
-        async for chunk in self._stream_legacy(messages, model, tools, options, verbose):
-            yield chunk
-
-    async def _stream_legacy(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
-        verbose: bool,
-    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
-        """Temporary compatibility shim for the migration flag."""
-        async for chunk in self._stream_via_drivers(
-            messages, model, tools, options, verbose
-        ):
-            yield chunk
-
-    async def _stream_via_drivers(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        tools: Optional[List[Dict[str, Any]]],
-        options: Optional[Dict[str, Any]],
-        verbose: bool,
-    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         if self._registry is None:
             inspector = OllamaInspector(host=self._host)
             self._registry = DriverRegistry(inspector)
