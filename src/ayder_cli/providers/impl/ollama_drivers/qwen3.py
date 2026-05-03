@@ -1,4 +1,14 @@
-"""Qwen3Driver: qwen2/qwen3 trained tool-call format."""
+"""Qwen3Driver: qwen2/qwen3 trained tool-call format.
+
+Currently NOT routed to by the matrix or self-claim — the matrix routes qwen3
+to generic_native because Ollama's native tool extraction works on current
+versions, and injecting our own <tools>/<tool_call> XML into the system prompt
+trips Ollama's qwen3 template parser (bare-EOF mid-stream).
+
+Kept in-tree as a manual fallback option and as the IN_CONTENT format
+reference for future qwen3-family revisions where native extraction
+regresses. To re-enable, add a matrix row routing qwen3 family to "qwen3".
+"""
 
 from __future__ import annotations
 
@@ -34,7 +44,9 @@ class Qwen3Driver(ChatDriver):
     mode = DriverMode.IN_CONTENT
     priority = 50
     fallback_driver = "generic_xml"
-    supports_families = ("qwen2", "qwen3")
+    # Empty: not auto-claimed via supports(). Reachable only via explicit
+    # matrix rule or driver-name override. See module docstring.
+    supports_families = ()
 
     _RE_TOOL_CALL_JSON = re.compile(
         r"<(?:\w+:)?tool_call>\s*(\{.*?\})\s*</(?:\w+:)?tool_call>",

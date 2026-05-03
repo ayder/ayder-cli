@@ -43,7 +43,15 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ),
     ToolDefinition(
         name="read_file",
-        description="Read the contents of a file, optionally specifying a line range (1-based).",
+        description=(
+            "Read the contents of a file. Output uses '<line_no>: <text>' "
+            "formatting. Without a range, returns up to the first 2000 lines; "
+            "if the file is longer, the result includes a footer naming the "
+            "total line count and the exact follow-up call to fetch the next "
+            "page (call again with start_line set to the next line). Pass "
+            "explicit start_line / end_line (1-based, inclusive) to read a "
+            "specific slice."
+        ),
         description_template="File {file_path} will be read",
         tags=("core",),
         func_ref="ayder_cli.tools.builtins.filesystem:read_file",
@@ -56,11 +64,11 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 },
                 "start_line": {
                     "type": "integer",
-                    "description": "Line number to start reading from (1-based)",
+                    "description": "Line number to start reading from (1-based, inclusive)",
                 },
                 "end_line": {
                     "type": "integer",
-                    "description": "Line number to stop reading at (1-based)",
+                    "description": "Line number to stop reading at (1-based, inclusive)",
                 },
             },
             "required": ["file_path"],
@@ -68,6 +76,9 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         permission="r",
         parameter_aliases=_FILE_PATH_ALIASES,
         path_parameters=("file_path",),
+        # read_file paginates internally; the chat-loop's head+tail truncation
+        # would silently corrupt the deliberately-bounded page payload.
+        max_result_chars=0,
     ),
     ToolDefinition(
         name="file_editor",

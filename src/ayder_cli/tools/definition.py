@@ -46,6 +46,15 @@ class ToolDefinition:
     parameter_aliases: Tuple[Tuple[str, str], ...] = ()  # ((alias, canonical), ...)
     path_parameters: Tuple[str, ...] = ()  # parameter names resolved via ProjectContext
 
+    # ---- result handling ----
+    # Per-tool override for the chat-loop's generic tool-result truncation.
+    # ``None`` (default) → use the loop's global default.
+    # ``0`` → exempt from truncation; the tool's own output bounds the size
+    #        (e.g. read_file paginates, so head+tail truncation would corrupt
+    #        a deliberately-bounded payload).
+    # Any positive int → custom max_chars for this tool.
+    max_result_chars: Optional[int] = None
+
     def to_openai_schema(self) -> Dict[str, Any]:
         """Return the OpenAI function-calling dict for this tool.
 

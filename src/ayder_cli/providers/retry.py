@@ -59,6 +59,11 @@ _RETRYABLE_NAMES: frozenset[tuple[str, str]] = frozenset({
     ("anthropic", "APITimeoutError"),
     ("anthropic", "RateLimitError"),
     ("anthropic", "InternalServerError"),
+    # ollama — covers bare "EOF (status code: -1)" mid-stream (transport
+    # drop, server crash, OOM kill) and other transient server failures.
+    # The committed=False gate above ensures we never retry after content
+    # has been yielded to the chat loop.
+    ("ollama", "ResponseError"),
 })
 
 

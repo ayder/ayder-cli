@@ -12,12 +12,18 @@ def test_deepseek_metadata():
     assert DeepSeekDriver.mode is DriverMode.IN_CONTENT
     assert DeepSeekDriver.fallback_driver == "generic_xml"
     assert DeepSeekDriver.priority < 100
+    # Empty: not auto-claimed via supports(). Reachable only via explicit
+    # matrix rule or driver-name override. See module docstring.
+    assert DeepSeekDriver.supports_families == ()
 
 
-def test_deepseek_supports_v2_and_v3_families():
-    assert DeepSeekDriver.supports(ModelInfo(family="deepseek2"))
-    assert DeepSeekDriver.supports(ModelInfo(family="deepseek3"))
-    assert DeepSeekDriver.supports(ModelInfo(family="deepseek-coder"))
+def test_deepseek_does_not_self_claim_via_supports():
+    """DeepSeekDriver is currently dormant — matrix routes deepseek to
+    generic_native (verified empirically against deepseek-v4-pro:cloud).
+    supports() must return False for everything."""
+    assert not DeepSeekDriver.supports(ModelInfo(family="deepseek2"))
+    assert not DeepSeekDriver.supports(ModelInfo(family="deepseek3"))
+    assert not DeepSeekDriver.supports(ModelInfo(family="deepseek-coder"))
     assert not DeepSeekDriver.supports(ModelInfo(family="llama"))
 
 

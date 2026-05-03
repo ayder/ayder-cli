@@ -178,9 +178,8 @@ class OllamaProvider(AIProvider):
             tool_calls = []
             if msg.tool_calls:
                 for i, tc in enumerate(msg.tool_calls):
-                    args = tc.function.arguments
-                    if isinstance(args, dict):
-                        args = json.dumps(args)
+                    raw_args = tc.function.arguments
+                    args = raw_args if isinstance(raw_args, str) else json.dumps(raw_args)
                     tool_calls.append(
                         ToolCallDef(
                             id=f"call_{i}",

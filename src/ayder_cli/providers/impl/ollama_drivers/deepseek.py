@@ -1,4 +1,15 @@
-"""DeepSeekDriver for deepseek-r1, deepseek-v3, and deepseek-coder."""
+"""DeepSeekDriver for deepseek family — currently dormant.
+
+The matrix routes deepseek family to generic_native because Ollama's native
+tool extraction handles it cleanly on current versions (verified empirically
+against deepseek-v4-pro:cloud — clean tool_calls, no DSML leak). Injecting our
+own <function_calls> XML protocol caused the model to emit <｜DSML｜tool_calls>
+wrappers in content that leaked through the display layer.
+
+Kept in-tree as a manual fallback option and as the IN_CONTENT format
+reference for any future deepseek variant where native extraction regresses.
+To re-enable, add a matrix row routing the specific model/family to "deepseek".
+"""
 
 from __future__ import annotations
 
@@ -37,7 +48,9 @@ class DeepSeekDriver(ChatDriver):
     mode = DriverMode.IN_CONTENT
     priority = 50
     fallback_driver = "generic_xml"
-    supports_families = ("deepseek",)
+    # Empty: not auto-claimed via supports(). Reachable only via explicit
+    # matrix rule or driver-name override. See module docstring.
+    supports_families = ()
 
     def render_tools_into_messages(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]

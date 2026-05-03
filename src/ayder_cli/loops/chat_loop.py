@@ -461,7 +461,7 @@ class ChatLoop:
                 if isinstance(rd, dict):
                     tid = rd["tool_call_id"]
                     name = rd["name"]
-                    result = truncate_tool_result(str(rd["result"]))
+                    result = _truncate_for_tool(name, str(rd["result"]))
                     rd["result"] = result
                     self.cb.on_tool_complete(tid, result)
                 else:
@@ -483,7 +483,7 @@ class ChatLoop:
                     self.registry,
                     pre_approved=True,
                 )
-                result = truncate_tool_result(_unwrap_exec_result(exec_result))
+                result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
                 rd = {"tool_call_id": tc.id, "name": name, "result": result}
                 tool_results_map[tc.id] = rd
 
@@ -579,6 +579,23 @@ class ChatLoop:
         """Delegate to shared ExecutionPolicy — same check for CLI and TUI."""
         policy = ExecutionPolicy(self.config.permissions)
         return policy.get_confirmation_requirement(tool_name).requires_confirmation
+
+
+def _truncate_for_tool(tool_name: str, content: str) -> str:
+    """Truncate a tool result, honoring the per-tool ``max_result_chars`` override.
+
+    Tools that paginate internally (e.g. ``read_file``) declare
+    ``max_result_chars=0`` to opt out of the loop's generic head+tail
+    truncation, which would otherwise silently corrupt their bounded
+    output. ``None`` means "use the loop's default".
+    """
+    from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+    tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    override = tool_def.max_result_chars if tool_def else None
+    if override is None:
+        return truncate_tool_result(content)
+    return truncate_tool_result(content, max_chars=override)
 
 
 def _parse_arguments(arguments) -> dict:

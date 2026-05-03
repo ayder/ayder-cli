@@ -101,14 +101,19 @@ class TestReadFile:
     """Test read_file() function."""
 
     def test_read_entire_file(self, tmp_path, project_context):
-        """Test reading entire file."""
+        """Files at or below the default page size return all lines plus an
+        explicit [COMPLETE] footer so the caller never has to infer
+        completeness from absence of metadata."""
         test_file = tmp_path / "test.txt"
         test_content = "Line 1\nLine 2\nLine 3\n"
         test_file.write_text(test_content)
 
         result = impl.read_file(project_context, str(test_file))
         assert isinstance(result, ToolSuccess)
-        assert result == test_content
+        assert result.startswith("1: Line 1\n2: Line 2\n3: Line 3\n")
+        assert "[FILE:" in result
+        assert "COMPLETE: 3 lines" in result
+        assert "showing lines 1-3" in result
 
     def test_read_with_start_line(self, tmp_path, project_context):
         """Test reading with start_line parameter."""
@@ -161,6 +166,59 @@ class TestReadFile:
         assert "1: First line" in result
         assert "2: Second line" in result
         assert "3: Third line" in result
+
+    def test_read_file_paginates_long_files(self, tmp_path, project_context, monkeypatch):
+        """A file longer than the default page size returns the first page
+        plus a continuation footer naming total lines and the next start_line."""
+        from ayder_cli.tools.builtins import filesystem
+
+        # Tighten the page size for a fast, deterministic test
+        monkeypatch.setattr(filesystem, "READ_FILE_DEFAULT_LINES", 5)
+
+        test_file = tmp_path / "long.txt"
+        test_file.write_text("\n".join(f"row {i}" for i in range(1, 13)) + "\n")
+
+        result = impl.read_file(project_context, str(test_file))
+        assert isinstance(result, ToolSuccess)
+
+        # First 5 lines present, line 6 absent from the body
+        assert "1: row 1" in result
+        assert "5: row 5" in result
+        assert "6: row 6" not in result.split("\n[FILE:")[0]
+
+        # Footer must name total line count AND the next call to make
+        assert "[FILE:" in result
+        assert "12 total lines" in result
+        assert "showing lines 1-5" in result
+        assert "start_line=6" in result
+
+    def test_read_file_explicit_range_appends_footer_when_more_remains(
+        self, tmp_path, project_context
+    ):
+        """Explicit ranges still get a continuation footer if more file
+        remains after the slice — the model should never silently miss tail."""
+        test_file = tmp_path / "tail.txt"
+        test_file.write_text("\n".join(f"row {i}" for i in range(1, 11)) + "\n")
+
+        result = impl.read_file(project_context, str(test_file), start_line=1, end_line=3)
+        assert "1: row 1" in result
+        assert "3: row 3" in result
+        assert "[FILE:" in result
+        assert "10 total lines" in result
+        assert "start_line=4" in result
+
+    def test_read_file_explicit_range_complete_footer(
+        self, tmp_path, project_context
+    ):
+        """An explicit range that reaches EOF gets a [COMPLETE] footer
+        (not a continuation hint) so the caller knows there is nothing more."""
+        test_file = tmp_path / "complete.txt"
+        test_file.write_text("a\nb\nc\n")
+
+        result = impl.read_file(project_context, str(test_file), start_line=1, end_line=3)
+        assert result.startswith("1: a\n2: b\n3: c\n")
+        assert "COMPLETE: 3 lines" in result
+        assert "start_line=" not in result  # no continuation hint at EOF
 
 
 class TestFileEditorWrite:
@@ -328,25 +386,27 @@ class TestReadFileSizeLimit:
         test_file.write_text(normal_content)
         
         result = impl.read_file(project_context, str(test_file))
-        
-        # Should return the file content successfully
-        assert result == normal_content
+
+        # Should return the file content successfully (line-numbered + footer)
+        assert result.startswith(f"1: {normal_content}")
+        assert "COMPLETE: 1 lines" in result
         assert "Error" not in result
 
     def test_read_file_size_limit_exact_boundary(self, tmp_path, project_context, monkeypatch):
         """Test that files exactly at the size limit are accepted."""
         # Set a small max size for testing
         monkeypatch.setattr("ayder_cli.tools.builtins.filesystem.MAX_FILE_SIZE", 100)  # 100 bytes limit
-        
+
         test_file = tmp_path / "boundary_file.txt"
         # Create content exactly at the limit
         exact_content = "x" * 100  # Exactly 100 bytes
         test_file.write_text(exact_content)
-        
+
         result = impl.read_file(project_context, str(test_file))
-        
-        # Should return the file content successfully (at limit is allowed)
-        assert result == exact_content
+
+        # Should return the file content successfully (line-numbered + footer)
+        assert result.startswith(f"1: {exact_content}")
+        assert "COMPLETE: 1 lines" in result
         assert "Error" not in result
 
     def test_read_file_size_limit_one_byte_over(self, tmp_path, project_context, monkeypatch):

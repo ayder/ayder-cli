@@ -12,12 +12,16 @@ def test_qwen3_metadata():
     assert Qwen3Driver.mode is DriverMode.IN_CONTENT
     assert Qwen3Driver.fallback_driver == "generic_xml"
     assert Qwen3Driver.priority < 100
-    assert "qwen3" in Qwen3Driver.supports_families
+    # supports_families is empty: not auto-claimed. Reachable only via explicit
+    # matrix rule or driver-name override. See module docstring.
+    assert Qwen3Driver.supports_families == ()
 
 
-def test_qwen3_supports_via_default_family_match():
-    assert Qwen3Driver.supports(ModelInfo(family="qwen3"))
-    assert Qwen3Driver.supports(ModelInfo(family="qwen2"))
+def test_qwen3_does_not_self_claim_via_supports():
+    """Qwen3Driver is currently dormant — matrix routes qwen3 to
+    generic_native. supports() must return False for everything."""
+    assert not Qwen3Driver.supports(ModelInfo(family="qwen3"))
+    assert not Qwen3Driver.supports(ModelInfo(family="qwen2"))
     assert not Qwen3Driver.supports(ModelInfo(family="llama"))
 
 

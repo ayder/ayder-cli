@@ -47,20 +47,34 @@ class ResolutionRule:
 
 
 RESOLUTION_MATRIX: tuple[ResolutionRule, ...] = (
+    # qwen3 / qwen2: native tool extraction works on current Ollama. Earlier
+    # Ollama crashed with "XML syntax error: unexpected EOF" on truncated qwen3
+    # output (#14834). Injecting our own <tools>/<tool_call> XML into the system
+    # prompt instead causes bare-EOF mid-stream because Ollama's qwen3 template
+    # scans the prompt. If #14834 returns, OllamaServerToolBug classification
+    # engages reactive fallback (generic_native -> generic_xml).
     ResolutionRule(
         family_substring="qwen3",
-        driver="qwen3",
-        note="Ollama #14834: native tools path crashes on truncated XML output",
+        driver="generic_native",
+        note="Native tool extraction works; reactive fallback to generic_xml on #14834",
     ),
     ResolutionRule(
         family_substring="qwen2",
-        driver="qwen3",
-        note="Same training format as qwen3; reuses qwen3 driver",
+        driver="generic_native",
+        note="Same routing as qwen3",
     ),
+    # deepseek: native tool extraction confirmed working on current Ollama
+    # (verified empirically against deepseek-v4-pro:cloud — returns empty
+    # content + populated msg.tool_calls). Earlier deepseek-r1/v3 reportedly
+    # leaked <function_calls><invoke> blocks into msg.content; our IN_CONTENT
+    # routing then made the model emit <｜DSML｜tool_calls> wrappers, which
+    # display-leaked. Trusting native; reactive fallback engages on #14834.
+    # If a specific deepseek variant regresses, prefer the model-name-specific
+    # driver (priority < 50) over re-engaging the family-wide IN_CONTENT path.
     ResolutionRule(
         family_substring="deepseek",
-        driver="deepseek",
-        note="Emits function_calls invoke blocks in message content",
+        driver="generic_native",
+        note="Native works on current Ollama; verified for deepseek-v4-pro:cloud",
     ),
     ResolutionRule(
         family_substring="minimax",

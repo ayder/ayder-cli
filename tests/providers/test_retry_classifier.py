@@ -57,6 +57,14 @@ def test_classify_by_name_anthropic_connection_error():
     assert classify_error(err) == RetryVerdict.RETRYABLE
 
 
+def test_classify_ollama_response_error_is_retryable():
+    """Bare 'EOF (status code: -1)' and similar transient ollama failures
+    must be retryable so the retry layer can recover when uncommitted."""
+    from ollama import ResponseError
+    err = ResponseError("EOF (status code: -1)")
+    assert classify_error(err) == RetryVerdict.RETRYABLE
+
+
 def test_compute_delay_without_jitter_is_deterministic():
     cfg = RetryConfig(
         initial_delay_seconds=1.0,

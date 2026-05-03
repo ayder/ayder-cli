@@ -14,7 +14,6 @@ from ayder_cli.providers.impl.ollama_drivers._errors import (
     [
         "XML syntax error on line 43: unexpected EOF",
         "xml syntax error: unexpected eof",
-        "EOF (status code: -1)",
         "failed to parse JSON: unexpected end of JSON input",
         "Failed to parse JSON: unexpected end of JSON input at line 5",
     ],
@@ -34,6 +33,12 @@ def test_known_bug_signatures_classify_as_tool_bug(message):
         "connection refused",
         "rate limit exceeded",
         "internal server error",
+        # Bare EOF is a transport failure (TCP RST, server crash, OOM
+        # mid-stream), NOT the tool-extractor parser bug. It must
+        # propagate as ResponseError so the retry layer decides.
+        "EOF (status code: -1)",
+        "EOF while reading local fixture",
+        "eof",
     ],
 )
 def test_unrelated_response_errors_pass_through_unchanged(message):
@@ -45,11 +50,5 @@ def test_unrelated_response_errors_pass_through_unchanged(message):
 
 def test_non_response_errors_pass_through_unchanged():
     err = TimeoutError("connection timed out")
-    out = classify_ollama_error(err)
-    assert out is err
-
-
-def test_bare_eof_without_ollama_stream_status_passes_through():
-    err = ResponseError("EOF while reading local fixture", 500)
     out = classify_ollama_error(err)
     assert out is err

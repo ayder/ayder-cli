@@ -47,7 +47,7 @@ def _show(family: str = "qwen3"):
     "error_message",
     [
         "XML syntax error on line 43: unexpected EOF",
-        "EOF (status code: -1)",
+        "failed to parse JSON: unexpected end of JSON input",
     ],
 )
 async def test_fallback_engages_when_uncommitted_tool_bug(error_message):

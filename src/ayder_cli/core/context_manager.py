@@ -59,7 +59,14 @@ class ContextManagerProtocol(Protocol):
 
 
 def truncate_tool_result(content: str, max_chars: int = 8192) -> str:
-    """Truncate a tool result at insertion time. Shared by all implementations."""
+    """Truncate a tool result at insertion time. Shared by all implementations.
+
+    ``max_chars=0`` is the explicit "exempt" sentinel — used by tools whose
+    output is already bounded by their own pagination (e.g. ``read_file``).
+    Generic head+tail truncation would silently corrupt such payloads.
+    """
+    if max_chars == 0:
+        return content
     if not content or len(content) <= max_chars:
         return content
 

@@ -1,7 +1,11 @@
-"""Regression: tool results must be truncated before appending to message history.
+"""Tool result truncation: generic tools are bounded by the chat-loop, while
+tools that paginate their own output (``max_result_chars=0``) pass through
+unmodified.
 
-Opus47 finding #1: full untruncated tool output was landing in self.messages,
-violating the Ollama immutability contract and defeating KV-cache reuse.
+Opus47 finding #1 (the original regression this file guards): full
+untruncated tool output was landing in ``self.messages``, defeating
+KV-cache reuse and violating the Ollama immutability contract. That guard
+is preserved here for non-exempt tools.
 """
 import pytest
 from unittest.mock import MagicMock
@@ -30,25 +34,25 @@ class _ToolCallChunk:
         self._stream_index = 0
 
 
-class FakeProvider:
-    """Yields one tool call, then (on next turn) a plain text response."""
+def _make_provider(tool_name: str, arguments: str = '{}'):
+    class _FakeProvider:
+        def __init__(self):
+            self._turn = 0
 
-    def __init__(self, huge_result):
-        self._turn = 0
-        self._huge = huge_result
+        async def stream_with_tools(self, messages, model, tools, options, verbose):
+            if self._turn == 0:
+                self._turn += 1
+                yield _Chunk(
+                    tool_calls=[_ToolCallChunk("call_1", tool_name, arguments)],
+                    usage={"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
+                )
+            else:
+                yield _Chunk(
+                    content="Done.",
+                    usage={"total_tokens": 20, "prompt_tokens": 15, "completion_tokens": 5},
+                )
 
-    async def stream_with_tools(self, messages, model, tools, options, verbose):
-        if self._turn == 0:
-            self._turn += 1
-            yield _Chunk(
-                tool_calls=[_ToolCallChunk("call_1", "read_file", '{"file_path": "big.txt"}')],
-                usage={"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
-            )
-        else:
-            yield _Chunk(
-                content="Done.",
-                usage={"total_tokens": 20, "prompt_tokens": 15, "completion_tokens": 5},
-            )
+    return _FakeProvider()
 
 
 class FakeCallbacks:
@@ -75,28 +79,33 @@ class FakeCallbacks:
         return self._calls > 4
 
 
-@pytest.mark.anyio
-async def test_tool_result_truncated_in_message_history():
-    """Full untruncated tool output must NOT end up in self.messages."""
-    huge = "x" * 50_000  # far exceeds truncate_tool_result default of 8192 chars
-
+def _run_loop(tool_name: str, fake_result: str, arguments: str = '{}') -> tuple[list[dict], ChatLoop]:
     registry = MagicMock()
     registry.get_schemas.return_value = [
-        {"type": "function", "function": {"name": "read_file", "parameters": {}}}
+        {"type": "function", "function": {"name": tool_name, "parameters": {}}}
     ]
-    registry.execute.return_value = huge
+    registry.execute.return_value = fake_result
 
-    config = ChatLoopConfig(permissions={"r", "w", "x"})
     messages = [{"role": "system", "content": "test"}]
-
     loop = ChatLoop(
-        llm=FakeProvider(huge_result=huge),
+        llm=_make_provider(tool_name, arguments=arguments),
         registry=registry,
         messages=messages,
-        config=config,
+        config=ChatLoopConfig(permissions={"r", "w", "x"}),
         callbacks=FakeCallbacks(),
     )
+    return messages, loop
 
+
+@pytest.mark.anyio
+async def test_generic_tool_result_truncated_in_message_history():
+    """Tools without ``max_result_chars`` go through the loop's default
+    truncation. Guards against Opus47 finding #1."""
+    huge = "x" * 50_000  # far exceeds truncate_tool_result default of 8192 chars
+
+    messages, loop = _run_loop(
+        "run_shell_command", huge, arguments='{"command": "echo hi"}'
+    )
     await loop.run()
 
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
@@ -106,8 +115,29 @@ async def test_tool_result_truncated_in_message_history():
     expected_truncated = truncate_tool_result(huge)
 
     assert stored == expected_truncated, (
-        f"Tool result stored in history must equal truncate_tool_result(result). "
         f"Stored length={len(stored)}, expected length={len(expected_truncated)}, "
         f"raw length={len(huge)}."
     )
-    assert len(stored) < len(huge), "Stored content must be strictly shorter than raw result"
+    assert len(stored) < len(huge)
+
+
+@pytest.mark.anyio
+async def test_read_file_result_passes_through_untruncated():
+    """``read_file`` declares ``max_result_chars=0`` because it paginates
+    internally. The chat loop must not apply head+tail truncation to its
+    output — that would silently corrupt the deliberately-bounded page."""
+    paginated = "x" * 50_000  # stand-in for a fully-paginated read_file payload
+
+    messages, loop = _run_loop(
+        "read_file", paginated, arguments='{"file_path": "big.txt"}'
+    )
+    await loop.run()
+
+    tool_msgs = [m for m in messages if m.get("role") == "tool"]
+    assert tool_msgs, "expected at least one tool message in history"
+
+    stored = tool_msgs[0]["content"]
+    assert stored == paginated, (
+        "read_file output must reach message history unmodified — "
+        f"got {len(stored)} chars, expected {len(paginated)}."
+    )

@@ -448,3 +448,60 @@ class TestContentProcessorUnified:
 
         assert content_processor.extract_think_blocks("No think blocks here.") == []
 
+
+class TestDeepseekV4PluralToolCalls:
+    """Regression tests for deepseek-v4-pro:cloud which uses plural
+    <｜DSML｜tool_calls> wrapper (vs older deepseek's <｜DSML｜function_calls>).
+
+    Without these the inner <invoke> blocks parse correctly but the outer
+    <tool_calls> / </tool_calls> wrappers leak into displayed content.
+    """
+
+    _DSML_PAYLOAD = (
+        "Calling read_file:\n"
+        "<｜ＤＳＭＬ｜tool_calls>"
+        "<｜ＤＳＭＬ｜invoke name=\"read_file\">"
+        "<｜ＤＳＭＬ｜parameter name=\"path\">/tmp/x</｜ＤＳＭＬ｜parameter>"
+        "</｜ＤＳＭＬ｜invoke>"
+        "</｜ＤＳＭＬ｜tool_calls>\n"
+        "Done."
+    )
+
+    def test_plural_tool_calls_detected_by_has_tool_calls(self):
+        from ayder_cli.parser import content_processor
+
+        # Even before DSML normalization, the DSML marker substring trips the check.
+        assert content_processor.has_tool_calls(self._DSML_PAYLOAD) is True
+
+    def test_plural_tool_calls_parses_inner_invoke(self):
+        from ayder_cli.parser import content_processor
+
+        calls = content_processor.parse_tool_calls(self._DSML_PAYLOAD)
+        assert len(calls) == 1
+        assert calls[0]["name"] == "read_file"
+        assert calls[0]["arguments"] == {"path": "/tmp/x"}
+
+    def test_plural_tool_calls_stripped_for_display(self):
+        from ayder_cli.parser import content_processor
+
+        rendered = content_processor.strip_for_display(self._DSML_PAYLOAD)
+        assert "tool_calls" not in rendered
+        assert "invoke" not in rendered
+        assert "parameter" not in rendered
+        assert "DSML" not in rendered
+        assert "ＤＳＭＬ" not in rendered  # fullwidth DSML
+        assert "Calling read_file:" in rendered
+        assert "Done." in rendered
+
+    def test_orphan_closing_plural_tool_calls_stripped(self):
+        """The exact symptom reported: dangling </｜DSML｜tool_calls> closer
+        without its opener should still be removed from the rendered view."""
+        from ayder_cli.parser import content_processor
+
+        leaked = "Result delivered.</｜ＤＳＭＬ｜tool_calls>"
+        rendered = content_processor.strip_for_display(leaked)
+        assert "tool_calls" not in rendered
+        assert "DSML" not in rendered
+        assert "ＤＳＭＬ" not in rendered
+        assert "Result delivered." in rendered
+

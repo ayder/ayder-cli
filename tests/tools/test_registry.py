@@ -32,12 +32,13 @@ class TestExecuteToolCall:
         assert "test.txt" in files
 
     def test_dispatch_read_file(self, tmp_path, tool_registry):
-        """Test dispatch to read_file."""
+        """Test dispatch to read_file. Output is line-numbered with a footer."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 
         result = tool_registry.execute("read_file", {"file_path": "test.txt"})
-        assert result == "test content"
+        assert result.startswith("1: test content")
+        assert "COMPLETE: 1 lines" in result
 
     def test_dispatch_file_editor_write(self, tmp_path, tool_registry):
         """Test dispatch to file_editor."""
@@ -73,7 +74,8 @@ class TestExecuteToolCall:
 
         args_json = json.dumps({"file_path": "test.txt"})
         result = tool_registry.execute("read_file", args_json)
-        assert result == "content"
+        assert result.startswith("1: content")
+        assert "COMPLETE: 1 lines" in result
 
     def test_with_dict_arguments(self, tmp_path, tool_registry):
         """Test with dict arguments."""
@@ -82,7 +84,8 @@ class TestExecuteToolCall:
 
         args_dict = {"file_path": "test.txt"}
         result = tool_registry.execute("read_file", args_dict)
-        assert result == "content"
+        assert result.startswith("1: content")
+        assert "COMPLETE: 1 lines" in result
 
     def test_with_invalid_json_string(self, tool_registry):
         """Test with invalid JSON string (error case)."""

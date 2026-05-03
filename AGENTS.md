@@ -179,6 +179,10 @@ ayder-cli/
 | `core/config.py` | Configuration with Pydantic validation |
 | `core/context.py` | ProjectContext for path sandboxing |
 | `providers/orchestrator.py` | Factory dispatching to correct driver |
+| `providers/impl/ollama_drivers/` | Per-family Ollama chat-driver package (matrix, registry, drivers, error classifier) |
+| `providers/impl/ollama_inspector.py` | `OllamaInspector` with `probe_native_tool_calling()` for empirical model verification |
+| `docs/README_OLLAMA.md` | **Ollama tool-call compatibility guide.** Read before adding/changing any matrix routing for an Ollama model. Covers the `OllamaInspector.probe_native_tool_calling()` API, equivalent `curl` recipes, the markup-leak detection table, and the decision flow for new families. |
+| `docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md` | Design spec for the per-family Ollama chat-drivers architecture. |
 
 ## Environment Setup
 

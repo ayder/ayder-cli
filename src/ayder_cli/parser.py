@@ -69,10 +69,12 @@ class ContentProcessor:
         r"<function=.*?(?:</function>|</tool_call>)", re.DOTALL
     )
     # DeepSeek format: <function_calls><invoke>...</invoke></function_calls>
-    # Also covers DSML-prefixed variants (｜DSML｜function_calls, etc.)
+    # Also covers DSML-prefixed variants (｜DSML｜function_calls, ｜DSML｜tool_calls).
+    # deepseek-v4-pro:cloud uses <｜DSML｜tool_calls> (plural) — same shape,
+    # different outer tag name. Match both function_calls and tool_calls.
     _RE_FUNCTION_CALLS_BLOCK = re.compile(
-        r"<\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?function_calls>.*?"
-        r"</\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?function_calls>",
+        r"<\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?(?:function|tool)_calls>.*?"
+        r"</\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?(?:function|tool)_calls>",
         re.DOTALL,
     )
     _RE_INVOKE_BLOCK = re.compile(
@@ -85,7 +87,7 @@ class ContentProcessor:
     _RE_ORPHAN_TOOL_CALL = re.compile(r"</?(\w+:)?tool_call>")
     _RE_ORPHAN_FUNCTION = re.compile(r"</?function[^>]*>")
     _RE_ORPHAN_FUNCTION_CALLS = re.compile(
-        r"</?\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?function_calls\s*>"
+        r"</?\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?(?:function|tool)_calls\s*>"
     )
     _RE_ORPHAN_INVOKE = re.compile(
         r"</?\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?invoke[^>]*>"
@@ -129,8 +131,8 @@ class ContentProcessor:
     _RE_DS_PARAM = re.compile(
         r'<parameter\s+name="([^"]+)"[^>]*>(.*?)</parameter>', re.DOTALL
     )
-    # Strip outer <function_calls> tags
-    _RE_FUNCTION_CALLS_STRIP = re.compile(r"</?function_calls\s*>", re.DOTALL)
+    # Strip outer <function_calls> / <tool_calls> tags after _convert_deepseek
+    _RE_FUNCTION_CALLS_STRIP = re.compile(r"</?(?:function|tool)_calls\s*>", re.DOTALL)
     # DSML fullwidth prefix: ｜DSML｜
     _RE_DSML_FULLWIDTH = re.compile(r"<(/?)\uff5c\uff24\uff33\uff2d\uff2c\uff5c")
     # DSML ASCII fallback: |DSML|
@@ -165,8 +167,8 @@ class ContentProcessor:
         Detects:
         - Standard: <function=...>
         - Wrapped: <tool_call> (including namespaced like <minimax:tool_call>)
-        - DeepSeek: <function_calls> or <invoke
-        - DeepSeek DSML: ｜DSML｜function_calls or ｜DSML｜invoke
+        - DeepSeek: <function_calls> / <tool_calls> / <invoke>
+        - DeepSeek DSML: ｜DSML｜function_calls or ｜DSML｜tool_calls or ｜DSML｜invoke
         """
         if not content:
             return False
@@ -174,6 +176,7 @@ class ContentProcessor:
             "<function=" in content
             or re.search(r"<(\w+:)?tool_call>", content) is not None
             or "<function_calls>" in content
+            or "<tool_calls>" in content
             or "<invoke" in content
             or "\uff5c\uff24\uff33\uff2d\uff2c\uff5c" in content
             or "|DSML|" in content

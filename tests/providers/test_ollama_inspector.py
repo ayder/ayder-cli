@@ -3,9 +3,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
+from ollama import ResponseError
+
 from ayder_cli.providers.impl.ollama_inspector import (
-    OllamaInspector,
     ModelInfo,
+    NativeToolProbe,
+    OllamaInspector,
     RuntimeState,
 )
 
@@ -121,3 +124,104 @@ async def test_get_model_info_connection_error(inspector, mock_client):
 
     with pytest.raises(ConnectionError):
         await inspector.get_model_info("any:model")
+
+
+def _chat_response(content: str = "", tool_calls=None):
+    """Build a fake non-streaming /api/chat response."""
+    msg = MagicMock()
+    msg.content = content
+    msg.tool_calls = tool_calls or []
+    resp = MagicMock()
+    resp.message = msg
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_probe_native_tool_calling_native_works(inspector, mock_client):
+    """Empty/clean content + populated tool_calls = native_works."""
+    fake_tc = MagicMock(id="call_1")
+    fake_tc.function = MagicMock(name="read_file", arguments={"path": "/tmp/x"})
+    mock_client.chat.return_value = _chat_response(content="", tool_calls=[fake_tc])
+
+    probe = await inspector.probe_native_tool_calling("any-model")
+
+    assert probe.verdict == "native_works"
+    assert probe.tool_call_count == 1
+    assert probe.content_markup_found == []
+
+
+@pytest.mark.asyncio
+async def test_probe_native_tool_calling_detects_dsml_leak(inspector, mock_client):
+    """The exact deepseek-v4-pro:cloud symptom: <｜DSML｜tool_calls> in content."""
+    leaked = (
+        "Calling tool:\n"
+        "<｜ＤＳＭＬ｜tool_calls>"
+        "<｜ＤＳＭＬ｜invoke name=\"read_file\">"
+        "<｜ＤＳＭＬ｜parameter name=\"path\">/tmp/x</｜ＤＳＭＬ｜parameter>"
+        "</｜ＤＳＭＬ｜invoke>"
+        "</｜ＤＳＭＬ｜tool_calls>"
+    )
+    mock_client.chat.return_value = _chat_response(content=leaked)
+
+    probe = await inspector.probe_native_tool_calling("deepseek-broken")
+
+    assert probe.verdict == "leaks_in_content"
+    # The DSML marker is the strongest signal — it interposes between the
+    # raw `<` and the tag name `invoke`, so the bare `<invoke` regex won't
+    # match. The DSML detection alone is enough to flag the leak.
+    assert "｜DSML｜" in probe.content_markup_found
+
+
+@pytest.mark.asyncio
+async def test_probe_native_tool_calling_detects_function_calls_leak(inspector, mock_client):
+    """deepseek-r1/v3 style without DSML markers."""
+    leaked = (
+        "<function_calls>"
+        "<invoke name=\"read_file\">"
+        "<parameter name=\"path\">/tmp/x</parameter>"
+        "</invoke>"
+        "</function_calls>"
+    )
+    mock_client.chat.return_value = _chat_response(content=leaked)
+
+    probe = await inspector.probe_native_tool_calling("deepseek-r1")
+
+    assert probe.verdict == "leaks_in_content"
+    assert "<function_calls>" in probe.content_markup_found
+
+
+@pytest.mark.asyncio
+async def test_probe_native_tool_calling_detects_tool_call_singular_leak(
+    inspector, mock_client
+):
+    """qwen3-trained <tool_call>{json}</tool_call> in content."""
+    leaked = '<tool_call>{"name": "read_file", "arguments": {"path": "/tmp/x"}}</tool_call>'
+    mock_client.chat.return_value = _chat_response(content=leaked)
+
+    probe = await inspector.probe_native_tool_calling("qwen-broken")
+
+    assert probe.verdict == "leaks_in_content"
+    assert "<tool_call>" in probe.content_markup_found
+
+
+@pytest.mark.asyncio
+async def test_probe_native_tool_calling_no_tool_call(inspector, mock_client):
+    """Model produced narration only — neither tool_calls nor markup."""
+    mock_client.chat.return_value = _chat_response(content="I would read the file.")
+
+    probe = await inspector.probe_native_tool_calling("any-model")
+
+    assert probe.verdict == "no_tool_call"
+    assert probe.tool_call_count == 0
+    assert probe.content_markup_found == []
+
+
+@pytest.mark.asyncio
+async def test_probe_native_tool_calling_handles_response_error(inspector, mock_client):
+    """Probe failures bubble out as a stream_failed verdict."""
+    mock_client.chat.side_effect = ResponseError("EOF (status code: -1)")
+
+    probe = await inspector.probe_native_tool_calling("any-model")
+
+    assert probe.verdict == "stream_failed"
+    assert "EOF" in probe.raw_error

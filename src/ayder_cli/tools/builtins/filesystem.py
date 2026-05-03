@@ -12,8 +12,20 @@ from ayder_cli.core.result import ToolSuccess, ToolError
 logger = logging.getLogger(__name__)
 
 # Maximum file size allowed for read_file() to prevent DoS/memory exhaustion
-# Default: 10MB
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 megabytes
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Default page size for read_file when no explicit range is given. Mirrors
+# Claude Code's Read tool — large enough for most source files in one shot,
+# small enough that small-context LLMs don't drown.
+READ_FILE_DEFAULT_LINES = 2000
+
+
+def _format_size(n_bytes: int) -> str:
+    if n_bytes < 1024:
+        return f"{n_bytes}B"
+    if n_bytes < 1024 * 1024:
+        return f"{n_bytes / 1024:.1f}KB"
+    return f"{n_bytes / (1024 * 1024):.1f}MB"
 
 
 def read_file(
@@ -22,9 +34,17 @@ def read_file(
     start_line: int | None = None,
     end_line: int | None = None,
 ) -> str:
-    """
-    Reads the content of a file.
-    Can optionally read a specific range of lines (1-based indices).
+    """Read a file with explicit pagination semantics.
+
+    Behavior:
+    - With no range: reads up to ``READ_FILE_DEFAULT_LINES`` starting at line 1.
+      If the file is longer, the result includes a footer naming the total
+      line count and the exact follow-up call needed to read the next page.
+    - With ``start_line`` / ``end_line``: reads that explicit slice (1-based,
+      inclusive). The same pagination footer is appended if more content
+      remains beyond the slice.
+    - The returned body always uses ``"<line_no>: <text>"`` formatting so the
+      caller can never confuse partial output for a complete file.
     """
     try:
         abs_path = project_ctx.validate_path(file_path)
@@ -33,37 +53,58 @@ def read_file(
             rel_path = project_ctx.to_relative(abs_path)
             return ToolError(f"Error: File '{rel_path}' does not exist.")
 
-        # Check file size before reading to prevent DoS/memory exhaustion
         file_size = os.path.getsize(abs_path)
         if file_size > MAX_FILE_SIZE:
             rel_path = project_ctx.to_relative(abs_path)
             return ToolError(
-                f"Error: File '{rel_path}' is too large ({file_size / (1024 * 1024):.1f}MB). Maximum allowed size is {MAX_FILE_SIZE / (1024 * 1024):.0f}MB."
+                f"Error: File '{rel_path}' is too large "
+                f"({file_size / (1024 * 1024):.1f}MB). "
+                f"Maximum allowed size is {MAX_FILE_SIZE / (1024 * 1024):.0f}MB."
             )
 
         with open(abs_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        # Handle line filtering
-        if start_line is not None or end_line is not None:
-            # Default to beginning/end if one is missing
+        total_lines = len(lines)
+        rel_path = str(project_ctx.to_relative(abs_path))
+
+        explicit_range = start_line is not None or end_line is not None
+
+        if explicit_range:
             start = int(start_line) if start_line else 1
-            end = int(end_line) if end_line else len(lines)
-
-            # Adjust to 0-based index
-            start_idx = max(0, start - 1)
-            end_idx = min(len(lines), end)
-
-            selected_lines = lines[start_idx:end_idx]
-
-            # Add line numbers for context
-            content_with_lines = ""
-            for i, line in enumerate(selected_lines):
-                content_with_lines += f"{start + i}: {line}"
-
-            return ToolSuccess(content_with_lines)
+            end = int(end_line) if end_line else total_lines
         else:
-            return ToolSuccess("".join(lines))
+            start = 1
+            end = min(total_lines, READ_FILE_DEFAULT_LINES)
+
+        start_idx = max(0, start - 1)
+        end_idx = min(total_lines, end)
+        selected = lines[start_idx:end_idx]
+
+        body = "".join(f"{start + i}: {line}" for i, line in enumerate(selected))
+
+        # Always append a footer so the caller never has to infer completeness
+        # from absence. Two shapes:
+        #   - more remaining → name the next call to make
+        #   - reached EOF    → explicit [COMPLETE] marker
+        last_returned = start_idx + len(selected)
+        more_remaining = last_returned < total_lines
+
+        if more_remaining:
+            footer = (
+                f"\n[FILE: {rel_path} | {total_lines} total lines, "
+                f"{_format_size(file_size)} | showing lines "
+                f"{start_idx + 1}-{last_returned}. "
+                f"To read more: read_file(file_path={rel_path!r}, "
+                f"start_line={last_returned + 1})]"
+            )
+        else:
+            footer = (
+                f"\n[FILE: {rel_path} | COMPLETE: {total_lines} lines, "
+                f"{_format_size(file_size)} | showing lines "
+                f"{start_idx + 1}-{last_returned}]"
+            )
+        return ToolSuccess(body + footer)
 
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
