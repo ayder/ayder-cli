@@ -199,6 +199,45 @@ CLIMultiSelectScreen .hint {
     margin-top: 1;
 }
 
+/* AgentListScreen - /agent popup listing configured agents */
+AgentListScreen {
+    align: center bottom;
+}
+
+AgentListScreen > Vertical {
+    width: 100%;
+    max-height: 60%;
+    height: auto;
+    background: $surface;
+    border-top: solid $primary;
+    padding: 1 2;
+}
+
+AgentListScreen .prompt {
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+AgentListScreen .description {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+AgentListScreen .select-list {
+    height: auto;
+    max-height: 20;
+    overflow-y: auto;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+AgentListScreen .hint {
+    color: $text-muted;
+    text-style: dim;
+    margin-top: 1;
+}
+
 /* TaskEditScreen - In-app task editor */
 TaskEditScreen {
     align: center bottom;

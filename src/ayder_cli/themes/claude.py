@@ -214,6 +214,46 @@ CLIMultiSelectScreen .hint {
     margin-top: 1;
 }
 
+/* AgentListScreen - The /agent popup that lists configured agents and their live status.
+   Targets 'AgentListScreen' in screens.py. */
+AgentListScreen {
+    align: center bottom;
+}
+
+AgentListScreen > Vertical {
+    width: 100%;
+    max-height: 60%;
+    height: auto;
+    background: #12122a;
+    border-top: solid #666680;
+    padding: 1 2;
+}
+
+AgentListScreen .prompt {
+    text-style: bold;
+    color: #5eaff5;
+    margin-bottom: 1;
+}
+
+AgentListScreen .description {
+    color: #666680;
+    margin-bottom: 1;
+}
+
+AgentListScreen .select-list {
+    height: auto;
+    max-height: 20;
+    overflow-y: auto;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+AgentListScreen .hint {
+    color: #666680;
+    text-style: dim;
+    margin-top: 1;
+}
+
 /* TaskEditScreen - The full-screen(ish) editor for editing task descriptions.
    Targets 'TaskEditScreen' in screens.py. */
 TaskEditScreen {

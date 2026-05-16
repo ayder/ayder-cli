@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from ayder_cli.tui.screens import AgentListScreen
 
 
