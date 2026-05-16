@@ -537,6 +537,169 @@ class TaskEditScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class AgentListScreen(ModalScreen[str | None]):
+    """
+    Modal popup listing all configured agents with live status.
+
+    Returns the selected agent name on Enter, or None on Esc.
+    Refreshes the visible status snapshot from the registry on a timer
+    while the screen is mounted.
+    """
+
+    REFRESH_INTERVAL = 1.0  # seconds; status pulled from registry
+
+    def __init__(self, registry):
+        super().__init__()
+        self._registry = registry
+        self._snapshot: list[dict] = []
+        self.selected_index = 0
+        self._refresh_handle = None
+        self._refresh_snapshot()
+
+    def _refresh_snapshot(self) -> None:
+        """Pull the latest agent rows from the registry."""
+        if self._registry is None:
+            self._snapshot = []
+            return
+        try:
+            self._snapshot = list(self._registry.list_agents())
+        except Exception:
+            self._snapshot = []
+
+    def _clamp_index(self) -> None:
+        if not self._snapshot:
+            self.selected_index = 0
+            return
+        if self.selected_index < 0:
+            self.selected_index = 0
+        elif self.selected_index >= len(self._snapshot):
+            self.selected_index = len(self._snapshot) - 1
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("? Agents", classes="prompt", markup=False)
+            yield Label(
+                "Live agent status — Enter to select, Esc to cancel",
+                classes="description",
+                markup=False,
+            )
+            yield Static(self._render_list(), id="agent-list", classes="select-list")
+            yield Label(
+                "↑↓ to navigate, Enter to fill /agent <name>, Esc to cancel",
+                classes="hint",
+            )
+
+    def on_mount(self) -> None:
+        self._refresh_handle = self.set_interval(
+            self.REFRESH_INTERVAL, self._on_tick
+        )
+
+    def on_unmount(self) -> None:
+        if self._refresh_handle is not None:
+            self._refresh_handle.stop()
+            self._refresh_handle = None
+
+    def _on_tick(self) -> None:
+        self._refresh_snapshot()
+        self._clamp_index()
+        self._update_display()
+
+    MAX_VISIBLE = 15
+
+    def _render_list(self) -> Text:
+        """Render the agent list with live status icons."""
+        result = Text()
+        if not self._snapshot:
+            result.append("  (no agents configured)\n", style="dim")
+            return result
+
+        total = len(self._snapshot)
+        half = self.MAX_VISIBLE // 2
+        start = max(0, self.selected_index - half)
+        end = min(total, start + self.MAX_VISIBLE)
+        start = max(0, end - self.MAX_VISIBLE)
+
+        if start > 0:
+            result.append(f"  ↑ {start} more above\n", style="dim")
+
+        for i in range(start, end):
+            row = self._snapshot[i]
+            name = row.get("name", "?")
+            status = row.get("status", "unknown")
+            count = int(row.get("running_count", 0) or 0)
+            description = row.get("description", "") or ""
+            description = description.strip().splitlines()[0] if description else ""
+            if len(description) > 60:
+                description = description[:57] + "..."
+
+            is_selected = i == self.selected_index
+
+            if is_selected:
+                result.append(" → ", style="bold cyan")
+            else:
+                result.append("   ", style="dim")
+
+            icon, icon_style, label, label_style = self._status_decoration(status)
+            result.append(icon + " ", style=icon_style)
+            result.append(f"{name:<20}", style="bold white" if is_selected else "white")
+            result.append(f" {label}", style=label_style)
+            if count > 1:
+                result.append(f" x{count}", style="bold yellow")
+            if description:
+                result.append(f"  — {description}", style="dim")
+            result.append("\n")
+
+        remaining = total - end
+        if remaining > 0:
+            result.append(f"  ↓ {remaining} more below\n", style="dim")
+
+        return result
+
+    @staticmethod
+    def _status_decoration(status: str) -> tuple[str, str, str, str]:
+        """Map status string to (icon, icon_style, label, label_style)."""
+        if status == "running":
+            return ("▶", "bold yellow", "working", "yellow")
+        if status == "idle":
+            return ("○", "green", "idle", "green")
+        if status == "completed":
+            return ("✓", "bold green", "completed", "green")
+        if status == "timeout":
+            return ("⏱", "bold yellow", "timeout", "yellow")
+        if status == "error":
+            return ("✗", "bold red", "error", "red")
+        return ("·", "dim", status, "dim")
+
+    def _update_display(self) -> None:
+        try:
+            list_widget = self.query_one("#agent-list", Static)
+        except Exception:
+            return
+        list_widget.update(self._render_list())
+
+    def on_key(self, event) -> None:
+        key = event.key.lower()
+        if key in ("up", "k"):
+            event.stop()
+            self.selected_index = max(0, self.selected_index - 1)
+            self._update_display()
+        elif key in ("down", "j"):
+            event.stop()
+            self.selected_index = min(
+                max(0, len(self._snapshot) - 1), self.selected_index + 1
+            )
+            self._update_display()
+        elif key in ("enter", "return"):
+            event.stop()
+            if self._snapshot:
+                self.dismiss(self._snapshot[self.selected_index].get("name"))
+            else:
+                self.dismiss(None)
+        elif key in ("escape", "q"):
+            event.stop()
+            self.dismiss(None)
+
+
 class CLIHelpScreen(ModalScreen[None]):
     """Centered help modal showing all keybindings, dynamically generated."""
 
