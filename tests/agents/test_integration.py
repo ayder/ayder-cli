@@ -36,9 +36,14 @@ class TestAgentIntegration:
             agent_timeout=cfg.agent_timeout,
         )
 
-        # 3. Verify capability prompts
+        # 3. Verify generic capability prompts and structured discovery
         prompts = registry.get_capability_prompts()
-        assert "reviewer" in prompts
+        assert "list_agents" in prompts
+        assert "call_agent" in prompts
+        assert "reviewer" not in prompts
+        agents = registry.list_agents()
+        assert agents[0]["name"] == "reviewer"
+        assert agents[0]["description"] == "You review code."
 
         # 4. Dispatch via tool handler (sync, fire-and-forget)
         with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:

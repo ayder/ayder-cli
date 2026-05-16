@@ -1,13 +1,13 @@
-"""call_agent tool — delegates tasks to specialized agents.
+"""Agent tools — discover and delegate to specialized agents.
 
-Provides the ToolDefinition for registration and a factory for the
-sync handler. The handler is sync because it runs inside asyncio.to_thread()
-in the tool execution pipeline. It calls registry.dispatch() which
-schedules the agent via run_coroutine_threadsafe and returns immediately.
+Provides dynamic ToolDefinitions for registration and factories for sync handlers.
+Handlers are sync because they run inside asyncio.to_thread() in the tool
+execution pipeline. call_agent schedules work via AgentRegistry.dispatch().
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Callable
 
@@ -18,19 +18,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+LIST_AGENTS_TOOL_DEFINITION = ToolDefinition(
+    name="list_agents",
+    description=(
+        "List configured specialized agents with exact names, descriptions, "
+        "status, and running counts. Use this before call_agent when you need "
+        "to discover available agent names."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+    permission="r",
+    tags=("core", "agents"),
+    system_prompt="",
+)
+
 AGENT_TOOL_DEFINITION = ToolDefinition(
     name="call_agent",
     description=(
         "Delegate a task to a specialized agent. The agent runs in the background "
         "with its own context and tools. You will receive its summary when it completes. "
-        "Use the exact agent name from the 'Registered Agents' list in your system prompt."
+        "Use list_agents to discover exact available agent names before calling this tool."
     ),
     parameters={
         "type": "object",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Exact agent name from the Registered Agents list",
+                "description": "Exact agent name returned by list_agents",
             },
             "task": {
                 "type": "string",
@@ -43,6 +60,15 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
     tags=("core", "agents"),
     system_prompt="",
 )
+
+
+def create_list_agents_handler(registry: AgentRegistry) -> Callable[..., str]:
+    """Create a sync handler for the list_agents tool."""
+
+    def handle_list_agents() -> str:
+        return json.dumps({"agents": registry.list_agents()}, indent=2)
+
+    return handle_list_agents
 
 
 def create_call_agent_handler(registry: AgentRegistry) -> Callable[..., str]:

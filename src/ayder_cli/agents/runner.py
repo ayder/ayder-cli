@@ -139,6 +139,23 @@ class AgentRunner:
                     error=f"Agent exceeded {self._timeout}s timeout",
                 )
 
+            # ChatLoop swallows stream/tool failures via on_system_message
+            # and returns normally. Promote any captured error into a real
+            # error AgentSummary so callers see the cause instead of a
+            # placeholder "completed with no summary".
+            if callbacks.last_system_error and not callbacks.last_content.strip():
+                self.status = "error"
+                logger.debug(
+                    "run failed (captured via on_system_message): agent='%s' run_id=%d error='%s'",
+                    self.agent_name, self.run_id, callbacks.last_system_error[:200],
+                )
+                return AgentSummary(
+                    agent_name=self.agent_name,
+                    status="error",
+                    summary="Agent failed before producing output.",
+                    error=callbacks.last_system_error,
+                )
+
             # Completed successfully
             self.status = "completed"
             summary_text = self._parse_summary(callbacks.last_content)

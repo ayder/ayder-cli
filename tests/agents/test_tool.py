@@ -1,8 +1,14 @@
 """Tests for the call_agent tool definition and handler."""
 
+import json
 from unittest.mock import MagicMock
 
-from ayder_cli.agents.tool import AGENT_TOOL_DEFINITION, create_call_agent_handler
+from ayder_cli.agents.tool import (
+    AGENT_TOOL_DEFINITION,
+    LIST_AGENTS_TOOL_DEFINITION,
+    create_call_agent_handler,
+    create_list_agents_handler,
+)
 from ayder_cli.tools.definition import ToolDefinition
 
 
@@ -24,6 +30,42 @@ class TestAgentToolDefinition:
 
     def test_definition_tags(self):
         assert "agents" in AGENT_TOOL_DEFINITION.tags
+
+
+class TestListAgentsToolDefinition:
+    def test_definition_is_tool_definition(self):
+        assert isinstance(LIST_AGENTS_TOOL_DEFINITION, ToolDefinition)
+
+    def test_definition_name(self):
+        assert LIST_AGENTS_TOOL_DEFINITION.name == "list_agents"
+
+    def test_definition_has_no_required_parameters(self):
+        params = LIST_AGENTS_TOOL_DEFINITION.parameters
+        assert params["properties"] == {}
+        assert params["required"] == []
+
+    def test_definition_permission(self):
+        assert LIST_AGENTS_TOOL_DEFINITION.permission == "r"
+
+
+class TestListAgentsHandler:
+    def test_handler_returns_structured_agents(self):
+        mock_registry = MagicMock()
+        mock_registry.list_agents.return_value = [
+            {
+                "name": "reviewer",
+                "description": "Reviews code",
+                "status": "idle",
+                "running_count": 0,
+            }
+        ]
+
+        handler = create_list_agents_handler(mock_registry)
+        result = json.loads(handler())
+
+        mock_registry.list_agents.assert_called_once_with()
+        assert result["agents"][0]["name"] == "reviewer"
+        assert result["agents"][0]["status"] == "idle"
 
 
 class TestCallAgentHandler:

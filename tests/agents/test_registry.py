@@ -9,6 +9,18 @@ from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.summary import AgentSummary
 
 
+def _close_scheduled_coroutine(coro, loop):
+    """Test scheduler stub that takes ownership of the coroutine like asyncio does."""
+    coro.close()
+    return MagicMock()
+
+
+def _close_then_raise_scheduler(coro, loop):
+    """Test scheduler stub for failures after coroutine ownership transfer."""
+    coro.close()
+    raise RuntimeError("loop closed")
+
+
 @pytest.fixture
 def agent_configs():
     return {
@@ -19,9 +31,11 @@ def agent_configs():
 
 @pytest.fixture
 def registry(agent_configs):
+    parent_config = MagicMock()
+    parent_config.model = "parent-model"
     return AgentRegistry(
         agents=agent_configs,
-        parent_config=MagicMock(),
+        parent_config=parent_config,
         project_ctx=MagicMock(),
         process_manager=MagicMock(),
         permissions={"r", "w"},
@@ -42,9 +56,50 @@ class TestAgentRegistry:
 
     def test_get_capability_prompts(self, registry):
         prompts = registry.get_capability_prompts()
-        assert "reviewer" in prompts
-        assert "writer" in prompts
+        assert "list_agents" in prompts
         assert "call_agent" in prompts
+        assert "reviewer" not in prompts
+        assert "writer" not in prompts
+
+    def test_list_agents_returns_structured_status(self, registry):
+        agents = registry.list_agents()
+        assert agents == [
+            {
+                "name": "reviewer",
+                "description": "You review code.",
+                "model": "parent-model",
+                "status": "idle",
+                "running_count": 0,
+            },
+            {
+                "name": "writer",
+                "description": "You write tests.",
+                "model": "parent-model",
+                "status": "idle",
+                "running_count": 0,
+            },
+        ]
+
+    def test_list_agents_prefers_agent_model_override(self):
+        agents = {
+            "custom": AgentConfig(
+                name="custom",
+                system_prompt="custom",
+                model="agent-specific-model",
+            ),
+        }
+        parent_config = MagicMock()
+        parent_config.model = "parent-model"
+        reg = AgentRegistry(
+            agents=agents,
+            parent_config=parent_config,
+            project_ctx=MagicMock(),
+            process_manager=MagicMock(),
+            permissions={"r"},
+            agent_timeout=300,
+        )
+        listed = reg.list_agents()
+        assert listed[0]["model"] == "agent-specific-model"
 
     def test_get_capability_prompts_empty(self):
         reg = AgentRegistry(
@@ -57,12 +112,12 @@ class TestAgentRegistry:
         )
         assert reg.get_capability_prompts() == ""
 
-    def test_get_capability_prompts_truncation(self):
-        """System prompts longer than 100 chars are truncated."""
+    def test_list_agents_description_truncation(self):
+        """System prompts exposed through list_agents are bounded."""
         agents = {
             "verbose": AgentConfig(
                 name="verbose",
-                system_prompt="A" * 200,
+                system_prompt="A" * 250,
             ),
         }
         reg = AgentRegistry(
@@ -73,11 +128,8 @@ class TestAgentRegistry:
             permissions={"r"},
             agent_timeout=300,
         )
-        prompts = reg.get_capability_prompts()
-        # Each agent description line should be truncated
-        for line in prompts.splitlines():
-            if line.startswith("- verbose:"):
-                assert len(line) < 120  # name + truncated prompt
+        listed = reg.list_agents()
+        assert listed[0]["description"] == "A" * 200
 
     def test_capability_prompts_mention_batch_behavior(self, registry):
         """Capability prompts explain batch completion and no-retry for failures."""
@@ -86,9 +138,12 @@ class TestAgentRegistry:
         assert "failed" in prompts.lower() or "error" in prompts.lower()
 
     def test_dispatch_unknown_agent(self, registry):
-        """Dispatching unknown agent returns error string."""
+        """Dispatching unknown agent returns error string with discovery guidance."""
         result = registry.dispatch("nonexistent", "do something")
         assert "not found" in result.lower()
+        assert "reviewer" in result
+        assert "writer" in result
+        assert "list_agents" in result
 
     def test_dispatch_returns_run_id(self, registry):
         """dispatch() returns int run_id on success."""
@@ -96,7 +151,10 @@ class TestAgentRegistry:
         registry.set_loop(mock_loop)
 
         with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
-             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
+             patch(
+                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
+                 side_effect=_close_scheduled_coroutine,
+             ):
             mock_runner = MockRunner.return_value
             mock_runner.agent_name = "reviewer"
 
@@ -105,13 +163,36 @@ class TestAgentRegistry:
         assert isinstance(result, int)
         assert result == 1  # first dispatch
 
+
+    def test_dispatch_closes_coroutine_when_scheduler_rejects(self, registry):
+        """dispatch() cleans up active state and closes coro if scheduling fails."""
+        mock_loop = MagicMock()
+        registry.set_loop(mock_loop)
+
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
+             patch(
+                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
+                 side_effect=_close_then_raise_scheduler,
+             ):
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock()
+
+            result = registry.dispatch("reviewer", "Review this")
+
+        assert "failed to schedule" in result.lower()
+        assert registry.active_count == 0
+
     def test_dispatch_allows_same_agent_twice(self, registry):
         """Same agent can be dispatched concurrently — no duplicate guard."""
         mock_loop = MagicMock()
         registry.set_loop(mock_loop)
 
         with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
-             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
+             patch(
+                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
+                 side_effect=_close_scheduled_coroutine,
+             ):
             mock_runner = MockRunner.return_value
             mock_runner.agent_name = "reviewer"
 
@@ -259,7 +340,10 @@ class TestAgentRegistry:
         registry.set_loop(mock_loop)
 
         with patch("ayder_cli.agents.registry.AgentRunner"), \
-             patch("ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe"):
+             patch(
+                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
+                 side_effect=_close_scheduled_coroutine,
+             ):
             result = registry.dispatch("reviewer", "run again")
 
         assert isinstance(result, int)

@@ -622,9 +622,17 @@ class AgentListScreen(ModalScreen[str | None]):
         if start > 0:
             result.append(f"  ↑ {start} more above\n", style="dim")
 
+        name_width = max(
+            (len(row.get("name", "?") or "?") for row in self._snapshot), default=0
+        )
+        model_width = max(
+            (len(row.get("model", "") or "") for row in self._snapshot), default=0
+        )
+
         for i in range(start, end):
             row = self._snapshot[i]
             name = row.get("name", "?")
+            model = row.get("model", "") or ""
             status = row.get("status", "unknown")
             count = int(row.get("running_count", 0) or 0)
             description = row.get("description", "") or ""
@@ -641,8 +649,15 @@ class AgentListScreen(ModalScreen[str | None]):
 
             icon, icon_style, label, label_style = self._status_decoration(status)
             result.append(icon + " ", style=icon_style)
-            result.append(f"{name:<20}", style="bold white" if is_selected else "white")
-            result.append(f" {label}", style=label_style)
+            result.append(
+                f"{name:<{name_width}}",
+                style="bold white" if is_selected else "white",
+            )
+            result.append(
+                f"  {model:<{model_width}}",
+                style="cyan" if model else "dim",
+            )
+            result.append(f"  {label}", style=label_style)
             if count > 1:
                 result.append(f" x{count}", style="bold yellow")
             if description:

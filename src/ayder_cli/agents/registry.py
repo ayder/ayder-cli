@@ -79,39 +79,42 @@ class AgentRegistry:
         """Count of currently active instances of the named agent."""
         return sum(1 for r in self._active.values() if r.agent_name == name)
 
+    def list_agents(self) -> list[dict[str, Any]]:
+        """Return configured agents with live status information."""
+        parent_model = getattr(self._parent_config, "model", None)
+        agents: list[dict[str, Any]] = []
+        for name, cfg in self.agents.items():
+            description = cfg.system_prompt[:200] if cfg.system_prompt else ""
+            resolved_model = cfg.model or parent_model
+            model = resolved_model if isinstance(resolved_model, str) else ""
+            agents.append({
+                "name": name,
+                "description": description,
+                "model": model,
+                "status": self.get_status(name) or "unknown",
+                "running_count": self.get_running_count(name),
+            })
+        return agents
+
     def get_capability_prompts(self) -> str:
-        """Generate capability prompt text for the main LLM's system prompt."""
+        """Generate generic agent capability guidance for the system prompt."""
         if not self.agents:
             return ""
 
-        agent_names = list(self.agents.keys())
-
         lines = [
-            "\n## Registered Agents",
+            "\n## Agent Delegation",
             "",
-            "You have specialized agents available. To use them, call the `call_agent` tool",
-            f"with the `name` parameter set to one of: {', '.join(repr(n) for n in agent_names)}.",
-            "",
+            "Configured specialized agents may be available.",
+            "Use the `list_agents` tool to discover exact names and descriptions before `call_agent`.",
             "Each agent runs in the background with its own LLM and tools.",
             "You will receive the agent's summary when it completes.",
-            "",
-            "When asked to list agents, list the names below — do NOT search the codebase.",
-            "",
-        ]
-        for name, cfg in self.agents.items():
-            provider = cfg.provider or "(inherited)"
-            model = cfg.model or "(inherited)"
-            desc = cfg.system_prompt[:150] if cfg.system_prompt else "(no description)"
-            lines.append(f"- **{name}** (provider: {provider}, model: {model}): {desc}")
-
-        lines.extend([
             "",
             "**Usage rules:**",
             "- You CAN dispatch the same agent multiple times with different tasks.",
             "- Only use the agent whose specialty matches the task. Do NOT use unrelated agents.",
             "- Batch behavior: you will receive all agent summaries after all agents complete.",
             "- On agent failure, handle the task yourself. Do NOT re-dispatch failed agents.",
-        ])
+        ]
 
         return "\n".join(lines)
 
@@ -122,7 +125,17 @@ class AgentRegistry:
         """
         if name not in self.agents:
             logger.debug("dispatch rejected: agent '%s' not found", name)
-            return f"Error: Agent '{name}' not found in configured agents"
+            available = ", ".join(sorted(self.agents))
+            if available:
+                return (
+                    f"Error: Agent '{name}' not found. "
+                    f"Available agents: {available}. "
+                    f"Call list_agents for descriptions."
+                )
+            return (
+                f"Error: Agent '{name}' not found. "
+                f"No agents are configured. Call list_agents to verify availability."
+            )
         # Re-dispatch guard: block agents that failed in this cycle
         if name in self._settled and self._settled[name] in ("error", "timeout"):
             logger.debug(
@@ -185,7 +198,19 @@ class AgentRegistry:
         if self._loop is None:
             self._active.pop(run_id, None)
             return "Error: Agent registry not initialized (event loop not set)"
-        asyncio.run_coroutine_threadsafe(_run_and_queue(), self._loop)
+
+        coro = _run_and_queue()
+        try:
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except Exception as exc:
+            # If scheduling fails (for example because the loop was closed),
+            # the coroutine object will never be awaited unless explicitly
+            # closed. Also remove the runner from active state so status does
+            # not remain stuck on "running".
+            coro.close()
+            self._active.pop(run_id, None)
+            logger.exception("failed to schedule agent run: agent='%s' run_id=%d", name, run_id)
+            return f"Error: Failed to schedule agent '{name}': {exc}"
 
         return run_id
 

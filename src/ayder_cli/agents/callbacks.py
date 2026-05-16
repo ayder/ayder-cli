@@ -41,6 +41,7 @@ class AgentCallbacks:
         self._cancel_event = cancel_event
         self._on_progress = on_progress
         self.last_content: str = ""
+        self.last_system_error: str | None = None
 
     def _emit(self, event: str, data: Any = None) -> None:
         if self._on_progress:
@@ -87,6 +88,11 @@ class AgentCallbacks:
         self._emit("tools_cleanup")
 
     def on_system_message(self, text: str) -> None:
+        # ChatLoop reports stream/tool failures here. Capture them so the
+        # runner can promote them into AgentSummary.error instead of returning
+        # a misleading "completed" status with no content.
+        if isinstance(text, str) and text.lstrip().lower().startswith("error"):
+            self.last_system_error = text
         self._emit("system_message", text)
 
     async def request_confirmation(

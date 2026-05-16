@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from ayder_cli.tui.screens import AgentListScreen
 
 
-def _make_registry(agents_with_status: dict[str, tuple[str, int]]):
+def _make_registry(agents_with_status: dict[str, tuple[str, int]], model: str = "qwen3-coder:latest"):
     """Build a fake registry. Maps name -> (status, running_count)."""
     reg = MagicMock()
     reg.agents = {name: MagicMock() for name in agents_with_status}
@@ -13,6 +13,7 @@ def _make_registry(agents_with_status: dict[str, tuple[str, int]]):
         {
             "name": name,
             "description": f"{name} description",
+            "model": model,
             "status": status,
             "running_count": count,
         }
@@ -38,13 +39,16 @@ def test_agent_list_screen_render_has_status_icons():
             "reviewer": ("idle", 0),
             "planner": ("running", 2),
             "fixer": ("error", 0),
-        }
+        },
+        model="qwen3-coder:latest",
     )
     screen = AgentListScreen(registry=reg)
     rendered = screen._render_list().plain
     assert "reviewer" in rendered
     assert "planner" in rendered
     assert "fixer" in rendered
+    # Model name surfaces next to each agent
+    assert "qwen3-coder:latest" in rendered
     # Running count is shown when > 1
     assert "x2" in rendered or "(2)" in rendered
     # Status labels surface in the rendered output
@@ -68,6 +72,32 @@ def test_agent_list_screen_navigation_clamps():
     screen.selected_index = 99
     screen._clamp_index()
     assert screen.selected_index == 1
+
+
+def test_agent_list_screen_columns_align_with_varying_model_lengths():
+    """Status column starts at the same offset on every row, even when model
+    names differ in length (auto-fit column widths)."""
+    reg = MagicMock()
+    rows = [
+        {"name": "code_reviewer", "model": "deepseek-v4-pro", "status": "idle",
+         "description": "", "running_count": 0},
+        {"name": "code_writer", "model": "qwen3.6:35b-a3b-coding-nvfp4",
+         "status": "idle", "description": "", "running_count": 0},
+        {"name": "qa", "model": "kimi-k2.6:cloud", "status": "idle",
+         "description": "", "running_count": 0},
+    ]
+    reg.agents = {r["name"]: MagicMock() for r in rows}
+    reg.list_agents.return_value = rows
+
+    screen = AgentListScreen(registry=reg)
+    rendered_lines = [line for line in screen._render_list().plain.splitlines() if line.strip()]
+    assert len(rendered_lines) == 3
+    # The status label "idle" must appear at the same column index on each row.
+    idle_offsets = [line.index("idle") for line in rendered_lines]
+    assert len(set(idle_offsets)) == 1, (
+        f"Status column not aligned across rows: offsets={idle_offsets}\n"
+        + "\n".join(rendered_lines)
+    )
 
 
 def test_agent_list_screen_refresh_picks_up_status_change():

@@ -230,6 +230,8 @@ class TestCreateAgentRuntime:
         assert rt.process_manager == pm
         assert rt.project_ctx == project_ctx
         assert rt.system_prompt != ""
+        assert "You are the specialized agent named 'test-agent'." in rt.system_prompt
+        assert "When asked for your agent name, report this configured name exactly." in rt.system_prompt
         assert "You are a test." in rt.system_prompt
 
     def test_agent_provider_override(self):

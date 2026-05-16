@@ -87,6 +87,38 @@ class TestAgentRunner:
         assert result.agent_name == "test-agent"
 
     @pytest.mark.anyio
+    async def test_run_passes_configured_agent_identity_prompt_to_chat_loop(self):
+        """AgentRunner sends the configured agent name in the ChatLoop system prompt."""
+        agent_cfg = AgentConfig(
+            name="file_lister",
+            system_prompt="You are a filesystem specialist.",
+        )
+        runner = self._make_runner(agent_config=agent_cfg)
+
+        mock_rt = MagicMock()
+        mock_rt.config = runner._parent_config
+        mock_rt.llm_provider = MagicMock()
+        mock_rt.tool_registry = MagicMock()
+        mock_rt.system_prompt = (
+            "You are the specialized agent named 'file_lister'.\n"
+            "When asked for your agent name, report this configured name exactly.\n\n"
+            "You are a filesystem specialist."
+        )
+
+        with patch("ayder_cli.agents.runner.create_agent_runtime", return_value=mock_rt), \
+             patch("ayder_cli.agents.runner.ChatLoop") as MockLoop:
+            mock_loop = MockLoop.return_value
+            mock_loop.run = AsyncMock()
+
+            result = await runner.run("What is your configured agent name?")
+
+        messages = MockLoop.call_args.kwargs["messages"]
+        assert messages[0] == {"role": "system", "content": mock_rt.system_prompt}
+        assert "specialized agent named 'file_lister'" in messages[0]["content"]
+        assert messages[1] == {"role": "user", "content": "What is your configured agent name?"}
+        assert result.agent_name == "file_lister"
+
+    @pytest.mark.anyio
     async def test_run_timeout(self):
         """AgentRunner.run() produces timeout summary when exceeding timeout."""
         runner = self._make_runner(timeout=0.01)  # 10ms timeout

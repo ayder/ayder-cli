@@ -29,7 +29,12 @@ from ayder_cli.tui.theme_manager import get_theme_css
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.screens import CLIConfirmScreen, CLIHelpScreen
 from ayder_cli.agents.registry import AgentRegistry
-from ayder_cli.agents.tool import AGENT_TOOL_DEFINITION, create_call_agent_handler
+from ayder_cli.agents.tool import (
+    AGENT_TOOL_DEFINITION,
+    LIST_AGENTS_TOOL_DEFINITION,
+    create_call_agent_handler,
+    create_list_agents_handler,
+)
 from ayder_cli.tui.widgets import (
     AgentPanel,
     ChatView,
@@ -286,7 +291,9 @@ class AyderApp(App):
                 on_complete=_agent_complete,
             )
 
-            # Register call_agent tool
+            # Register agent tools
+            list_handler = create_list_agents_handler(self._agent_registry)
+            self.registry.register_dynamic_tool(LIST_AGENTS_TOOL_DEFINITION, list_handler)
             handler = create_call_agent_handler(self._agent_registry)
             self.registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
 

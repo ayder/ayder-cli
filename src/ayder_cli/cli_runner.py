@@ -14,7 +14,12 @@ import sys
 from pathlib import Path
 
 from ayder_cli.agents.registry import AgentRegistry
-from ayder_cli.agents.tool import AGENT_TOOL_DEFINITION, create_call_agent_handler
+from ayder_cli.agents.tool import (
+    AGENT_TOOL_DEFINITION,
+    LIST_AGENTS_TOOL_DEFINITION,
+    create_call_agent_handler,
+    create_list_agents_handler,
+)
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.cli_callbacks import CliCallbacks
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
@@ -45,7 +50,7 @@ def _run_loop(
         {"role": "user", "content": prompt},
     ]
 
-    # Initialize agents if configured
+    agent_registry: AgentRegistry | None = None
     if hasattr(rt.config, "agents") and isinstance(rt.config.agents, dict) and rt.config.agents:
         agent_registry = AgentRegistry(
             agents=rt.config.agents,
@@ -55,6 +60,8 @@ def _run_loop(
             permissions=set(permissions or {"r"}),
             agent_timeout=getattr(rt.config, "agent_timeout", 300),
         )
+        list_handler = create_list_agents_handler(agent_registry)
+        rt.tool_registry.register_dynamic_tool(LIST_AGENTS_TOOL_DEFINITION, list_handler)
         handler = create_call_agent_handler(agent_registry)
         rt.tool_registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
 
@@ -84,7 +91,15 @@ def _run_loop(
         context_manager=rt.context_manager,
     )
 
-    asyncio.run(loop.run())
+    async def _drive() -> None:
+        # AgentRegistry.dispatch needs a running loop to schedule agent runs
+        # via run_coroutine_threadsafe. Wire it before entering the chat loop
+        # so call_agent works in single-shot CLI mode too.
+        if agent_registry is not None:
+            agent_registry.set_loop(asyncio.get_running_loop())
+        await loop.run()
+
+    asyncio.run(_drive())
     print()  # Ensure terminal prompt starts on a new line after streaming output
     return 0
 

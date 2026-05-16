@@ -151,9 +151,12 @@ def create_agent_runtime(
     else:
         cfg = parent_config
 
-    # 2. Apply model override
-    if agent_config.model:
-        cfg = cfg.model_copy(update={"model": agent_config.model})
+    # 2. Apply per-agent overrides (model, base_url, api_key, num_ctx, …).
+    # Without this, fields under [agents.<name>] beyond provider/model are
+    # silently ignored and the agent inherits the parent profile's endpoint.
+    overrides = agent_config.overrides()
+    if overrides:
+        cfg = cfg.model_copy(update=overrides)
 
     # 3. Create isolated AIProvider
     llm_provider = provider_orchestrator.create(cfg)
@@ -162,6 +165,10 @@ def create_agent_runtime(
     tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
 
     # 5. Build agent system prompt
+    identity_prefix = (
+        f"You are the specialized agent named '{agent_config.name}'.\n"
+        "When asked for your agent name, report this configured name exactly.\n\n"
+    )
     summary_suffix = (
         "\n\n---\nWhen you have completed your task, end your final response with "
         "a structured summary block:\n"
@@ -173,7 +180,7 @@ def create_agent_runtime(
     )
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    system_prompt = agent_config.system_prompt + tool_prompts + summary_suffix
+    system_prompt = identity_prefix + agent_config.system_prompt + tool_prompts + summary_suffix
 
     # Create context manager and freeze agent system prompt
     context_mgr = context_manager_factory.create(cfg)
