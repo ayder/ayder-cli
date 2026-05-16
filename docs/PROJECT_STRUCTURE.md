@@ -219,7 +219,7 @@ cli.py:main()
 | `tui/adapter.py` | Adapter glue between `AyderApp` and `ChatLoop` | callback wiring helpers |
 | `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()` |
 | `tui/widgets.py` | Custom widgets | `ChatView`, `ToolPanel`, `CLIInputBar`, `StatusBar`, `AutoCompleteInput` |
-| `tui/screens.py` | Modal screens | `CLIConfirmScreen`, `CLIHelpScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `TaskEditScreen` |
+| `tui/screens.py` | Modal screens | `AgentListScreen`, `CLIConfirmScreen`, `CLIHelpScreen`, `CLIMultiSelectScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `TaskEditScreen` |
 | `tui/parser.py` | TUI-specific parsing | `content_processor()` |
 | `tui/helpers.py` | UI helpers | `create_tui_banner()` |
 | `tui/keybindings.py` | Keybinding declarations | `BINDINGS` |
