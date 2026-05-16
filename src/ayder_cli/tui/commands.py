@@ -959,8 +959,10 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         def on_agent_selected(name: str | None) -> None:
             if not name:
                 return
+            from textual.widgets import TextArea
+
             try:
-                input_widget = app.query_one("#chat-input")
+                input_widget = app.query_one("#chat-input", TextArea)
             except Exception:
                 return
             input_widget.text = f"/agent {name} "
