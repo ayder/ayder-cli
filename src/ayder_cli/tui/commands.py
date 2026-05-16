@@ -956,7 +956,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
             )
             return
 
-        def _on_agent_selected(name: str | None) -> None:
+        def on_agent_selected(name: str | None) -> None:
             if not name:
                 return
             try:
@@ -971,7 +971,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
 
         app.push_screen(
             AgentListScreen(registry=app._agent_registry),
-            _on_agent_selected,
+            on_agent_selected,
         )
         return
 
