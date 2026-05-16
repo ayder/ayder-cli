@@ -13,7 +13,13 @@ from typing import TYPE_CHECKING, Callable
 from ayder_cli.core.config import list_provider_profiles
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
-from ayder_cli.tui.screens import CLISelectScreen, CLIMultiSelectScreen, CLIPermissionScreen, TaskEditScreen
+from ayder_cli.tui.screens import (
+    AgentListScreen,
+    CLISelectScreen,
+    CLIMultiSelectScreen,
+    CLIPermissionScreen,
+    TaskEditScreen,
+)
 from ayder_cli.tui.widgets import AgentPanel, ActivityBar, ChatView, StatusBar
 
 if TYPE_CHECKING:
@@ -944,8 +950,28 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
     """Handle /agent command: dispatch, list, or cancel agents."""
     parts = args.strip().split(None, 1)
     if not parts:
-        chat_view.add_system_message(
-            "Usage: /agent <name> <task> | /agent list | /agent cancel <name>"
+        if not hasattr(app, "_agent_registry") or app._agent_registry is None:
+            chat_view.add_system_message(
+                "No agents configured. Add [agents.*] sections to config.toml."
+            )
+            return
+
+        def _on_agent_selected(name: str | None) -> None:
+            if not name:
+                return
+            try:
+                input_widget = app.query_one("#chat-input")
+            except Exception:
+                return
+            input_widget.text = f"/agent {name} "
+            try:
+                input_widget.focus()
+            except Exception:
+                pass
+
+        app.push_screen(
+            AgentListScreen(registry=app._agent_registry),
+            _on_agent_selected,
         )
         return
 
