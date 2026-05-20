@@ -40,7 +40,7 @@ The tool description and parameter descriptions are the per-call cost. Both are 
 ```json
 {
   "name": "context",
-  "description": "Session context. action=save snapshots state by name; load restores by name; list enumerates slots; stats reports token + cache usage; clear summarizes the conversation, auto-saves it, and frees the budget.",
+  "description": "Session context. action=save snapshots state by name; load restores by name; list enumerates slots; stats reports token + cache usage; clear auto-saves the caller-provided summary (content) then deferred-wipes the conversation to free the budget.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -55,7 +55,7 @@ The tool description and parameter descriptions are the per-call cost. Both are 
       },
       "content": {
         "type": "string",
-        "description": "Content to snapshot. Required for save."
+        "description": "Content. Required for save (the snapshot text) and clear (the LLM's summary of work done)."
       },
       "overwrite": {
         "type": "boolean",
@@ -81,7 +81,7 @@ Conditional-required (`content` only when `action=save`) is intentionally not en
 | `load` | `name` | `ToolSuccess(content_string)`; on missing name, `ToolError` whose body lists available names |
 | `list` | none | `ToolSuccess(JSON array)` of `{name, saved_at, size_bytes}` |
 | `stats` | none | `ToolSuccess(JSON object)` with token + cache fields (see below) |
-| `clear` | none | `ToolSuccess(JSON object)` summarizing the compaction (see below) |
+| `clear` | `content` | `ToolSuccess(JSON object)` summarizing the deferred compaction (see below) |
 
 ### `stats` payload
 
@@ -105,34 +105,42 @@ Token fields come from `ContextManagerProtocol.get_stats()` (returns `ContextSta
 
 ### `clear` payload and behavior
 
-`clear` is the LLM-callable equivalent of the existing `/compact` slash command. The model invokes it when it has finished a discrete unit of work and wants to free its working budget before the next chunk. The flow is the same one `/compact` uses today (`handle_compact` in `tui/commands.py` around line 330): summarize → save → clear messages → reload summary as the new context.
+`clear` is the LLM's "I'm done with this chunk, free the budget" signal. **The LLM provides its own summary** as the `content` parameter — the tool does not invoke a secondary summarization round-trip. This caller-supplied design avoids tool-cycle re-entrancy hazards (an LLM-driven summarization step inside a tool call would require chat-loop re-entrancy that the current architecture does not support cleanly).
 
-Behavior:
-1. Build a `conversation_text` from current `app.messages` (user + assistant turns), excluding the last `keep_last_n` message exchanges.
-2. Trigger the LLM to produce a summary using `COMPACT_COMMAND_PROMPT_TEMPLATE`.
-3. Auto-save the summary into the context store with a generated name: `auto-compact-<ISO-timestamp>`. The slot is regular `.ayder/context/` storage — recoverable via `context(action="load", name=...)` like any other.
-4. Clear `app.messages` (preserving the system message and the retained last-N exchanges) and call `ContextManagerProtocol.clear()` on the active context manager to reset compression/utilization counters.
-5. Re-seed `app.messages` with the summary so the LLM has continuity on its next turn.
+Behavior (synchronous file write + deferred message mutation):
 
-Return shape:
+1. Validate `content` is non-empty (the LLM-authored summary).
+2. Auto-save the summary into `.ayder/context/<name>.json`. If `name` is not provided, generate `auto-compact-<microsecond-timestamp>`. Same versioning rules as `save`.
+3. Set `app._pending_compact = {"summary_name": <name>, "summary_content": <content>, "keep_last_n": <n>}` on the running app handle.
+4. Return projected counts to the LLM immediately.
+
+The actual message wipe + re-seed happens **after the tool call cycle completes**, when the chat_loop's `pre_iteration_hook` fires at the start of the next iteration. This avoids mutating `app.messages` mid-tool-call (which would orphan a tool_result from its assistant pair).
+
+Return shape (immediate, before the deferred wipe runs):
 
 ```json
 {
   "messages_before": 42,
-  "messages_after": 3,
-  "tokens_freed_estimate": 14200,
-  "saved_as": "auto-compact-2026-05-20T15-22-08",
-  "kept_last_n": 0
+  "kept_last_n": 0,
+  "saved_as": "auto-compact-2026-05-20T15-22-08-123456",
+  "status": "pending — will be applied at next chat-loop iteration"
 }
 ```
 
-Because step 2 requires an LLM round-trip, `clear` is asynchronous from the tool's standpoint — it queues the compaction flow and returns the projected counts. The actual summary text is not returned in the tool result (it goes into the next conversation turn). If summarization fails partway, no destructive action is taken — `app.messages` is untouched, the auto-save slot is not created, and `ToolError` is returned.
+Failure modes:
+- Missing `content` → `ToolError("content (summary text) is required for clear", "validation")`. No file write, no flag set.
+- Missing app handle (e.g., headless CLI) → `ToolError("clear requires a running TUI session (no app handle)", "execution")`.
+- `_save` fails → its error propagates; flag is not set.
+
+### `/clear` coordination fix (bundled)
 
 ### `/clear` coordination fix (bundled)
 
 Today `do_clear` in `tui/commands.py:862` clears `app.messages` and the chat view but does **not** call `ContextManagerProtocol.clear()` (defined at `default_context_manager.py:437`). As a result, the active context manager's `_compressed_count`, `_message_meta`, and cache state persist across an explicit user `/clear`. This is a latent bug.
 
 Fixed in the same PR: `do_clear` calls `app.context_manager.clear()` after clearing `app.messages`. Independent of the new `context(action="clear")` tool — this fixes the existing `/clear` slash command too.
+
+`clear()` is invoked with `hasattr(cm, "clear")` (duck-typed) rather than as a `ContextManagerProtocol` method, because the protocol does not declare it. Only `DefaultContextManager` currently implements it. Promoting `clear()` to the protocol is a separate refactor that would require updates to every implementer — out of scope here.
 
 ## Storage
 
@@ -155,7 +163,9 @@ Each JSON file contains:
 
 `save` with `overwrite=false` (default) renames any existing `<name>.json` to `<name>.<ISO-timestamp>.json` before writing the new file. `overwrite=true` removes the predecessor without versioning.
 
-The timestamp in versioned filenames uses dashes instead of colons (`2026-05-20T14-32-15`) for filesystem portability. The `saved_at` field inside the JSON body uses standard ISO 8601 with colons (`2026-05-20T14:35:02`) — these are deliberately different.
+The timestamp in versioned filenames uses dashes instead of colons (`2026-05-20T14-32-15-987654`) for filesystem portability **and includes microseconds** to prevent collision when the same slot is overwritten more than once per second. The `saved_at` field inside the JSON body uses standard ISO 8601 with colons (`2026-05-20T14:35:02.987654`) — these are deliberately different.
+
+**Slot name validation.** All slot names are validated against `^[A-Za-z0-9._-]+$` and rejected if they equal `.`, `..`, or start with `.`. This prevents path traversal (`name="../escape"`) and accidental nested paths. Validation is applied at the entry of both `save` and `load`.
 
 `list` returns only "current" entries — files whose name matches `<name>.json` with no additional `.` segments before the extension. Versioned files (which contain an extra `.<timestamp>` segment) are recovery-only and not surfaced through the tool. Recovery is a manual operation (file restore).
 
@@ -163,14 +173,13 @@ The timestamp in versioned filenames uses dashes instead of colons (`2026-05-20T
 
 ### Dependency injection
 
-`stats` and `clear` need access to the active `ContextManagerProtocol`, `CacheMonitor`, and (for `clear`) the running `AyderApp` instance so the compaction flow can mutate `app.messages`. The registry already injects `project_ctx` and `process_manager` based on function signature inspection. Extend the same mechanism with the additional injectable types:
+`stats` and `clear` need access to the active `ContextManagerProtocol` and (for `clear`) the running `AyderApp` instance. The registry already injects `project_ctx` and `process_manager` based on function signature inspection. Extend the same mechanism with two more injectable types:
 
 ```python
 def context(
     project_ctx: ProjectContext,
     context_manager: ContextManagerProtocol,
-    cache_monitor: CacheMonitor | None,
-    app: AyderApp,  # needed by clear; None-safe if registry has no app handle
+    app: Any,  # AyderApp instance; needed by clear. Optional — None in headless mode.
     action: str,
     name: str | None = None,
     content: str | None = None,
@@ -180,7 +189,9 @@ def context(
     ...
 ```
 
-Registry change: in `create_default_registry(...)`, accept and inject `context_manager`, `cache_monitor`, and an `app` reference the same way it does `process_manager`. If the `app` handle is unavailable (e.g., headless CLI execution), `context(action="clear")` returns `ToolError("clear requires a running TUI session", "execution")` and the other actions still work.
+Registry change: in `create_default_registry(...)`, accept and inject `context_manager` and an `app` reference the same way it does `process_manager`. If the `app` handle is unavailable (e.g., headless CLI execution), `context(action="clear")` returns `ToolError("clear requires a running TUI session", "execution")` and the other actions still work.
+
+**`CacheMonitor` is not a separate injectable.** Only `OllamaContextManager` owns one, and it's attached as an instance attribute (`context_manager._cache_monitor`). `_stats` accesses it via `getattr(context_manager, "_cache_monitor", None)` and gracefully reports `cache_state="n/a"` when absent. Adding a separate DI parameter would duplicate the lookup and complicate registry construction for the non-Ollama case.
 
 ### File layout
 
@@ -266,8 +277,12 @@ Single PR. No data migration — existing `.ayder/memory/` files are orphaned bu
 
 ## Open Items for Implementation Plan
 
-- Confirm where `CacheMonitor` is instantiated and how it reaches the registry's DI scope.
-- Confirm where `ContextManagerProtocol` instance lives at runtime (per-session in the chat loop?) and how the registry obtains a reference.
 - Decide whether `stats` should also include the active provider/model name (useful context, ~1 extra line in payload).
-- Decide how `context(action="clear")` interacts with an in-flight LLM turn — the existing `/compact` flow runs through `app.start_llm_processing()` which queues a new LLM call. Need to confirm whether the registry's tool dispatch can re-enter the chat loop safely, or whether `clear` must defer the actual compaction to after the current tool-call cycle completes.
 - Decide whether `auto-compact-*` slots should be garbage-collected after N entries (otherwise they accumulate unboundedly across long sessions).
+- Decide whether to promote `clear()` to `ContextManagerProtocol`. Currently only `DefaultContextManager` implements it; the design uses `hasattr` duck-typing. Promotion would force every context manager (including `OllamaContextManager`) to implement reset semantics consistently.
+- Decide whether agent-runtime contexts should be isolated from the parent's `.ayder/context/`. Current design shares the namespace; agents can use slot-name prefixes for logical isolation.
+
+**Resolved during planning:**
+- `CacheMonitor` lives on `OllamaContextManager._cache_monitor` (instance attribute); accessed via `getattr(context_manager, "_cache_monitor", None)` — no separate DI injection.
+- `ContextManagerProtocol` instance is created in `runtime_factory.create_runtime()` and held on `RuntimeComponents.context_manager`; passed to `create_default_registry(..., context_manager=context_mgr)` for tool DI.
+- `clear` action does **not** trigger in-tool LLM summarization. The LLM provides its own summary as the `content` parameter and the tool defers message mutation via `app._pending_compact`, consumed at the next chat-loop iteration boundary by a composed `pre_iteration_hook`.

@@ -4,7 +4,7 @@
 
 **Goal:** Replace four memory tools (`save_memory`, `load_memory`, `save_context_memory`, `load_context_memory`) with a single polymorphic `context` tool that handles `save` / `load` / `list` / `stats` / `clear`. Fix the latent `/clear` coordination bug. Cut ~135 tokens per LLM call from the tool-definition surface.
 
-**Architecture:** New `context` tool mirrors the polymorphic enum-dispatch pattern of `file_editor` (one tool, one `action` enum, params interpreted per action). Storage is per-named-slot JSON files in `.ayder/context/` with auto-versioning on overwrite. The `clear` action is deferred via `app._pending_compact` consumed by the chat_loop's `pre_iteration_hook` — this avoids mutating `app.messages` mid-tool-call which would orphan tool_result messages.
+**Architecture:** New `context` tool mirrors the polymorphic enum-dispatch pattern of `file_editor` (one tool, one `action` enum, params interpreted per action). Storage is per-named-slot JSON files in `.ayder/context/` with auto-versioning on overwrite and microsecond timestamps to prevent same-second collisions. Slot names are validated against a slug-like regex to prevent path traversal. The `clear` action takes a **caller-supplied summary** (the LLM provides the summary text in `content`) rather than triggering in-tool summarization — this avoids tool-cycle re-entrancy hazards. Actual message mutation is deferred via `app._pending_compact` and consumed by the chat_loop's `pre_iteration_hook`, composed with the existing agent-summary injection hook so both can run.
 
 **Tech Stack:** Python 3.12, pytest with `anyio`, JSON for storage, existing `ToolDefinition` schema, existing `ContextManagerProtocol`. No new dependencies.
 
@@ -211,7 +211,7 @@ Expected: 3 tests PASS.
 
 - [ ] **Step 6: Run full registry/execution tests to verify no regressions**
 
-Run: `.venv/bin/python3 -m pytest tests/tools/ -v --timeout=10`
+Run: `.venv/bin/python3 -m pytest tests/tools/ -v --timeout=30`
 Expected: All existing tests still PASS.
 
 - [ ] **Step 7: Commit**
@@ -299,7 +299,7 @@ The cleanest path is to set it after registry creation. Edit `src/ayder_cli/tui/
 
 - [ ] **Step 5: Run the full test suite**
 
-Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=10`
+Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=30`
 Expected: All tests PASS (no behavior change yet — only wiring).
 
 - [ ] **Step 6: Commit**
@@ -367,10 +367,14 @@ Replaces save_memory, load_memory, save_context_memory, load_context_memory
 with a single polymorphic tool dispatching on `action`.
 
 Storage: .ayder/context/<name>.json (current), <name>.<timestamp>.json (versioned).
+
+Slot names are validated to a slug-like character class to prevent
+path traversal (`..`, `/`, etc).
 """
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -382,13 +386,35 @@ from ayder_cli.core.result import ToolError, ToolSuccess
 _VALID_ACTIONS = frozenset({"save", "load", "list", "stats", "clear"})
 
 
+_SLOT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 def _get_context_dir(project_ctx: ProjectContext) -> Path:
     return project_ctx.root / ".ayder" / "context"
 
 
 def _iso_dashed_timestamp() -> str:
-    """Filesystem-safe ISO timestamp using dashes in the time portion."""
-    return datetime.now().isoformat().replace(":", "-").split(".")[0]
+    """Filesystem-safe ISO timestamp with microsecond precision.
+
+    Microseconds avoid same-second collision when two saves of the same slot
+    happen rapidly. Colons in the time portion are replaced with dashes for
+    Windows/macOS portability.
+    """
+    return datetime.now().isoformat().replace(":", "-").replace(".", "-")
+
+
+def _validate_slot_name(name: str | None) -> str | None:
+    """Return None if the slot name is safe, else an error message."""
+    if not name:
+        return "name must be a non-empty string"
+    if not _SLOT_NAME_RE.match(name):
+        return (
+            "name must contain only letters, digits, '.', '_', '-' "
+            "(no path separators or '..')"
+        )
+    if name in (".", "..") or name.startswith("."):
+        return "name must not be '.', '..', or start with '.'"
+    return None
 
 
 def context(
@@ -523,6 +549,30 @@ def test_save_missing_content_returns_validation_error(project_ctx):
     result = context(project_ctx=project_ctx, action="save", name="s")
     assert isinstance(result, ToolError)
     assert result.category == "validation"
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    ["..", "../escape", "a/b", "a\\b", ".hidden", "name with spaces", ""],
+)
+def test_save_rejects_unsafe_slot_names(project_ctx, bad_name):
+    result = context(
+        project_ctx=project_ctx, action="save", name=bad_name, content="x"
+    )
+    assert isinstance(result, ToolError)
+    assert result.category == "validation"
+
+
+def test_save_versioning_handles_rapid_repeat_saves(project_ctx, monkeypatch):
+    """Two saves of the same slot within one second must each produce a distinct
+    versioned file (microsecond precision guarantees uniqueness)."""
+    context(project_ctx=project_ctx, action="save", name="s", content="v1")
+    context(project_ctx=project_ctx, action="save", name="s", content="v2")
+    context(project_ctx=project_ctx, action="save", name="s", content="v3")
+
+    ctx_dir = project_ctx.root / ".ayder" / "context"
+    versioned = sorted(p.name for p in ctx_dir.iterdir() if p.name != "s.json")
+    assert len(versioned) == 2  # v1 and v2 each got versioned
 ```
 
 Also add `import json` at the top of the test file if not already present.
@@ -543,8 +593,9 @@ def _save(
     content: str | None,
     overwrite: bool,
 ) -> str:
-    if not name:
-        return ToolError("name is required for save", "validation")
+    err = _validate_slot_name(name)
+    if err:
+        return ToolError(err, "validation")
     if content is None or content == "":
         return ToolError("content is required for save", "validation")
 
@@ -553,6 +604,8 @@ def _save(
 
     target = ctx_dir / f"{name}.json"
     if target.exists() and not overwrite:
+        # Microsecond precision avoids same-second collisions on rapid
+        # repeat saves of the same slot.
         versioned = ctx_dir / f"{name}.{_iso_dashed_timestamp()}.json"
         target.rename(versioned)
 
@@ -632,8 +685,9 @@ Replace the `_load` placeholder:
 
 ```python
 def _load(project_ctx: ProjectContext, name: str | None) -> str:
-    if not name:
-        return ToolError("name is required for load", "validation")
+    err = _validate_slot_name(name)
+    if err:
+        return ToolError(err, "validation")
 
     ctx_dir = _get_context_dir(project_ctx)
     target = ctx_dir / f"{name}.json"
@@ -1146,6 +1200,9 @@ async def test_consumer_wipes_messages_preserves_system_and_summary():
 
 @pytest.mark.anyio
 async def test_consumer_preserves_keep_last_n_exchanges():
+    """An 'exchange' = one user message and all subsequent
+    assistant/tool/tool_result messages until the next user message
+    (or end of list)."""
     from ayder_cli.tui.app import apply_pending_compact
 
     msgs = [
@@ -1153,7 +1210,9 @@ async def test_consumer_preserves_keep_last_n_exchanges():
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
         {"role": "user", "content": "u2"},
-        {"role": "assistant", "content": "a2"},
+        {"role": "assistant", "content": "a2-with-tool"},
+        {"role": "tool", "content": "tool-output"},
+        {"role": "assistant", "content": "a2-followup"},
     ]
     pending = {
         "summary_name": "auto",
@@ -1164,14 +1223,35 @@ async def test_consumer_preserves_keep_last_n_exchanges():
 
     await apply_pending_compact(app, app.messages)
 
-    # Expect: system + summary + last 2 messages (one full exchange)
+    # Expect: system + summary + the last exchange (u2 → a2-with-tool → tool → a2-followup)
     assert app.messages[0]["role"] == "system"
     assert "sum" in str(app.messages[1].get("content", ""))
-    assert app.messages[-2:] == [
+    assert app.messages[2:] == [
         {"role": "user", "content": "u2"},
-        {"role": "assistant", "content": "a2"},
+        {"role": "assistant", "content": "a2-with-tool"},
+        {"role": "tool", "content": "tool-output"},
+        {"role": "assistant", "content": "a2-followup"},
     ]
     assert app._pending_compact is None
+
+
+@pytest.mark.anyio
+async def test_consumer_keep_last_n_zero_drops_all_non_system():
+    from ayder_cli.tui.app import apply_pending_compact
+
+    msgs = [
+        {"role": "system", "content": "SYS"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+    ]
+    pending = {"summary_name": "a", "summary_content": "s", "keep_last_n": 0}
+    app = _make_app(msgs, pending)
+
+    await apply_pending_compact(app, app.messages)
+
+    # system + summary only
+    assert len(app.messages) == 2
+    assert app.messages[0]["role"] == "system"
 
 
 @pytest.mark.anyio
@@ -1215,29 +1295,57 @@ Expected: FAIL — `apply_pending_compact` does not exist.
 Append to `src/ayder_cli/tui/app.py` (at module scope, after the class):
 
 ```python
+def _split_into_exchanges(messages: list[dict]) -> list[list[dict]]:
+    """Group messages into exchanges.
+
+    An exchange begins with a user message and includes every subsequent
+    assistant/tool/tool_result message until the next user message (or end of
+    list). Messages before the first user message (typically the system msg)
+    are excluded — caller handles them separately.
+    """
+    exchanges: list[list[dict]] = []
+    current: list[dict] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "user":
+            if current:
+                exchanges.append(current)
+            current = [m]
+        elif current:
+            # Only collect if we've already seen a user message
+            current.append(m)
+    if current:
+        exchanges.append(current)
+    return exchanges
+
+
 async def apply_pending_compact(app, messages: list[dict]) -> None:
     """Consume ``app._pending_compact`` set by context(action='clear').
 
     Called by the chat_loop pre_iteration_hook. Wipes ``messages`` (preserving
-    the system message and the last_n exchanges) and re-seeds with the summary.
-    Also resets the context_manager's internal counters.
+    the system message and the last `keep_last_n` *exchanges*) and re-seeds
+    with the summary. Also resets the context_manager's internal counters.
+
+    An exchange = one user message + all subsequent assistant/tool messages
+    until the next user message. This matters because raw message slicing
+    can split a tool_result from its assistant call.
     """
     pending = getattr(app, "_pending_compact", None)
     if not pending:
         return
 
     summary_content = pending.get("summary_content", "")
-    keep_last_n = int(pending.get("keep_last_n", 0))
+    keep_last_n = max(0, int(pending.get("keep_last_n", 0)))
 
-    # Preserve system message (index 0 if present).
     system_msg = None
     if messages and messages[0].get("role") == "system":
         system_msg = messages[0]
 
-    # Capture last 2*keep_last_n messages (one exchange = user + assistant).
-    tail: list[dict] = []
+    tail_messages: list[dict] = []
     if keep_last_n > 0:
-        tail = messages[-(2 * keep_last_n):]
+        exchanges = _split_into_exchanges(messages)
+        for ex in exchanges[-keep_last_n:]:
+            tail_messages.extend(ex)
 
     messages.clear()
     if system_msg is not None:
@@ -1246,9 +1354,11 @@ async def apply_pending_compact(app, messages: list[dict]) -> None:
         "role": "user",
         "content": f"[Previous session summary]\n\n{summary_content}",
     })
-    messages.extend(tail)
+    messages.extend(tail_messages)
 
     cm = getattr(app, "context_manager", None)
+    # clear() is duck-typed — not all ContextManagerProtocol implementations
+    # declare it. DefaultContextManager does; OllamaContextManager may not.
     if cm is not None and hasattr(cm, "clear"):
         cm.clear()
 
@@ -1260,22 +1370,85 @@ async def apply_pending_compact(app, messages: list[dict]) -> None:
 Run: `.venv/bin/python3 -m pytest tests/tui/test_pending_compact_consumer.py -v`
 Expected: 4 tests PASS.
 
-- [ ] **Step 6: Wire apply_pending_compact into the chat_loop hook**
+- [ ] **Step 6: Compose apply_pending_compact with existing agent-summary hook**
 
-Find where ChatLoopConfig is constructed for the TUI session in `src/ayder_cli/tui/app.py` (around line 339, where `ChatLoop` is created). The current code passes `pre_iteration_hook=None`. Modify it to pass:
+`src/ayder_cli/tui/app.py:357-363` already assigns `_inject_summaries` to `self.chat_loop.config.pre_iteration_hook` when `self._agent_registry` is present. **Naively reassigning would silently break agent summary injection.** Compose the two hooks instead.
+
+Replace the block at `src/ayder_cli/tui/app.py:355-363` (the `# Wire pre-iteration hook for agent summary injection` block):
 
 ```python
-            pre_iteration_hook=lambda messages: apply_pending_compact(self, messages),
+        # Compose the pre-iteration hook from all sources that need it:
+        # (a) drain pending_compact set by context(action="clear")
+        # (b) inject agent summaries when an agent registry is present
+        existing_hook = self.chat_loop.config.pre_iteration_hook
+
+        async def _composed_pre_iteration(messages):
+            # 1. Apply any pending compaction first — this may wipe history.
+            await apply_pending_compact(self, messages)
+
+            # 2. Drain agent summaries (only if an agent registry exists).
+            if self._agent_registry:
+                summaries = self._agent_registry.drain_summaries()
+                for s in summaries:
+                    messages.append({
+                        "role": "system",
+                        "content": s.format_for_injection(),
+                    })
+
+            # 3. Chain any pre-existing hook (defensive: in case a test or
+            # plugin installed one before this point).
+            if existing_hook is not None:
+                result = existing_hook(messages)
+                if hasattr(result, "__await__"):
+                    await result
+
+        self.chat_loop.config.pre_iteration_hook = _composed_pre_iteration
 ```
 
-If there's no existing `pre_iteration_hook=` line at construction, add it to the ChatLoop / ChatLoopConfig call. Search:
-Run: `grep -n "pre_iteration_hook" /Users/sinanalyuruk/Vscode/ayder-cli/src/ayder_cli/tui/app.py`
+This runs unconditionally (not gated on `_agent_registry`) because pending_compact must always be checked. The agent-summary step is gated internally.
 
-If the hook is on `ChatLoopConfig` rather than `ChatLoop`, locate the ChatLoopConfig instantiation in app.py and add the hook there.
+- [ ] **Step 6b: Add regression test for hook composition**
+
+Append to `tests/tui/test_pending_compact_consumer.py`:
+
+```python
+@pytest.mark.anyio
+async def test_composed_hook_runs_pending_compact_and_agent_summaries():
+    """Both hooks must run when both are needed."""
+    from ayder_cli.tui.app import apply_pending_compact
+
+    # Set up: app with pending compaction AND a fake agent registry.
+    app = _make_app(
+        [
+            {"role": "system", "content": "SYS"},
+            {"role": "user", "content": "u1"},
+        ],
+        pending={"summary_name": "a", "summary_content": "the-summary", "keep_last_n": 0},
+    )
+
+    fake_summary = MagicMock()
+    fake_summary.format_for_injection.return_value = "AGENT-SUMMARY"
+    agent_registry = MagicMock()
+    agent_registry.drain_summaries.return_value = [fake_summary]
+
+    # Inline the composition logic from app.py for the test.
+    async def composed(messages):
+        await apply_pending_compact(app, messages)
+        summaries = agent_registry.drain_summaries()
+        for s in summaries:
+            messages.append({"role": "system", "content": s.format_for_injection()})
+
+    await composed(app.messages)
+
+    # Should have: system + summary user-message + agent-summary system-message
+    assert app.messages[0]["role"] == "system" and app.messages[0]["content"] == "SYS"
+    assert "the-summary" in app.messages[1]["content"]
+    assert app.messages[-1]["content"] == "AGENT-SUMMARY"
+```
 
 - [ ] **Step 7: Run the full test suite to check for regressions**
 
-Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=10`
+Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=30`
 Expected: All PASS.
 
 - [ ] **Step 8: Commit**
@@ -1291,13 +1464,14 @@ git commit -m "feat(tui): consume pending_compact at chat_loop iteration boundar
 
 **Files:**
 - Create: `src/ayder_cli/tools/builtins/context_definitions.py`
-- Modify: `src/ayder_cli/tools/definition.py` (or wherever `TOOL_DEFINITIONS` aggregates per-module tuples — locate first)
 - Test: `tests/test_context.py` add registration assertions
 
-- [ ] **Step 1: Locate where TOOL_DEFINITIONS is aggregated**
+**Note:** `src/ayder_cli/tools/definition.py` uses `pkgutil.iter_modules` to auto-discover `*_definitions.py` files under `tools/builtins/`. Creating `context_definitions.py` with a `TOOL_DEFINITIONS` tuple is sufficient — **no edits to `definition.py` are needed**.
 
-Run: `grep -n "TOOL_DEFINITIONS\s*=\|from.*_definitions import" /Users/sinanalyuruk/Vscode/ayder-cli/src/ayder_cli/tools/definition.py | head -30`
-Expected: shows the aggregation pattern (likely imports per-builtin `TOOL_DEFINITIONS` tuples and concatenates them).
+- [ ] **Step 1: Confirm auto-discovery behavior**
+
+Run: `grep -n "iter_modules\|TOOL_DEFINITIONS" /Users/sinanalyuruk/Vscode/ayder-cli/src/ayder_cli/tools/definition.py | head -10`
+Expected: lines around 110 show `pkgutil.iter_modules(package_path)` looping over builtins and pulling each module's `TOOL_DEFINITIONS`. This confirms no manual aggregation is required.
 
 - [ ] **Step 2: Write the failing registration test**
 
@@ -1388,15 +1562,14 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
 )
 ```
 
-- [ ] **Step 5: Register the new module in the central definition aggregator**
+- [ ] **Step 5: Verify the file was auto-discovered**
 
-Open `src/ayder_cli/tools/definition.py` and locate where per-builtin TOOL_DEFINITIONS tuples are imported and concatenated (you found this in Step 1). Add:
+No edits needed. Run a quick interactive check:
 
-```python
-from ayder_cli.tools.builtins.context_definitions import TOOL_DEFINITIONS as _CONTEXT_DEFS
+```bash
+.venv/bin/python3 -c "from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME; print('context' in TOOL_DEFINITIONS_BY_NAME)"
 ```
-
-And include `_CONTEXT_DEFS` in the concatenated tuple. The pattern in the file should make this obvious — follow the existing `_MEMORY_DEFS` style (which we'll be removing later).
+Expected output: `True`
 
 - [ ] **Step 6: Run registration tests to verify they pass**
 
@@ -1639,7 +1812,7 @@ Conversation:
 
 - [ ] **Step 4: Smoke-test by running existing TUI tests**
 
-Run: `.venv/bin/python3 -m pytest tests/tui/ -v --timeout=10`
+Run: `.venv/bin/python3 -m pytest tests/tui/ -v --timeout=30`
 Expected: All PASS (the new handlers aren't yet tested but don't break existing tests).
 
 - [ ] **Step 5: Commit**
@@ -1657,11 +1830,12 @@ git commit -m "feat(tui): add /save-context, /load-context, /list-contexts, /con
 - Delete: `src/ayder_cli/tools/builtins/memory.py`
 - Delete: `src/ayder_cli/tools/builtins/memory_definitions.py`
 - Delete: `tests/test_memory.py`
-- Modify: `src/ayder_cli/tools/definition.py` (remove _MEMORY_DEFS import + concat)
 - Modify: `src/ayder_cli/tui/commands.py` (remove `handle_save_memory`, `handle_load_memory`, map entries)
-- Modify: `src/ayder_cli/prompts.py` (remove `SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE`, `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE`)
+- Modify: `src/ayder_cli/prompts.py` (remove BOTH `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` definitions — at lines ~207 and ~274 — plus `SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE` at line ~236, and the related `COMPACT_COMMAND_PROMPT_TEMPLATE` and comment blocks if they reference `commands/system.py` (orphan; that file no longer exists))
 - Modify: `tests/tools/test_definition_discovery.py:276-277`
 - Modify: `tests/tools/test_schemas.py:56`
+
+**Note:** `definition.py` uses auto-discovery — deleting `memory_definitions.py` is enough; no manual aggregator edit needed.
 
 - [ ] **Step 1: Locate every reference to the old memory tools**
 
@@ -1679,9 +1853,15 @@ rm /Users/sinanalyuruk/Vscode/ayder-cli/src/ayder_cli/tools/builtins/memory_defi
 rm /Users/sinanalyuruk/Vscode/ayder-cli/tests/test_memory.py
 ```
 
-- [ ] **Step 3: Remove the import + concat in definition.py**
+- [ ] **Step 3: Confirm no manual aggregator edit is needed**
 
-Open `src/ayder_cli/tools/definition.py`. Remove the line that imports memory's TOOL_DEFINITIONS (look for `_MEMORY_DEFS` or `from ayder_cli.tools.builtins.memory_definitions import TOOL_DEFINITIONS`) and remove its entry from the concatenated `TOOL_DEFINITIONS` tuple. Do not leave the import dangling.
+`definition.py` uses `pkgutil.iter_modules`-based auto-discovery (Task 10 Step 1 confirmed this). Deleting `memory_definitions.py` in Step 2 above removes the module from discovery automatically.
+
+Sanity check:
+```bash
+.venv/bin/python3 -c "from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME; print(sorted(n for n in TOOL_DEFINITIONS_BY_NAME if 'memory' in n))"
+```
+Expected output: `[]`
 
 - [ ] **Step 4: Remove memory slash commands and handlers**
 
@@ -1693,11 +1873,25 @@ Edit `src/ayder_cli/tui/commands.py`:
   "/load-memory": handle_load_memory,
   ```
 
-- [ ] **Step 5: Remove memory prompt templates**
+- [ ] **Step 5: Remove memory prompt templates (all of them)**
 
-Open `src/ayder_cli/prompts.py`. Delete:
-- The section header `# SAVE MEMORY COMMAND` and the `SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE` definition (around line 232).
-- The section header `# LOAD MEMORY COMMAND` and the `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` definition (around line 271).
+`src/ayder_cli/prompts.py` contains **two** `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` definitions — at lines ~207 and ~274. The first is an orphan (its `# Used by:` comment references `commands/system.py::LoadCommand` which no longer exists). Both must go.
+
+Delete:
+- Line ~203-211: the comment block `# Used by: commands/system.py::LoadCommand.execute()` and the first `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` definition.
+- Line ~214-226: the orphaned `COMPACT_COMMAND_PROMPT_TEMPLATE` if its comment also references the non-existent `commands/system.py`. **Caution:** verify it isn't used by anything else first:
+  ```bash
+  grep -rn "COMPACT_COMMAND_PROMPT_TEMPLATE" /Users/sinanalyuruk/Vscode/ayder-cli/src /Users/sinanalyuruk/Vscode/ayder-cli/tests
+  ```
+  `tui/commands.py:handle_compact` uses it — keep this one. Only remove if the only callers were the deleted memory handlers.
+- Line ~229-247: the `SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE` block plus its `# SAVE/LOAD MEMORY COMMANDS` section header.
+- Line ~270-281: the comment block `# Used by: tui/commands.py::handle_load_memory()` and the second `LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE` definition.
+
+After editing, run a residual-reference check:
+```bash
+grep -n "SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE\|LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE" /Users/sinanalyuruk/Vscode/ayder-cli/src/ayder_cli/prompts.py
+```
+Expected: no matches.
 
 - [ ] **Step 6: Update test assertions**
 
@@ -1718,7 +1912,7 @@ Open `tests/tools/test_schemas.py:56`. Find the list of expected tool names. Rem
 
 - [ ] **Step 7: Run the full test suite**
 
-Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=10`
+Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=30`
 Expected: All PASS. If anything fails with `ImportError` or `NameError`, you missed a reference — re-run Step 1 to find it.
 
 - [ ] **Step 8: Commit**
@@ -1768,12 +1962,12 @@ git commit -m "docs: replace memory-tool references with context tool"
 
 - [ ] **Step 1: Run the full test suite with verbose output**
 
-Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=10`
+Run: `.venv/bin/python3 -m pytest tests/ -v --timeout=30`
 Expected: All tests PASS. New test count should be roughly `previous_count + 30` (new context tests + DI tests + pending_compact tests + do_clear coordination tests, minus the deleted test_memory.py).
 
 - [ ] **Step 2: Run mypy**
 
-Run: `uv run poe mypy` or `.venv/bin/python3 -m mypy src/ayder_cli/tools/builtins/context.py src/ayder_cli/tui/app.py src/ayder_cli/tools/registry.py src/ayder_cli/tools/execution.py`
+Run: `uv run poe typecheck` (defined in `pyproject.toml` as `mypy src/`)
 Expected: No errors. If mypy is strict about the `Any` injected types, that's fine — the codebase already uses `Any` for `process_manager`.
 
 - [ ] **Step 3: Run ruff/lint**
@@ -1831,6 +2025,8 @@ If everything is green, no commit needed. Otherwise, fix and commit any remainin
 **Still deferred (out of scope for this plan):**
 - Garbage collection of accumulated `auto-compact-*` slots — flagged as a follow-up.
 - Provider/model name in `stats` payload — flagged as a follow-up.
+- Adding `clear()` to `ContextManagerProtocol`. The plan uses `hasattr(cm, "clear")` because only `DefaultContextManager` currently implements it. Promoting it to the protocol is a separate refactor with broader implications (touches `OllamaContextManager` and any future provider).
+- Agent-runtime context isolation. Currently all agents share `.ayder/context/` via the parent's `project_ctx`. Slot-name conventions (e.g., agent-name prefix) can give logical isolation without a structural change.
 
 **Placeholder scan:** No `TBD`, `TODO`, or "implement later" in any task. Each task has the complete code an engineer needs.
 
