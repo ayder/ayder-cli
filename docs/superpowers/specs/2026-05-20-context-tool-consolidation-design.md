@@ -6,7 +6,7 @@
 
 ## Goal
 
-Reduce the memory-related tool surface from four tools to one polymorphic `context` tool that handles save / load / list / stats. Drop the JSONL fact-log entirely. Fix the silent-overwrite data-loss bug. Cut tool-definition tokens carried in every LLM call.
+Reduce the memory-related tool surface from four tools to one polymorphic `context` tool that handles save / load / list / stats / clear. Drop the JSONL fact-log entirely. Fix the silent-overwrite data-loss bug. Fix the `/clear` coordination bug (context-manager counters not reset). Cut tool-definition tokens carried in every LLM call.
 
 ## Motivation
 
@@ -30,7 +30,7 @@ The current memory cluster has four tools doing two overlapping jobs:
 ### Signature
 
 ```python
-context(action, name=None, content=None, overwrite=False)
+context(action, name=None, content=None, overwrite=False, keep_last_n=0)
 ```
 
 ### JSON Schema (token-budgeted)
@@ -40,13 +40,13 @@ The tool description and parameter descriptions are the per-call cost. Both are 
 ```json
 {
   "name": "context",
-  "description": "Session context. action=save snapshots state by name; load restores by name; list enumerates slots; stats reports token + cache usage.",
+  "description": "Session context. action=save snapshots state by name; load restores by name; list enumerates slots; stats reports token + cache usage; clear summarizes the conversation, auto-saves it, and frees the budget.",
   "parameters": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["save", "load", "list", "stats"],
+        "enum": ["save", "load", "list", "stats", "clear"],
         "description": "Operation to perform."
       },
       "name": {
@@ -60,6 +60,10 @@ The tool description and parameter descriptions are the per-call cost. Both are 
       "overwrite": {
         "type": "boolean",
         "description": "Save: skip auto-versioning of existing slot."
+      },
+      "keep_last_n": {
+        "type": "integer",
+        "description": "Clear: number of most-recent message exchanges to retain verbatim (default 0)."
       }
     },
     "required": ["action"]
@@ -77,6 +81,7 @@ Conditional-required (`content` only when `action=save`) is intentionally not en
 | `load` | `name` | `ToolSuccess(content_string)`; on missing name, `ToolError` whose body lists available names |
 | `list` | none | `ToolSuccess(JSON array)` of `{name, saved_at, size_bytes}` |
 | `stats` | none | `ToolSuccess(JSON object)` with token + cache fields (see below) |
+| `clear` | none | `ToolSuccess(JSON object)` summarizing the compaction (see below) |
 
 ### `stats` payload
 
@@ -97,6 +102,37 @@ Reads from existing instrumentation — no new collection logic:
 ```
 
 Token fields come from `ContextManagerProtocol.get_stats()` (returns `ContextStats`). Cache fields come from `CacheMonitor.last_status` (may be `None` for non-Ollama providers — return `cache_state: "n/a"` in that case). `saved_contexts_count` is a directory scan.
+
+### `clear` payload and behavior
+
+`clear` is the LLM-callable equivalent of the existing `/compact` slash command. The model invokes it when it has finished a discrete unit of work and wants to free its working budget before the next chunk. The flow is the same one `/compact` uses today (`handle_compact` in `tui/commands.py` around line 330): summarize → save → clear messages → reload summary as the new context.
+
+Behavior:
+1. Build a `conversation_text` from current `app.messages` (user + assistant turns), excluding the last `keep_last_n` message exchanges.
+2. Trigger the LLM to produce a summary using `COMPACT_COMMAND_PROMPT_TEMPLATE`.
+3. Auto-save the summary into the context store with a generated name: `auto-compact-<ISO-timestamp>`. The slot is regular `.ayder/context/` storage — recoverable via `context(action="load", name=...)` like any other.
+4. Clear `app.messages` (preserving the system message and the retained last-N exchanges) and call `ContextManagerProtocol.clear()` on the active context manager to reset compression/utilization counters.
+5. Re-seed `app.messages` with the summary so the LLM has continuity on its next turn.
+
+Return shape:
+
+```json
+{
+  "messages_before": 42,
+  "messages_after": 3,
+  "tokens_freed_estimate": 14200,
+  "saved_as": "auto-compact-2026-05-20T15-22-08",
+  "kept_last_n": 0
+}
+```
+
+Because step 2 requires an LLM round-trip, `clear` is asynchronous from the tool's standpoint — it queues the compaction flow and returns the projected counts. The actual summary text is not returned in the tool result (it goes into the next conversation turn). If summarization fails partway, no destructive action is taken — `app.messages` is untouched, the auto-save slot is not created, and `ToolError` is returned.
+
+### `/clear` coordination fix (bundled)
+
+Today `do_clear` in `tui/commands.py:862` clears `app.messages` and the chat view but does **not** call `ContextManagerProtocol.clear()` (defined at `default_context_manager.py:437`). As a result, the active context manager's `_compressed_count`, `_message_meta`, and cache state persist across an explicit user `/clear`. This is a latent bug.
+
+Fixed in the same PR: `do_clear` calls `app.context_manager.clear()` after clearing `app.messages`. Independent of the new `context(action="clear")` tool — this fixes the existing `/clear` slash command too.
 
 ## Storage
 
@@ -127,22 +163,24 @@ The timestamp in versioned filenames uses dashes instead of colons (`2026-05-20T
 
 ### Dependency injection
 
-`stats` needs access to the active `ContextManagerProtocol` and `CacheMonitor`. The registry already injects `project_ctx` and `process_manager` based on function signature inspection. Extend the same mechanism with two more injectable types:
+`stats` and `clear` need access to the active `ContextManagerProtocol`, `CacheMonitor`, and (for `clear`) the running `AyderApp` instance so the compaction flow can mutate `app.messages`. The registry already injects `project_ctx` and `process_manager` based on function signature inspection. Extend the same mechanism with the additional injectable types:
 
 ```python
 def context(
     project_ctx: ProjectContext,
     context_manager: ContextManagerProtocol,
     cache_monitor: CacheMonitor | None,
+    app: AyderApp,  # needed by clear; None-safe if registry has no app handle
     action: str,
     name: str | None = None,
     content: str | None = None,
     overwrite: bool = False,
+    keep_last_n: int = 0,
 ) -> str:
     ...
 ```
 
-Registry change: in `create_default_registry(...)`, accept and inject `context_manager` and `cache_monitor` the same way it does `process_manager`.
+Registry change: in `create_default_registry(...)`, accept and inject `context_manager`, `cache_monitor`, and an `app` reference the same way it does `process_manager`. If the `app` handle is unavailable (e.g., headless CLI execution), `context(action="clear")` returns `ToolError("clear requires a running TUI session", "execution")` and the other actions still work.
 
 ### File layout
 
@@ -152,7 +190,9 @@ New module: `src/ayder_cli/tools/builtins/context.py`
 - `_load(project_ctx, name)`
 - `_list(project_ctx)`
 - `_stats(project_ctx, context_manager, cache_monitor)`
+- `_clear(app, context_manager, keep_last_n)` — wraps the existing `/compact` flow; returns the JSON summary described above
 - Helper: `_get_context_dir(project_ctx)` returns `.ayder/context/`
+- Helper: `_auto_compact_name()` returns `f"auto-compact-{iso_timestamp_dashed()}"`
 
 New definitions module: `src/ayder_cli/tools/builtins/context_definitions.py`
 
@@ -167,15 +207,16 @@ New definitions module: `src/ayder_cli/tools/builtins/context_definitions.py`
 - `tests/tools/test_schemas.py` line 56 — update tool list
 - The JSONL file `.ayder/memory/memories.jsonl` is no longer written; existing project files are left in place (no automatic deletion — user can `rm -rf .ayder/memory/` if desired)
 
-### Slash command renames
+### Slash command renames and fixes
 
 In `tui/commands.py`:
 - `/save-memory` → `/save-context` (call `context(action="save", ...)`)
 - `/load-memory` → `/load-context` (call `context(action="load", ...)`)
 - Add `/list-contexts` (call `context(action="list")`)
 - Add `/context-stats` (call `context(action="stats")`)
+- **Fix `/clear`**: `do_clear` (line 862) gains a call to `app.context_manager.clear()` after the message wipe. The existing `/clear` keeps its current behavior (purely user-driven clear), now correctly coordinated with the context manager. No new slash command for `context(action="clear")` — that path is LLM-initiated; `/compact` already covers the user-initiated equivalent.
 
-Clean break — no aliases for the old names.
+Clean break — no aliases for the old memory names.
 
 ## Token Math
 
@@ -184,8 +225,8 @@ Approximate token cost of the tool-definition surface carried in every LLM call.
 | Surface | Tokens |
 |---|---|
 | Current: `save_memory` + `load_memory` + `save_context_memory` + `load_context_memory` | ~260 |
-| New: `context` | ~100 |
-| **Saved per call** | **~160** |
+| New: `context` (with `clear` action and `keep_last_n` param) | ~125 |
+| **Saved per call** | **~135** |
 
 Counts are estimates from current schema text; exact tokenization depends on the provider's tokenizer. The win compounds with every tool call in a session.
 
@@ -204,6 +245,14 @@ New file: `tests/test_context.py`
 - `test_invalid_action_returns_validation_error`
 - `test_save_missing_name_returns_validation_error`
 - `test_save_missing_content_returns_validation_error`
+- `test_clear_creates_auto_compact_slot`
+- `test_clear_preserves_keep_last_n_exchanges`
+- `test_clear_resets_context_manager_counters`
+- `test_clear_returns_error_without_app_handle`
+- `test_clear_does_not_mutate_state_on_summarizer_failure`
+
+Additional test for the bundled fix:
+- New file or addition to existing `tests/tui/test_commands.py`: `test_do_clear_resets_context_manager` — verifies `/clear` now calls `ContextManagerProtocol.clear()`.
 
 ## Migration
 
@@ -220,3 +269,5 @@ Single PR. No data migration — existing `.ayder/memory/` files are orphaned bu
 - Confirm where `CacheMonitor` is instantiated and how it reaches the registry's DI scope.
 - Confirm where `ContextManagerProtocol` instance lives at runtime (per-session in the chat loop?) and how the registry obtains a reference.
 - Decide whether `stats` should also include the active provider/model name (useful context, ~1 extra line in payload).
+- Decide how `context(action="clear")` interacts with an in-flight LLM turn — the existing `/compact` flow runs through `app.start_llm_processing()` which queues a new LLM call. Need to confirm whether the registry's tool dispatch can re-enter the chat loop safely, or whether `clear` must defer the actual compaction to after the current tool-call cycle completes.
+- Decide whether `auto-compact-*` slots should be garbage-collected after N entries (otherwise they accumulate unboundedly across long sessions).
