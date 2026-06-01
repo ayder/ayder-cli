@@ -33,6 +33,8 @@ def execute_tool(
     hook_manager: HookManager,
     project_ctx: ProjectContext,
     process_manager: Any = None,
+    context_manager: Any = None,
+    app: Any = None,
 ) -> ToolResult:
     """Execute a tool through the full pipeline.
 
@@ -42,7 +44,7 @@ def execute_tool(
     3. Check tool_func is not None — returns "Unknown tool" error if None.
     4. Run pre-execute callbacks (failures logged, not raised).
     5. Run middlewares (PermissionError re-raised; others logged).
-    6. Inject dependencies (``project_ctx``, ``process_manager``) via signature inspection.
+    6. Inject dependencies via signature inspection.
     7. Execute with timing.
     8. Run post-execute callbacks (failures logged, not raised).
     9. Return result.
@@ -57,6 +59,8 @@ def execute_tool(
         hook_manager: Manages middleware and callbacks.
         project_ctx: Project context for path sandboxing.
         process_manager: Optional process manager injected for shell tools.
+        context_manager: Optional context manager injected for context tools.
+        app: Optional TUI app handle injected for context tools.
 
     Returns:
         ``ToolSuccess`` or ``ToolError``.
@@ -95,6 +99,10 @@ def execute_tool(
         call_args["project_ctx"] = project_ctx
     if "process_manager" in sig.parameters and process_manager is not None:
         call_args["process_manager"] = process_manager
+    if "context_manager" in sig.parameters and context_manager is not None:
+        call_args["context_manager"] = context_manager
+    if "app" in sig.parameters and app is not None:
+        call_args["app"] = app
 
     # Step 7: Execute with timing
     logger.debug(f"Tool call: {tool_name}  args={args}")

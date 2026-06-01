@@ -418,6 +418,47 @@ class TestContentProcessorUnified:
         assert "<invoke" not in result
         assert "Done." in result
 
+    def test_strip_for_display_removes_minimax_leaked_token(self):
+        """MiniMax's native structural token (]<]minimax[>[) is stripped.
+
+        Observed leaking into content on minimax-m3:cloud when an IN_CONTENT
+        driver is used on a multi-turn request.
+        """
+        from ayder_cli.parser import content_processor
+
+        content = "]<]minimax[>[Here is the answer.]<]minimax[>["
+        result = content_processor.strip_for_display(content)
+
+        assert "]<]minimax[>[" not in result
+        assert "Here is the answer." in result
+
+    def test_strip_for_display_removes_minimax_role_markers(self):
+        """Older M2 role-marker tokens (]~b]ai / [e~[) are also stripped."""
+        from ayder_cli.parser import content_processor
+
+        content = "]~b]ai\nHere is the answer.[e~["
+        result = content_processor.strip_for_display(content)
+
+        assert "]~b]" not in result
+        assert "[e~[" not in result
+        assert "Here is the answer." in result
+
+    def test_strip_for_display_removes_minimax_garbled_tool_call(self):
+        """The exact garbled multi-turn leak does not survive display."""
+        from ayder_cli.parser import content_processor
+
+        content = (
+            "]<]minimax[>[<tool_call>\n"
+            "]<]minimax[>[<invoke name=\"write_file\">\n"
+            "<parameter name=\"file_path\">daily.html</parameter>\n"
+            "<content>week]<]minimax[>[</content>\n</invoke>"
+        )
+        result = content_processor.strip_for_display(content).strip()
+
+        assert "]<]minimax[>[" not in result
+        assert "<invoke" not in result
+        assert "<tool_call>" not in result
+
     # -------------------------------------------------------------------------
     # extract_think_blocks
     # -------------------------------------------------------------------------

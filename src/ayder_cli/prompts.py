@@ -174,44 +174,9 @@ If you encounter errors, fix them and continue. Only stop when all tasks are mar
 
 
 # =============================================================================
-# MEMORY & CONVERSATION MANAGEMENT PROMPTS (commands/system.py)
+# CONVERSATION MANAGEMENT PROMPTS
 # =============================================================================
-# Used by: commands/system.py::ClearCommand.execute()
-# REASON: After clearing conversation history, confirm the LLM understands
-# the context is fresh and ready for new work.
-
-CLEAR_COMMAND_RESET_PROMPT = """The conversation has been cleared. Please acknowledge this reset and confirm you're ready to start fresh."""
-
-
-# Used by: commands/system.py::SummaryCommand.execute()
-# REASON: Extract key decisions and context from a long conversation and
-# persist it to a memory file for future reference or session restoration.
-
-SUMMARY_COMMAND_PROMPT_TEMPLATE = """Please summarize the following conversation and save it to `.ayder/current_memory.md`.
-
-The summary should:
-- Capture key decisions, context, and progress
-- Be concise but comprehensive
-- Help future me understand what we've done so far
-
-Conversation:
-{conversation_text}
-
-Use the write_file tool to save the summary to `.ayder/current_memory.md`."""
-
-
-# Used by: commands/system.py::LoadCommand.execute()
-# REASON: Restore context from a previously saved memory file so the LLM
-# can continue work from where it left off in a previous session.
-
-LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE = """I've loaded the previous conversation memory from `.ayder/current_memory.md`. 
-Please acknowledge this context and continue from where we left off.
-
-[Memory from previous conversation]:
-{memory_content}"""
-
-
-# Used by: commands/system.py::CompactCommand.execute()
+# Used by: tui/commands.py::handle_compact()
 # REASON: Combine summary, save, clear, and reload into a single operation
 # to prevent context window overflow while maintaining continuity.
 
@@ -227,24 +192,21 @@ Provide a brief summary, save it, confirm reset, and acknowledge the context."""
 
 
 # =============================================================================
-# SAVE/LOAD MEMORY COMMANDS (tui/commands.py)
+# SAVE CONTEXT COMMAND (tui/commands.py)
 # =============================================================================
-# Used by: tui/commands.py::handle_save_memory()
-# REASON: Prompt LLM to create and save a memory summary without clearing
-# the conversation history.
+# Used by: tui/commands.py::handle_save_context()
 
-SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE = """Please create a memory summary of our conversation:
+SAVE_CONTEXT_COMMAND_PROMPT_TEMPLATE = """Summarize the following conversation in 200-400 words, focusing on:
+- Goals and decisions made
+- Code changes attempted or completed
+- Open questions or next steps
 
+Then call the context tool exactly once to save it:
+  context(action="save", name="{name}", content="<your summary>")
+
+Conversation:
 {conversation_text}
-
-Save this summary to `.ayder/memory/current_memory.md` using the write_file tool.
-
-The summary should:
-- Capture key decisions, context, and progress
-- Be concise but comprehensive
-- Help future sessions understand what we've done so far
-
-Save the summary and confirm when done."""
+"""
 
 
 # =============================================================================
@@ -267,15 +229,3 @@ the skill content to determine when to apply it.
 ### END SKILL
 """
 
-
-# Used by: tui/commands.py::handle_load_memory()
-# REASON: Prompt LLM to load and acknowledge memory from file.
-
-LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE = """Please load the previous memory from `.ayder/memory/current_memory.md` and acknowledge the context.
-
-Previous context:
-```
-{memory_content}
-```
-
-Please acknowledge this context and continue from where we left off."""

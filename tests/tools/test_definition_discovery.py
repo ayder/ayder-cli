@@ -272,9 +272,8 @@ class TestBackwardCompatibility:
         assert 'run_shell_command' in tool_names
         assert 'fetch_web' in tool_names
 
-        # Memory tools
-        assert 'save_memory' in tool_names
-        assert 'load_memory' in tool_names
+        # Context tool
+        assert 'context' in tool_names
 
         # Environment tools
         assert 'manage_environment_vars' in tool_names
@@ -297,4 +296,3 @@ class TestBackwardCompatibility:
             assert schema["type"] == "function"
             assert "function" in schema
             assert schema["function"]["name"] == td.name
-

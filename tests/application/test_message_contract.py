@@ -267,8 +267,7 @@ class TestCheckpointSummaryIntegration:
     def test_checkpoint_summary_with_mixed_messages(self):
         """Summary generation works with dict/object messages.
 
-        This validates the message contract integration in memory.py
-        and checkpoint flows.
+        This validates the message contract integration in checkpoint flows.
         """
         # Mixed message list
         dict_msg = {"role": "user", "content": "Hello from dict"}

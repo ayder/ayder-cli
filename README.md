@@ -25,39 +25,11 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Agentic workflow** -- the LLM reads files, edits code, runs shell commands, and iterates autonomously with configurable iteration limits per message.
 - **Multi-agent** -- define specialized sub-agents in `config.toml`. Each agent runs independently with its own LLM, model, and context. Results are injected back into the main conversation when complete.
 - **Textual TUI** -- an inline terminal interface with chat view, tool panel, thinking block toggle, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews.
-- **Minimal dependencies** -- OpenAI SDK, Rich, and Textual. Other provider SDKs are optional.
-
-### Tested Providers with Models
-
-| Provider | Location | Model |
-| -------- | -------- | ----- |
-| ollama | Cloud | deepseek-v3.2:cloud |
-| ollama | Cloud | gemini-3-pro-preview:latest |
-| ollama | Local | glm-4.7-flash:latest |
-| ollama | Cloud | glm-4.7:cloud |
-| ollama | Cloud | glm-5:cloud |
-| ollama | Local | glm-ocr:latest |
-| ollama | Cloud | gpt-oss:120b-cloud |
-| ollama | Cloud | kimi-k2.5:cloud |
-| ollama | Cloud | minimax-m2.5:cloud |
-| ollama | Local | ministral-3:14b |
-| ollama | Cloud | qwen3-coder-next:cloud |
-| ollama | Cloud | qwen3-coder:480b-cloud |
-| ollama | Local | qwen3-coder:latest |
-| anthropic | Cloud | claude-opus-4-6 |
-| anthropic | Cloud | claude-sonnet-4-5-20250929 |
-| anthropic | Cloud | claude-haiku-4-5-20251001 |
-| openai | Cloud | GPT-5.3-Codex |
-| openai | Cloud | GPT-5.3-Codex-Spark |
-| openai | Cloud | GPT-5.2 |
-| openai | Cloud | GPT-5 |
-| gemini | Cloud | gemini-3-deep-think |
-| gemini | Cloud | gemini-3-pro |
-| gemini | Cloud | gemini-3-flash |
+- **Batteries included** -- the OpenAI, Anthropic, Google, and Ollama SDKs all ship with ayder-cli, so every provider works out of the box. The terminal UI is built on Rich and Textual.
 
 ### Tools
 
-LLMs on their own can only generate text. To be a useful coding assistant, the model needs to *act* on your codebase. ayder-cli provides 25 tools across 10 categories that the model can call:
+LLMs on their own can only generate text. To be a useful coding assistant, the model needs to *act* on your codebase. ayder-cli ships 16 built-in tools that the model can call, plus optional plugin toolsets (see [Plugins](#plugins)):
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
@@ -105,25 +77,15 @@ export OLLAMA_FLASH_ATTENTION=true
 export OLLAMA_MAX_LOADED_MODELS=1
 ```
 
-### Anthropic setup (optional)
+### Cloud providers (Anthropic, OpenAI, Gemini)
+
+The Anthropic, OpenAI, and Google SDKs ship with ayder-cli — no extra installs.
+Just add an API key to a profile in `~/.ayder/config.toml` (see Configuration
+below) and switch provider in the TUI:
 
 ```bash
-# Install the Anthropic SDK
-pip install anthropic
-
-# Set your API key in ~/.ayder/config.toml (see Configuration below)
-# Then switch provider:
-#   /provider anthropic
+/provider anthropic   # or: openai, gemini
 ```
-
-### Gemini setup (optional)
-
-```bash
-# Install the Google Generative AI SDK
-pip install google-generativeai
-```
-
-Set your API key in `~/.ayder/config.toml`, then switch provider: `/provider gemini`
 
 ### Configuration: Profiles and Drivers
 
@@ -189,7 +151,7 @@ rotation = "10 MB"
 retention = "7 days"
 
 [context_manager]
-enabled = false
+enabled = true
 max_context_tokens = 8192
 
 [temporal]
@@ -287,12 +249,14 @@ ayder --implement-all
 
 By default, every tool call requires user confirmation. Use permission flags to auto-approve tool categories:
 
-| Flag | Category | Tools |
-| ---- | -------- | ----- |
-| `-r` | Read | `file_explorer`, `read_file`, `search_codebase`, `get_project_structure`, `load_memory`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task`, `list_virtualenvs`, `activate_virtualenv` |
-| `-w` | Write | `file_editor`, `create_note`, `save_memory`, `manage_environment_vars`, `python_editor`, `temporal_workflow` |
-| `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process`, `create_virtualenv`, `install_requirements`, `remove_virtualenv` |
-| `--http` | Web/Network | `fetch_web`, `dbs_tool` |
+| Flag | Category | Built-in tools |
+| ---- | -------- | -------------- |
+| `-r` | Read | `file_explorer`, `read_file`, `search_codebase`, `get_project_structure`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
+| `-w` | Write | `file_editor`, `context`, `create_note`, `manage_environment_vars` |
+| `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
+| `--http` | Web/Network | `fetch_web` |
+
+Installed plugins extend these categories (e.g. `python_editor` → write, virtualenv tools → execute, `dbs_tool` → web).
 
 ```bash
 # Auto-approve read-only tools
@@ -341,7 +305,7 @@ The context manager is configured under `[context_manager]` in `config.toml`:
 | `max_tool_result_length` | `2048` | Maximum character length for a compressed tool result. |
 | `compress_tool_results` | `true` | Enable automatic tool result compression. |
 
-You can also manually manage context with `/save-memory`, `/load-memory`, and `/compact`.
+You can also manually manage context with the `context` tool and its slash-command shortcuts: `/save-context`, `/load-context`, `/list-contexts`, `/context-stats`, and `/compact`.
 
 ### Slash Commands
 
@@ -361,9 +325,11 @@ You can also manually manage context with `/save-memory`, `/load-memory`, and `/
 | `/skill` | Activate a domain skill from `.ayder/skills/` |
 | `/verbose` | Toggle verbose mode |
 | `/logging` | Set log level for current session (NONE, ERROR, WARNING, INFO, DEBUG) |
-| `/compact` | Summarize conversation, save to memory, clear, and reload context |
-| `/save-memory` | Summarize conversation and save to memory (no clear) |
-| `/load-memory` | Load memory and restore context |
+| `/compact` | Summarize conversation, save a context snapshot, clear, and reload |
+| `/save-context` | Summarize conversation and save it to a named context slot (no clear) |
+| `/load-context` | Load a saved context slot and restore it |
+| `/list-contexts` | List saved context slots |
+| `/context-stats` | Show current token and KV-cache usage |
 | `/archive-completed-tasks` | Move completed tasks to `.ayder/task_archive/` |
 | `/temporal` | Start/status Temporal queue worker |
 | `/agent list` | List configured agents and their current status |
@@ -407,7 +373,7 @@ The standard mode for general coding and chat. Uses the system prompt.
 > create a fibonacci function
 ```
 
-Available tools: File read/write, shell commands, search, memory, notes, tasks.
+Available tools: file read/write, shell commands, search, context, notes, tasks.
 
 ### Planning Mode (`/plan`)
 
@@ -457,24 +423,23 @@ The tool system:
 - Supports tag-based filtering for dynamic enable/disable
 - Injects tool-specific system prompts when enabled
 
-**Current tool categories (25 tools):**
+**Built-in tools (16):**
 
 | Category | Tools |
 |----------|-------|
 | **Filesystem** | `file_explorer`, `read_file`, `file_editor` |
 | **Search** | `search_codebase`, `get_project_structure` |
 | **Shell** | `run_shell_command` |
-| **Python Editor** | `python_editor` (CST-based structural code manipulation) |
-| **Memory** | `save_memory`, `load_memory` |
+| **Context** | `context` (save / load / list / stats / clear session context slots) |
 | **Notes** | `create_note` |
 | **Background Processes** | `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes` |
 | **Tasks** | `list_tasks`, `show_task` |
 | **Environment** | `manage_environment_vars` |
-| **Virtual Environments** | `create_virtualenv`, `install_requirements`, `list_virtualenvs`, `activate_virtualenv`, `remove_virtualenv` |
 | **Web** | `fetch_web` |
-| **DBS** | `dbs_tool` (RAG API for DBS-related queries) |
-| **Workflow** | `temporal_workflow` |
-| **Agents** | `call_agent` (dispatch a named agent to run a task in the background) |
+
+When agents are configured, the `call_agent` tool is also registered so the main LLM can dispatch them (see [Multi-Agent System](#multi-agent-system)).
+
+**Plugin tools** — `python_editor`, `dbs_tool`, `temporal_workflow`, virtualenv tools, and MCP integrations ship as optional plugins in the [ayder/ayder-plugins](https://github.com/ayder/ayder-plugins) repo (see [Plugins](#plugins)). Once installed they are auto-discovered exactly like built-ins.
 
 ## Multi-Agent System
 

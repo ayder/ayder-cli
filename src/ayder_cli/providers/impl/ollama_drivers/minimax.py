@@ -19,11 +19,11 @@ Available tools:
 </tools>
 
 To call a tool, wrap the call in <minimax:tool_call> tags using the
-function/parameter format:
+invoke/parameter format:
 <minimax:tool_call>
-<function=tool_name>
-<parameter=key>value</parameter>
-</function>
+<invoke name="tool_name">
+<parameter name="key">value</parameter>
+</invoke>
 </minimax:tool_call>
 """
 
@@ -33,7 +33,11 @@ class MiniMaxDriver(ChatDriver):
     mode = DriverMode.IN_CONTENT
     priority = 50
     fallback_driver = "generic_xml"
-    supports_families = ("minimax",)
+    # Dormant by default: the resolution matrix routes the minimax family to
+    # generic_native (Ollama parses tool calls natively). This IN_CONTENT driver
+    # stays available via explicit override / reactive fallback only, mirroring
+    # the dormant qwen3 and deepseek drivers.
+    supports_families = ()
 
     def render_tools_into_messages(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]

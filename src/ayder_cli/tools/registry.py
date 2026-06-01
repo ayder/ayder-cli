@@ -24,9 +24,17 @@ logger = logging.getLogger(__name__)
 class ToolRegistry:
     """Registry for tool functions with schema queries and execution dispatch."""
 
-    def __init__(self, project_ctx: ProjectContext, process_manager: Any = None) -> None:
+    def __init__(
+        self,
+        project_ctx: ProjectContext,
+        process_manager: Any = None,
+        context_manager: Any = None,
+        app: Any = None,
+    ) -> None:
         self.project_ctx = project_ctx
         self.process_manager = process_manager
+        self.context_manager = context_manager
+        self.app = app
         self._registry: Dict[str, Callable] = {}
         self._dynamic_definitions: list = []
         self.hooks = HookManager()
@@ -62,6 +70,8 @@ class ToolRegistry:
             hook_manager=self.hooks,
             project_ctx=self.project_ctx,
             process_manager=self.process_manager,
+            context_manager=self.context_manager,
+            app=self.app,
         )
 
     def get_system_prompts(self, tags: frozenset | None = None) -> str:
@@ -113,12 +123,20 @@ def _resolve_func_ref(func_ref: str) -> Callable:
 
 
 def create_default_registry(
-    project_ctx: ProjectContext, process_manager: Any = None
+    project_ctx: ProjectContext,
+    process_manager: Any = None,
+    context_manager: Any = None,
+    app: Any = None,
 ) -> ToolRegistry:
     """Create a ToolRegistry with all tools from TOOL_DEFINITIONS auto-registered."""
     from ayder_cli.tools.definition import _PLUGIN_HANDLERS
 
-    reg = ToolRegistry(project_ctx, process_manager=process_manager)
+    reg = ToolRegistry(
+        project_ctx,
+        process_manager=process_manager,
+        context_manager=context_manager,
+        app=app,
+    )
     for td in TOOL_DEFINITIONS:
         if td.name in _PLUGIN_HANDLERS:
             # External plugin — use pre-resolved handler

@@ -211,7 +211,9 @@ class AyderApp(App):
         self.llm = rt.llm_provider
         self._process_manager = rt.process_manager
         self.registry = rt.tool_registry
+        self.registry.app = self
         self.context_manager = rt.context_manager
+        self._pending_compact: dict | None = None
 
         # Wire up debug logging for verbose mode
         from ayder_cli.tui.adapter import TUIInteractionSink
@@ -352,15 +354,27 @@ class AyderApp(App):
             context_manager=self.context_manager,
         )
 
-        # Wire pre-iteration hook for agent summary injection (Part 2)
-        # Must be after self.chat_loop is created above
-        if self._agent_registry:
-            async def _inject_summaries(messages):
-                summaries = self._agent_registry.drain_summaries()
-                for s in summaries:
-                    messages.append({"role": "system", "content": s.format_for_injection()})
+        existing_hook = self.chat_loop.config.pre_iteration_hook
 
-            self.chat_loop.config.pre_iteration_hook = _inject_summaries
+        async def _composed_pre_iteration(messages):
+            await apply_pending_compact(self, messages)
+
+            if self._agent_registry:
+                summaries = self._agent_registry.drain_summaries()
+                for summary in summaries:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": summary.format_for_injection(),
+                        }
+                    )
+
+            if existing_hook is not None:
+                result = existing_hook(messages)
+                if hasattr(result, "__await__"):
+                    await result
+
+        self.chat_loop.config.pre_iteration_hook = _composed_pre_iteration
 
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt with project structure."""
@@ -766,9 +780,63 @@ class AyderApp(App):
         do_clear(self, chat_view)
 
     def on_app_focus(self) -> None:
-        """Restore input focus when terminal window regains focus (e.g. after Cmd+Tab)."""
+        """Restore input focus when terminal window regains focus."""
         try:
             input_bar = self.query_one("#input-bar", CLIInputBar)
             input_bar.focus_input()
         except Exception:
             pass
+
+
+def _split_into_exchanges(messages: list[dict]) -> list[list[dict]]:
+    """Group messages into user-led exchanges."""
+    exchanges: list[list[dict]] = []
+    current: list[dict] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "user":
+            if current:
+                exchanges.append(current)
+            current = [message]
+        elif current:
+            current.append(message)
+    if current:
+        exchanges.append(current)
+    return exchanges
+
+
+async def apply_pending_compact(app, messages: list[dict]) -> None:
+    """Consume pending context compaction at the chat-loop boundary."""
+    pending = getattr(app, "_pending_compact", None)
+    if not pending:
+        return
+
+    summary_content = pending.get("summary_content", "")
+    keep_last_n = max(0, int(pending.get("keep_last_n", 0)))
+
+    system_msg = None
+    if messages and messages[0].get("role") == "system":
+        system_msg = messages[0]
+
+    tail_messages: list[dict] = []
+    if keep_last_n > 0:
+        exchanges = _split_into_exchanges(messages)
+        for exchange in exchanges[-keep_last_n:]:
+            tail_messages.extend(exchange)
+
+    messages.clear()
+    if system_msg is not None:
+        messages.append(system_msg)
+    messages.append(
+        {
+            "role": "user",
+            "content": f"[Previous session summary]\n\n{summary_content}",
+        }
+    )
+    messages.extend(tail_messages)
+
+    context_manager = getattr(app, "context_manager", None)
+    if context_manager is not None and hasattr(context_manager, "clear"):
+        context_manager.clear()
+
+    app._pending_compact = None

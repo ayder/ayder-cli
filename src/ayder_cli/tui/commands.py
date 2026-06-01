@@ -366,60 +366,6 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.start_llm_processing()
 
 
-def handle_save_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /save-memory command."""
-    from ayder_cli.prompts import SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE
-    from ayder_cli.application.message_contract import get_message_role, get_message_content
-
-    if len(app.messages) <= 1:
-        chat_view.add_system_message("No conversation to save.")
-        return
-
-    conversation_text = ""
-    for msg in app.messages:
-        role = get_message_role(msg)
-        if role in ("user", "assistant"):
-            content = get_message_content(msg)
-            conversation_text += f"[{role}] {content}\n\n"
-
-    save_prompt = SAVE_MEMORY_COMMAND_PROMPT_TEMPLATE.format(
-        conversation_text=conversation_text
-    )
-    app.messages.append({"role": "user", "content": save_prompt})
-    chat_view.add_system_message("Saving memory summary...")
-
-    app.start_llm_processing()
-
-
-def handle_load_memory(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /load-memory command."""
-    from ayder_cli.prompts import LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE
-
-    project_ctx = ProjectContext(".")
-    memory_file = project_ctx.root / ".ayder" / "memory" / "checkpoint.md"
-
-    if not memory_file.exists():
-        chat_view.add_system_message(
-            "No memory file found at `.ayder/memory/checkpoint.md`. "
-            "Use `/save-memory` to create one first."
-        )
-        return
-
-    try:
-        memory_content = memory_file.read_text(encoding="utf-8")
-    except Exception as e:
-        chat_view.add_system_message(f"Error reading memory file: {e}")
-        return
-
-    load_prompt = LOAD_MEMORY_COMMAND_PROMPT_TEMPLATE.format(
-        memory_content=memory_content
-    )
-    app.messages.append({"role": "user", "content": load_prompt})
-    chat_view.add_system_message("Loading memory...")
-
-    app.start_llm_processing()
-
-
 def handle_plan(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /plan command."""
     from ayder_cli.prompts import PLANNING_PROMPT_TEMPLATE
@@ -860,8 +806,20 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
 
 
 def do_clear(app: AyderApp, chat_view: ChatView) -> None:
-    """Clear conversation history."""
+    """Clear conversation history and reset context-manager counters.
+
+    Before wiping, snapshots the current conversation into the recovery slot
+    `latest-context-before-clear` so the user (or a future LLM turn) can
+    inspect what was cleared by loading it.
+    """
     from ayder_cli.application.message_contract import get_message_role
+    from ayder_cli.tools.builtins.context import snapshot_conversation_for_clear
+
+    registry = getattr(app, "registry", None)
+    project_ctx = getattr(registry, "project_ctx", None) if registry else None
+    recovery_slot = None
+    if project_ctx is not None:
+        recovery_slot = snapshot_conversation_for_clear(project_ctx, app)
 
     if app.messages:
         if get_message_role(app.messages[0]) == "system":
@@ -871,8 +829,80 @@ def do_clear(app: AyderApp, chat_view: ChatView) -> None:
         else:
             app.messages.clear()
 
+    context_manager = getattr(app, "context_manager", None)
+    if context_manager is not None and hasattr(context_manager, "clear"):
+        context_manager.clear()
+
     chat_view.clear_messages()
-    chat_view.add_system_message("Conversation history cleared.")
+    if recovery_slot is not None:
+        chat_view.add_system_message(
+            f"Conversation history cleared. Snapshot saved to slot '{recovery_slot}' "
+            f"(use context(action='load', name='{recovery_slot}') to inspect)."
+        )
+    else:
+        chat_view.add_system_message("Conversation history cleared.")
+
+
+def handle_save_context(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /save-context <name>. Triggers the LLM to summarize and save."""
+    from ayder_cli.application.message_contract import (
+        get_message_content,
+        get_message_role,
+    )
+    from ayder_cli.prompts import SAVE_CONTEXT_COMMAND_PROMPT_TEMPLATE
+
+    name = args.strip() or "session"
+    if len(app.messages) <= 1:
+        chat_view.add_system_message("No conversation to save.")
+        return
+
+    conversation_text = ""
+    for message in app.messages:
+        role = get_message_role(message)
+        if role in ("user", "assistant"):
+            content = get_message_content(message)
+            conversation_text += f"[{role}] {content}\n\n"
+
+    prompt = SAVE_CONTEXT_COMMAND_PROMPT_TEMPLATE.format(
+        name=name,
+        conversation_text=conversation_text,
+    )
+    app.messages.append({"role": "user", "content": prompt})
+    chat_view.add_system_message(f"Saving context to slot '{name}'...")
+    app.start_llm_processing()
+
+
+def handle_load_context(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /load-context <name>. Load a context slot into the conversation."""
+    name = args.strip()
+    if not name:
+        chat_view.add_system_message("Usage: /load-context <name>")
+        return
+
+    result = app.registry.execute("context", {"action": "load", "name": name})
+    if getattr(result, "is_error", False):
+        chat_view.add_system_message(str(result))
+        return
+
+    app.messages.append(
+        {
+            "role": "user",
+            "content": f"[Loaded context '{name}']\n\n{str(result)}",
+        }
+    )
+    chat_view.add_system_message(f"Loaded context from slot '{name}'.")
+
+
+def handle_list_contexts(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /list-contexts. Print available context slots."""
+    result = app.registry.execute("context", {"action": "list"})
+    chat_view.add_system_message(f"Saved contexts:\n{str(result)}")
+
+
+def handle_context_stats(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Handle /context-stats. Print current token and cache usage."""
+    result = app.registry.execute("context", {"action": "stats"})
+    chat_view.add_system_message(f"Context stats:\n{str(result)}")
 
 
 
@@ -1064,8 +1094,10 @@ COMMAND_MAP: dict[str, Callable] = {
     "/verbose": handle_verbose,
     "/logging": handle_logging,
     "/compact": handle_compact,
-    "/save-memory": handle_save_memory,
-    "/load-memory": handle_load_memory,
+    "/save-context": handle_save_context,
+    "/load-context": handle_load_context,
+    "/list-contexts": handle_list_contexts,
+    "/context-stats": handle_context_stats,
     "/plan": handle_plan,
     "/ask": handle_ask,
     "/implement": handle_implement,

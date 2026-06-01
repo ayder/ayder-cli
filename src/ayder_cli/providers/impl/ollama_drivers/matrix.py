@@ -76,10 +76,30 @@ RESOLUTION_MATRIX: tuple[ResolutionRule, ...] = (
         driver="generic_native",
         note="Native works on current Ollama; verified for deepseek-v4-pro:cloud",
     ),
+    # minimax: native tool extraction verified working on current Ollama
+    # (probed minimax-m3:cloud — returns clean msg.tool_calls, empty content,
+    # both single- and multi-turn). The IN_CONTENT MiniMaxDriver leaks the
+    # model's native tool-call special token (]<]minimax[>[) on multi-turn
+    # requests: _convert_messages feeds prior tool_calls/results back, Ollama's
+    # template renders them with native tokens, the model mimics them, and the
+    # text parser neither parses nor strips them — garbling the call. Trusting
+    # native; reactive fallback engages on #14834. If a specific minimax variant
+    # regresses, prefer a model-name-specific driver (priority < 50) over
+    # re-engaging the family-wide IN_CONTENT path.
     ResolutionRule(
         family_substring="minimax",
-        driver="minimax",
-        note="Emits namespaced minimax tool_call blocks in message content",
+        driver="generic_native",
+        note="Native works on current Ollama; verified for minimax-m3:cloud",
+    ),
+    # kimi: native tool extraction verified working on current Ollama (probed
+    # kimi-k2.6:cloud — clean msg.tool_calls, empty content, single- and
+    # multi-turn). NOT affected by ollama#14360 (Kimi K2.5 leaked its native
+    # <|tool_calls_section_begin|> tokens as raw text where the template was
+    # missing a ToolCalls block); the k2.6 cloud build parses them correctly.
+    ResolutionRule(
+        family_substring="kimi",
+        driver="generic_native",
+        note="Native works on current Ollama; verified for kimi-k2.6:cloud",
     ),
     ResolutionRule(family_substring="llama", driver="generic_native"),
     ResolutionRule(family_substring="mistral", driver="generic_native"),

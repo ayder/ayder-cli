@@ -62,7 +62,14 @@ def create_runtime(
     llm_provider: AIProvider = provider_orchestrator.create(cfg)
     project_ctx = ProjectContext(project_root)
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
-    tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
+
+    # Create context manager before registry so tools can receive it via DI.
+    context_mgr = context_manager_factory.create(cfg)
+    tool_registry = create_default_registry(
+        project_ctx,
+        process_manager=process_manager,
+        context_manager=context_mgr,
+    )
 
     try:
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
@@ -76,8 +83,7 @@ def create_runtime(
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = base_prompt + tool_prompts + macro
 
-    # Create context manager and freeze system prompt
-    context_mgr = context_manager_factory.create(cfg)
+    # Freeze system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
     context_mgr.freeze_system_prompt(system_prompt, tool_schemas)
 
@@ -161,8 +167,13 @@ def create_agent_runtime(
     # 3. Create isolated AIProvider
     llm_provider = provider_orchestrator.create(cfg)
 
-    # 4. Create isolated ToolRegistry (shared PM and ProjectContext)
-    tool_registry = create_default_registry(project_ctx, process_manager=process_manager)
+    # 4. Create isolated context manager and ToolRegistry (shared PM/ProjectContext)
+    context_mgr = context_manager_factory.create(cfg)
+    tool_registry = create_default_registry(
+        project_ctx,
+        process_manager=process_manager,
+        context_manager=context_mgr,
+    )
 
     # 5. Build agent system prompt
     identity_prefix = (
@@ -182,8 +193,7 @@ def create_agent_runtime(
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = identity_prefix + agent_config.system_prompt + tool_prompts + summary_suffix
 
-    # Create context manager and freeze agent system prompt
-    context_mgr = context_manager_factory.create(cfg)
+    # Freeze agent system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
     context_mgr.freeze_system_prompt(system_prompt, tool_schemas)
 

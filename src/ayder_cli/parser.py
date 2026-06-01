@@ -95,6 +95,13 @@ class ContentProcessor:
     _RE_ORPHAN_PARAMETER = re.compile(
         r"</?\uff5c?\uff24?\uff33?\uff2d?\uff2c?\uff5c?parameter[^>]*>"
     )
+    # MiniMax models use special structural tokens that can leak into
+    # msg.content when an IN_CONTENT driver is used on a multi-turn request
+    # (observed empirically on minimax-m3:cloud as ]<]minimax[>[ ). Older M2
+    # builds documented the ]~b]<role> / [e~[ role markers. Strip all variants.
+    _RE_ORPHAN_MINIMAX_MARKER = re.compile(
+        r"\]<\]minimax\[>\[|\]~b\](?:system|user|ai|tool)?|\[e~\["
+    )
 
     # -- JSON tool arrays (for stripping and parsing) ------------------------
     _RE_JSON_TOOL_ARRAY = re.compile(r'\[\s*\{[^}]*"function"\s*:.*?\}\s*\]', re.DOTALL)
@@ -427,6 +434,7 @@ class ContentProcessor:
         text = self._RE_ORPHAN_FUNCTION_CALLS.sub("", text)
         text = self._RE_ORPHAN_INVOKE.sub("", text)
         text = self._RE_ORPHAN_PARAMETER.sub("", text)
+        text = self._RE_ORPHAN_MINIMAX_MARKER.sub("", text)
         return text
 
     def _strip_json_tool_arrays(self, text: str) -> str:

@@ -289,7 +289,7 @@ the design rationale.
 | `tools/builtins/filesystem.py` | File system tool impls | `file_explorer()`, `read_file()`, `file_editor()` |
 | `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
 | `tools/builtins/shell.py` | Shell execution impl | `run_shell_command()` |
-| `tools/builtins/memory.py` | Long-term memory tools | `save_memory`, `load_memory`, `save_context_memory`, `load_context_memory` |
+| `tools/builtins/context.py` | Session context snapshots | `context` |
 | `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
 | `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
 | `tools/builtins/web.py` | HTTP fetch tool | `fetch_web()` |
@@ -642,11 +642,11 @@ Schema-driven tool definitions with auto-discovery:
 - **Schema generation**: `to_openai_schema()` returns the OpenAI function-calling dict
 - **Plugin loading**: `tools/plugin_manager.py` can augment `TOOL_DEFINITIONS` at runtime from local or GitHub-sourced plugins
 
-19 built-in tools across 9 definition files:
+16 built-in tools across 9 definition files:
 - Filesystem (3): `file_explorer`, `read_file`, `file_editor`
 - Search (2): `search_codebase`, `get_project_structure`
 - Shell (1): `run_shell_command`
-- Memory (4): `save_memory`, `load_memory`, `save_context_memory`, `load_context_memory`
+- Context (1): `context`
 - Notes (1): `create_note`
 - Background Processes (4): `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes`
 - Tasks (2): `list_tasks`, `show_task`

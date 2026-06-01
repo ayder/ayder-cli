@@ -13,7 +13,7 @@ from ayder_cli.providers.impl.ollama_inspector import ModelInfo
         (ModelInfo(name="deepseek-v3.2", family="deepseek3"), "generic_native"),
         (ModelInfo(name="qwen3.6:latest", family="qwen3"), "generic_native"),
         (ModelInfo(name="qwen2.5:7b", family="qwen2"), "generic_native"),
-        (ModelInfo(name="minimax-m1", family="minimax"), "minimax"),
+        (ModelInfo(name="minimax-m3:cloud", family="minimax"), "generic_native"),
         (ModelInfo(name="llama3.1:8b", family="llama"), "generic_native"),
     ],
 )
