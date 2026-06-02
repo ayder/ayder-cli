@@ -5,7 +5,8 @@
 **Target version:** 2.0.0 (breaking)
 **Origin:** Cleanup audit item 2.1 — `impl/{qwen,glm,deepseek}.py` were registered but unreachable. Scope expanded by request: make `anthropic` and `google-genai` optional too. OpenAI and Ollama are the primary drivers and stay core.
 
-**Revisions:** R1 (2026-06-02) — resolved 10 review ambiguities: core deps keep loguru/httpx (#3); dev group lists SDKs explicitly, no self-`[all]` (#4); concrete `register()` signature (#5); alias canonicalization is lookup-only, `config.driver` preserved (#6); `find_spec` exceptions → unavailable (#8); no new default `[llm.*]` sections (#9); ASCII-only error message (#10); error-catch ownership fixed — composition propagates, entry points catch, agent path already handled, TUI switch create-then-assign (#1/#2/#7).
+**Revisions:** R2 (2026-06-02) — consistency fixes: D5 wording matches §3.1 (explicit SDK list, no self-`[all]`); `create()` uses `_installed()` not raw `find_spec(...) is None`; CLI catches `ProviderUnavailableError` before generic `Exception` to avoid double `Error:` prefix (`cli_runner.py:125`).
+R1 (2026-06-02) — resolved 10 review ambiguities: core deps keep loguru/httpx (#3); dev group lists SDKs explicitly, no self-`[all]` (#4); concrete `register()` signature (#5); alias canonicalization is lookup-only, `config.driver` preserved (#6); `find_spec` exceptions → unavailable (#8); no new default `[llm.*]` sections (#9); ASCII-only error message (#10); error-catch ownership fixed — composition propagates, entry points catch, agent path already handled, TUI switch create-then-assign (#1/#2/#7).
 
 ---
 
@@ -41,7 +42,7 @@ This means the work is **packaging + UX + reachability**, not a code restructure
 | D2 | **Fail-fast** at provider creation with an actionable error that names the exact `pip install` command **and** lists each driver's availability (installed vs not, ASCII — see §3.3). |
 | D3 | **DeepSeek is core**, always available (no extra) — it uses the already-core OpenAI SDK. Just unblock it in `validate_driver`. |
 | D4 | **Clean break at v2.0.0.** Document in CHANGELOG/README. No phased deprecation. |
-| D5 | **Dev group installs `[all]`** so the existing provider suite runs; add simulate-absence unit tests for the missing-dependency path. |
+| D5 | **Dev group lists the four optional SDKs explicitly** (not a self-reference to `[all]`) so the existing provider suite runs; add simulate-absence unit tests for the missing-dependency path. (See §3.1.) |
 | D6 | **Architecture = central capability map** in the orchestrator, using `importlib.util.find_spec` to probe availability without importing heavy SDKs. |
 
 ---
@@ -118,7 +119,7 @@ _CAPABILITIES: dict[str, DriverCapability] = {
 
 `create(config, interaction_sink)`:
 1. Look up `cap = _CAPABILITIES[config.driver]` (KeyError → existing "unsupported driver" `ValueError`, listing valid names).
-2. If `cap.sdk_module` is set and `find_spec(cap.sdk_module) is None` → raise `ProviderUnavailableError(driver, cap.extra_name, available_drivers())`.
+2. If `not _installed(cap.sdk_module)` (the helper from above, which treats `find_spec` exceptions as unavailable) → raise `ProviderUnavailableError(driver, cap.extra_name, available_drivers())`. Use `_installed(...)`, **not** a raw `find_spec(...) is None`, so the exception-handling path isn't bypassed.
 3. Otherwise `importlib.import_module(...)` the provider class and instantiate (unchanged).
 
 **`register()` (resolves review #5):** keep backward compatibility — the current signature is `register(driver_name, provider_path)`. Extend with keyword-only optional fields:
@@ -168,7 +169,7 @@ Drivers in this install:
 
 **(a) `create_runtime()` (`runtime_factory.py:62`) — shared composition.**
 Used by CLI, TUI, `cli_runner`, and tests. It must **not** print or exit. It simply lets `ProviderUnavailableError` propagate. Ownership of the catch lives at the actual process entry points:
-- **CLI** (`cli.py` `main` and/or `cli_runner.py`): wrap the runtime build; on `ProviderUnavailableError`, print `str(e)` to **stderr** (no traceback) and exit non-zero.
+- **CLI** (`cli.py` `main` and/or `cli_runner.py`): `CommandRunner.run()` (`cli_runner.py:125`) currently has a broad `except Exception: print(f"Error: {e}")`. Since `ProviderUnavailableError`'s message **already starts with `Error:`**, add a **specific `except ProviderUnavailableError as e:` _before_ the generic `Exception`** that prints **`str(e)` as-is** (no `Error: ` prefix) to stderr and returns non-zero. This avoids the double `Error: Error: …` prefix. Apply the same ordering at any other CLI catch site in `cli.py`.
 - **TUI launch** (`tui/__init__.py` / wherever the app is constructed before `app.run()`): catch and present `str(e)` as a clean startup error instead of a crash.
 - Tests: assert the exception propagates from `create_runtime()` unchanged.
 
@@ -243,7 +244,7 @@ Rationale: users think in model-family terms (`qwen`, `glm`) but the codebase/ve
 | `src/ayder_cli/providers/orchestrator.py` | add `DriverCapability`, `_CAPABILITIES`, `available_drivers()`; `find_spec` gate + aliases in `create()` |
 | `src/ayder_cli/core/config.py` | widen `validate_driver`; extend `_DRIVER_BY_PROVIDER` |
 | `src/ayder_cli/application/runtime_factory.py` | **no catch** — `create_runtime`/`create_agent_runtime` propagate `ProviderUnavailableError` |
-| `src/ayder_cli/cli.py` + `cli_runner.py` | catch at CLI entry: print `str(e)` to stderr, exit non-zero |
+| `src/ayder_cli/cli.py` + `cli_runner.py` | add `except ProviderUnavailableError` **before** the existing broad `except Exception` (`cli_runner.py:125`); print `str(e)` as-is (avoid double `Error:` prefix), exit non-zero |
 | `src/ayder_cli/tui/__init__.py` (app launch) | catch at TUI startup: clean error message, no crash |
 | `src/ayder_cli/agents/runner.py` | **no code change** — existing `except Exception` returns failed `AgentSummary`; add a test |
 | `src/ayder_cli/tui/commands.py` (`_apply_provider_switch`) | add `ProviderUnavailableError` to caught set; restructure to create-then-assign (no rollback) |
