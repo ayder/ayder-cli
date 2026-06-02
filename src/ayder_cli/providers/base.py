@@ -83,15 +83,41 @@ class AIProvider(ABC):
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         """
         Stream a chat completion, resolving model-specific native tool calls and reasoning.
-        
+
         Args:
             messages: The standard OpenAI-like conversation history.
             model: The target model name.
             tools: Optional internal tool schemas. The provider translates these if necessary.
             options: Execution options (num_ctx, max_output_tokens, etc).
             verbose: Whether to log low-level debugging info.
-            
+
         Yields:
             NormalizedStreamChunk objects ready for direct consumption by the chat loop.
         """
         pass
+
+
+class ProviderUnavailableError(RuntimeError):
+    """Raised when a driver's optional dependency is not installed.
+
+    The string form is a complete, ASCII, user-facing message (already
+    prefixed with 'Error:') so entry points can print str(e) verbatim.
+    """
+
+    def __init__(self, driver: str, extra: str, available: dict[str, bool]) -> None:
+        self.driver = driver
+        self.extra = extra
+        self.available = available
+        super().__init__(self._format())
+
+    def _format(self) -> str:
+        installed = [name for name, ok in self.available.items() if ok]
+        missing = [name for name, ok in self.available.items() if not ok]
+        return (
+            f"Error: the '{self.driver}' driver is not installed.\n"
+            f"  Install it with:  pip install ayder-cli[{self.extra}]\n"
+            f"\n"
+            f"Drivers in this install:\n"
+            f"  available:      {', '.join(installed)}\n"
+            f"  not installed:  {', '.join(missing)}"
+        )

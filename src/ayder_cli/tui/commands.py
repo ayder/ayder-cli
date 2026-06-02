@@ -10,9 +10,10 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from ayder_cli.core.config import list_provider_profiles
+from ayder_cli.core.config import list_provider_profiles, load_config_for_provider
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
+from ayder_cli.providers import provider_orchestrator, ProviderUnavailableError
 from ayder_cli.tui.screens import (
     AgentListScreen,
     CLISelectScreen,
@@ -84,27 +85,23 @@ def handle_provider(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 
 def _apply_provider_switch(
-    app: AyderApp, provider: str, chat_view: ChatView
+    app: "AyderApp", provider: str, chat_view: ChatView
 ) -> None:
-    """Apply provider switch: reload config from config.toml for the chosen provider."""
-    from ayder_cli.core.config import load_config_for_provider
-    from ayder_cli.providers import provider_orchestrator
-
-    # Save old config for rollback on error
-    old_config = app.config
-
-    # Re-read config.toml with the new provider active (picks up real api_key etc.)
+    """Switch provider: build config, create provider, then commit on success."""
     new_config = load_config_for_provider(provider)
-    app.config = new_config
 
-    # Recreate the LLM provider
+    # Create FIRST - only mutate app state after a successful build.
     try:
-        app.llm = provider_orchestrator.create(new_config)
+        new_llm = provider_orchestrator.create(new_config)
+    except ProviderUnavailableError as e:
+        chat_view.add_system_message(str(e))   # already actionable; keep current provider
+        return
     except (ModuleNotFoundError, ImportError, ValueError) as e:
-        # SDK not installed or provider not yet supported — revert and inform
-        app.config = old_config
         chat_view.add_system_message(f"Cannot switch to {provider}: {e}")
         return
+
+    app.config = new_config
+    app.llm = new_llm
     app.chat_loop.llm = app.llm
 
     # Update model and UI
