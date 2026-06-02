@@ -21,8 +21,8 @@
 | `src/ayder_cli/providers/__init__.py` | export the exception | modify |
 | `src/ayder_cli/providers/orchestrator.py` | capability map, availability, gated `create()`, `register()` | rewrite |
 | `src/ayder_cli/core/config.py` | widen `validate_driver`, extend `_DRIVER_BY_PROVIDER` | modify |
-| `src/ayder_cli/cli_runner.py` | catch `ProviderUnavailableError` before generic `Exception` | modify |
-| `src/ayder_cli/cli.py` | catch around `run_tui` (interactive startup) | modify |
+| `src/ayder_cli/cli_runner.py` | catch `ProviderUnavailableError` before generic `Exception` (non-interactive) | modify |
+| `src/ayder_cli/tui/__init__.py` | catch inside `run_tui()` (interactive startup, covers all callers) | modify |
 | `src/ayder_cli/tui/commands.py` | `_apply_provider_switch`: create-then-assign + catch | modify |
 | `tests/providers/test_orchestrator_capabilities.py` | exception + orchestrator behavior | create |
 | `tests/core/test_config.py` | widened driver validation | modify |
@@ -128,7 +128,7 @@ def test_provider_unavailable_error_message_is_ascii_and_actionable():
     # available row lists core drivers; missing row lists anthropic
     assert "openai" in msg.split("available:")[1].split("not installed:")[0]
     assert "anthropic" in msg.split("not installed:")[1]
-    # ASCII only — no check/cross glyphs
+    # ASCII only - no check/cross glyphs
     assert all(ord(c) < 128 for c in msg)
     assert err.driver == "anthropic" and err.extra == "anthropic"
 ```
@@ -257,6 +257,18 @@ def test_alias_resolves_to_same_capability():
     assert o._canonical("zhipu") == "glm"
 
 
+def test_create_via_alias_uses_user_value_and_canonical_extra(monkeypatch):
+    """driver='dashscope' (alias) -> error names 'dashscope' but install command is [qwen]."""
+    _hide_optional(monkeypatch)
+    from ayder_cli.providers import ProviderUnavailableError
+    cfg = SimpleNamespace(driver="dashscope")
+    with pytest.raises(ProviderUnavailableError) as ei:
+        ProviderOrchestrator().create(cfg)
+    msg = str(ei.value)
+    assert "the 'dashscope' driver is not installed" in msg   # verbatim user value
+    assert "pip install ayder-cli[qwen]" in msg               # canonical extra
+
+
 def test_register_backward_compatible_two_args():
     o = ProviderOrchestrator()
     o.register("custom", "ayder_cli.providers.impl.openai.OpenAIProvider")
@@ -357,12 +369,15 @@ class ProviderOrchestrator:
         driver = self._canonical(config.driver)
         cap = self._capabilities.get(driver)
         if cap is None:
+            known = list(self._capabilities) + list(self._aliases)  # include aliases
             raise ValueError(
                 f"Unsupported LLM driver '{config.driver}'. "
-                f"Expected one of: {', '.join(self._capabilities.keys())}."
+                f"Expected one of: {', '.join(known)}."
             )
         if not _installed(cap.sdk_module):
-            raise ProviderUnavailableError(driver, cap.extra_name, self.available_drivers())
+            # Report the user's verbatim driver name; install command uses the
+            # canonical extra (e.g. driver="dashscope" -> ayder-cli[qwen]).
+            raise ProviderUnavailableError(config.driver, cap.extra_name, self.available_drivers())
         provider_cls = self._import_provider(cap.provider_path)
         return provider_cls(config, interaction_sink=interaction_sink)
 
@@ -408,6 +423,19 @@ def test_validate_driver_accepts_all_supported(drv):
 def test_validate_driver_rejects_unknown():
     with pytest.raises(Exception):
         Config(driver="not-a-driver")
+
+
+def test_provider_profile_infers_driver():
+    # A [llm.<name>] profile with no explicit driver infers via _DRIVER_BY_PROVIDER.
+    cfg = Config(**{"app": {"provider": "qwen"},
+                    "llm": {"qwen": {"model": "qwen3-coder", "num_ctx": 4096}}})
+    assert cfg.driver == "qwen"
+    cfg_glm = Config(**{"app": {"provider": "glm"},
+                        "llm": {"glm": {"model": "glm-4.6"}}})
+    assert cfg_glm.driver == "glm"
+    cfg_ds = Config(**{"app": {"provider": "deepseek"},
+                       "llm": {"deepseek": {"model": "deepseek-chat"}}})
+    assert cfg_ds.driver == "deepseek"
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -467,8 +495,8 @@ git commit -m "feat(config): accept deepseek/qwen/glm driver names + aliases"
 ## Task 5: CLI entry-point error handling
 
 **Files:**
-- Modify: `src/ayder_cli/cli_runner.py` (`CommandRunner.run`, ~line 120-127)
-- Modify: `src/ayder_cli/cli.py` (around `run_tui(permissions=granted)`, ~line 353-355)
+- Modify: `src/ayder_cli/cli_runner.py` (`CommandRunner.run`, ~line 120-127) — non-interactive path
+- Modify: `src/ayder_cli/tui/__init__.py` (`run_tui`, ~line 43-48) — interactive/TUI path
 - Test: `tests/providers/test_orchestrator_capabilities.py` (append a CLI-level test)
 
 - [ ] **Step 1: Write the failing test**
@@ -521,24 +549,33 @@ Then in `CommandRunner.run`, insert the specific handler **before** the generic 
             return 1
 ```
 
-- [ ] **Step 4: Wrap the interactive TUI launch in `cli.py`**
+- [ ] **Step 4: Catch inside `run_tui()` — the true TUI entry point (covers all callers)**
 
-In `src/ayder_cli/cli.py`, replace:
+`run_tui()` constructs `AyderApp(...)` (tui/__init__.py:45), which calls `create_runtime()` (app.py:199) — so `ProviderUnavailableError` raises there. Catching inside `run_tui()` (rather than only at the `cli.py` call site) covers `cli.py` **and** any direct `run_tui()` callers. In `src/ayder_cli/tui/__init__.py`, replace:
 ```python
-        from ayder_cli.tui import run_tui
-        run_tui(permissions=granted)
+    import sys
+
+    app = AyderApp(
+        model=model, safe_mode=safe_mode, permissions=permissions
+    )
+    app.run(inline=True, mouse=False)
 ```
 with:
 ```python
-        from ayder_cli.tui import run_tui
-        from ayder_cli.providers import ProviderUnavailableError
-        try:
-            run_tui(permissions=granted)
-        except ProviderUnavailableError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(1)
+    import sys
+    from ayder_cli.providers import ProviderUnavailableError
+
+    try:
+        app = AyderApp(
+            model=model, safe_mode=safe_mode, permissions=permissions
+        )
+    except ProviderUnavailableError as e:
+        print(str(e), file=sys.stderr)
+        raise SystemExit(1)
+
+    app.run(inline=True, mouse=False)
 ```
-(`sys` is already imported in `cli.py`.)
+`cli.py` needs **no** change — `run_tui()` owns the catch, and `SystemExit(1)` propagates cleanly to terminate the process.
 
 - [ ] **Step 5: Run to verify pass**
 
@@ -548,7 +585,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/ayder_cli/cli_runner.py src/ayder_cli/cli.py tests/providers/test_orchestrator_capabilities.py
+git add src/ayder_cli/cli_runner.py src/ayder_cli/tui/__init__.py tests/providers/test_orchestrator_capabilities.py
 git commit -m "feat(cli): surface ProviderUnavailableError cleanly at entry points"
 ```
 
@@ -619,7 +656,7 @@ def _apply_provider_switch(
     """Switch provider: build config, create provider, then commit on success."""
     new_config = load_config_for_provider(provider)
 
-    # Create FIRST — only mutate app state after a successful build.
+    # Create FIRST - only mutate app state after a successful build.
     try:
         new_llm = provider_orchestrator.create(new_config)
     except ProviderUnavailableError as e:
@@ -768,9 +805,9 @@ Prepend to `CHANGELOG.md` (create if absent):
 Near the `[llm.<provider>]` examples, add a comment:
 ```toml
 # driver may be: openai, ollama, deepseek (core, always available),
-#                anthropic, google, qwen (or dashscope), glm (or zhipu)
-#                — non-core drivers require their extra:
-#                  pip install ayder-cli[anthropic]   (etc.)
+#                anthropic, google, qwen (or dashscope), glm (or zhipu).
+# Non-core drivers require their extra, e.g.:
+#                  pip install ayder-cli[anthropic]
 ```
 
 - [ ] **Step 4: Commit**

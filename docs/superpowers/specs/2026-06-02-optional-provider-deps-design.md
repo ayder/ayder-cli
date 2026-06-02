@@ -5,7 +5,8 @@
 **Target version:** 2.0.0 (breaking)
 **Origin:** Cleanup audit item 2.1 — `impl/{qwen,glm,deepseek}.py` were registered but unreachable. Scope expanded by request: make `anthropic` and `google-genai` optional too. OpenAI and Ollama are the primary drivers and stay core.
 
-**Revisions:** R2 (2026-06-02) — consistency fixes: D5 wording matches §3.1 (explicit SDK list, no self-`[all]`); `create()` uses `_installed()` not raw `find_spec(...) is None`; CLI catches `ProviderUnavailableError` before generic `Exception` to avoid double `Error:` prefix (`cli_runner.py:125`).
+**Revisions:** R3 (2026-06-02) — plan-review clarifications: TUI startup catch lives in `run_tui()` (covers all callers), not `cli.py`; `ProviderUnavailableError` reports the user's verbatim `config.driver` with the canonical extra in the install command; the unsupported-driver `ValueError` lists aliases too.
+R2 (2026-06-02) — consistency fixes: D5 wording matches §3.1 (explicit SDK list, no self-`[all]`); `create()` uses `_installed()` not raw `find_spec(...) is None`; CLI catches `ProviderUnavailableError` before generic `Exception` to avoid double `Error:` prefix (`cli_runner.py:125`).
 R1 (2026-06-02) — resolved 10 review ambiguities: core deps keep loguru/httpx (#3); dev group lists SDKs explicitly, no self-`[all]` (#4); concrete `register()` signature (#5); alias canonicalization is lookup-only, `config.driver` preserved (#6); `find_spec` exceptions → unavailable (#8); no new default `[llm.*]` sections (#9); ASCII-only error message (#10); error-catch ownership fixed — composition propagates, entry points catch, agent path already handled, TUI switch create-then-assign (#1/#2/#7).
 
 ---
@@ -118,8 +119,8 @@ _CAPABILITIES: dict[str, DriverCapability] = {
 **Alias canonicalization scope (resolves review #6):** aliasing is applied **only** for the capability lookup inside the orchestrator. `config.driver` is **preserved verbatim** — if a user writes `driver = "dashscope"`, it stays `"dashscope"` in config, logs, and status output; the orchestrator simply maps both `dashscope` and `qwen` to the same `DriverCapability`. Verified there is no downstream coupling on the exact spelling: `providers/retry.py` is not keyed on driver name, and `context_manager_factory` only special-cases `"ollama"` (every other driver, regardless of spelling, gets `DefaultContextManager`). So no normalization of stored state is needed.
 
 `create(config, interaction_sink)`:
-1. Look up `cap = _CAPABILITIES[config.driver]` (KeyError → existing "unsupported driver" `ValueError`, listing valid names).
-2. If `not _installed(cap.sdk_module)` (the helper from above, which treats `find_spec` exceptions as unavailable) → raise `ProviderUnavailableError(driver, cap.extra_name, available_drivers())`. Use `_installed(...)`, **not** a raw `find_spec(...) is None`, so the exception-handling path isn't bypassed.
+1. Resolve `driver = _canonical(config.driver)` (alias→family), then `cap = _capabilities.get(driver)`. If unknown → `ValueError` whose "Expected one of" list includes **both canonical names and aliases** (validation accepts aliases, so the error should too).
+2. If `not _installed(cap.sdk_module)` (the helper above, which treats `find_spec` exceptions as unavailable) → raise `ProviderUnavailableError(config.driver, cap.extra_name, available_drivers())`. **Use the user's verbatim `config.driver`** in the error (so `driver="dashscope"` reads "the 'dashscope' driver is not installed") while the install command uses the **canonical `cap.extra_name`** (`pip install ayder-cli[qwen]`). Use `_installed(...)`, **not** a raw `find_spec(...) is None`.
 3. Otherwise `importlib.import_module(...)` the provider class and instantiate (unchanged).
 
 **`register()` (resolves review #5):** keep backward compatibility — the current signature is `register(driver_name, provider_path)`. Extend with keyword-only optional fields:
