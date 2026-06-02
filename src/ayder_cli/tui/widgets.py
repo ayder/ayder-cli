@@ -171,21 +171,9 @@ class ChatView(VerticalScroll):
         """Add a thinking/reasoning message."""
         self.add_message(content, MessageType.THINKING)
 
-    def add_tool_call(self, tool_name: str, arguments: str) -> None:
-        """Add a tool call message."""
-        self.add_message(arguments, MessageType.TOOL_CALL, {"tool_name": tool_name})
-
-    def add_tool_result(self, result: str) -> None:
-        """Add a tool result message."""
-        self.add_message(result, MessageType.TOOL_RESULT)
-
     def add_system_message(self, content: str) -> None:
         """Add a system message."""
         self.add_message(content, MessageType.SYSTEM)
-
-    def add_toast(self, content: str) -> None:
-        """Add a toast-style alert message."""
-        self.add_system_message(f"⚠ {content}")
 
     def clear_messages(self) -> None:
         """Clear all messages from the chat view."""
@@ -296,12 +284,6 @@ class ToolPanel(Container):
             widget, _, _, _, _ = self._tools[tool_id]
             widget.remove()
             del self._tools[tool_id]
-
-    def clear_all(self) -> None:
-        """Clear all tools from panel (does not change visibility)."""
-        for widget, _, _, _, _ in self._tools.values():
-            widget.remove()
-        self._tools.clear()
 
 
 class ActivityBar(Horizontal):
@@ -714,10 +696,6 @@ class CLIInputBar(Horizontal):
         if self._input:
             self._input.focus()
 
-    def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable input (no-op, input always stays enabled)."""
-        pass
-
     def _history_navigate(self, direction: int) -> None:
         """Navigate through command history.
 
@@ -781,12 +759,6 @@ class StatusBar(Horizontal):
         self.token_count = count
         label = self.query_one("#token-label", Label)
         label.update(f" | tokens: {count:,}")
-
-    def update_files(self, files: list[str]) -> None:
-        """Update active files count."""
-        self.active_files = files
-        label = self.query_one("#files-label", Label)
-        label.update(f" | files: {len(files)}")
 
     def update_permissions(self, permissions: set) -> None:
         """Update permission mode display."""
@@ -910,15 +882,6 @@ class AgentPanel(Container):
             self._update_status(entry, "Thinking...")
         elif event == "tools_cleanup":
             self._update_status(entry, "Processing...")
-
-    def remove_agent(self, run_id: int) -> None:
-        """Remove an agent entry from the panel by run_id. Does not affect visibility."""
-        if run_id in self._entries:
-            entry = self._entries[run_id]
-            entry.status_widget.remove()
-            if entry.detail_widget:
-                entry.detail_widget.remove()
-            del self._entries[run_id]
 
     def _update_status(self, entry: _AgentEntry, status_text: str) -> None:
         """Update the status line text for a running agent."""

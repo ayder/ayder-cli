@@ -174,7 +174,6 @@ class ContextManagerConfigSection(BaseModel):
     tool_result_compress_age: int = Field(default=5)
     max_tool_result_length: int = Field(default=2048)
     compress_tool_results: bool = Field(default=True)
-    model_overrides: dict[str, dict] = Field(default_factory=dict)
 
     @field_validator("reserve_ratio", "compaction_threshold")
     @classmethod

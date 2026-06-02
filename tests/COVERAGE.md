@@ -1,5 +1,11 @@
 # 📊 Test Coverage Report
 
+> ⚠️ **STALE SNAPSHOT — do not trust the figures below.** This is an auto-generated
+> report from 2026-02-09 (v0.81.7, 540 tests). The suite has since grown to 1196 tests
+> and several listed modules were removed/relocated in refactors (e.g. `tools/impl.py` →
+> `tools/builtins/*`, `services/tools/executor.py` removed). Regenerate before relying on it:
+> `uv run poe test` with coverage, or delete this file if no longer maintained.
+
 <div align="center">
 
 ![Coverage](https://img.shields.io/badge/coverage-84%25-green)
