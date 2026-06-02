@@ -99,3 +99,27 @@ num_ctx = 8192
     assert cfg.driver == "anthropic"
     assert cfg.api_key == "sk-ant"
     assert cfg.model == "claude-sonnet-4-5-20250929"
+
+
+@pytest.mark.parametrize("drv", ["openai", "ollama", "deepseek", "anthropic",
+                                 "google", "qwen", "dashscope", "glm", "zhipu"])
+def test_validate_driver_accepts_all_supported(drv):
+    assert Config(driver=drv).driver == drv  # preserved verbatim, incl. aliases
+
+
+def test_validate_driver_rejects_unknown():
+    with pytest.raises(Exception):
+        Config(driver="not-a-driver")
+
+
+def test_provider_profile_infers_driver():
+    # A [llm.<name>] profile with no explicit driver infers via _DRIVER_BY_PROVIDER.
+    cfg = Config(**{"app": {"provider": "qwen"},
+                    "llm": {"qwen": {"model": "qwen3-coder", "num_ctx": 4096}}})
+    assert cfg.driver == "qwen"
+    cfg_glm = Config(**{"app": {"provider": "glm"},
+                        "llm": {"glm": {"model": "glm-4.6"}}})
+    assert cfg_glm.driver == "glm"
+    cfg_ds = Config(**{"app": {"provider": "deepseek"},
+                       "llm": {"deepseek": {"model": "deepseek-chat"}}})
+    assert cfg_ds.driver == "deepseek"

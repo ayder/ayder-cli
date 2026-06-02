@@ -62,6 +62,12 @@ _DRIVER_BY_PROVIDER = {
     "ollama": "ollama",
     "anthropic": "anthropic",
     "gemini": "google",
+    "google": "google",
+    "deepseek": "deepseek",
+    "qwen": "qwen",
+    "dashscope": "dashscope",
+    "glm": "glm",
+    "zhipu": "zhipu",
 }
 
 _DEFAULT_TOML = """\
@@ -348,8 +354,13 @@ class Config(BaseModel):
     @field_validator("driver")
     @classmethod
     def validate_driver(cls, v: str) -> str:
-        if v not in ("openai", "ollama", "anthropic", "google"):
-            raise ValueError("driver must be one of 'openai', 'ollama', 'anthropic', or 'google'")
+        valid = (
+            "openai", "ollama", "deepseek",
+            "anthropic", "google",
+            "qwen", "dashscope", "glm", "zhipu",
+        )
+        if v not in valid:
+            raise ValueError(f"driver must be one of: {', '.join(valid)}")
         return v
 
     @field_validator("num_ctx")
