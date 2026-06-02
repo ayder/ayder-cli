@@ -1,11 +1,5 @@
 import os
 from pathlib import Path
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
-from ayder_cli.core.config import Config
-
-if TYPE_CHECKING:
-    from ayder_cli.providers import AIProvider
 
 
 class ProjectContext:
@@ -63,19 +57,3 @@ class ProjectContext:
             return str(absolute_path.relative_to(self.root))
         except ValueError:
             return str(absolute_path)
-
-
-@dataclass
-class SessionContext:
-    """Unified context for a chat session.
-
-    Holds configuration, project-specific path context, chat history, runtime state,
-    and enhanced system prompt.
-    """
-
-    config: Config
-    project: ProjectContext
-    messages: list
-    state: dict
-    llm: "AIProvider"
-    system_prompt: str = ""  # Enhanced system prompt with project structure

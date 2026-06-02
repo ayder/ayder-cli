@@ -251,30 +251,6 @@ def show_task(project_ctx: ProjectContext, identifier: str):
         return ToolError(f"Error reading task file: {str(e)}", "execution")
 
 
-def _update_task_status(project_ctx: ProjectContext, task_id, status):
-    """Update the status field of a task."""
-    _ensure_tasks_dir(project_ctx)
-    task_id = int(task_id)
-    path = _get_task_path_by_id(project_ctx, task_id)
-
-    if path is None:
-        return ToolError(f"Error: Task TASK-{task_id:03d} not found.")
-
-    try:
-        content = path.read_text(encoding="utf-8")
-
-        # Replace the status line
-        updated_content = re.sub(
-            r"(-\s+\*\*Status:\*\*\s+)(.+)", rf"\1{status}", content
-        )
-
-        path.write_text(updated_content, encoding="utf-8")
-
-        return ToolSuccess("Status updated")
-    except Exception as e:
-        return ToolError(f"Error updating task status: {str(e)}", "execution")
-
-
 def update_task_temporal_metadata(
     project_ctx: ProjectContext,
     task_id: int,

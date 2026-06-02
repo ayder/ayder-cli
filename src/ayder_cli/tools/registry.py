@@ -16,7 +16,7 @@ from ayder_cli.core.result import ToolResult
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.tools.execution import execute_tool
 from ayder_cli.tools.hooks import HookManager
-from ayder_cli.tools.normalization import normalize_arguments
+from ayder_cli.tools.normalization import normalize_arguments as normalize_arguments  # re-export: callers/tests use registry.normalize_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +108,6 @@ class ToolRegistry:
 
     def remove_post_execute_callback(self, cb: Callable) -> None:
         self.hooks.remove_post_callback(cb)
-
-    # -- Deprecated methods --------------------------------------------------
-
-    def normalize_args(self, name: str, arguments: dict) -> dict:
-        return normalize_arguments(name, arguments, self.project_ctx)
 
 
 def _resolve_func_ref(func_ref: str) -> Callable:
