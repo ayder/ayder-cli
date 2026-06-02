@@ -89,6 +89,9 @@ class DriverCapability:
     sdk_module: str | None       # module to probe; None => core (no extra)
     extra_name: str | None       # pip extra; None => core
 
+# Canonical entries only — vendor aliases live in a separate _ALIASES map and
+# resolve to a canonical name at lookup (so the availability list has one row
+# per provider, not duplicate alias rows).
 _CAPABILITIES: dict[str, DriverCapability] = {
     "openai":    DriverCapability("...impl.openai.OpenAIProvider",      None,           None),
     "ollama":    DriverCapability("...impl.ollama.OllamaProvider",      None,           None),
@@ -96,10 +99,9 @@ _CAPABILITIES: dict[str, DriverCapability] = {
     "anthropic": DriverCapability("...impl.claude.ClaudeProvider",      "anthropic",    "anthropic"),
     "google":    DriverCapability("...impl.gemini.GeminiProvider",      "google.genai", "google"),
     "qwen":      DriverCapability("...impl.qwen.QwenNativeProvider",    "dashscope",    "qwen"),
-    "dashscope": DriverCapability("...impl.qwen.QwenNativeProvider",    "dashscope",    "qwen"),  # alias
     "glm":       DriverCapability("...impl.glm.GLMNativeProvider",      "zhipuai",      "glm"),
-    "zhipu":     DriverCapability("...impl.glm.GLMNativeProvider",      "zhipuai",      "glm"),    # alias
 }
+_ALIASES: dict[str, str] = {"dashscope": "qwen", "zhipu": "glm"}
 ```
 
 `available_drivers() -> dict[str, bool]`:
@@ -211,7 +213,7 @@ Rationale: users think in model-family terms (`qwen`, `glm`) but the codebase/ve
 ## 4. Testing (D5)
 
 - **Dev env** includes all optional SDKs, so existing `tests/providers/test_qwen_async.py`, `test_glm_async.py`, and the claude/gemini tests keep running unchanged.
-- **New** `tests/providers/test_optional_providers.py`:
+- **New** `tests/providers/test_orchestrator_capabilities.py`:
   - `available_drivers()` reports core drivers `True` always.
   - Simulate a missing SDK by monkeypatching `importlib.util.find_spec` (or hiding the module in `sys.modules`) and assert `create()` raises `ProviderUnavailableError` whose message contains `pip install ayder-cli[anthropic]` and **both ASCII rows** (`available:` includes openai/ollama/deepseek; `not installed:` includes anthropic). No Unicode glyphs in the message.
   - `find_spec` raising (not just returning `None`) is treated as unavailable (test the `try/except` in `_installed`).
@@ -250,7 +252,7 @@ Rationale: users think in model-family terms (`qwen`, `glm`) but the codebase/ve
 | `src/ayder_cli/agents/runner.py` | **no code change** — existing `except Exception` returns failed `AgentSummary`; add a test |
 | `src/ayder_cli/tui/commands.py` (`_apply_provider_switch`) | add `ProviderUnavailableError` to caught set; restructure to create-then-assign (no rollback) |
 | `pyproject.toml` | (see §3.1) keep loguru/httpx core; dev group lists 4 SDKs explicitly |
-| `tests/providers/test_optional_providers.py` | new |
+| `tests/providers/test_orchestrator_capabilities.py` | new |
 | `tests/core/test_config.py` (+ coverage) | update for new driver names/aliases |
 | `README.md`, `CHANGELOG`, `docs/config.toml.example` | docs |
 
