@@ -1,6 +1,5 @@
 """Integration: runtime_factory wraps the provider in RetryingProvider when
 retry.enabled is true, and wires CacheMonitor.reset() for OllamaContextManager."""
-import pytest
 
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.core.config import Config, RetryConfigSection

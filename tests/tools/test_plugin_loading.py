@@ -1,7 +1,6 @@
 """Integration tests for external plugin loading into the tool registry."""
 
 import sys
-from pathlib import Path
 
 import pytest
 

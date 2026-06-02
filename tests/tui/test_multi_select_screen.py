@@ -1,6 +1,5 @@
 """Tests for CLIMultiSelectScreen widget."""
 
-import pytest
 from ayder_cli.tui.screens import CLIMultiSelectScreen
 
 

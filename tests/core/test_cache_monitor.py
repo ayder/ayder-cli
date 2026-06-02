@@ -1,5 +1,4 @@
 """Tests for CacheMonitor — timing-based KV-cache hit detection."""
-import pytest
 from ayder_cli.core.cache_monitor import CacheMonitor
 
 
