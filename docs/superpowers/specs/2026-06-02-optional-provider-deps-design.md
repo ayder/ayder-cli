@@ -170,8 +170,8 @@ Drivers in this install:
 
 **(a) `create_runtime()` (`runtime_factory.py:62`) — shared composition.**
 Used by CLI, TUI, `cli_runner`, and tests. It must **not** print or exit. It simply lets `ProviderUnavailableError` propagate. Ownership of the catch lives at the actual process entry points:
-- **CLI** (`cli.py` `main` and/or `cli_runner.py`): `CommandRunner.run()` (`cli_runner.py:125`) currently has a broad `except Exception: print(f"Error: {e}")`. Since `ProviderUnavailableError`'s message **already starts with `Error:`**, add a **specific `except ProviderUnavailableError as e:` _before_ the generic `Exception`** that prints **`str(e)` as-is** (no `Error: ` prefix) to stderr and returns non-zero. This avoids the double `Error: Error: …` prefix. Apply the same ordering at any other CLI catch site in `cli.py`.
-- **TUI launch** (`tui/__init__.py` / wherever the app is constructed before `app.run()`): catch and present `str(e)` as a clean startup error instead of a crash.
+- **CLI non-interactive** (`cli_runner.py`): `CommandRunner.run()` (`cli_runner.py:125`) currently has a broad `except Exception: print(f"Error: {e}")`. Since `ProviderUnavailableError`'s message **already starts with `Error:`**, add a **specific `except ProviderUnavailableError as e:` _before_ the generic `Exception`** that prints **`str(e)` as-is** (no `Error: ` prefix) to stderr and returns non-zero. This avoids the double `Error: Error: …` prefix.
+- **TUI interactive** (`tui/__init__.py`): catch **inside `run_tui()`** (which constructs `AyderApp(...)` → `create_runtime()`), print `str(e)` to stderr and `raise SystemExit(1)`. Catching here (not at the `cli.py` call site) covers every `run_tui()` caller. **`cli.py` needs no change.**
 - Tests: assert the exception propagates from `create_runtime()` unchanged.
 
 **(b) `create_agent_runtime()` (`runtime_factory.py:168`) — agent path. Already handled.**
@@ -245,8 +245,8 @@ Rationale: users think in model-family terms (`qwen`, `glm`) but the codebase/ve
 | `src/ayder_cli/providers/orchestrator.py` | add `DriverCapability`, `_CAPABILITIES`, `available_drivers()`; `find_spec` gate + aliases in `create()` |
 | `src/ayder_cli/core/config.py` | widen `validate_driver`; extend `_DRIVER_BY_PROVIDER` |
 | `src/ayder_cli/application/runtime_factory.py` | **no catch** — `create_runtime`/`create_agent_runtime` propagate `ProviderUnavailableError` |
-| `src/ayder_cli/cli.py` + `cli_runner.py` | add `except ProviderUnavailableError` **before** the existing broad `except Exception` (`cli_runner.py:125`); print `str(e)` as-is (avoid double `Error:` prefix), exit non-zero |
-| `src/ayder_cli/tui/__init__.py` (app launch) | catch at TUI startup: clean error message, no crash |
+| `src/ayder_cli/cli_runner.py` | add `except ProviderUnavailableError` **before** the existing broad `except Exception` (`cli_runner.py:125`); print `str(e)` as-is (avoid double `Error:` prefix), return non-zero. **`cli.py` needs no change.** |
+| `src/ayder_cli/tui/__init__.py` | catch inside `run_tui()` (wraps `AyderApp(...)`): print `str(e)`, `raise SystemExit(1)` — covers all callers |
 | `src/ayder_cli/agents/runner.py` | **no code change** — existing `except Exception` returns failed `AgentSummary`; add a test |
 | `src/ayder_cli/tui/commands.py` (`_apply_provider_switch`) | add `ProviderUnavailableError` to caught set; restructure to create-then-assign (no rollback) |
 | `pyproject.toml` | (see §3.1) keep loguru/httpx core; dev group lists 4 SDKs explicitly |

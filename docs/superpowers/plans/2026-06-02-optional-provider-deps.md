@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, hatchling, PEP 735 dependency-groups, pydantic config, pytest, Textual TUI.
 
-**Spec:** `docs/superpowers/specs/2026-06-02-optional-provider-deps-design.md` (R2).
+**Spec:** `docs/superpowers/specs/2026-06-02-optional-provider-deps-design.md` (R3).
 
 ---
 
@@ -26,6 +26,7 @@
 | `src/ayder_cli/tui/commands.py` | `_apply_provider_switch`: create-then-assign + catch | modify |
 | `tests/providers/test_orchestrator_capabilities.py` | exception + orchestrator behavior | create |
 | `tests/core/test_config.py` | widened driver validation | modify |
+| `tests/ui/test_run_tui_startup.py` | run_tui() startup catch → SystemExit(1) | create |
 | `tests/ui/test_provider_switch.py` | in-session switch failure | create |
 | `tests/agents/test_runner_provider_unavailable.py` | agent isolation | create |
 | `README.md`, `CHANGELOG.md`, `docs/config.toml.example` | docs | modify |
@@ -196,18 +197,24 @@ git commit -m "feat(providers): add ProviderUnavailableError with actionable mes
 - Rewrite: `src/ayder_cli/providers/orchestrator.py`
 - Test: `tests/providers/test_orchestrator_capabilities.py` (append)
 
-- [ ] **Step 1: Append failing tests**
+- [ ] **Step 1: Add failing tests**
 
-Add to `tests/providers/test_orchestrator_capabilities.py`:
+**Place the new `import`/`from` lines at the TOP of `tests/providers/test_orchestrator_capabilities.py`** (merge with the existing `from ayder_cli.providers import ProviderUnavailableError` line) — do NOT leave imports mid-file after the existing functions, or Ruff E402 will fail. Add the test functions below the import block.
+
+Imports to ensure at the top of the file:
 ```python
 import importlib.util
 from types import SimpleNamespace
 
 import pytest
 
+from ayder_cli.providers import ProviderUnavailableError
 from ayder_cli.providers.orchestrator import (
     ProviderOrchestrator, DriverCapability, _installed,
 )
+```
+Test functions to add (below the imports):
+```python
 
 
 def _hide_optional(monkeypatch):
@@ -408,12 +415,8 @@ git commit -m "feat(providers): capability map + find_spec availability + gated 
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/core/test_config.py`:
+Append the test functions below to `tests/core/test_config.py`. **`pytest` and `Config` are almost certainly already imported at the top of that file — if either is missing, add it to the existing top-of-file import block (not mid-file, to avoid Ruff E402). Do not duplicate imports.**
 ```python
-import pytest
-from ayder_cli.core.config import Config
-
-
 @pytest.mark.parametrize("drv", ["openai", "ollama", "deepseek", "anthropic",
                                  "google", "qwen", "dashscope", "glm", "zhipu"])
 def test_validate_driver_accepts_all_supported(drv):
@@ -440,8 +443,8 @@ def test_provider_profile_infers_driver():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python3 -m pytest tests/core/test_config.py -k validate_driver -v`
-Expected: FAIL for `deepseek`/`qwen`/`dashscope`/`glm`/`zhipu` (rejected by the old tuple).
+Run: `.venv/bin/python3 -m pytest tests/core/test_config.py -k "validate_driver or provider_profile" -v`
+Expected: FAIL for `deepseek`/`qwen`/`dashscope`/`glm`/`zhipu` (rejected by the old tuple) and for `test_provider_profile_infers_driver` (no `_DRIVER_BY_PROVIDER` entries yet).
 
 - [ ] **Step 3: Widen `validate_driver`**
 
@@ -498,6 +501,7 @@ git commit -m "feat(config): accept deepseek/qwen/glm driver names + aliases"
 - Modify: `src/ayder_cli/cli_runner.py` (`CommandRunner.run`, ~line 120-127) — non-interactive path
 - Modify: `src/ayder_cli/tui/__init__.py` (`run_tui`, ~line 43-48) — interactive/TUI path
 - Test: `tests/providers/test_orchestrator_capabilities.py` (append a CLI-level test)
+- Test: `tests/ui/test_run_tui_startup.py` (create) — run_tui startup catch
 
 - [ ] **Step 1: Write the failing test**
 
@@ -577,15 +581,42 @@ with:
 ```
 `cli.py` needs **no** change — `run_tui()` owns the catch, and `SystemExit(1)` propagates cleanly to terminate the process.
 
-- [ ] **Step 5: Run to verify pass**
+- [ ] **Step 5: Add a TUI-startup test for `run_tui()`**
 
-Run: `.venv/bin/python3 -m pytest tests/providers/test_orchestrator_capabilities.py -v`
-Expected: PASS.
+Create `tests/ui/test_run_tui_startup.py`:
+```python
+import pytest
 
-- [ ] **Step 6: Commit**
+import ayder_cli.tui as tui
+from ayder_cli.providers import ProviderUnavailableError
+
+
+def test_run_tui_exits_when_provider_unavailable(monkeypatch, capsys):
+    """run_tui() prints the actionable error and raises SystemExit(1)."""
+    def boom(*a, **k):
+        raise ProviderUnavailableError(
+            "anthropic", "anthropic",
+            {"openai": True, "ollama": True, "deepseek": True,
+             "anthropic": False, "google": False, "qwen": False, "glm": False},
+        )
+    # run_tui constructs AyderApp (module-global in ayder_cli.tui); patch it to raise.
+    monkeypatch.setattr(tui, "AyderApp", boom)
+
+    with pytest.raises(SystemExit) as ei:
+        tui.run_tui(permissions=set())
+    assert ei.value.code == 1
+    assert "pip install ayder-cli[anthropic]" in capsys.readouterr().err
+```
+
+- [ ] **Step 6: Run to verify pass**
+
+Run: `.venv/bin/python3 -m pytest tests/providers/test_orchestrator_capabilities.py tests/ui/test_run_tui_startup.py -v`
+Expected: PASS (CommandRunner + run_tui startup tests).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/ayder_cli/cli_runner.py src/ayder_cli/tui/__init__.py tests/providers/test_orchestrator_capabilities.py
+git add src/ayder_cli/cli_runner.py src/ayder_cli/tui/__init__.py tests/providers/test_orchestrator_capabilities.py tests/ui/test_run_tui_startup.py
 git commit -m "feat(cli): surface ProviderUnavailableError cleanly at entry points"
 ```
 
