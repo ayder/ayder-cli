@@ -61,8 +61,14 @@ retention = "7 days"
 # Each [llm.<name>] section defines a provider profile. Set [app].provider
 # to the profile name you want to use.
 #
+# driver may be: openai, ollama, deepseek (core, always available),
+#                anthropic, google, qwen (or dashscope), glm (or zhipu).
+# Non-core drivers require their extra, e.g.:
+#                  pip install ayder-cli[anthropic]
+#
 # Required fields per profile:
-#   driver    - SDK backend: "openai", "ollama", "anthropic", "google"
+#   driver    - SDK backend: "openai", "ollama", "anthropic", "google",
+#               "deepseek", "qwen", or "glm"
 #   model     - Model identifier
 #
 # Optional fields:

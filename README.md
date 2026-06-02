@@ -25,7 +25,7 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Agentic workflow** -- the LLM reads files, edits code, runs shell commands, and iterates autonomously with configurable iteration limits per message.
 - **Multi-agent** -- define specialized sub-agents in `config.toml`. Each agent runs independently with its own LLM, model, and context. Results are injected back into the main conversation when complete.
 - **Textual TUI** -- an inline terminal interface with chat view, tool panel, thinking block toggle, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews.
-- **Batteries included** -- the OpenAI, Anthropic, Google, and Ollama SDKs all ship with ayder-cli, so every provider works out of the box. The terminal UI is built on Rich and Textual.
+- **Batteries included** -- the OpenAI and Ollama SDKs ship with ayder-cli core. Anthropic, Google, Qwen, and GLM are optional extras (install only what you need). The terminal UI is built on Rich and Textual.
 
 ### Tools
 
@@ -41,17 +41,29 @@ Each tool has an OpenAI-compatible JSON schema so models that support function c
 ## Installation
 
 Requires Python 3.12+.
-Works best with uv tool. If you don't have uv in your path, get it from
- [Astral uv](https://docs.astral.sh/uv/#highlights)
+Works best with uv. If you don't have uv in your path, get it from
+[Astral uv](https://docs.astral.sh/uv/#highlights).
+
+Core install (OpenAI + Ollama, plus DeepSeek which reuses the OpenAI SDK):
+
+    pip install ayder-cli
+
+Optional providers (install only what you use):
+
+    pip install ayder-cli[anthropic]   # Claude
+    pip install ayder-cli[google]      # Gemini
+    pip install ayder-cli[qwen]        # Qwen (dashscope)
+    pip install ayder-cli[glm]         # GLM (zhipuai)
+    pip install ayder-cli[all]         # everything
+
+If you select a driver whose package isn't installed, ayder prints the exact
+install command and lists the drivers available in your install.
 
 ```bash
-# Install to user environment
+# Install to user environment (uv tool)
 uv tool install ayder-cli
 
-# or install from PyPI
-pip install ayder-cli
-
-# For nightly builds:
+# Or for nightly / development builds:
 git clone https://github.com/ayder/ayder-cli.git
 cd ayder-cli
 
@@ -77,15 +89,18 @@ export OLLAMA_FLASH_ATTENTION=true
 export OLLAMA_MAX_LOADED_MODELS=1
 ```
 
-### Cloud providers (Anthropic, OpenAI, Gemini)
+### Cloud providers
 
-The Anthropic, OpenAI, and Google SDKs ship with ayder-cli — no extra installs.
-Just add an API key to a profile in `~/.ayder/config.toml` (see Configuration
+Add an API key to a profile in `~/.ayder/config.toml` (see Configuration
 below) and switch provider in the TUI:
 
 ```bash
-/provider anthropic   # or: openai, gemini
+/provider anthropic   # or: openai, google, deepseek, qwen, glm
 ```
+
+Note: `anthropic` and `google` require the corresponding optional extra
+(see Installation above). `openai`, `ollama`, and `deepseek` are included
+in the core install.
 
 ### Configuration: Profiles and Drivers
 
