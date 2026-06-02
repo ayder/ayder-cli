@@ -78,13 +78,13 @@ class TestNoConflictingValidation:
             from ayder_cli.application.validation import (
                 ValidationAuthority,
                 ToolRequest,
-                RuntimeContext,
             )
+            from ayder_cli.application.execution_policy import RuntimeContext
         except ImportError:
             pytest.skip("Validation authority not yet implemented")
 
         authority = ValidationAuthority()
-        
+
         request = ToolRequest(name="file_editor", arguments={"file_path": "/test.txt"})
         
         # Same validation from CLI entry
