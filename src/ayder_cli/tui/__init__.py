@@ -41,10 +41,16 @@ def run_tui(
         permissions: Set of granted permission levels ("r", "w", "x")
     """
     import sys
+    from ayder_cli.providers import ProviderUnavailableError
 
-    app = AyderApp(
-        model=model, safe_mode=safe_mode, permissions=permissions
-    )
+    try:
+        app = AyderApp(
+            model=model, safe_mode=safe_mode, permissions=permissions
+        )
+    except ProviderUnavailableError as e:
+        print(str(e), file=sys.stderr)
+        raise SystemExit(1)
+
     app.run(inline=True, mouse=False)
 
     # Ensure mouse reporting is disabled after exit — Textual's driver may

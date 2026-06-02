@@ -21,6 +21,7 @@ from ayder_cli.agents.tool import (
     create_list_agents_handler,
 )
 from ayder_cli.application.runtime_factory import create_runtime
+from ayder_cli.providers import ProviderUnavailableError
 from ayder_cli.cli_callbacks import CliCallbacks
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
@@ -122,6 +123,9 @@ class CommandRunner:
                 self.prompt,
                 permissions=self.permissions,
             )
+        except ProviderUnavailableError as e:
+            print(str(e), file=sys.stderr)   # message already starts with "Error:"
+            return 1
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
