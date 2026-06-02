@@ -5,6 +5,12 @@ or any OpenAI-compatible API and provides an autonomous coding assistant with fi
 
 ![ayder](docs/cc.png)
 
+## What's New in 2.0
+
+Provider SDKs are now **optional**. The core install ships only OpenAI + Ollama (plus DeepSeek, which reuses the OpenAI SDK); Anthropic, Google, Qwen, and GLM are opt-in extras -- install only what you use. Selecting a driver whose package isn't installed fails fast with the exact `pip install` command and a list of the drivers available in your install. See [CHANGELOG.md](CHANGELOG.md) and [Installation](#installation).
+
+> **Upgrading from 1.x (breaking):** `anthropic` and `google` are no longer installed by default. Run `pip install ayder-cli[anthropic]` / `[google]` (or `[all]`) if you use them.
+
 ## Supported LLM providers
 
 - [Ollama](https://ollama.com) (local or cloud)
