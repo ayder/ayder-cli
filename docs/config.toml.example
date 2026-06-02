@@ -227,11 +227,6 @@ tool_result_compress_age = 5            # Compress tool results older than N tur
 max_tool_result_length   = 2048         # Max chars per tool result before truncation
 compress_tool_results    = true         # Enable automatic tool result compression
 
-# Per-model overrides (optional)
-# [context_manager.model_overrides."gpt-4o"]
-# max_context_tokens = 128000
-# reserve_ratio = 0.20
-
 
 # =============================================================================
 # Agents

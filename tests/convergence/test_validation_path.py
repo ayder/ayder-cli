@@ -14,13 +14,10 @@ class TestNoRedundantValidation:
 
     def test_single_validation_authority(self):
         """One validation component has authority per validation type."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                SchemaValidator,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            SchemaValidator,
+        )
 
         # Authority registry ensures single owner per validation type
         authority = ValidationAuthority()
@@ -32,10 +29,7 @@ class TestNoRedundantValidation:
 
     def test_no_duplicate_validators_same_type(self):
         """No two validators handle the same validation type."""
-        try:
-            from ayder_cli.application.validation import ValidationAuthority
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import ValidationAuthority
 
         authority = ValidationAuthority()
         
@@ -45,13 +39,10 @@ class TestNoRedundantValidation:
 
     def test_validation_runs_once_per_type(self):
         """Each validation type runs exactly once per tool call."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ToolRequest,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ToolRequest,
+        )
 
         authority = ValidationAuthority()
         
@@ -74,17 +65,14 @@ class TestNoConflictingValidation:
 
     def test_consistent_validation_rules(self):
         """Same validation rules apply regardless of entry point."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ToolRequest,
-                RuntimeContext,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ToolRequest,
+        )
+        from ayder_cli.application.execution_policy import RuntimeContext
 
         authority = ValidationAuthority()
-        
+
         request = ToolRequest(name="file_editor", arguments={"file_path": "/test.txt"})
         
         # Same validation from CLI entry
@@ -100,10 +88,7 @@ class TestNoConflictingValidation:
 
     def test_no_path_dependent_validation_rules(self):
         """Validation rules don't depend on code path taken."""
-        try:
-            from ayder_cli.application.validation import ValidationAuthority
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import ValidationAuthority
 
         import inspect
         
@@ -117,13 +102,10 @@ class TestNoConflictingValidation:
 
     def test_normalized_validation_order(self):
         """Validation runs in consistent order."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ValidationStage,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ValidationStage,
+        )
 
         authority = ValidationAuthority()
         
@@ -142,13 +124,10 @@ class TestUserVisibleErrors:
 
     def test_error_messages_clear(self):
         """Validation error messages are clear and actionable."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ToolRequest,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ToolRequest,
+        )
 
         authority = ValidationAuthority()
         
@@ -165,13 +144,10 @@ class TestUserVisibleErrors:
 
     def test_error_includes_context(self):
         """Error includes what was being validated."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ToolRequest,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ToolRequest,
+        )
 
         authority = ValidationAuthority()
 
@@ -186,13 +162,10 @@ class TestUserVisibleErrors:
 
     def test_stable_error_format(self):
         """Error format is stable for programmatic handling."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ToolRequest,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ToolRequest,
+        )
 
         authority = ValidationAuthority()
 
@@ -211,10 +184,7 @@ class TestValidationCentralization:
 
     def test_single_validation_entry_point(self):
         """One entry point for all validation."""
-        try:
-            from ayder_cli.application.validation import ValidationAuthority
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import ValidationAuthority
 
         # Authority is singleton or shared instance
         auth1 = ValidationAuthority()
@@ -225,10 +195,7 @@ class TestValidationCentralization:
 
     def test_validation_not_bypassed(self):
         """No code path bypasses centralized validation."""
-        try:
-            from ayder_cli.application.execution_policy import ExecutionPolicy
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import ExecutionPolicy
 
         import inspect
         
@@ -239,10 +206,7 @@ class TestValidationCentralization:
 
     def test_old_bypass_paths_removed(self):
         """Old bypass paths are removed or delegate to authority."""
-        try:
-            from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop
-        except ImportError:
-            pytest.skip("Implementation not yet available")
+        from ayder_cli.loops.chat_loop import ChatLoop as TuiChatLoop
 
         import inspect
         
@@ -266,13 +230,10 @@ class TestValidationStageContract:
 
     def test_schema_validation_first(self):
         """Schema validation runs before permission validation."""
-        try:
-            from ayder_cli.application.validation import (
-                ValidationAuthority,
-                ValidationStage,
-            )
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import (
+            ValidationAuthority,
+            ValidationStage,
+        )
 
         order = ValidationAuthority.get_validation_order()
 
@@ -281,10 +242,7 @@ class TestValidationStageContract:
 
     def test_early_exit_on_failure(self):
         """Validation exits early on first failure."""
-        try:
-            from ayder_cli.application.validation import ValidationAuthority
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import ValidationAuthority
 
         authority = ValidationAuthority()
         
@@ -309,10 +267,7 @@ class TestValidationStageContract:
 
     def test_all_stages_run_on_success(self):
         """All validation stages run when validation succeeds."""
-        try:
-            from ayder_cli.application.validation import ValidationAuthority
-        except ImportError:
-            pytest.skip("Validation authority not yet implemented")
+        from ayder_cli.application.validation import ValidationAuthority
 
         authority = ValidationAuthority()
         

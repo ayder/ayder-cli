@@ -1,5 +1,4 @@
 """Tests for ContextManagerFactory — registry-based OCP factory."""
-import pytest
 from unittest.mock import MagicMock
 
 from ayder_cli.core.context_manager_factory import ContextManagerFactory

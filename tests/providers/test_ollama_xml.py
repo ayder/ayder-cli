@@ -4,16 +4,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ayder_cli.providers.base import NormalizedStreamChunk
 from ayder_cli.providers.impl.ollama import OllamaProvider
-
-
-def _make_provider():
-    config = MagicMock()
-    config.chat_protocol = "xml"
-    config.base_url = "http://localhost:11434"
-    config.api_key = "test"
-    return OllamaProvider(config)
 
 
 def _make_stream_chunk(content="", thinking="", done=False):
@@ -41,8 +32,6 @@ def test_xml_protocol_correctly_maps_parser_output_to_tool_call_def():
         "<parameter=file_path>foo.py</parameter>"
         "</function></tool_call>"
     )
-
-    provider = _make_provider()
 
     async def _run():
         async def mock_stream(*args, **kwargs):

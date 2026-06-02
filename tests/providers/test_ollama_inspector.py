@@ -7,9 +7,7 @@ from ollama import ResponseError
 
 from ayder_cli.providers.impl.ollama_inspector import (
     ModelInfo,
-    NativeToolProbe,
     OllamaInspector,
-    RuntimeState,
 )
 
 

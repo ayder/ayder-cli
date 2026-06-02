@@ -244,10 +244,6 @@ class DefaultContextManager:
     # -- Core logic ----------------------------------------------------------
 
     @property
-    def max_context(self) -> int:
-        return self._config.max_context_tokens
-
-    @property
     def reserve(self) -> int:
         return int(self._config.max_context_tokens * self._config.reserve_ratio)
 
@@ -411,28 +407,6 @@ class DefaultContextManager:
             logger.info(f"Compressed {compressed} old tool results")
 
         return compressed
-
-    def reset_with_summary(self, summary: str) -> None:
-        self._messages = [{"role": "user", "content": summary}]
-        self._message_meta = [
-            {
-                "tier": MessageTier.RECENT_USER,
-                "timestamp": datetime.now(),
-                "original_length": len(summary),
-                "compressed": False,
-                "token_count": self._counter.estimate(self._messages[0]),
-            }
-        ]
-        self._compressed_count = 0
-        self._last_summarization = datetime.now()
-        self._cache_valid = False
-        logger.info("Context reset with summary")
-
-    def get_messages(self) -> list[dict]:
-        return self._messages.copy()
-
-    def estimate_tokens(self, obj: Any) -> int:
-        return self._counter.estimate(obj)
 
     def clear(self) -> None:
         self._messages.clear()

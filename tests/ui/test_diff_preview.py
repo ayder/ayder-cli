@@ -5,8 +5,6 @@ Tests colorize_diff, truncate_diff, and generate_diff_preview.
 """
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-import pytest
 from rich.text import Text
 from ayder_cli.ui import (
     colorize_diff,

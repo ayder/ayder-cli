@@ -6,7 +6,6 @@ These tests define expected behavior BEFORE DEV implements shared execution.
 """
 
 import asyncio
-import pytest
 
 
 def _run_async(coro):
@@ -19,13 +18,10 @@ class TestPermissionDeniedParity:
 
     def test_same_denied_error_format(self):
         """Both interfaces produce identical error format for denied permissions."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                PermissionDeniedError,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            PermissionDeniedError,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
         
@@ -38,12 +34,9 @@ class TestPermissionDeniedParity:
 
     def test_denied_error_includes_remediation(self):
         """Error includes how to grant permission (both interfaces)."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
         error = policy.check_permission("run_shell_command")
@@ -54,13 +47,10 @@ class TestPermissionDeniedParity:
 
     def test_cli_tui_same_permission_check(self):
         """Same permission check logic for both interfaces."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                RuntimeContext,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            RuntimeContext,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
         
@@ -80,13 +70,10 @@ class TestConfirmationBehaviorParity:
 
     def test_confirmation_required_same_conditions(self):
         """Same conditions trigger confirmation in both interfaces."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                ConfirmationRequirement,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            ConfirmationRequirement,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
         
@@ -99,12 +86,9 @@ class TestConfirmationBehaviorParity:
 
     def test_confirmation_flow_same_outcomes(self):
         """Confirmation produces same outcomes in both interfaces."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ConfirmationResult,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ConfirmationResult,
+        )
 
         # Approved: tool executes
         assert ConfirmationResult.APPROVED.executes_tool is True
@@ -122,12 +106,9 @@ class TestErrorPropagationParity:
 
     def test_tool_error_same_format(self):
         """Tool execution errors have same format in both interfaces."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ToolExecutionError,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ToolExecutionError,
+        )
 
         error = ToolExecutionError(
             tool_name="read_file",
@@ -147,12 +128,9 @@ class TestErrorPropagationParity:
 
     def test_validation_error_same_format(self):
         """Validation errors have same format in both interfaces."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ValidationError,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ValidationError,
+        )
 
         error = ValidationError(
             tool_name="file_editor",
@@ -167,13 +145,10 @@ class TestErrorPropagationParity:
 
     def test_error_message_to_llm_same_format(self):
         """Error messages sent back to LLM have same format."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                ToolExecutionError,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            ToolExecutionError,
+        )
 
         policy = ExecutionPolicy()
         
@@ -196,23 +171,17 @@ class TestExecutionPolicyContract:
 
     def test_policy_is_shared_service(self):
         """Single policy class used by both CLI and TUI."""
-        try:
-            from ayder_cli.application.execution_policy import ExecutionPolicy
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import ExecutionPolicy
 
         # One class, not CLI/TUI specific variants
         assert ExecutionPolicy.__name__ == "ExecutionPolicy"
 
     def test_policy_executes_tools_consistently(self):
         """Tool execution produces consistent results."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                ToolRequest,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            ToolRequest,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r", "w"})
         
@@ -230,10 +199,7 @@ class TestExecutionPolicyContract:
 
     def test_no_interface_specific_execution_paths(self):
         """No execution code branches on interface type."""
-        try:
-            from ayder_cli.application.execution_policy import ExecutionPolicy
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import ExecutionPolicy
 
         # Verify no interface-specific branching
         import inspect
@@ -249,14 +215,11 @@ class TestConvergenceScenarios:
 
     def test_read_only_tool_auto_approved_both(self):
         """Read-only tools auto-approved in both CLI and TUI."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                ToolRequest,
-                RuntimeContext,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            ToolRequest,
+            RuntimeContext,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
         request = ToolRequest(name="read_file", arguments={"file_path": "/test.txt"})
@@ -270,12 +233,9 @@ class TestConvergenceScenarios:
 
     def test_write_tool_needs_confirmation_both(self):
         """Write tools need confirmation in both CLI and TUI."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+        )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
 
@@ -288,14 +248,11 @@ class TestConvergenceScenarios:
 
     def test_denied_tool_same_error_both(self):
         """Denied tools produce same error in both CLI and TUI."""
-        try:
-            from ayder_cli.application.execution_policy import (
-                ExecutionPolicy,
-                ToolRequest,
-                RuntimeContext,
-            )
-        except ImportError:
-            pytest.skip("Execution policy not yet implemented")
+        from ayder_cli.application.execution_policy import (
+            ExecutionPolicy,
+            ToolRequest,
+            RuntimeContext,
+        )
 
         policy = ExecutionPolicy(granted_permissions=set())  # No permissions
         request = ToolRequest(name="read_file", arguments={"file_path": "/test.txt"})

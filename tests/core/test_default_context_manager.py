@@ -1,5 +1,4 @@
 """Tests for DefaultContextManager — preserves existing behavior for non-Ollama providers."""
-import pytest
 from unittest.mock import MagicMock
 
 from ayder_cli.core.default_context_manager import DefaultContextManager

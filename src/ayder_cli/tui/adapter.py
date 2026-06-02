@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ayder_cli.services.interactions import InteractionSink
-
 
 class TUIInteractionSink:
     """Routes on_llm_request_debug events to a TUI callback."""
@@ -25,8 +23,3 @@ class TUIInteractionSink:
     ) -> None:
         if self._on_llm_request_debug is not None:
             self._on_llm_request_debug(messages, model, tools, options)
-
-
-# Type guard — verify adapter satisfies protocol at import time
-def _check() -> None:
-    assert isinstance(TUIInteractionSink(), InteractionSink)

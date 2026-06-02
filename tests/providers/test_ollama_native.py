@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from ollama._types import Message as OllamaMessage
 
 from ayder_cli.providers.impl.ollama import OllamaProvider
-from ayder_cli.providers.base import NormalizedStreamChunk, ToolCallDef
 
 
 def make_config(**overrides):
