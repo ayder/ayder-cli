@@ -1,8 +1,8 @@
-# Agent-Result Push Delivery Implementation Plan (rev. 2 — post-review)
+# Agent-Result Push Delivery Implementation Plan (rev. 3 — + agent notes)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Revision note:** Revised after `.ayder/020-codex-multi-agent-review.md`. Findings F1, F2, F3, F5, F6, F7 confirmed against the code and incorporated; F4 (role) resolved by decision (user-role block); F8 addressed (unit + integration). Verified facts: `commands.py` has 7 direct `start_llm_processing()` calls (363, 380, 394, 427, 483, 783, 869); `callbacks.py:59` accumulates `last_content` across all iterations and never resets; `claude.py:170-171` / `gemini.py:176-177` concatenate **all** system messages into the top-level system prompt; `pyproject.toml:72` ignores `tests/core/test_config.py`.
+**Revision note:** Revised after `.ayder/020-codex-multi-agent-review.md`. Findings F1, F2, F3, F5, F6, F7 confirmed against the code and incorporated; F4 (role) resolved by decision (user-role block); F8 addressed (unit + integration). Verified facts: `commands.py` has 7 direct `start_llm_processing()` calls (363, 380, 394, 427, 483, 783, 869); `callbacks.py:59` accumulates `last_content` across all iterations and never resets; `claude.py:170-171` / `gemini.py:176-177` concatenate **all** system messages into the top-level system prompt; `pyproject.toml:72` ignores `tests/core/test_config.py`. **rev. 3** folds in the agent-notes design (`docs/superpowers/specs/2026-06-18-agent-notes-design.md`): the runner persists each agent's final message to `.ayder/notes/` (reusing the existing `notes.py` writer + `/notes` browser) and surfaces the path via a `note=` attribute — Task 1 (`note_path` field), new Task 2b (writer + wiring), Task 7 (capability line).
 
 **Goal:** Deliver each sub-agent's final deliverable into the main conversation and wake the main LLM as soon as it's ready — no head-of-line blocking, no stale/competing turns, with a single turn arbiter enforcing one turn at a time.
 
@@ -23,21 +23,23 @@
 - **Stale safety:** pending wakes are cancelled and stale results dropped on cancel, `/clear`, and conversation replacement (via timer generation + `cycle_id`).
 - **User preempts:** user input or a slash command during the debounce window cancels the pending wake and runs immediately; pending results are consumed by that turn's pre-iteration drain.
 - **Scope:** this phase wires push delivery into the **TUI (`AyderApp`) only**. The single-shot CLI path (`cli_runner.py:56-67`) keeps its current behavior; a note is added there. **Model-callable agent cancellation is the next phase** — not in this plan.
+- **Agent notes (`2026-06-18-agent-notes-design.md`):** the runner persists each agent's final message to `.ayder/notes/` for **every** terminal status, using a collision-proof filename `{YYYYMMDD-HHMMSS}-{agent-slug}-run{run_id}.md`, and surfaces the project-relative path via a `note=` attribute on the injected block. Note writing is **best-effort** — a failure logs and sets `note_path=None`, never failing the agent run. Retention/cleanup is out of scope (gitignored scratch).
 
 ---
 
 ## File Structure
 
-- `src/ayder_cli/agents/summary.py` — `AgentSummary` → `AgentResult` (`run_id`, `cycle_id`, `agent_name`, `status`, `content`, `error`); `format_for_injection` renders a delimiter-safe labeled block.
+- `src/ayder_cli/agents/summary.py` — `AgentSummary` → `AgentResult` (`run_id`, `cycle_id`, `agent_name`, `status`, `content`, `error`, `note_path`); `format_for_injection` renders a delimiter-safe labeled block with an optional `note=` attribute.
 - `src/ayder_cli/agents/__init__.py` — export rename.
-- `src/ayder_cli/agents/runner.py` — capture the **final assistant message** from history; drop `_parse_summary`; build `AgentResult`.
+- `src/ayder_cli/agents/runner.py` — capture the **final assistant message** from history; drop `_parse_summary`; build `AgentResult`; persist the message via `write_agent_note` and set `note_path`.
+- `src/ayder_cli/tools/builtins/notes.py` — extract a shared `_write_note`; add `write_agent_note` (collision-proof filename, best-effort, all statuses).
 - `src/ayder_cli/agents/registry.py` — rename queue/methods to `_result_queue` / `drain_results` / `has_pending_results`; add `cycle_id` tracking (`new_cycle()`, stamp at dispatch, drop stale before enqueue); push-semantics capability prompt.
 - `src/ayder_cli/application/runtime_factory.py` — replace summary suffix with a final-message/structure contract.
 - `src/ayder_cli/core/config.py` — add `agent_wake_debounce_ms`.
 - `src/ayder_cli/agents/turn_arbiter.py` — **new** `TurnArbiter` (pure state machine; heart of F1/F2/F6/F7).
 - `src/ayder_cli/tui/app.py` — replace `_is_processing` with the arbiter; route `start_llm_processing` through `begin_turn`; `_agent_complete` → `request_agent_wake`; user-role + cycle-filtered `inject_agent_results`; `action_cancel`/`do_clear` → `arbiter.cancel()` + queue purge.
 - `src/ayder_cli/tui/commands.py` — no per-site edits (they call `start_llm_processing`, now arbiter-routed); verify in tests.
-- Tests: `tests/agents/test_summary.py`, `tests/agents/test_runner.py`, `tests/agents/test_registry.py`, `tests/agents/test_turn_arbiter.py` (new), `tests/application/test_runtime_factory.py`, `tests/core/test_agent_wake_config.py` (new, **non-ignored** name), `tests/ui/test_agent_wake_injection.py` (new), `tests/providers/test_agent_result_roundtrip.py` (new), `tests/tui/test_agent_wake_integration.py` (new, Pilot).
+- Tests: `tests/agents/test_summary.py`, `tests/agents/test_runner.py`, `tests/agents/test_registry.py`, `tests/agents/test_turn_arbiter.py` (new), `tests/application/test_runtime_factory.py`, `tests/core/test_agent_wake_config.py` (new, **non-ignored** name), `tests/ui/test_agent_wake_injection.py` (new), `tests/providers/test_agent_result_roundtrip.py` (new), `tests/tui/test_agent_wake_integration.py` (new, Pilot), `tests/tools/test_agent_notes.py` (new).
 
 ---
 
@@ -50,7 +52,7 @@ This task renames the shared type and its registry API together so the commit is
 - Test: `tests/agents/test_summary.py`, `tests/agents/test_runner.py`, `tests/agents/test_registry.py`
 
 **Interfaces:**
-- Produces: `AgentResult(run_id: int, cycle_id: int, agent_name: str, status: str, content: str, error: str | None)` with `format_for_injection() -> str`. Registry exposes `drain_results() -> list[AgentResult]`, `has_pending_results() -> bool`, `new_cycle() -> int`, `current_cycle: int`.
+- Produces: `AgentResult(run_id: int, cycle_id: int, agent_name: str, status: str, content: str, error: str | None, note_path: str | None = None)` with `format_for_injection() -> str`. Registry exposes `drain_results() -> list[AgentResult]`, `has_pending_results() -> bool`, `new_cycle() -> int`, `current_cycle: int`.
 
 - [ ] **Step 1: Rewrite `tests/agents/test_summary.py`** (small file, fully about this type):
 
@@ -95,6 +97,16 @@ class TestAgentResult:
         text = r.format_for_injection()
         assert "ERROR: boom" in text
         assert 'status="error"' in text
+
+    def test_format_includes_note_attr_when_present(self):
+        r = AgentResult(run_id=1, cycle_id=1, agent_name="x", status="completed",
+                        content="ok", error=None, note_path=".ayder/notes/n.md")
+        assert 'note=".ayder/notes/n.md"' in r.format_for_injection().splitlines()[0]
+
+    def test_format_omits_note_attr_when_absent(self):
+        r = AgentResult(run_id=1, cycle_id=1, agent_name="x", status="completed",
+                        content="ok", error=None)
+        assert "note=" not in r.format_for_injection()
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -131,12 +143,14 @@ class AgentResult:
     status: str          # "completed" | "timeout" | "error"
     content: str         # the agent's FINAL message, verbatim, never truncated
     error: str | None    # error/timeout metadata, separate from content
+    note_path: str | None = None  # project-relative path of the persisted note, if written
 
     def format_for_injection(self) -> str:
         """Render as a delimiter-safe labeled block (injected as role=user)."""
+        note_attr = f' note="{_sanitize_attr(self.note_path)}"' if self.note_path else ""
         header = (
             f'[agent-result name="{_sanitize_attr(self.agent_name)}" '
-            f'run="{self.run_id}" status="{_sanitize_attr(self.status)}"]'
+            f'run="{self.run_id}" status="{_sanitize_attr(self.status)}"{note_attr}]'
         )
         # Neutralize any embedded closing delimiter so the block stays unambiguous.
         body = (self.content or "").replace("[/agent-result]", "[/agent-result ]")
@@ -356,6 +370,240 @@ Expected: PASS.
 ```bash
 git add src/ayder_cli/application/runtime_factory.py tests/application/test_runtime_factory.py
 git commit -m "feat(agents): final-message/structure contract replaces forced summary suffix"
+```
+
+---
+
+### Task 2b: Agent deliverable notes — `write_agent_note` + runner wiring
+
+Persists each agent's final message to `.ayder/notes/` and sets `AgentResult.note_path`. Depends on Task 1 (`AgentResult.note_path`, `AgentRunner._final_message`, `self._cycle_id`). Spec: `docs/superpowers/specs/2026-06-18-agent-notes-design.md`. Reuses the existing `notes.py` writer (`_get_notes_dir`, `_title_to_slug`) and the existing `/notes` browser (no command change).
+
+**Files:**
+- Modify: `src/ayder_cli/tools/builtins/notes.py` (add `import logging`; extract `_write_note`; add `write_agent_note`)
+- Modify: `src/ayder_cli/agents/runner.py` (add `_persist_note`; set `note_path` in each return branch)
+- Test: `tests/tools/test_agent_notes.py` (new), `tests/agents/test_runner.py`
+
+**Interfaces:**
+- Consumes: `ProjectContext` (`.root`, `.to_relative`), existing `_get_notes_dir` / `_title_to_slug` (`notes.py`), `AgentResult` (Task 1).
+- Produces: `write_agent_note(project_ctx, *, agent_name: str, run_id: int, cycle_id: int, status: str, task: str, content: str, timestamp: str, error: str | None = None) -> str | None` — project-relative note path, or `None` on write failure. The `timestamp` is `"YYYYMMDD-HHMMSS"`, passed in (no hidden clock).
+
+- [ ] **Step 1: Write the failing test** — create `tests/tools/test_agent_notes.py`:
+
+```python
+"""Tests for write_agent_note — deterministic agent deliverable notes."""
+
+from ayder_cli.core.context import ProjectContext
+from ayder_cli.tools.builtins.notes import write_agent_note
+
+
+def test_writes_note_with_frontmatter_and_sections(tmp_path):
+    ctx = ProjectContext(str(tmp_path))
+    rel = write_agent_note(
+        ctx, agent_name="reviewer", run_id=3, cycle_id=1, status="completed",
+        task="Review the auth module", content="# Findings\nAll good.",
+        timestamp="20260618-143022",
+    )
+    assert rel == ".ayder/notes/20260618-143022-reviewer-run3.md"
+    text = (tmp_path / rel).read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    assert "agent: reviewer" in text and "run_id: 3" in text and "status: completed" in text
+    assert "tags: [agent-result]" in text
+    assert "## Task\nReview the auth module" in text
+    assert "## Result\n# Findings\nAll good." in text
+
+
+def test_error_status_appends_error_section(tmp_path):
+    ctx = ProjectContext(str(tmp_path))
+    rel = write_agent_note(
+        ctx, agent_name="writer", run_id=1, cycle_id=2, status="error",
+        task="t", content="partial", timestamp="20260618-090000", error="boom",
+    )
+    text = (tmp_path / rel).read_text(encoding="utf-8")
+    assert "status: error" in text
+    assert "## Error\nboom" in text
+
+
+def test_filename_is_collision_proof_by_run_id(tmp_path):
+    ctx = ProjectContext(str(tmp_path))
+    a = write_agent_note(ctx, agent_name="x", run_id=1, cycle_id=1, status="completed",
+                         task="t", content="A", timestamp="20260618-120000")
+    b = write_agent_note(ctx, agent_name="x", run_id=2, cycle_id=1, status="completed",
+                         task="t", content="B", timestamp="20260618-120000")
+    assert a != b
+    assert (tmp_path / a).read_text().endswith("A\n")
+    assert (tmp_path / b).read_text().endswith("B\n")
+
+
+def test_write_failure_returns_none(tmp_path, monkeypatch):
+    ctx = ProjectContext(str(tmp_path))
+    import ayder_cli.tools.builtins.notes as notes_mod
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(notes_mod, "_write_note", boom)
+    rel = write_agent_note(ctx, agent_name="x", run_id=1, cycle_id=1, status="completed",
+                           task="t", content="c", timestamp="20260618-120000")
+    assert rel is None
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/tools/test_agent_notes.py -v`
+Expected: FAIL — `ImportError: cannot import name 'write_agent_note'`.
+
+- [ ] **Step 3: Edit `src/ayder_cli/tools/builtins/notes.py`**
+
+3a. Add at the top (after the existing imports): `import logging` and `logger = logging.getLogger(__name__)`.
+
+3b. Add a shared writer and the agent-note function (after `_title_to_slug`):
+
+```python
+def _write_note(notes_dir: Path, filename: str, frontmatter: list[str], body: str) -> Path:
+    """Write YAML frontmatter + body to notes_dir/filename. Returns the path."""
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    content = "\n".join(["---", *frontmatter, "---"]) + f"\n\n{body}\n"
+    path = notes_dir / filename
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def write_agent_note(
+    project_ctx: ProjectContext,
+    *,
+    agent_name: str,
+    run_id: int,
+    cycle_id: int,
+    status: str,
+    task: str,
+    content: str,
+    timestamp: str,
+    error: str | None = None,
+) -> str | None:
+    """Persist an agent's final deliverable to .ayder/notes/. Best-effort.
+
+    Returns the project-relative note path, or None if writing fails (a note
+    failure must never fail the agent run).
+    """
+    try:
+        notes_dir = _get_notes_dir(project_ctx)
+        slug = _title_to_slug(agent_name)
+        filename = f"{timestamp}-{slug}-run{run_id}.md"
+        frontmatter = [
+            f'title: "{agent_name} — run {run_id}"',
+            f"date: {timestamp}",
+            f"agent: {agent_name}",
+            f"run_id: {run_id}",
+            f"cycle_id: {cycle_id}",
+            f"status: {status}",
+            "tags: [agent-result]",
+        ]
+        body = f"## Task\n{task}\n\n## Result\n{content}"
+        if error:
+            body += f"\n\n## Error\n{error}"
+        path = _write_note(notes_dir, filename, frontmatter, body)
+        return project_ctx.to_relative(path)
+    except Exception as e:
+        logger.warning("write_agent_note failed for agent '%s' run %d: %s", agent_name, run_id, e)
+        return None
+```
+
+3c. (DRY, optional but recommended) Refactor `create_note` to use `_write_note`: replace its inline `frontmatter_lines = ["---", ...]` / `note_content = "\n".join(...)` / `path.write_text(...)` with:
+```python
+        frontmatter = [f'title: "{title}"', f"date: {now}"]
+        if tag_list:
+            frontmatter.append(f"tags: [{', '.join(tag_list)}]")
+        path = _write_note(notes_dir, filename, frontmatter, content)
+```
+The byte output is identical (frontmatter delimiters + `\n\n{content}\n`), so existing `create_note` tests stay green.
+
+- [ ] **Step 4: Run tests to verify pass (incl. existing notes tests)**
+
+Run: `uv run pytest tests/tools/test_agent_notes.py tests/tools/ -k note -v`
+Expected: PASS — `write_agent_note` tests pass and any existing `create_note` test still passes.
+
+- [ ] **Step 5: Wire the runner — edit `src/ayder_cli/agents/runner.py`**
+
+5a. Add a best-effort note helper (alongside `_final_message`):
+```python
+    def _persist_note(self, task: str, status: str, content: str, error: str | None) -> str | None:
+        from datetime import datetime
+        from ayder_cli.tools.builtins.notes import write_agent_note
+        return write_agent_note(
+            self._project_ctx,
+            agent_name=self.agent_name,
+            run_id=self.run_id,
+            cycle_id=self._cycle_id,
+            status=status,
+            task=task,
+            content=content,
+            timestamp=datetime.now().strftime("%Y%m%d-%H%M%S"),
+            error=error,
+        )
+```
+
+5b. In each terminal branch of `run`, compute `note_path` from the SAME values used to build the `AgentResult`, and pass it through. For example, the success branch becomes:
+```python
+            content = content or "Agent completed without producing output."
+            note_path = self._persist_note(task, "completed", content, None)
+            return AgentResult(
+                run_id=self.run_id, cycle_id=self._cycle_id, agent_name=self.agent_name,
+                status="completed", content=content, error=None, note_path=note_path,
+            )
+```
+Do the same in the timeout branch (`status="timeout"`, `error=f"Agent exceeded {self._timeout}s timeout"`), the captured-error branch (`status="error"`, `content=""`, `error=callbacks.last_system_error`), and the `except` branch (`status="error"`, `content="Agent encountered an error."`, `error=str(e)`). Each passes its own `content`/`status`/`error` to both `_persist_note` and `AgentResult(note_path=...)`.
+
+- [ ] **Step 6: Write the runner note test** — append to `tests/agents/test_runner.py`:
+
+```python
+@pytest.mark.anyio
+async def test_runner_persists_note_and_sets_path(tmp_path):
+    from ayder_cli.core.context import ProjectContext
+    cfg = AgentConfig(name="reporter", system_prompt="Write a report.")
+    ctx = ProjectContext(str(tmp_path))
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(), project_ctx=ctx,
+        process_manager=MagicMock(), permissions=set(), timeout=5, run_id=7, cycle_id=1,
+    )
+    fake_rt = MagicMock()
+    fake_rt.system_prompt = "sys"
+    fake_rt.config = MagicMock(model="m", provider="p", num_ctx=1, max_output_tokens=1,
+                               stop_sequences=[], tool_tags=None, max_history_messages=30)
+
+    def loop_ctor(**kwargs):
+        msgs = kwargs["messages"]
+        m = MagicMock()
+
+        async def _run(*a, **k):
+            msgs.append({"role": "assistant", "content": "# Deliverable\nbody"})
+
+        m.run = _run
+        return m
+
+    import ayder_cli.agents.runner as runner_mod
+    from unittest.mock import patch
+    with patch.object(runner_mod, "create_agent_runtime", return_value=fake_rt), \
+         patch.object(runner_mod, "ChatLoop", side_effect=loop_ctor):
+        result = await runner.run("Do the task")
+
+    assert result.note_path is not None
+    note_file = tmp_path / result.note_path
+    assert note_file.exists()
+    text = note_file.read_text(encoding="utf-8")
+    assert "# Deliverable\nbody" in text
+    assert "## Task\nDo the task" in text
+```
+
+- [ ] **Step 7: Run the runner + notes suites**
+
+Run: `uv run pytest tests/agents/test_runner.py tests/tools/test_agent_notes.py -v`
+Expected: PASS. (The Task 1 runner test `test_runner_returns_final_message_not_transcript` still passes — its `MagicMock` project_ctx makes `write_agent_note` fail internally and return `None`, leaving `content` untouched.)
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/ayder_cli/tools/builtins/notes.py src/ayder_cli/agents/runner.py tests/tools/test_agent_notes.py tests/agents/test_runner.py
+git commit -m "feat(agents): persist each agent's final deliverable as a .ayder/notes note"
 ```
 
 ---
@@ -965,6 +1213,7 @@ git commit -m "feat(tui): push agent results via TurnArbiter; user-role injectio
         assert "after all agents complete" not in p        # no batch language
         assert "Batch behavior" not in p
         assert "structure" in p.lower()                    # caller specifies structure
+        assert "note=" in p                                # note path is referenced
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -991,6 +1240,10 @@ Expected: FAIL — batch language present / no structure language.
             "block as soon as that agent finishes (within a short coalescing window, or at "
             "the next safe step of your current turn) — you may receive them one at a time. "
             "Act on each as it arrives; do NOT wait for all agents.",
+            "",
+            "Each `[agent-result]` block carries a `note=\"…\"` path to the agent's full "
+            "saved deliverable; if it has scrolled out of context, read that file with "
+            "`read_file` instead of re-dispatching the agent.",
             "",
             "**Rules:**",
             "- You CAN dispatch the same agent multiple times with different tasks.",
@@ -1110,7 +1363,8 @@ git add -A && git commit -m "chore: full-suite green for agent-result push deliv
 - green intermediate commits → Task 1 makes the rename atomic. ✓
 - TUI-only scope → Task 8 Step 4 CLI note. ✓
 - Agent cancellation → explicitly next phase (Global Constraints). ✓
+- Agent notes (spec `2026-06-18-agent-notes-design.md`) → `AgentResult.note_path` + `format_for_injection` `note=` (Task 1); `write_agent_note` + `_write_note` extraction + runner `_persist_note` wiring (Task 2b); capability `note=` line (Task 7); best-effort, all statuses, never fails the run; reuses existing `/notes` browser. ✓
 
 **2. Placeholder scan** — Task 8 test bodies are intentionally sketched because the Pilot harness must be mirrored from the existing file read in Step 1; every other code/test step is complete. Flag: Task 8 is the one task whose tests require reading an existing harness before the bodies can be finalized — its deliverable is "passing integration tests," not fixed code.
 
-**3. Type consistency** — `AgentResult(run_id, cycle_id, agent_name, status, content, error)` identical across Tasks 1/4/6/8; `inject_agent_results(registry, messages) -> int` defined Task 6 Step 4, used Steps 7b; `TurnArbiter` constructor kwargs match Task 5 definition and Task 6 Step 6 wiring; `drain_results`/`has_pending_results`/`current_cycle`/`new_cycle` defined Task 1 and consumed Tasks 5/6; `begin_turn`/`request_agent_wake`/`end_turn`/`cancel` consistent between Task 5 and Task 6 call sites.
+**3. Type consistency** — `AgentResult(run_id, cycle_id, agent_name, status, content, error, note_path=None)` identical across Tasks 1/4/6/8 (the trailing `note_path` defaults to `None`, so the 6-positional constructions in Tasks 4/6 stay valid); `write_agent_note(...) -> str | None` defined Task 2b and consumed by the runner's `_persist_note`, its result assigned to `AgentResult.note_path`; `inject_agent_results(registry, messages) -> int` defined Task 6 Step 4, used Steps 7b; `TurnArbiter` constructor kwargs match Task 5 definition and Task 6 Step 6 wiring; `drain_results`/`has_pending_results`/`current_cycle`/`new_cycle` defined Task 1 and consumed Tasks 5/6; `begin_turn`/`request_agent_wake`/`end_turn`/`cancel` consistent between Task 5 and Task 6 call sites.
