@@ -443,7 +443,10 @@ class _SubmitTextArea(TextArea):
         self._tab_cycle_matches: list[str] = []
         self._tab_cycle_index = -1
         self._placeholder_widget: Static | None = None
-        self._pasted_content: str | None = None
+        # Ordered (marker, content) pairs for collapsed pastes. Markers are
+        # shown inline in the textarea; on submit they are expanded back to
+        # their full content in place, preserving any surrounding typed text.
+        self._pastes: list[tuple[str, str]] = []
 
     def on_mount(self) -> None:
         self._placeholder_widget = Static(
@@ -466,17 +469,41 @@ class _SubmitTextArea(TextArea):
         line_count = text.count("\n") + (1 if not text.endswith("\n") else 0)
         return f"[pasted: {line_count} lines]"
 
-    def _store_paste(self, content: str) -> None:
-        """Store pasted content for later submission."""
-        self._pasted_content = content
-
-    def _get_submit_value(self) -> str | None:
-        """Return stored paste content if any, else None."""
-        return self._pasted_content
+    def _store_paste(self, marker: str, content: str) -> None:
+        """Record a collapsed paste so its marker can be expanded on submit."""
+        self._pastes.append((marker, content))
 
     def _clear_paste(self) -> None:
-        """Clear stored paste state."""
-        self._pasted_content = None
+        """Clear all stored paste state."""
+        self._pastes = []
+
+    def _remove_paste(self, marker: str) -> None:
+        """Drop the first stored paste whose marker matches."""
+        for i, (stored_marker, _content) in enumerate(self._pastes):
+            if stored_marker == marker:
+                del self._pastes[i]
+                return
+
+    def _expand_pastes(self, text: str) -> str:
+        """Expand each stored marker in ``text`` back to its full content.
+
+        Markers are replaced one occurrence at a time, in insertion order, so
+        text typed around (and between) pastes is preserved verbatim.
+        """
+        result = text
+        for marker, content in self._pastes:
+            idx = result.find(marker)
+            if idx == -1:
+                continue
+            result = result[:idx] + content + result[idx + len(marker) :]
+        return result
+
+    def _marker_at_cursor_end(self, text_before_cursor: str) -> str | None:
+        """Return a stored marker that ``text_before_cursor`` ends with, if any."""
+        for marker, _content in self._pastes:
+            if text_before_cursor.endswith(marker):
+                return marker
+        return None
 
     def _reset_tab_cycle(self) -> None:
         """Reset slash-command tab cycle state."""
@@ -506,31 +533,30 @@ class _SubmitTextArea(TextArea):
         if event.key == "enter":
             event.prevent_default()
             event.stop()
-            paste_value = self._get_submit_value()
-            if paste_value:
-                self.post_message(self.Submitted(paste_value))
+            value = self._expand_pastes(self.text).strip()
+            if value:
+                self.post_message(self.Submitted(value))
                 self._clear_paste()
                 self.clear()
-            else:
-                value = self.text.strip()
-                if value:
-                    self.post_message(self.Submitted(value))
-                    self.clear()
             return
 
-        if event.key == "escape" and self._pasted_content is not None:
+        if event.key == "escape" and self._pastes:
             event.prevent_default()
             event.stop()
             self._clear_paste()
             self.clear()
             return
 
-        if event.key == "backspace" and self._pasted_content is not None:
-            event.prevent_default()
-            event.stop()
-            self._clear_paste()
-            self.clear()
-            return
+        if event.key == "backspace" and self._pastes:
+            row, col = self.cursor_location
+            before_cursor = self.text.split("\n")[row][:col]
+            marker = self._marker_at_cursor_end(before_cursor)
+            if marker is not None:
+                event.prevent_default()
+                event.stop()
+                self.delete((row, col - len(marker)), (row, col))
+                self._remove_paste(marker)
+                return
 
         if event.key == "tab" and self.text.startswith("/"):
             event.prevent_default()
@@ -595,14 +621,19 @@ class _SubmitTextArea(TextArea):
         self._reset_tab_cycle()
 
     async def _on_paste(self, event) -> None:
-        """Handle bracketed paste — collapse multi-line pastes."""
+        """Handle bracketed paste — collapse multi-line pastes.
+
+        The collapsed marker is inserted at the cursor (replacing any
+        selection) so existing typed text is preserved; the full content is
+        expanded back in place on submit.
+        """
         text = event.text
         if self._should_collapse_paste(text):
             event.prevent_default()
             event.stop()
-            self._store_paste(text)
-            self.clear()
-            self.insert(self._collapse_display_text(text))
+            marker = self._collapse_display_text(text)
+            self._store_paste(marker, text)
+            self.insert(marker)
 
 
 class CLIInputBar(Horizontal):
