@@ -21,6 +21,19 @@ class DriverCapability:
     sdk_module: str | None = None   # None => core driver (no optional dependency)
     extra_name: str | None = None   # pip extra that provides sdk_module
 
+    def __post_init__(self) -> None:
+        # A driver is either core (no SDK probe, no pip extra) or optional
+        # (both set). Mixing them is meaningless: an SDK with no extra can't
+        # tell users how to install it, and an extra with no SDK is never
+        # probed. Enforcing this lets create() trust extra_name is a str
+        # whenever an optional driver's SDK is missing.
+        if (self.sdk_module is None) != (self.extra_name is None):
+            raise ValueError(
+                "DriverCapability requires sdk_module and extra_name to be set "
+                f"together (got sdk_module={self.sdk_module!r}, "
+                f"extra_name={self.extra_name!r})."
+            )
+
 
 def _installed(sdk_module: str | None) -> bool:
     """True if the SDK is importable. Core drivers (None) are always available."""
@@ -88,6 +101,10 @@ class ProviderOrchestrator:
                 f"Expected one of: {', '.join(known)}."
             )
         if not _installed(cap.sdk_module):
+            # Reaching here means sdk_module is not None (core drivers are
+            # always "installed"), so this optional driver always declares an
+            # extra_name — guaranteed by DriverCapability's invariant.
+            assert cap.extra_name is not None
             # Report the user's verbatim driver name; install command uses the
             # canonical extra (e.g. driver="dashscope" -> ayder-cli[qwen]).
             raise ProviderUnavailableError(config.driver, cap.extra_name, self.available_drivers())

@@ -89,6 +89,28 @@ def test_register_backward_compatible_two_args():
     assert isinstance(cap, DriverCapability) and cap.sdk_module is None
 
 
+def test_capability_core_driver_both_none_is_valid():
+    cap = DriverCapability("pkg.mod.Provider")
+    assert cap.sdk_module is None and cap.extra_name is None
+
+
+def test_capability_optional_driver_both_set_is_valid():
+    cap = DriverCapability("pkg.mod.Provider", "some_sdk", "some_extra")
+    assert cap.sdk_module == "some_sdk" and cap.extra_name == "some_extra"
+
+
+def test_capability_sdk_without_extra_is_rejected():
+    """An optional driver with no pip extra cannot produce a usable install hint."""
+    with pytest.raises(ValueError):
+        DriverCapability("pkg.mod.Provider", sdk_module="some_sdk")
+
+
+def test_capability_extra_without_sdk_is_rejected():
+    """A pip extra is meaningless when no SDK module is ever probed."""
+    with pytest.raises(ValueError):
+        DriverCapability("pkg.mod.Provider", extra_name="some_extra")
+
+
 def test_command_runner_prints_provider_error_without_double_prefix(monkeypatch, capsys):
     from ayder_cli import cli_runner
     from ayder_cli.providers import ProviderUnavailableError
