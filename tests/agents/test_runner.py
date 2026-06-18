@@ -153,7 +153,8 @@ async def test_run_reports_error_when_stream_fails_after_text():
     )
 
     def loop_ctor(**kwargs):
-        cb = kwargs["callbacks"]; msgs = kwargs["messages"]
+        cb = kwargs["callbacks"]
+        msgs = kwargs["messages"]
         m = MagicMock()
         async def _run(*a, **k):
             msgs.append({"role": "assistant", "content": "intermediate text"})

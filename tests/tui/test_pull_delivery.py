@@ -6,11 +6,15 @@ from ayder_cli.agents.run import AgentRun
 
 
 class FakeReg:
-    def __init__(self, runs): self._runs = runs
+    def __init__(self, runs):
+        self._runs = runs
+
     def pending_nudge(self):
         return [r for r in self._runs if r.status in ("done", "error") and not r.drained and not r.nudged]
+
     def mark_nudged(self, runs):
-        for r in runs: r.nudged = True
+        for r in runs:
+            r.nudged = True
 
 
 def _app(reg, processing=False):

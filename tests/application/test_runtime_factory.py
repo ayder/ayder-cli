@@ -295,7 +295,9 @@ def test_agent_prompt_uses_final_message_contract_not_summary_block():
     from ayder_cli.application import runtime_factory
     agent_cfg = AgentConfig(name="reporter", system_prompt="Produce a document.")
     parent = MagicMock(provider="ollama", tool_tags=None, retry=MagicMock(enabled=False))
-    fake_reg = MagicMock(); fake_reg.get_system_prompts.return_value = "\n[tools]\n"; fake_reg.get_schemas.return_value = []
+    fake_reg = MagicMock()
+    fake_reg.get_system_prompts.return_value = "\n[tools]\n"
+    fake_reg.get_schemas.return_value = []
     with patch.object(runtime_factory.provider_orchestrator, "create", return_value=MagicMock()), \
          patch.object(runtime_factory.context_manager_factory, "create", return_value=MagicMock()), \
          patch.object(runtime_factory, "create_default_registry", return_value=fake_reg):
