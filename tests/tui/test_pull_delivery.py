@@ -48,3 +48,14 @@ def test_no_nudge_without_pending():
     app = _app(FakeReg([AgentRun(1, 1, "a", 0.0, status="working")]))
     app._maybe_nudge()
     app.start_llm_processing.assert_not_called()
+
+
+def test_do_clear_bumps_generation():
+    from unittest.mock import MagicMock, patch
+    from ayder_cli.tui.commands import do_clear
+    app = MagicMock()
+    app._agent_registry = MagicMock()
+    app.messages = []
+    with patch("ayder_cli.tools.builtins.context.snapshot_conversation_for_clear", return_value=None):
+        do_clear(app, MagicMock())
+    app._agent_registry.new_generation.assert_called_once()

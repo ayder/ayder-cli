@@ -109,6 +109,9 @@ def _apply_provider_switch(
     app.chat_loop.config.model = new_config.model
     app.chat_loop.config.num_ctx = new_config.num_ctx
     app.update_system_prompt_model()
+    _agent_reg = getattr(app, "_agent_registry", None)
+    if _agent_reg is not None:
+        _agent_reg.new_generation()
 
     status_bar = app.query_one("#status-bar", StatusBar)
     status_bar.set_model(new_config.model)
@@ -134,6 +137,9 @@ async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
                 app.model = selected
                 app.chat_loop.config.model = selected
                 app.update_system_prompt_model()
+                _agent_reg = getattr(app, "_agent_registry", None)
+                if _agent_reg is not None:
+                    _agent_reg.new_generation()
                 status_bar = app.query_one("#status-bar", StatusBar)
                 status_bar.set_model(selected)
                 chat_view.add_system_message(f"Switched to model: {selected}")
@@ -161,6 +167,9 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
         app.model = new_model
         app.chat_loop.config.model = new_model
         app.update_system_prompt_model()
+        _agent_reg = getattr(app, "_agent_registry", None)
+        if _agent_reg is not None:
+            _agent_reg.new_generation()
         status_bar = app.query_one("#status-bar", StatusBar)
         status_bar.set_model(new_model)
         chat_view.add_system_message(f"Switched to model: {new_model}")
@@ -358,6 +367,9 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
         conversation_text=conversation_text
     )
     app.messages.append({"role": "user", "content": compact_prompt})
+    _agent_reg = getattr(app, "_agent_registry", None)
+    if _agent_reg is not None:
+        _agent_reg.new_generation()
     chat_view.add_system_message("Compacting: summarize → save → clear → load")
 
     app.start_llm_processing()
@@ -750,6 +762,9 @@ def _apply_skill(
         chat_view.add_system_message(f"SKILL.md for '{skill_name}' is empty, skipping.")
         return
     app.inject_skill(skill_name, content)
+    _agent_reg = getattr(app, "_agent_registry", None)
+    if _agent_reg is not None:
+        _agent_reg.new_generation()
     status_bar = app.query_one("#status-bar", StatusBar)
     status_bar.set_skill(skill_name)
     chat_view.add_system_message(f"Activated skill: {skill_name}")
@@ -829,6 +844,10 @@ def do_clear(app: AyderApp, chat_view: ChatView) -> None:
     context_manager = getattr(app, "context_manager", None)
     if context_manager is not None and hasattr(context_manager, "clear"):
         context_manager.clear()
+
+    _agent_reg = getattr(app, "_agent_registry", None)
+    if _agent_reg is not None:
+        _agent_reg.new_generation()
 
     chat_view.clear_messages()
     if recovery_slot is not None:

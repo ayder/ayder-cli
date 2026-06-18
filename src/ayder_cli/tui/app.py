@@ -819,4 +819,8 @@ async def apply_pending_compact(app, messages: list[dict]) -> None:
     if context_manager is not None and hasattr(context_manager, "clear"):
         context_manager.clear()
 
+    _agent_reg = getattr(app, "_agent_registry", None)
+    if _agent_reg is not None:
+        _agent_reg.new_generation()
+
     app._pending_compact = None
