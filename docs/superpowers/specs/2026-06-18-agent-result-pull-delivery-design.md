@@ -139,7 +139,7 @@ def request_turn(prepare=None, *, run_loop=True, no_tools=False, interrupt=False
 
 **Why finding 3 needs this:** commands mutate shared state immediately today (`/compact` clears `messages`, `/provider` rebuilds the provider, `/skill` replaces `messages`, `/ask` appends + starts a no-tools turn). Queuing user *strings* doesn't stop that. Each breaking command instead defers its mutation into `prepare` and calls `request_turn(...)`; the consumer runs `prepare` only when no turn is in flight, so it can't corrupt a running turn. User input is just `request_turn(prepare=append-the-message)`. The nudge (§7) is `request_turn(prepare=append-nudge-text)`.
 
-**v1 interrupt policy (open decision, §12):** breaking commands default to **queue** (`interrupt=False` → run after the current turn finishes); `Esc`/cancel cancels the active `_run_task`. The `interrupt=True` path exists for when we decide a command must preempt.
+**v1 interrupt policy (decided, §12):** breaking commands **queue** (`interrupt=False` → run after the current turn finishes); **Ctrl+C** — the existing `action_cancel` binding (`app.py:163`; Ctrl+Q is quit) — cancels the active `_run_task` if the user wants them sooner. `action_cancel` is rewired to cancel `self._run_task` (the consumer then awaits teardown) instead of the old Textual `exclusive=True` worker. The `interrupt=True` path exists for when we later decide a specific command must preempt.
 
 ## 7. Nudges — event-driven, timer as fallback (finding D)
 
@@ -219,7 +219,7 @@ Kept. `write_agent_note(...)` and the runner auto-persisting the **final message
 
 **In scope:** `AgentRun` + pull tools (CLI **and** TUI), single-loop ownership, the serial turn/command consumer, generation-based staleness, event+timer nudges (TUI), auto-notes, capability-prompt rewrite.
 
-**Open decision (needs your call before the plan):** the **v1 interrupt policy** of §6 — do breaking commands **queue** behind a running turn (simplest; `Esc` cancels), or must specific commands (e.g. `/ask`, `/provider`) **interrupt** (`interrupt=True`) on day one? The machinery supports both; this only sets defaults.
+**v1 interrupt policy (decided):** breaking commands **queue** behind a running turn; **Ctrl+C** cancels the active turn (existing binding). Per-command `interrupt=True` preemption is deferred — the machinery supports it when wanted.
 
 **Out of scope / deferred:**
 - Model-callable agent cancellation — next phase.
@@ -246,3 +246,4 @@ Kept. `write_agent_note(...)` and the runner auto-persisting the **final message
 6. Registry state is **owned solely by the event loop**; worker-thread tool handlers marshal via `run_coroutine_threadsafe`.
 7. Conversation staleness uses a **generation marker that filters visibility**, never dropping active runs.
 8. The serial turn consumer queues **complete turn/command requests** (with `prepare` mutations), not just user strings. Pull tools are registered in **both** CLI and TUI.
+9. v1 interrupt policy = **queue**; **Ctrl+C** (`action_cancel`, the existing binding) cancels the active turn; per-command `interrupt=True` preemption is deferred.
