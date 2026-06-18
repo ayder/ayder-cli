@@ -69,44 +69,45 @@ class TestListAgentsHandler:
 
 
 class TestCallAgentHandler:
-    def test_handler_calls_dispatch(self):
-        """Handler calls registry.dispatch() synchronously."""
+    def test_handler_calls_create_run(self):
+        """Handler routes registry.create_run() onto the loop via _on_loop."""
         mock_registry = MagicMock()
-        mock_registry.dispatch.return_value = (
-            "Agent 'reviewer' dispatched with task: Review auth.py\n"
-            "The agent is running in the background. "
-            "You will receive its summary when it completes."
-        )
+        mock_registry._on_loop = lambda fn: fn()
+        mock_registry.create_run.return_value = 1
 
         handler = create_call_agent_handler(mock_registry)
         result = handler(name="reviewer", task="Review auth.py")
 
-        mock_registry.dispatch.assert_called_once_with("reviewer", "Review auth.py")
-        assert "dispatched" in result.lower()
+        mock_registry.create_run.assert_called_once_with("reviewer", "Review auth.py")
+        assert "run #1" in result
+        assert "read_agent_result" in result
 
     def test_handler_returns_error_for_unknown_agent(self):
         mock_registry = MagicMock()
-        mock_registry.dispatch.return_value = "Error: Agent 'unknown' not found"
+        mock_registry._on_loop = lambda fn: fn()
+        mock_registry.create_run.return_value = "Error: Agent 'unknown' not found"
 
         handler = create_call_agent_handler(mock_registry)
         result = handler(name="unknown", task="do something")
 
         assert "not found" in result.lower() or "error" in result.lower()
 
-    def test_handler_returns_dispatch_result_directly(self):
-        """Handler returns whatever registry.dispatch() returns."""
+    def test_handler_returns_create_run_error_directly(self):
+        """Handler returns the error string from create_run unchanged."""
         mock_registry = MagicMock()
-        mock_registry.dispatch.return_value = "Agent 'writer' dispatched with task: Write tests..."
+        mock_registry._on_loop = lambda fn: fn()
+        mock_registry.create_run.return_value = "Error: Agent 'writer' failed in this cycle."
 
         handler = create_call_agent_handler(mock_registry)
         result = handler(name="writer", task="Write tests for auth.py")
 
-        assert result == "Agent 'writer' dispatched with task: Write tests..."
+        assert result == "Error: Agent 'writer' failed in this cycle."
 
     def test_handler_converts_int_run_id_to_success_string(self):
-        """When dispatch succeeds (returns int run_id), handler returns a success string."""
+        """When create_run succeeds (returns int run_id), handler returns a success string."""
         mock_registry = MagicMock()
-        mock_registry.dispatch.return_value = 1  # int run_id
+        mock_registry._on_loop = lambda fn: fn()
+        mock_registry.create_run.return_value = 1  # int run_id
 
         handler = create_call_agent_handler(mock_registry)
         result = handler(name="reviewer", task="Review auth.py")
@@ -114,3 +115,4 @@ class TestCallAgentHandler:
         assert isinstance(result, str)
         assert "dispatched" in result.lower()
         assert "reviewer" in result
+        assert "run #1" in result

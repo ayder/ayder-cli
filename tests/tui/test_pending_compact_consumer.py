@@ -119,7 +119,9 @@ async def test_consumer_resets_context_manager():
 
 
 @pytest.mark.anyio
-async def test_composed_hook_runs_pending_compact_and_agent_summaries():
+async def test_composed_hook_runs_pending_compact():
+    # Agent results are now delivered via the pull/nudge model, so the
+    # pre-iteration hook only applies pending compaction (no summary drain).
     from ayder_cli.tui.app import apply_pending_compact
 
     app = _make_app(
@@ -129,20 +131,12 @@ async def test_composed_hook_runs_pending_compact_and_agent_summaries():
         ],
         pending={"summary_name": "a", "summary_content": "the-summary", "keep_last_n": 0},
     )
-    fake_summary = MagicMock()
-    fake_summary.format_for_injection.return_value = "AGENT-SUMMARY"
-    agent_registry = MagicMock()
-    agent_registry.drain_summaries.return_value = [fake_summary]
 
     async def composed(messages):
         await apply_pending_compact(app, messages)
-        summaries = agent_registry.drain_summaries()
-        for summary in summaries:
-            messages.append({"role": "system", "content": summary.format_for_injection()})
 
     await composed(app.messages)
 
     assert app.messages[0]["role"] == "system"
     assert app.messages[0]["content"] == "SYS"
     assert "the-summary" in app.messages[1]["content"]
-    assert app.messages[-1]["content"] == "AGENT-SUMMARY"

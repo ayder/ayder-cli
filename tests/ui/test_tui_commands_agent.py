@@ -83,9 +83,9 @@ def test_handle_agent_screen_cancel_does_not_touch_input():
     input_widget.focus.assert_not_called()
 
 
-def test_handle_agent_dispatch_path_unchanged():
+def test_handle_agent_create_run_path():
     reg = _make_registry(["reviewer"])
-    reg.dispatch.return_value = 7  # success path returns int run_id
+    reg.create_run.return_value = 7  # success path returns int run_id
     app, _input = _make_app(registry=reg)
     # Avoid AgentPanel/ActivityBar query failures by raising on those:
     app.query_one = MagicMock(side_effect=Exception("no widgets in test"))
@@ -93,7 +93,7 @@ def test_handle_agent_dispatch_path_unchanged():
     chat_view = MagicMock()
 
     handle_agent(app, "reviewer fix the parser bug", chat_view)
-    reg.dispatch.assert_called_once_with("reviewer", "fix the parser bug")
+    reg.create_run.assert_called_once_with("reviewer", "fix the parser bug")
     chat_view.add_system_message.assert_called()
 
 

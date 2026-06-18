@@ -6,19 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.registry import AgentRegistry
-from ayder_cli.agents.summary import AgentSummary
-
-
-def _close_scheduled_coroutine(coro, loop):
-    """Test scheduler stub that takes ownership of the coroutine like asyncio does."""
-    coro.close()
-    return MagicMock()
-
-
-def _close_then_raise_scheduler(coro, loop):
-    """Test scheduler stub for failures after coroutine ownership transfer."""
-    coro.close()
-    raise RuntimeError("loop closed")
+from ayder_cli.agents.run import AgentRun
+from ayder_cli.agents.runner import AgentRunOutcome
 
 
 @pytest.fixture
@@ -137,72 +126,37 @@ class TestAgentRegistry:
         assert "all agents complete" in prompts.lower() or "batch" in prompts.lower()
         assert "failed" in prompts.lower() or "error" in prompts.lower()
 
-    def test_dispatch_unknown_agent(self, registry):
-        """Dispatching unknown agent returns error string with discovery guidance."""
-        result = registry.dispatch("nonexistent", "do something")
+    def test_create_run_unknown_agent(self, registry):
+        """create_run on an unknown agent returns error string with discovery guidance."""
+        result = registry.create_run("nonexistent", "do something")
         assert "not found" in result.lower()
         assert "reviewer" in result
         assert "writer" in result
         assert "list_agents" in result
 
-    def test_dispatch_returns_run_id(self, registry):
-        """dispatch() returns int run_id on success."""
-        mock_loop = MagicMock()
-        registry.set_loop(mock_loop)
+    @pytest.mark.anyio
+    async def test_create_run_allows_same_agent_twice(self, registry):
+        """Same agent can be created concurrently — no duplicate guard, distinct run_ids."""
+        registry.set_loop(asyncio.get_running_loop())
 
-        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
-             patch(
-                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
-                 side_effect=_close_scheduled_coroutine,
-             ):
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
             mock_runner = MockRunner.return_value
             mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome(
+                "done", "ok", None, None,
+            ))
 
-            result = registry.dispatch("reviewer", "Review this")
-
-        assert isinstance(result, int)
-        assert result == 1  # first dispatch
-
-
-    def test_dispatch_closes_coroutine_when_scheduler_rejects(self, registry):
-        """dispatch() cleans up active state and closes coro if scheduling fails."""
-        mock_loop = MagicMock()
-        registry.set_loop(mock_loop)
-
-        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
-             patch(
-                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
-                 side_effect=_close_then_raise_scheduler,
-             ):
-            mock_runner = MockRunner.return_value
-            mock_runner.agent_name = "reviewer"
-            mock_runner.run = AsyncMock()
-
-            result = registry.dispatch("reviewer", "Review this")
-
-        assert "failed to schedule" in result.lower()
-        assert registry.active_count == 0
-
-    def test_dispatch_allows_same_agent_twice(self, registry):
-        """Same agent can be dispatched concurrently — no duplicate guard."""
-        mock_loop = MagicMock()
-        registry.set_loop(mock_loop)
-
-        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner, \
-             patch(
-                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
-                 side_effect=_close_scheduled_coroutine,
-             ):
-            mock_runner = MockRunner.return_value
-            mock_runner.agent_name = "reviewer"
-
-            run1 = registry.dispatch("reviewer", "task 1")
-            run2 = registry.dispatch("reviewer", "task 2")
+            run1 = registry.create_run("reviewer", "task 1")
+            run2 = registry.create_run("reviewer", "task 2")
 
         assert isinstance(run1, int)
         assert isinstance(run2, int)
         assert run1 != run2
+        # Both scheduled and still working until their tasks run
         assert registry.active_count == 2
+        # Let scheduled tasks complete so the test loop has no pending work
+        await registry._runs[run1].done_event.wait()
+        await registry._runs[run2].done_event.wait()
 
     def test_cancel_all_by_name(self, registry):
         """cancel() cancels all instances with the given name."""
@@ -223,21 +177,6 @@ class TestAgentRegistry:
     def test_cancel_not_running(self, registry):
         assert registry.cancel("reviewer") is False
 
-    def test_drain_summaries_empty(self, registry):
-        """drain_summaries returns empty list when no summaries."""
-        assert registry.drain_summaries() == []
-
-    @pytest.mark.anyio
-    async def test_drain_summaries_after_completion(self, registry):
-        """drain_summaries returns summaries that were queued."""
-        summary = AgentSummary(
-            agent_name="reviewer", status="completed", summary="Done.", error=None
-        )
-        await registry._summary_queue.put(summary)
-        result = registry.drain_summaries()
-        assert len(result) == 1
-        assert result[0].agent_name == "reviewer"
-
     def test_on_complete_callback_received(self, agent_configs):
         """on_complete is stored and accessible."""
         callback = MagicMock()
@@ -255,13 +194,13 @@ class TestAgentRegistry:
     def test_active_count_empty(self, registry):
         assert registry.active_count == 0
 
-    def test_active_count_with_runners(self, registry):
-        mock1 = MagicMock()
-        mock1.agent_name = "reviewer"
-        mock2 = MagicMock()
-        mock2.agent_name = "writer"
-        registry._active[1] = mock1
-        registry._active[2] = mock2
+    def test_active_count_counts_working_runs(self, registry):
+        """active_count derives from working runs in the current generation."""
+        registry._runs = {
+            1: AgentRun(1, 0, "reviewer", 0.0, status="working"),
+            2: AgentRun(2, 0, "writer", 0.0, status="working"),
+            3: AgentRun(3, 0, "reviewer", 0.0, status="done"),
+        }
         assert registry.active_count == 2
 
     def test_get_running_count(self, registry):
@@ -289,7 +228,7 @@ class TestAgentRegistry:
 
     @pytest.mark.anyio
     async def test_on_complete_called_after_agent_finishes(self, agent_configs):
-        """on_complete callback fires after agent completes and is removed from _active."""
+        """on_complete callback fires with (run_id, AgentRun) after the agent finishes."""
         callback = MagicMock()
         reg = AgentRegistry(
             agents=agent_configs,
@@ -300,53 +239,54 @@ class TestAgentRegistry:
             agent_timeout=300,
             on_complete=callback,
         )
-        loop = asyncio.get_running_loop()
-        reg.set_loop(loop)
+        reg.set_loop(asyncio.get_running_loop())
 
-        summary = AgentSummary(
-            agent_name="reviewer", status="completed", summary="Done.", error=None
-        )
+        outcome = AgentRunOutcome("done", "Done.", None, ".ayder/notes/n.md")
 
         with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
             mock_runner = MockRunner.return_value
             mock_runner.agent_name = "reviewer"
-            mock_runner.run = AsyncMock(return_value=summary)
+            mock_runner.run = AsyncMock(return_value=outcome)
 
-            reg.dispatch("reviewer", "Review code")
+            rid = reg.create_run("reviewer", "Review code")
+            await reg._runs[rid].done_event.wait()
 
-            # Allow the scheduled coroutine to run
-            await asyncio.sleep(0.1)
-
-        callback.assert_called_once_with(1, summary)
+        callback.assert_called_once()
+        called_run_id, called_run = callback.call_args.args
+        assert called_run_id == rid
+        assert isinstance(called_run, AgentRun)
+        assert called_run.status == "done"
+        assert called_run.result == "Done."
         # Agent should be removed from _active
-        assert 1 not in reg._active
+        assert rid not in reg._active
 
     def test_settled_blocks_failed_agent_redispatch(self, registry):
-        """Cannot re-dispatch an agent that errored in this cycle."""
+        """Cannot re-create a run for an agent that errored in this cycle."""
         registry._settled = {"reviewer": "error"}
-        result = registry.dispatch("reviewer", "try again")
+        result = registry.create_run("reviewer", "try again")
         assert "failed in this cycle" in result.lower() and "handle the task directly" in result.lower()
 
     def test_settled_blocks_timed_out_agent_redispatch(self, registry):
-        """Cannot re-dispatch an agent that timed out in this cycle."""
+        """Cannot re-create a run for an agent that timed out in this cycle."""
         registry._settled = {"reviewer": "timeout"}
-        result = registry.dispatch("reviewer", "try again")
+        result = registry.create_run("reviewer", "try again")
         assert "failed in this cycle" in result.lower() and "handle the task directly" in result.lower()
 
-    def test_settled_allows_completed_agent_redispatch(self, registry):
-        """Can re-dispatch an agent that completed successfully."""
+    @pytest.mark.anyio
+    async def test_settled_allows_completed_agent_redispatch(self, registry):
+        """Can re-create a run for an agent that completed successfully."""
         registry._settled = {"reviewer": "completed"}
-        mock_loop = MagicMock()
-        registry.set_loop(mock_loop)
+        registry.set_loop(asyncio.get_running_loop())
 
-        with patch("ayder_cli.agents.registry.AgentRunner"), \
-             patch(
-                 "ayder_cli.agents.registry.asyncio.run_coroutine_threadsafe",
-                 side_effect=_close_scheduled_coroutine,
-             ):
-            result = registry.dispatch("reviewer", "run again")
-
-        assert isinstance(result, int)
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome(
+                "done", "ok", None, None,
+            ))
+            result = registry.create_run("reviewer", "run again")
+            assert isinstance(result, int)
+            await registry._runs[result].done_event.wait()
 
     def test_reset_settled(self, registry):
         """reset_settled clears the settled tracker."""
@@ -354,25 +294,80 @@ class TestAgentRegistry:
         registry.reset_settled()
         assert registry._settled == {}
 
-    def test_has_pending_summaries_empty(self, registry):
-        """Returns False when no summaries are queued."""
-        assert registry.has_pending_summaries() is False
 
-    @pytest.mark.anyio
-    async def test_has_pending_summaries_with_item(self, registry):
-        """Returns True when a summary is in the queue."""
-        summary = AgentSummary(
-            agent_name="reviewer", status="completed", summary="Done.", error=None
-        )
-        await registry._summary_queue.put(summary)
-        assert registry.has_pending_summaries() is True
+@pytest.mark.anyio
+async def test_create_run_then_snapshot_and_read(registry):
+    registry.set_loop(asyncio.get_running_loop())
+    rid = registry.create_run("reviewer", "do it")
+    assert isinstance(rid, int)
+    # simulate completion
+    run = registry._runs[rid]
+    run.status, run.result, run.drained = "done", "THE RESULT", False
+    run.done_event.set()
+    snap = registry.snapshot()
+    assert snap[0]["run_id"] == rid and snap[0]["has_unread_result"] is True
+    assert "result" not in snap[0]                 # status omits the body
+    payload = registry.read_result(rid)
+    assert payload["result"] == "THE RESULT"
+    assert registry._runs[rid].drained is True     # read marks drained
+    assert registry.read_result(rid)["result"] == "THE RESULT"  # idempotent read
 
-    @pytest.mark.anyio
-    async def test_has_pending_summaries_false_after_drain(self, registry):
-        """Returns False after drain_summaries empties the queue."""
-        summary = AgentSummary(
-            agent_name="reviewer", status="completed", summary="Done.", error=None
-        )
-        await registry._summary_queue.put(summary)
-        registry.drain_summaries()
-        assert registry.has_pending_summaries() is False
+
+def test_new_generation_keeps_runs_but_filters(registry):
+    from ayder_cli.agents.run import AgentRun
+    registry._runs[1] = AgentRun(run_id=1, generation=0, agent_name="x", started_at=0.0,
+                                 status="done", result="STALE")
+    registry._current_generation = 0
+    registry._run_counter = 1
+    registry.new_generation()
+    assert registry.snapshot() == []               # old-gen filtered out
+    assert registry.read_result(1) is None
+    assert registry.pending_nudge() == []
+    assert 1 in registry._runs                      # but NOT dropped
+
+
+def test_pending_nudge_excludes_drained_and_nudged(registry):
+    from ayder_cli.agents.run import AgentRun
+    registry._current_generation = 1
+    registry._runs = {
+        1: AgentRun(1, 1, "a", 0.0, status="done"),
+        2: AgentRun(2, 1, "b", 0.0, status="done", drained=True),
+        3: AgentRun(3, 1, "c", 0.0, status="done", nudged=True),
+        4: AgentRun(4, 1, "d", 0.0, status="working"),
+    }
+    ids = [r.run_id for r in registry.pending_nudge()]
+    assert ids == [1]
+    registry.mark_nudged(registry.pending_nudge())
+    assert registry.pending_nudge() == []
+
+
+def test_read_while_working_does_not_drain_then_completion_still_nudges(registry):
+    # finding 1 regression: a non-blocking read of a WORKING run must not drain it,
+    # or the later completion would have no unread result and never nudge.
+    from ayder_cli.agents.run import AgentRun
+    registry._current_generation = 1
+    run = AgentRun(run_id=5, generation=1, agent_name="x", started_at=0.0, status="working")
+    registry._runs[5] = run
+    payload = registry.read_result(5)
+    assert payload["status"] == "working"
+    assert run.drained is False                       # NOT drained while working
+    # agent completes:
+    run.status, run.result = "done", "DELIVERABLE"
+    assert [r.run_id for r in registry.pending_nudge()] == [5]   # still nudge-eligible
+    assert registry.read_result(5)["result"] == "DELIVERABLE"
+    assert run.drained is True                          # terminal read drains
+
+
+def test_create_run_returns_error_when_loop_unset(registry):
+    # single-loop invariant: create_run must refuse to schedule off-loop.
+    assert registry._loop is None
+    result = registry.create_run("reviewer", "do it")
+    assert isinstance(result, str)
+    assert "not initialized" in result and "event loop not set" in result
+
+
+def test_on_loop_raises_when_loop_unset(registry):
+    # _on_loop must raise (never run fn locally) when the owning loop is unset.
+    assert registry._loop is None
+    with pytest.raises(RuntimeError, match="loop not set"):
+        registry._on_loop(lambda: "should not run")

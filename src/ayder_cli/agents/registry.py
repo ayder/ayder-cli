@@ -1,28 +1,32 @@
 """AgentRegistry — lifecycle management for agents.
 
-All dispatches are non-blocking (Approach A). dispatch() is a sync method
-that schedules agent runs on the event loop via run_coroutine_threadsafe.
-Summaries are delivered via _summary_queue, drained by pre_iteration_hook.
+All registry result state (the AgentRun records) is owned by the event loop.
+create_run() schedules agent runs via asyncio.create_task and MUST run on the
+loop; worker threads marshal through _on_loop(). The main LLM polls/drains
+results via the pull API (snapshot/read_result/await_run); completions nudge
+the idle LLM rather than pushing summaries into its context.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable
 
 from ayder_cli.agents.config import AgentConfig
-from ayder_cli.agents.runner import AgentRunner
-from ayder_cli.agents.summary import AgentSummary
+from ayder_cli.agents.run import AgentRun
+from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
 
 logger = logging.getLogger(__name__)
 
 
 class AgentRegistry:
-    """Manages agent lifecycle: dispatch, cancel, status, capability prompts.
+    """Manages agent lifecycle: create_run, cancel, status, capability prompts.
 
-    dispatch() is sync and thread-safe — works from both the event loop
-    thread and from asyncio.to_thread() background threads (tool pipeline).
+    Registry result state (the AgentRun records) is loop-owned. create_run()
+    runs on the event loop and schedules runs with asyncio.create_task; worker
+    threads must route mutations through _on_loop() (single-loop invariant).
     """
 
     def __init__(
@@ -34,7 +38,7 @@ class AgentRegistry:
         permissions: set[str],
         agent_timeout: int = 300,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
-        on_complete: Callable[[int, AgentSummary], None] | None = None,
+        on_complete: Callable[[int, AgentRun], None] | None = None,
     ) -> None:
         self.agents = agents
         self._parent_config = parent_config
@@ -47,7 +51,8 @@ class AgentRegistry:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._active: dict[int, AgentRunner] = {}  # run_id -> runner
         self._run_counter: int = 0
-        self._summary_queue: asyncio.Queue[AgentSummary] = asyncio.Queue()
+        self._runs: dict[int, AgentRun] = {}
+        self._current_generation: int = 0
         self._settled: dict[str, str] = {}
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -59,8 +64,33 @@ class AgentRegistry:
 
     @property
     def active_count(self) -> int:
-        """Number of currently running agents."""
-        return len(self._active)
+        """Number of currently running (working) agents."""
+        return sum(1 for r in self._runs.values() if r.status == "working")
+
+    @property
+    def current_generation(self) -> int:
+        return self._current_generation
+
+    def new_generation(self) -> int:
+        """Bump the conversation generation and reset the re-dispatch guard.
+        Does NOT drop _runs: active agents keep running and are simply filtered
+        out of delivery (snapshot/read/nudge) for the new conversation."""
+        self._current_generation += 1
+        self._settled = {}
+        return self._current_generation
+
+    async def _on_loop_coro(self, fn):
+        return fn()
+
+    def _on_loop(self, fn):
+        """Run fn() on the owning event loop from a worker thread; return its result.
+
+        Fails explicitly if the loop is unset — registry state is loop-owned, so a
+        worker thread must never read/mutate it directly (single-loop invariant, §4).
+        """
+        if self._loop is None:
+            raise RuntimeError("AgentRegistry loop not set (call set_loop first)")
+        return asyncio.run_coroutine_threadsafe(self._on_loop_coro(fn), self._loop).result()
 
     def get_status(self, name: str) -> str | None:
         """Get agent status: aggregate across all instances."""
@@ -118,101 +148,102 @@ class AgentRegistry:
 
         return "\n".join(lines)
 
-    def dispatch(self, name: str, task: str) -> int | str:
-        """Fire-and-forget agent dispatch. Thread-safe.
-
-        Returns run_id (int) on success, error message (str) on failure.
-        """
+    def create_run(self, name: str, task: str) -> int | str:
+        """Create an AgentRun and schedule it. MUST run on the event loop.
+        Returns run_id (int) or an error string."""
         if name not in self.agents:
-            logger.debug("dispatch rejected: agent '%s' not found", name)
             available = ", ".join(sorted(self.agents))
-            if available:
-                return (
-                    f"Error: Agent '{name}' not found. "
-                    f"Available agents: {available}. "
-                    f"Call list_agents for descriptions."
-                )
-            return (
-                f"Error: Agent '{name}' not found. "
-                f"No agents are configured. Call list_agents to verify availability."
-            )
-        # Re-dispatch guard: block agents that failed in this cycle
+            return (f"Error: Agent '{name}' not found. Available: {available}. Call list_agents."
+                    if available else
+                    "Error: Agent '{name}' not found. No agents configured.".format(name=name))
         if name in self._settled and self._settled[name] in ("error", "timeout"):
-            logger.debug(
-                "dispatch blocked by _settled guard: agent='%s' status='%s'",
-                name, self._settled[name],
-            )
-            return (
-                f"Error: Agent '{name}' failed in this cycle "
-                f"(status: {self._settled[name]}). Handle the task directly."
-            )
+            return (f"Error: Agent '{name}' failed in this cycle "
+                    f"(status: {self._settled[name]}). Handle the task directly.")
+        if self._loop is None:
+            return "Error: Agent registry not initialized (event loop not set)"
 
         self._run_counter += 1
         run_id = self._run_counter
-
         runner = AgentRunner(
-            agent_config=self.agents[name],
-            parent_config=self._parent_config,
-            project_ctx=self._project_ctx,
-            process_manager=self._process_manager,
-            permissions=self._permissions,
-            timeout=self._agent_timeout,
-            run_id=run_id,
-            on_progress=self._on_progress,
+            agent_config=self.agents[name], parent_config=self._parent_config,
+            project_ctx=self._project_ctx, process_manager=self._process_manager,
+            permissions=self._permissions, timeout=self._agent_timeout,
+            run_id=run_id, generation=self._current_generation, on_progress=self._on_progress,
         )
+        run = AgentRun(run_id=run_id, generation=self._current_generation,
+                       agent_name=name, started_at=time.monotonic())
+        self._runs[run_id] = run
         self._active[run_id] = runner
-        task_preview = task[:120] + "..." if len(task) > 120 else task
-        logger.debug(
-            "dispatch: agent='%s' run_id=%d task='%s' active_count=%d",
-            name, run_id, task_preview, self.active_count,
-        )
-
-        async def _run_and_queue():
-            result: AgentSummary | None = None
-            try:
-                result = await runner.run(task)
-                await self._summary_queue.put(result)
-            finally:
-                self._active.pop(run_id, None)
-                if result is not None:
-                    self._settled[name] = result.status
-                    logger.debug(
-                        "agent finished: agent='%s' run_id=%d status='%s' "
-                        "active_count=%d settled='%s'",
-                        name, run_id, result.status,
-                        self.active_count, result.status,
-                    )
-                else:
-                    logger.debug(
-                        "agent finished with no result: agent='%s' run_id=%d "
-                        "active_count=%d",
-                        name, run_id, self.active_count,
-                    )
-                if self._on_complete is not None and result is not None:
-                    try:
-                        self._on_complete(run_id, result)
-                    except Exception:
-                        logger.exception("on_complete callback failed")
-
-        # Schedule on event loop (thread-safe)
-        if self._loop is None:
-            self._active.pop(run_id, None)
-            return "Error: Agent registry not initialized (event loop not set)"
-
-        coro = _run_and_queue()
-        try:
-            asyncio.run_coroutine_threadsafe(coro, self._loop)
-        except Exception as exc:
-            # If scheduling fails (for example because the loop was closed),
-            # the coroutine object will never be awaited unless explicitly
-            # closed. Also remove the runner from active state so status does
-            # not remain stuck on "running".
-            coro.close()
-            self._active.pop(run_id, None)
-            logger.exception("failed to schedule agent run: agent='%s' run_id=%d", name, run_id)
-            return f"Error: Failed to schedule agent '{name}': {exc}"
-
+        asyncio.create_task(self._run_and_queue(run, runner, task))
         return run_id
+
+    async def _run_and_queue(self, run: AgentRun, runner: AgentRunner, task: str) -> None:
+        outcome: AgentRunOutcome | None = None
+        try:
+            outcome = await runner.run(task)
+        except Exception:
+            logger.exception("agent run crashed: run_id=%d", run.run_id)
+            outcome = AgentRunOutcome("error", "Agent encountered an error.", "internal error", None)
+        finally:
+            self._active.pop(run.run_id, None)
+            if outcome is not None:
+                run.status = outcome.status
+                run.result = outcome.content
+                run.error = outcome.error
+                run.note_path = outcome.note_path
+            run.finished_at = time.monotonic()
+            run.done_event.set()
+            if run.generation == self._current_generation and outcome is not None:
+                self._settled[run.agent_name] = outcome.status
+            if self._on_complete is not None:
+                try:
+                    self._on_complete(run.run_id, run)
+                except Exception:
+                    logger.exception("on_complete callback failed")
+
+    def snapshot(self) -> list[dict]:
+        now = time.monotonic()
+        runs = [r for r in self._runs.values() if r.generation == self._current_generation]
+        runs.sort(key=lambda r: r.run_id, reverse=True)
+        return [r.to_status_dict(now=now) for r in runs]
+
+    def _result_payload(self, run: AgentRun) -> dict:
+        """Full payload for a TERMINAL run; marks it drained. Never call on a working run."""
+        run.drained = True
+        return {"run_id": run.run_id, "name": run.agent_name, "status": run.status,
+                "result": run.result, "note_path": run.note_path,
+                "working_time_s": run.working_time(now=time.monotonic()), "error": run.error}
+
+    def read_result(self, run_id: int) -> dict | None:
+        run = self._runs.get(run_id)
+        if run is None or run.generation != self._current_generation:
+            return None
+        if run.status == "working":
+            return run.to_status_dict(now=time.monotonic())   # NOT drained (finding 1)
+        return self._result_payload(run)                       # terminal -> drains
+
+    async def await_run(self, run_id: int, timeout_s: float) -> dict | None:
+        run = self._runs.get(run_id)
+        if run is None or run.generation != self._current_generation:
+            return None
+        if run.status == "working":
+            capped = max(0.0, min(float(timeout_s), float(self._agent_timeout)))
+            try:
+                await asyncio.wait_for(run.done_event.wait(), timeout=capped)
+            except asyncio.TimeoutError:
+                return run.to_status_dict(now=time.monotonic())  # still working, NOT drained
+        if run.status == "working":
+            return run.to_status_dict(now=time.monotonic())      # spurious wake; NOT drained
+        return self._result_payload(run)                          # terminal -> drains
+
+    def pending_nudge(self) -> list[AgentRun]:
+        return [r for r in self._runs.values()
+                if r.generation == self._current_generation
+                and r.status in ("done", "error") and not r.drained and not r.nudged]
+
+    def mark_nudged(self, runs: list[AgentRun]) -> None:
+        for r in runs:
+            r.nudged = True
 
     def cancel(self, name: str) -> bool:
         """Cancel all running instances of the named agent. Returns True if any cancelled."""
@@ -228,24 +259,3 @@ class AgentRegistry:
     def reset_settled(self) -> None:
         """Clear the settled tracker. Call on new user message cycle."""
         self._settled = {}
-
-    def drain_summaries(self) -> list[AgentSummary]:
-        """Drain all completed summaries from the queue (non-blocking)."""
-        summaries = []
-        while not self._summary_queue.empty():
-            try:
-                summaries.append(self._summary_queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-        if summaries:
-            agents = [(s.agent_name, s.status) for s in summaries]
-            logger.debug("drain_summaries: %d summaries drained: %s", len(summaries), agents)
-        return summaries
-
-    def has_pending_summaries(self) -> bool:
-        """Return True if any completed agent summaries are waiting to be drained.
-
-        Non-destructive — does not remove items from the queue.
-        Safe to call from the event loop thread.
-        """
-        return not self._summary_queue.empty()

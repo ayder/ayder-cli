@@ -13,7 +13,6 @@ from textual.timer import Timer
 from textual import on
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 import asyncio
 import difflib
 
@@ -45,31 +44,6 @@ from ayder_cli.tui.widgets import (
 )
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
-
-
-def _wake_for_pending_agents(
-    registry: AgentRegistry,
-    messages: list[dict],
-    start_llm_fn: Callable[[], None],
-) -> bool:
-    """Drain pending agent summaries and trigger an LLM restart.
-
-    Called from _finish_processing when the LLM turn ends but agent(s) completed
-    during that turn (the _agent_complete fast path skipped because _is_processing
-    was True). Returns True if a restart was triggered, False otherwise.
-
-    Args:
-        registry: AgentRegistry instance.
-        messages: The shared conversation message list (mutated in-place).
-        start_llm_fn: Callable that starts a new LLM processing turn.
-    """
-    if registry.active_count != 0 or not registry.has_pending_summaries():
-        return False
-    summaries = registry.drain_summaries()
-    for s in summaries:
-        messages.append({"role": "system", "content": s.format_for_injection()})
-    start_llm_fn()
-    return True
 
 
 class AppCallbacks:
@@ -256,31 +230,20 @@ class AyderApp(App):
                 except Exception:
                     pass
 
-            def _agent_complete(run_id, summary):
-                """Handle agent completion: update UI and wake LLM if all done."""
+            def _agent_complete(run_id, run):
+                """Handle agent completion: update UI and nudge the idle LLM."""
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
-                    self.call_later(
-                        lambda: panel.complete_agent(run_id, summary.summary, summary.status)
-                    )
+                    self.call_later(lambda: panel.complete_agent(run_id, run.result, run.status))
                 except Exception:
                     pass
-
-                # Update activity bar
                 try:
                     activity = self.query_one("#activity-bar", ActivityBar)
                     count = self._agent_registry.active_count if self._agent_registry else 0
                     self.call_later(lambda: activity.set_agents_running(count))
                 except Exception:
                     pass
-
-                # Batch wake-up: only trigger LLM when ALL agents are done.
-                if self._agent_registry and self._agent_registry.active_count == 0:
-                    if not self._is_processing:
-                        summaries = self._agent_registry.drain_summaries()
-                        for s in summaries:
-                            self.messages.append({"role": "system", "content": s.format_for_injection()})
-                        self.call_later(lambda: self.start_llm_processing())
+                self._maybe_nudge()                 # event-driven nudge (spec §7)
 
             self._agent_registry = AgentRegistry(
                 agents=self.config.agents,
@@ -358,16 +321,6 @@ class AyderApp(App):
 
         async def _composed_pre_iteration(messages):
             await apply_pending_compact(self, messages)
-
-            if self._agent_registry:
-                summaries = self._agent_registry.drain_summaries()
-                for summary in summaries:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": summary.format_for_injection(),
-                        }
-                    )
 
             if existing_hook is not None:
                 result = existing_hook(messages)
@@ -587,6 +540,7 @@ class AyderApp(App):
         # Set the event loop on the agent registry now that it's running (Part 3)
         if self._agent_registry:
             self._agent_registry.set_loop(asyncio.get_running_loop())
+            self.set_interval(1.0, self._maybe_nudge)   # recovery fallback (spec §7)
 
         # Show the banner as scrollable content in the chat view
         chat_view = self.query_one("#chat-view", ChatView)
@@ -699,13 +653,31 @@ class AyderApp(App):
 
         if self._pending_messages:
             self._process_next_message()
-        elif self._agent_registry:
-            # Agent(s) may have completed while the LLM was processing.
-            # _is_processing must be False before start_llm_processing() is called.
-            self._is_processing = False
-            _wake_for_pending_agents(self._agent_registry, self.messages, self.start_llm_processing)
         else:
             self._is_processing = False
+            if self._agent_registry:
+                self._maybe_nudge()                     # turn-finished nudge
+
+    def _maybe_nudge(self) -> None:
+        """Wake the LLM once when it left a finished agent result unread while idle.
+
+        Phase-A limitation: start_llm_processing() does not set _is_processing,
+        so this guard does not suppress a nudge while a nudge-launched turn is
+        already running — a second mid-turn completion can cancel it via the
+        exclusive worker. Task 9's serial turn consumer (request_turn) removes
+        this hazard; the guard is correct for the user-turn path it gates today.
+        """
+        if self._is_processing or not self._agent_registry:
+            return
+        pending = self._agent_registry.pending_nudge()
+        if not pending:
+            return
+        n = len(pending)
+        self.messages.append({"role": "user", "content":
+            f"[system] {n} agent result(s) are ready and unread. "
+            f"Call agent_status() then read_agent_result(run_id) to collect."})
+        self.start_llm_processing()                 # Phase B swaps this for request_turn
+        self._agent_registry.mark_nudged(pending)   # finding A: AFTER enqueue
 
     def action_cancel(self) -> None:
         """Cancel current operation."""

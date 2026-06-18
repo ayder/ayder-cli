@@ -1048,8 +1048,8 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         chat_view.add_system_message(f"Unknown agent: '{agent_name}'")
         return
 
-    # Show agent in panel and dispatch (sync, fire-and-forget)
-    result = app._agent_registry.dispatch(agent_name, task)
+    # Show agent in panel and create the run (runs on the event loop)
+    result = app._agent_registry.create_run(agent_name, task)
 
     if isinstance(result, int):
         # Success — run_id returned
@@ -1060,11 +1060,9 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         except Exception:
             pass
 
-        task_preview = task[:80] + "..." if len(task) > 80 else task
         chat_view.add_system_message(
-            f"Agent '{agent_name}' dispatched with task: {task_preview}\n"
-            f"The agent is running in the background. "
-            f"You will receive its summary when it completes."
+            f"Agent '{agent_name}' dispatched as run #{run_id} (working).\n"
+            f"Use agent_status / read_agent_result to collect it."
         )
     else:
         # Error — error string returned
