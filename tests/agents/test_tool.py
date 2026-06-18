@@ -59,6 +59,7 @@ class TestListAgentsHandler:
                 "running_count": 0,
             }
         ]
+        mock_registry._on_loop = lambda fn: fn()  # list_agents now marshals through _on_loop
 
         handler = create_list_agents_handler(mock_registry)
         result = json.loads(handler())

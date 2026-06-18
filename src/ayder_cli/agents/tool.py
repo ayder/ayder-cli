@@ -8,6 +8,7 @@ routed onto the event loop through registry._on_loop().
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Callable
@@ -39,9 +40,9 @@ LIST_AGENTS_TOOL_DEFINITION = ToolDefinition(
 AGENT_TOOL_DEFINITION = ToolDefinition(
     name="call_agent",
     description=(
-        "Delegate a task to a specialized agent. The agent runs in the background "
-        "with its own context and tools. You will receive its summary when it completes. "
-        "Use list_agents to discover exact available agent names before calling this tool."
+        "Delegate a task to a specialized agent that runs in the background. "
+        "Returns a run id immediately; poll agent_status and collect with read_agent_result. "
+        "Use list_agents to discover names first."
     ),
     parameters={
         "type": "object",
@@ -67,7 +68,7 @@ def create_list_agents_handler(registry: AgentRegistry) -> Callable[..., str]:
     """Create a sync handler for the list_agents tool."""
 
     def handle_list_agents() -> str:
-        return json.dumps({"agents": registry.list_agents()}, indent=2)
+        return json.dumps({"agents": registry._on_loop(lambda: registry.list_agents())}, indent=2)
 
     return handle_list_agents
 
@@ -90,3 +91,55 @@ def create_call_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
         return result  # error string
 
     return handle_call_agent
+
+
+AGENT_STATUS_TOOL_DEFINITION = ToolDefinition(
+    name="agent_status",
+    description=("Show all agent runs you dispatched this conversation with their status "
+                 "(working/done/error), elapsed seconds, and whether a result is unread. "
+                 "Use read_agent_result(run_id) to collect a finished one."),
+    parameters={"type": "object", "properties": {}, "required": []},
+    permission="r", tags=("core", "agents"), system_prompt="",
+)
+
+READ_AGENT_RESULT_TOOL_DEFINITION = ToolDefinition(
+    name="read_agent_result",
+    description=("Collect a dispatched agent's deliverable by run id. Marks it read. "
+                 "Set wait=true to block until it finishes (up to timeout_s seconds)."),
+    parameters={"type": "object", "properties": {
+        "run_id": {"type": "integer", "description": "The run id from call_agent / agent_status"},
+        "wait": {"type": "boolean", "description": "Block until the agent finishes (default false)"},
+        "timeout_s": {"type": "integer", "description": "Max seconds to block when wait=true (default 60)"},
+    }, "required": ["run_id"]},
+    permission="r", tags=("core", "agents"), system_prompt="",
+)
+
+
+def create_agent_status_handler(registry: AgentRegistry) -> Callable[..., str]:
+    """Create a sync handler for the agent_status tool."""
+
+    def handle_agent_status() -> str:
+        return json.dumps({"agents": registry._on_loop(lambda: registry.snapshot())}, indent=2)
+
+    return handle_agent_status
+
+
+def create_read_agent_result_handler(registry: AgentRegistry) -> Callable[..., str]:
+    """Create a sync handler for the read_agent_result tool.
+
+    When wait=True, blocks the calling thread using run_coroutine_threadsafe
+    so the event loop can keep running (await_run is a coroutine).
+    """
+
+    def handle_read_agent_result(*, run_id: int, wait: bool = False, timeout_s: int = 60) -> str:
+        if wait:
+            payload = asyncio.run_coroutine_threadsafe(
+                registry.await_run(run_id, timeout_s), registry._loop
+            ).result() if registry._loop is not None else None
+        else:
+            payload = registry._on_loop(lambda: registry.read_result(run_id))
+        if payload is None:
+            return json.dumps({"error": f"No agent run #{run_id} in this conversation."})
+        return json.dumps(payload, indent=2)
+
+    return handle_read_agent_result
