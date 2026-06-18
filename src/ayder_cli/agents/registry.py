@@ -134,16 +134,20 @@ class AgentRegistry:
         lines = [
             "\n## Agent Delegation",
             "",
-            "Configured specialized agents may be available.",
-            "Use the `list_agents` tool to discover exact names and descriptions before `call_agent`.",
-            "Each agent runs in the background with its own LLM and tools.",
-            "You will receive the agent's summary when it completes.",
+            "Configured specialized agents may be available. Use `list_agents` to discover "
+            "exact names before `call_agent`. Each runs in the background with its own LLM.",
             "",
-            "**Usage rules:**",
-            "- You CAN dispatch the same agent multiple times with different tasks.",
-            "- Only use the agent whose specialty matches the task. Do NOT use unrelated agents.",
-            "- Batch behavior: you will receive all agent summaries after all agents complete.",
-            "- On agent failure, handle the task yourself. Do NOT re-dispatch failed agents.",
+            "**You pull results — they are not delivered automatically.** `call_agent` returns "
+            "a run id. Use `agent_status()` to see what is working/done, and "
+            "`read_agent_result(run_id)` to collect a finished one. To wait for an agent, call "
+            "`read_agent_result(run_id, wait=true, timeout_s=…)` instead of polling in a loop.",
+            "",
+            "Each finished run has a best-effort `note_path` to its full saved deliverable; if a "
+            "result has scrolled out of context, `read_file` that path instead of re-dispatching.",
+            "If you end your turn with results unread, you will be nudged once to collect them.",
+            "",
+            "**Rules:** dispatch the same agent multiple times if useful; only use an agent whose "
+            "specialty matches; on failure, handle the task yourself — do not re-dispatch a failed agent.",
         ]
 
         return "\n".join(lines)

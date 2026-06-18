@@ -50,6 +50,14 @@ class TestAgentRegistry:
         assert "reviewer" not in prompts
         assert "writer" not in prompts
 
+    def test_capability_prompt_is_pull(self, registry):
+        p = registry.get_capability_prompts()
+        assert "agent_status" in p and "read_agent_result" in p
+        assert "after all agents complete" not in p
+        assert "Batch behavior" not in p
+        assert "pull" in p.lower()
+        assert "note_path" in p          # points the model at the saved deliverable
+
     def test_list_agents_returns_structured_status(self, registry):
         agents = registry.list_agents()
         assert agents == [
@@ -119,12 +127,6 @@ class TestAgentRegistry:
         )
         listed = reg.list_agents()
         assert listed[0]["description"] == "A" * 200
-
-    def test_capability_prompts_mention_batch_behavior(self, registry):
-        """Capability prompts explain batch completion and no-retry for failures."""
-        prompts = registry.get_capability_prompts()
-        assert "all agents complete" in prompts.lower() or "batch" in prompts.lower()
-        assert "failed" in prompts.lower() or "error" in prompts.lower()
 
     def test_create_run_unknown_agent(self, registry):
         """create_run on an unknown agent returns error string with discovery guidance."""
