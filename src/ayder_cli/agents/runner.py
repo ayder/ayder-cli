@@ -1,27 +1,32 @@
 """AgentRunner — wraps one ChatLoop execution per agent dispatch.
 
 Disposable: one instance per dispatch. Creates an isolated runtime,
-runs a ChatLoop, and produces an AgentSummary.
+runs a ChatLoop, and produces an AgentRunOutcome.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable
 
 from ayder_cli.agents.callbacks import AgentCallbacks
 from ayder_cli.agents.config import AgentConfig
-from ayder_cli.agents.summary import AgentSummary
 from ayder_cli.application.runtime_factory import create_agent_runtime
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_PATTERN = re.compile(
-    r"<agent-summary>\s*(.*?)\s*</agent-summary>", re.DOTALL
-)
+
+@dataclass
+class AgentRunOutcome:
+    """What an AgentRunner produces; the registry applies it to its AgentRun."""
+    status: str          # "done" | "error"
+    content: str
+    error: str | None
+    note_path: str | None
 
 
 class AgentRunner:
@@ -36,6 +41,7 @@ class AgentRunner:
         permissions: set[str],
         timeout: int = 300,
         run_id: int = 0,
+        generation: int = 0,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
     ) -> None:
         self._agent_config = agent_config
@@ -45,6 +51,7 @@ class AgentRunner:
         self._permissions = permissions
         self._timeout = timeout
         self.run_id = run_id
+        self._generation = generation
         self._on_progress = on_progress
         self._cancel_event = asyncio.Event()
         self.status: str = "idle"
@@ -60,15 +67,33 @@ class AgentRunner:
         self.status = "cancelled"
         return True
 
-    def _parse_summary(self, content: str) -> str:
-        """Extract <agent-summary> block or fall back to full content."""
-        match = _SUMMARY_PATTERN.search(content)
-        if match:
-            return match.group(1).strip()
-        return content
+    @staticmethod
+    def _final_message(messages: list[dict]) -> str:
+        """Last assistant message with real text — the deliverable.
 
-    async def run(self, task: str) -> AgentSummary:
-        """Execute the agent task and return a summary."""
+        Skips pure <think> blocks and tool-only (empty-content) messages.
+        """
+        for msg in reversed(messages):
+            if msg.get("role") != "assistant":
+                continue
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+            if content.startswith("<think>") and content.endswith("</think>"):
+                continue
+            return msg.get("content") or ""
+        return ""
+
+    def _persist_note(self, task: str, status: str, content: str, error: str | None) -> str | None:
+        from ayder_cli.tools.builtins.notes import write_agent_note
+        return write_agent_note(
+            self._project_ctx, agent_name=self.agent_name, run_id=self.run_id,
+            generation=self._generation, status=status, task=task, content=content,
+            timestamp=datetime.now().strftime("%Y%m%d-%H%M%S"), error=error,
+        )
+
+    async def run(self, task: str) -> AgentRunOutcome:
+        """Execute the agent task and return an AgentRunOutcome."""
         self.status = "running"
         task_preview = task[:120] + "..." if len(task) > 120 else task
         logger.debug(
@@ -127,56 +152,38 @@ class AgentRunner:
             except asyncio.TimeoutError:
                 self._cancel_event.set()
                 self.status = "timeout"
-                summary_text = self._parse_summary(callbacks.last_content)
+                content = self._final_message(messages) or "Agent timed out before producing output."
+                err = f"Agent exceeded {self._timeout}s timeout"
                 logger.debug(
                     "run timeout: agent='%s' run_id=%d after %ds",
                     self.agent_name, self.run_id, self._timeout,
                 )
-                return AgentSummary(
-                    agent_name=self.agent_name,
-                    status="timeout",
-                    summary=summary_text or "Agent timed out before producing output.",
-                    error=f"Agent exceeded {self._timeout}s timeout",
-                )
+                return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
 
             # ChatLoop swallows stream/tool failures via on_system_message
             # and returns normally. Promote any captured error into a real
-            # error AgentSummary so callers see the cause instead of a
-            # placeholder "completed with no summary".
-            if callbacks.last_system_error and not callbacks.last_content.strip():
+            # error AgentRunOutcome so callers see the cause.
+            if callbacks.last_system_error:
                 self.status = "error"
                 logger.debug(
                     "run failed (captured via on_system_message): agent='%s' run_id=%d error='%s'",
                     self.agent_name, self.run_id, callbacks.last_system_error[:200],
                 )
-                return AgentSummary(
-                    agent_name=self.agent_name,
-                    status="error",
-                    summary="Agent failed before producing output.",
-                    error=callbacks.last_system_error,
-                )
+                content = self._final_message(messages)
+                err = callbacks.last_system_error
+                return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
 
             # Completed successfully
             self.status = "completed"
-            summary_text = self._parse_summary(callbacks.last_content)
-            summary_preview = (summary_text[:200] + "...") if summary_text and len(summary_text) > 200 else summary_text
+            content = self._final_message(messages) or "Agent completed without producing output."
             logger.debug(
-                "run completed: agent='%s' run_id=%d summary='%s'",
-                self.agent_name, self.run_id, summary_preview or "(empty)",
+                "run completed: agent='%s' run_id=%d",
+                self.agent_name, self.run_id,
             )
-            return AgentSummary(
-                agent_name=self.agent_name,
-                status="completed",
-                summary=summary_text or "Agent completed without producing a summary.",
-                error=None,
-            )
+            return AgentRunOutcome("done", content, None, self._persist_note(task, "done", content, None))
 
         except Exception as e:
             self.status = "error"
             logger.exception(f"Agent '{self.agent_name}' failed: {e}")
-            return AgentSummary(
-                agent_name=self.agent_name,
-                status="error",
-                summary="Agent encountered an error.",
-                error=str(e),
-            )
+            return AgentRunOutcome("error", "Agent encountered an error.", str(e),
+                                   self._persist_note(task, "error", "Agent encountered an error.", str(e)))

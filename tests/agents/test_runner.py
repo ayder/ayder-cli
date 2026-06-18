@@ -5,8 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
-from ayder_cli.agents.runner import AgentRunner
-from ayder_cli.agents.summary import AgentSummary
+from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
 
 
 class TestAgentRunner:
@@ -38,53 +37,10 @@ class TestAgentRunner:
         assert runner.agent_name == "test-agent"
         assert runner.status == "idle"
 
-    def test_parse_summary_block(self):
-        """Extracts <agent-summary> from content."""
-        content = (
-            "I reviewed the code.\n"
-            "<agent-summary>\n"
-            "FINDINGS: Found 2 bugs\n"
-            "FILES_CHANGED: none\n"
-            "RECOMMENDATIONS: Fix bug in auth.py\n"
-            "</agent-summary>"
-        )
-        runner = self._make_runner()
-        summary = runner._parse_summary(content)
-        assert "Found 2 bugs" in summary
-
-    def test_parse_summary_fallback(self):
-        """Falls back to full content when no <agent-summary> block."""
-        content = "I finished reviewing the code. All looks good."
-        runner = self._make_runner()
-        summary = runner._parse_summary(content)
-        assert summary == content
-
     def test_cancel(self):
         runner = self._make_runner()
         assert runner.cancel() is True
         assert runner.status == "cancelled"
-
-    @pytest.mark.anyio
-    async def test_run_returns_summary(self):
-        """AgentRunner.run() returns an AgentSummary."""
-        runner = self._make_runner()
-
-        # Mock create_agent_runtime
-        mock_rt = MagicMock()
-        mock_rt.config = runner._parent_config
-        mock_rt.llm_provider = MagicMock()
-        mock_rt.tool_registry = MagicMock()
-        mock_rt.system_prompt = "test prompt"
-
-        with patch("ayder_cli.agents.runner.create_agent_runtime", return_value=mock_rt), \
-             patch("ayder_cli.agents.runner.ChatLoop") as MockLoop:
-            mock_loop = MockLoop.return_value
-            mock_loop.run = AsyncMock()
-
-            result = await runner.run("Review this code")
-
-        assert isinstance(result, AgentSummary)
-        assert result.agent_name == "test-agent"
 
     @pytest.mark.anyio
     async def test_run_passes_configured_agent_identity_prompt_to_chat_loop(self):
@@ -116,11 +72,15 @@ class TestAgentRunner:
         assert messages[0] == {"role": "system", "content": mock_rt.system_prompt}
         assert "specialized agent named 'file_lister'" in messages[0]["content"]
         assert messages[1] == {"role": "user", "content": "What is your configured agent name?"}
-        assert result.agent_name == "file_lister"
+        # No assistant message was produced by the mocked loop, so run() takes the
+        # success path and _final_message falls back to the default deliverable.
+        assert isinstance(result, AgentRunOutcome)
+        assert result.status == "done"
+        assert result.content == "Agent completed without producing output."
 
     @pytest.mark.anyio
     async def test_run_timeout(self):
-        """AgentRunner.run() produces timeout summary when exceeding timeout."""
+        """AgentRunner.run() produces error outcome when exceeding timeout."""
         runner = self._make_runner(timeout=0.01)  # 10ms timeout
 
         mock_rt = MagicMock()
@@ -139,5 +99,98 @@ class TestAgentRunner:
 
             result = await runner.run("Do something")
 
-        assert result.status == "timeout"
-        assert result.agent_name == "test-agent"
+        assert result.status == "error"
+        assert "timeout" in result.error.lower()
+
+
+def _fake_rt():
+    rt = MagicMock()
+    rt.system_prompt = "sys"
+    rt.config = MagicMock(model="m", provider="p", num_ctx=1, max_output_tokens=1,
+                          stop_sequences=[], tool_tags=None, max_history_messages=30)
+    return rt
+
+
+@pytest.mark.anyio
+async def test_run_returns_final_message_not_transcript(tmp_path):
+    from ayder_cli.core.context import ProjectContext
+    cfg = AgentConfig(name="reporter", system_prompt="Write a report.")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(), project_ctx=ProjectContext(str(tmp_path)),
+        process_manager=MagicMock(), permissions=set(), timeout=5, run_id=42, generation=3,
+    )
+
+    def loop_ctor(**kwargs):
+        msgs = kwargs["messages"]
+        m = MagicMock()
+        async def _run(*a, **k):
+            msgs.append({"role": "assistant", "content": "Let me check the files."})
+            msgs.append({"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]})
+            msgs.append({"role": "tool", "content": "file contents"})
+            msgs.append({"role": "assistant", "content": "# Final Report\nAll done."})
+        m.run = _run
+        return m
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=_fake_rt()), \
+         patch.object(rm, "ChatLoop", side_effect=loop_ctor):
+        out = await runner.run("Write the report")
+
+    assert isinstance(out, AgentRunOutcome)
+    assert out.status == "done"
+    assert out.content == "# Final Report\nAll done."
+    assert "Let me check the files." not in out.content
+    assert out.note_path is not None
+    assert (tmp_path / out.note_path).read_text(encoding="utf-8").count("# Final Report") == 1
+
+
+@pytest.mark.anyio
+async def test_run_reports_error_when_stream_fails_after_text():
+    cfg = AgentConfig(name="x", system_prompt="s")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(), project_ctx=MagicMock(),
+        process_manager=MagicMock(), permissions=set(), timeout=5, run_id=1, generation=1,
+    )
+
+    def loop_ctor(**kwargs):
+        cb = kwargs["callbacks"]; msgs = kwargs["messages"]
+        m = MagicMock()
+        async def _run(*a, **k):
+            msgs.append({"role": "assistant", "content": "intermediate text"})
+            cb.last_content = "intermediate text"          # cumulative, non-empty
+            cb.last_system_error = "Error: stream failed"  # late failure
+        m.run = _run
+        return m
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=_fake_rt()), \
+         patch.object(rm, "ChatLoop", side_effect=loop_ctor):
+        out = await runner.run("t")
+
+    assert out.status == "error"               # NOT "done"
+    assert out.error == "Error: stream failed"
+
+
+def test_final_message_skips_think_blocks():
+    msgs = [
+        {"role": "assistant", "content": "<think>reasoning</think>"},
+        {"role": "assistant", "content": "Real answer."},
+    ]
+    assert AgentRunner._final_message(msgs) == "Real answer."
+
+
+def test_final_message_returns_last_real_skipping_trailing_think():
+    msgs = [
+        {"role": "assistant", "content": "First answer."},
+        {"role": "assistant", "content": "<think>re-thinking</think>"},
+    ]
+    assert AgentRunner._final_message(msgs) == "First answer."
+
+
+def test_final_message_empty_when_no_real_assistant_text():
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+        {"role": "tool", "content": "tool output"},
+    ]
+    assert AgentRunner._final_message(msgs) == ""
