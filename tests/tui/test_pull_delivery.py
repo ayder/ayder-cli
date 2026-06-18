@@ -23,7 +23,12 @@ def _app(reg, processing=False):
     app._agent_registry = reg
     app._run_task = object() if processing else None   # property derives _is_processing
     app.messages = []
-    app.request_turn = MagicMock()                      # nudge now calls request_turn
+    # _maybe_nudge defers the message append into request_turn's prepare; run it
+    # immediately so the test can observe the effect (mirrors the serial consumer).
+    def _run_prepare(prepare=None, **kw):
+        if prepare is not None:
+            prepare()
+    app.request_turn = MagicMock(side_effect=_run_prepare)
     return app
 
 
@@ -32,7 +37,7 @@ def test_nudges_once_when_idle_with_unread():
     app = _app(FakeReg([run]))
     app._maybe_nudge()
     assert app.request_turn.call_count == 1
-    assert "unread" in app.messages[0]["content"]
+    assert "unread" in app.messages[0]["content"]   # nudge text appended via prepare
     app._maybe_nudge()                          # already nudged -> no second wake (no loop)
     assert app.request_turn.call_count == 1
 

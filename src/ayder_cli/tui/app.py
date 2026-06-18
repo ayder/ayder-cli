@@ -719,23 +719,25 @@ class AyderApp(App):
             self._maybe_nudge()
 
     def _maybe_nudge(self) -> None:
-        """Wake the LLM once when it left a finished agent result unread while idle.
-
-        Only fires while quiescent (from _after_turn_finished or the 1 s timer,
-        guarded by the _is_processing check below), so appending the nudge text to
-        self.messages here is race-free without a prepare closure — no turn is
-        reading the list when this runs.
-        """
+        """Wake the LLM once when it left a finished agent result unread while idle."""
         if self._is_processing or not self._agent_registry:
             return
         pending = self._agent_registry.pending_nudge()
         if not pending:
             return
         n = len(pending)
-        self.messages.append({"role": "user", "content":
+        text = (
             f"[system] {n} agent result(s) are ready and unread. "
-            f"Call agent_status() then read_agent_result(run_id) to collect."})
-        self.request_turn()                         # serial consumer enqueues the nudge turn
+            f"Call agent_status() then read_agent_result(run_id) to collect."
+        )
+
+        # Defer the append into the request's prepare so ALL self.messages writes
+        # are uniformly deferred — a user message submitted just before this nudge
+        # (whose append is also deferred) keeps its submission order.
+        def _prepare(msg=text):
+            self.messages.append({"role": "user", "content": msg})
+
+        self.request_turn(prepare=_prepare)         # serial consumer enqueues the nudge turn
         self._agent_registry.mark_nudged(pending)   # finding A: AFTER enqueue
 
     def action_cancel(self) -> None:
