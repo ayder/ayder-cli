@@ -180,18 +180,15 @@ def create_agent_runtime(
         f"You are the specialized agent named '{agent_config.name}'.\n"
         "When asked for your agent name, report this configured name exactly.\n\n"
     )
-    summary_suffix = (
-        "\n\n---\nWhen you have completed your task, end your final response with "
-        "a structured summary block:\n"
-        "<agent-summary>\n"
-        "FINDINGS: [what you found or accomplished]\n"
-        "FILES_CHANGED: [list of files modified, or 'none']\n"
-        "RECOMMENDATIONS: [any follow-up actions]\n"
-        "</agent-summary>"
+    deliverable_directive = (
+        "\n\n---\n"
+        "Put your COMPLETE deliverable in your FINAL message, formatted exactly as the task "
+        "requests. Only your final message is returned to the caller — intermediate messages and "
+        "tool output are not. Do not truncate it and do not add a separate summary block."
     )
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    system_prompt = identity_prefix + agent_config.system_prompt + tool_prompts + summary_suffix
+    system_prompt = identity_prefix + agent_config.system_prompt + tool_prompts + deliverable_directive
 
     # Freeze agent system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)

@@ -287,3 +287,21 @@ class TestCreateAgentRuntime:
             )
 
         assert rt.config.model == "custom-model"
+
+
+def test_agent_prompt_uses_final_message_contract_not_summary_block():
+    from unittest.mock import MagicMock, patch
+    from ayder_cli.agents.config import AgentConfig
+    from ayder_cli.application import runtime_factory
+    agent_cfg = AgentConfig(name="reporter", system_prompt="Produce a document.")
+    parent = MagicMock(provider="ollama", tool_tags=None, retry=MagicMock(enabled=False))
+    fake_reg = MagicMock(); fake_reg.get_system_prompts.return_value = "\n[tools]\n"; fake_reg.get_schemas.return_value = []
+    with patch.object(runtime_factory.provider_orchestrator, "create", return_value=MagicMock()), \
+         patch.object(runtime_factory.context_manager_factory, "create", return_value=MagicMock()), \
+         patch.object(runtime_factory, "create_default_registry", return_value=fake_reg):
+        rt = runtime_factory.create_agent_runtime(
+            agent_config=agent_cfg, parent_config=parent, project_ctx=MagicMock(),
+            process_manager=MagicMock(), permissions=set())
+    assert "Produce a document." in rt.system_prompt
+    assert "<agent-summary>" not in rt.system_prompt
+    assert "final message" in rt.system_prompt.lower()
