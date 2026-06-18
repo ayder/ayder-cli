@@ -87,7 +87,12 @@ def handle_provider(app: AyderApp, args: str, chat_view: ChatView) -> None:
 def _apply_provider_switch(
     app: "AyderApp", provider: str, chat_view: ChatView
 ) -> None:
-    """Switch provider: build config, create provider, then commit on success."""
+    """Switch provider: build config, create provider, then commit on success.
+
+    The build (config load + provider create) stays eager so a failed build
+    reports immediately without enqueuing a turn. Only the state COMMIT is
+    deferred into ``prepare`` (run when quiescent) so it never races a turn.
+    """
     new_config = load_config_for_provider(provider)
 
     # Create FIRST - only mutate app state after a successful build.
@@ -100,25 +105,28 @@ def _apply_provider_switch(
         chat_view.add_system_message(f"Cannot switch to {provider}: {e}")
         return
 
-    app.config = new_config
-    app.llm = new_llm
-    app.chat_loop.llm = app.llm
+    def _prepare() -> None:
+        app.config = new_config
+        app.llm = new_llm
+        app.chat_loop.llm = app.llm
 
-    # Update model and UI
-    app.model = new_config.model
-    app.chat_loop.config.model = new_config.model
-    app.chat_loop.config.num_ctx = new_config.num_ctx
-    app.update_system_prompt_model()
-    _agent_reg = getattr(app, "_agent_registry", None)
-    if _agent_reg is not None:
-        _agent_reg.new_generation()
+        # Update model and UI
+        app.model = new_config.model
+        app.chat_loop.config.model = new_config.model
+        app.chat_loop.config.num_ctx = new_config.num_ctx
+        app.update_system_prompt_model()
+        _agent_reg = getattr(app, "_agent_registry", None)
+        if _agent_reg is not None:
+            _agent_reg.new_generation()
 
-    status_bar = app.query_one("#status-bar", StatusBar)
-    status_bar.set_model(new_config.model)
+        status_bar = app.query_one("#status-bar", StatusBar)
+        status_bar.set_model(new_config.model)
 
-    chat_view.add_system_message(
-        f"Switched to provider: {provider} (model: {new_config.model})"
-    )
+        chat_view.add_system_message(
+            f"Switched to provider: {provider} (model: {new_config.model})"
+        )
+
+    app.request_turn(prepare=_prepare, run_loop=False)
 
 
 async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
@@ -134,15 +142,18 @@ async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
 
         def on_model_selected(selected: str | None) -> None:
             if selected:
-                app.model = selected
-                app.chat_loop.config.model = selected
-                app.update_system_prompt_model()
-                _agent_reg = getattr(app, "_agent_registry", None)
-                if _agent_reg is not None:
-                    _agent_reg.new_generation()
-                status_bar = app.query_one("#status-bar", StatusBar)
-                status_bar.set_model(selected)
-                chat_view.add_system_message(f"Switched to model: {selected}")
+                def _prepare(new_model=selected) -> None:
+                    app.model = new_model
+                    app.chat_loop.config.model = new_model
+                    app.update_system_prompt_model()
+                    _agent_reg = getattr(app, "_agent_registry", None)
+                    if _agent_reg is not None:
+                        _agent_reg.new_generation()
+                    status_bar = app.query_one("#status-bar", StatusBar)
+                    status_bar.set_model(new_model)
+                    chat_view.add_system_message(f"Switched to model: {new_model}")
+
+                app.request_turn(prepare=_prepare, run_loop=False)
 
         app.push_screen(
             CLISelectScreen(
@@ -164,15 +175,19 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
         asyncio.create_task(_list_and_show_models(app, chat_view))
     else:
         new_model = args.strip()
-        app.model = new_model
-        app.chat_loop.config.model = new_model
-        app.update_system_prompt_model()
-        _agent_reg = getattr(app, "_agent_registry", None)
-        if _agent_reg is not None:
-            _agent_reg.new_generation()
-        status_bar = app.query_one("#status-bar", StatusBar)
-        status_bar.set_model(new_model)
-        chat_view.add_system_message(f"Switched to model: {new_model}")
+
+        def _prepare() -> None:
+            app.model = new_model
+            app.chat_loop.config.model = new_model
+            app.update_system_prompt_model()
+            _agent_reg = getattr(app, "_agent_registry", None)
+            if _agent_reg is not None:
+                _agent_reg.new_generation()
+            status_bar = app.query_one("#status-bar", StatusBar)
+            status_bar.set_model(new_model)
+            chat_view.add_system_message(f"Switched to model: {new_model}")
+
+        app.request_turn(prepare=_prepare, run_loop=False)
 
 
 def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -290,12 +305,16 @@ def handle_tools(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def handle_verbose(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /verbose command."""
-    current = getattr(app, "_verbose_mode", False)
-    app._verbose_mode = not current
-    if hasattr(app, "chat_loop"):
-        app.chat_loop.config.verbose = app._verbose_mode
-    status = "ON" if app._verbose_mode else "OFF"
-    chat_view.add_system_message(f"Verbose mode: {status}")
+
+    def _prepare() -> None:
+        current = getattr(app, "_verbose_mode", False)
+        app._verbose_mode = not current
+        if hasattr(app, "chat_loop"):
+            app.chat_loop.config.verbose = app._verbose_mode
+        status = "ON" if app._verbose_mode else "OFF"
+        chat_view.add_system_message(f"Verbose mode: {status}")
+
+    app.request_turn(prepare=_prepare, run_loop=False)
 
 
 def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -347,32 +366,38 @@ def handle_compact(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message("No conversation to compact.")
         return
 
-    from ayder_cli.application.message_contract import get_message_role, get_message_content
-
-    conversation_text = ""
-    for msg in app.messages:
-        role = get_message_role(msg)
-        if role in ("user", "assistant"):
-            content = get_message_content(msg)
-            conversation_text += f"[{role}] {content}\n\n"
-
-    system_msg = None
-    if app.messages and get_message_role(app.messages[0]) == "system":
-        system_msg = app.messages[0]
-    app.messages.clear()
-    if system_msg:
-        app.messages.append(system_msg)
-
-    compact_prompt = COMPACT_COMMAND_PROMPT_TEMPLATE.format(
-        conversation_text=conversation_text
-    )
-    app.messages.append({"role": "user", "content": compact_prompt})
-    _agent_reg = getattr(app, "_agent_registry", None)
-    if _agent_reg is not None:
-        _agent_reg.new_generation()
     chat_view.add_system_message("Compacting: summarize → save → clear → load")
 
-    app.start_llm_processing()
+    def _prepare() -> None:
+        # Read post-turn state (not a stale snapshot taken at dispatch).
+        from ayder_cli.application.message_contract import (
+            get_message_role,
+            get_message_content,
+        )
+
+        conversation_text = ""
+        for msg in app.messages:
+            role = get_message_role(msg)
+            if role in ("user", "assistant"):
+                content = get_message_content(msg)
+                conversation_text += f"[{role}] {content}\n\n"
+
+        system_msg = None
+        if app.messages and get_message_role(app.messages[0]) == "system":
+            system_msg = app.messages[0]
+        app.messages.clear()
+        if system_msg:
+            app.messages.append(system_msg)
+
+        compact_prompt = COMPACT_COMMAND_PROMPT_TEMPLATE.format(
+            conversation_text=conversation_text
+        )
+        app.messages.append({"role": "user", "content": compact_prompt})
+        _agent_reg = getattr(app, "_agent_registry", None)
+        if _agent_reg is not None:
+            _agent_reg.new_generation()
+
+    app.request_turn(prepare=_prepare)
 
 
 def handle_plan(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -386,24 +411,29 @@ def handle_plan(app: AyderApp, args: str, chat_view: ChatView) -> None:
         return
 
     planning_prompt = PLANNING_PROMPT_TEMPLATE.format(task_description=args.strip())
-    app.messages.append({"role": "user", "content": planning_prompt})
     chat_view.add_system_message(f"Planning: {args.strip()[:50]}...")
 
-    app.start_llm_processing()
+    def _prepare() -> None:
+        app.messages.append({"role": "user", "content": planning_prompt})
+
+    app.request_turn(prepare=_prepare)
 
 
 def handle_ask(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /ask command."""
-    if not args.strip():
+    q = args.strip()
+    if not q:
         chat_view.add_system_message(
             "Usage: /ask <question>\nExample: /ask What is Python?"
         )
         return
 
-    app.messages.append({"role": "user", "content": args.strip()})
-    chat_view.add_user_message(args.strip())
+    chat_view.add_user_message(q)
 
-    app.start_llm_processing(no_tools=True)
+    def _prepare() -> None:
+        app.messages.append({"role": "user", "content": q})
+
+    app.request_turn(prepare=_prepare, no_tools=True)
 
 
 def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -434,9 +464,12 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
         title = _parse_title(task_path)
         rel_path = project_ctx.to_relative(task_path)
         command = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel_path)
-        app.messages.append({"role": "user", "content": command})
         chat_view.add_system_message(f"Running TASK-{task_id:03d}: {title}")
-        app.start_llm_processing()
+
+        def _prepare() -> None:
+            app.messages.append({"role": "user", "content": command})
+
+        app.request_turn(prepare=_prepare)
         return
 
     # No arg — show interactive select screen
@@ -488,11 +521,14 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
                     t_title = _parse_title(path)
                     rel = project_ctx.to_relative(path)
                     cmd = TASK_EXECUTION_PROMPT_TEMPLATE.format(task_path=rel)
-                    app.messages.append({"role": "user", "content": cmd})
                     chat_view.add_system_message(
                         f"Running TASK-{t_id:03d}: {t_title}"
                     )
-                    app.start_llm_processing()
+
+                    def _prepare(command=cmd) -> None:
+                        app.messages.append({"role": "user", "content": command})
+
+                    app.request_turn(prepare=_prepare)
 
         app.push_screen(
             CLISelectScreen(
@@ -671,12 +707,15 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     def on_result(new_permissions: set | None):
         if new_permissions is not None:
-            app.permissions = new_permissions
-            app.chat_loop.config.permissions = new_permissions
-            status_bar = app.query_one("#status-bar", StatusBar)
-            status_bar.update_permissions(new_permissions)
-            mode_str = "".join(sorted(new_permissions))
-            chat_view.add_system_message(f"Permissions updated: mode {mode_str}")
+            def _prepare() -> None:
+                app.permissions = new_permissions
+                app.chat_loop.config.permissions = new_permissions
+                status_bar = app.query_one("#status-bar", StatusBar)
+                status_bar.update_permissions(new_permissions)
+                mode_str = "".join(sorted(new_permissions))
+                chat_view.add_system_message(f"Permissions updated: mode {mode_str}")
+
+            app.request_turn(prepare=_prepare, run_loop=False)
 
     app.push_screen(CLIPermissionScreen(app.permissions), on_result)
 
@@ -752,22 +791,41 @@ def _discover_skills(project_ctx: ProjectContext) -> list[tuple[str, Path]]:
 
 
 def _apply_skill(
-    app: "AyderApp", skill_name: str, skill_path: Path, chat_view: ChatView
+    app: "AyderApp",
+    skill_name: str,
+    skill_path: Path,
+    chat_view: ChatView,
+    command: str = "",
 ) -> None:
-    """Inject a skill into the conversation and update the status bar."""
+    """Inject a skill into the conversation and update the status bar.
+
+    The file read + empty-check are eager so an empty skill reports immediately
+    without enqueuing a turn. The injection (state mutation) + new_generation +
+    status bar are deferred into ``prepare``. If a trailing ``command`` was
+    given, it is appended in the SAME request and the turn is run.
+    """
     from pathlib import Path
 
     content = Path(skill_path).read_text(encoding="utf-8").strip()
     if not content:
         chat_view.add_system_message(f"SKILL.md for '{skill_name}' is empty, skipping.")
         return
-    app.inject_skill(skill_name, content)
-    _agent_reg = getattr(app, "_agent_registry", None)
-    if _agent_reg is not None:
-        _agent_reg.new_generation()
-    status_bar = app.query_one("#status-bar", StatusBar)
-    status_bar.set_skill(skill_name)
-    chat_view.add_system_message(f"Activated skill: {skill_name}")
+
+    if command:
+        chat_view.add_user_message(command)
+
+    def _prepare() -> None:
+        app.inject_skill(skill_name, content)
+        _agent_reg = getattr(app, "_agent_registry", None)
+        if _agent_reg is not None:
+            _agent_reg.new_generation()
+        status_bar = app.query_one("#status-bar", StatusBar)
+        status_bar.set_skill(skill_name)
+        chat_view.add_system_message(f"Activated skill: {skill_name}")
+        if command:
+            app.messages.append({"role": "user", "content": command})
+
+    app.request_turn(prepare=_prepare, run_loop=bool(command))
 
 
 def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
@@ -791,11 +849,7 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
                 f"Unknown skill: '{name}'. Available: {available}"
             )
             return
-        _apply_skill(app, match[0], match[1], chat_view)
-        if command:
-            chat_view.add_user_message(command)
-            app.messages.append({"role": "user", "content": command})
-            app.start_llm_processing()
+        _apply_skill(app, match[0], match[1], chat_view, command)
     else:
         # Interactive picker
         current = app._active_skill or ""
@@ -820,43 +874,52 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
 def do_clear(app: AyderApp, chat_view: ChatView) -> None:
     """Clear conversation history and reset context-manager counters.
 
+    Called by both ``/clear`` and Ctrl+L (``action_clear``). The wipe (and the
+    pre-wipe recovery snapshot, which READS the conversation) is deferred into
+    ``prepare`` and enqueued with ``run_loop=False`` so it runs only when the
+    turn consumer is quiescent — serializing Ctrl+L too.
+
     Before wiping, snapshots the current conversation into the recovery slot
     `latest-context-before-clear` so the user (or a future LLM turn) can
     inspect what was cleared by loading it.
     """
-    from ayder_cli.application.message_contract import get_message_role
-    from ayder_cli.tools.builtins.context import snapshot_conversation_for_clear
 
-    registry = getattr(app, "registry", None)
-    project_ctx = getattr(registry, "project_ctx", None) if registry else None
-    recovery_slot = None
-    if project_ctx is not None:
-        recovery_slot = snapshot_conversation_for_clear(project_ctx, app)
+    def _prepare() -> None:
+        from ayder_cli.application.message_contract import get_message_role
+        from ayder_cli.tools.builtins.context import snapshot_conversation_for_clear
 
-    if app.messages:
-        if get_message_role(app.messages[0]) == "system":
-            system_msg = app.messages[0]
-            app.messages.clear()
-            app.messages.append(system_msg)
+        registry = getattr(app, "registry", None)
+        project_ctx = getattr(registry, "project_ctx", None) if registry else None
+        recovery_slot = None
+        if project_ctx is not None:
+            recovery_slot = snapshot_conversation_for_clear(project_ctx, app)
+
+        if app.messages:
+            if get_message_role(app.messages[0]) == "system":
+                system_msg = app.messages[0]
+                app.messages.clear()
+                app.messages.append(system_msg)
+            else:
+                app.messages.clear()
+
+        context_manager = getattr(app, "context_manager", None)
+        if context_manager is not None and hasattr(context_manager, "clear"):
+            context_manager.clear()
+
+        _agent_reg = getattr(app, "_agent_registry", None)
+        if _agent_reg is not None:
+            _agent_reg.new_generation()
+
+        chat_view.clear_messages()
+        if recovery_slot is not None:
+            chat_view.add_system_message(
+                f"Conversation history cleared. Snapshot saved to slot '{recovery_slot}' "
+                f"(use context(action='load', name='{recovery_slot}') to inspect)."
+            )
         else:
-            app.messages.clear()
+            chat_view.add_system_message("Conversation history cleared.")
 
-    context_manager = getattr(app, "context_manager", None)
-    if context_manager is not None and hasattr(context_manager, "clear"):
-        context_manager.clear()
-
-    _agent_reg = getattr(app, "_agent_registry", None)
-    if _agent_reg is not None:
-        _agent_reg.new_generation()
-
-    chat_view.clear_messages()
-    if recovery_slot is not None:
-        chat_view.add_system_message(
-            f"Conversation history cleared. Snapshot saved to slot '{recovery_slot}' "
-            f"(use context(action='load', name='{recovery_slot}') to inspect)."
-        )
-    else:
-        chat_view.add_system_message("Conversation history cleared.")
+    app.request_turn(prepare=_prepare, run_loop=False)
 
 
 def handle_save_context(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -872,20 +935,24 @@ def handle_save_context(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message("No conversation to save.")
         return
 
-    conversation_text = ""
-    for message in app.messages:
-        role = get_message_role(message)
-        if role in ("user", "assistant"):
-            content = get_message_content(message)
-            conversation_text += f"[{role}] {content}\n\n"
-
-    prompt = SAVE_CONTEXT_COMMAND_PROMPT_TEMPLATE.format(
-        name=name,
-        conversation_text=conversation_text,
-    )
-    app.messages.append({"role": "user", "content": prompt})
     chat_view.add_system_message(f"Saving context to slot '{name}'...")
-    app.start_llm_processing()
+
+    def _prepare() -> None:
+        # Read post-turn state (not a stale snapshot taken at dispatch).
+        conversation_text = ""
+        for message in app.messages:
+            role = get_message_role(message)
+            if role in ("user", "assistant"):
+                content = get_message_content(message)
+                conversation_text += f"[{role}] {content}\n\n"
+
+        prompt = SAVE_CONTEXT_COMMAND_PROMPT_TEMPLATE.format(
+            name=name,
+            conversation_text=conversation_text,
+        )
+        app.messages.append({"role": "user", "content": prompt})
+
+    app.request_turn(prepare=_prepare)
 
 
 def handle_load_context(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -900,13 +967,13 @@ def handle_load_context(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message(str(result))
         return
 
-    app.messages.append(
-        {
-            "role": "user",
-            "content": f"[Loaded context '{name}']\n\n{str(result)}",
-        }
-    )
+    content = f"[Loaded context '{name}']\n\n{str(result)}"
     chat_view.add_system_message(f"Loaded context from slot '{name}'.")
+
+    def _prepare() -> None:
+        app.messages.append({"role": "user", "content": content})
+
+    app.request_turn(prepare=_prepare, run_loop=False)
 
 
 def handle_list_contexts(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -935,11 +1002,10 @@ def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
 
     available_plugins_list = sorted(list(available_plugins))
 
-    # Initialize tool_tags if needed
-    if app.chat_loop.config.tool_tags is None:
-        app.chat_loop.config.tool_tags = frozenset({"core", "metadata"})
-
-    current_tags = set(app.chat_loop.config.tool_tags)
+    # Read current tags for the (eager) picker display; the MUTATION of
+    # chat_loop.config.tool_tags is deferred into prepare (run_loop=False).
+    existing_tags = app.chat_loop.config.tool_tags
+    current_tags = set(existing_tags) if existing_tags is not None else {"core", "metadata"}
 
     if args.strip():
         plugin_name = args.strip().lower()
@@ -950,15 +1016,20 @@ def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
             )
             return
 
-        if plugin_name in current_tags:
-            current_tags.remove(plugin_name)
-            status = "disabled"
-        else:
-            current_tags.add(plugin_name)
-            status = "enabled"
+        def _prepare() -> None:
+            # Re-read tool_tags at turn-prep so we toggle against current state.
+            existing = app.chat_loop.config.tool_tags
+            tags = set(existing) if existing is not None else {"core", "metadata"}
+            if plugin_name in tags:
+                tags.remove(plugin_name)
+                status = "disabled"
+            else:
+                tags.add(plugin_name)
+                status = "enabled"
+            app.chat_loop.config.tool_tags = frozenset(tags)
+            chat_view.add_system_message(f"Plugin '{plugin_name}' {status}.")
 
-        app.chat_loop.config.tool_tags = frozenset(current_tags)
-        chat_view.add_system_message(f"Plugin '{plugin_name}' {status}.")
+        app.request_turn(prepare=_prepare, run_loop=False)
     else:
         # Show multi-select screen
         items = []
@@ -972,14 +1043,18 @@ def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         def on_plugins_confirmed(result: set[str] | None) -> None:
             if result is None:
                 return  # Cancelled
-            # Apply the new set of enabled plugins
-            base_tags = {"core", "metadata"}
-            new_tags = base_tags | result
-            app.chat_loop.config.tool_tags = frozenset(new_tags)
-            enabled = sorted(result)
-            chat_view.add_system_message(
-                f"Plugins updated: {', '.join(enabled) if enabled else 'none enabled'}"
-            )
+
+            def _prepare() -> None:
+                # Apply the new set of enabled plugins
+                base_tags = {"core", "metadata"}
+                new_tags = base_tags | result
+                app.chat_loop.config.tool_tags = frozenset(new_tags)
+                enabled = sorted(result)
+                chat_view.add_system_message(
+                    f"Plugins updated: {', '.join(enabled) if enabled else 'none enabled'}"
+                )
+
+            app.request_turn(prepare=_prepare, run_loop=False)
 
         app.push_screen(
             CLIMultiSelectScreen(

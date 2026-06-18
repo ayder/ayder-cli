@@ -8,11 +8,11 @@ Command handlers are in tui.commands.
 
 from textual.app import App, ComposeResult
 from textual.widgets import Static
-from textual.worker import get_current_worker
 from textual.timer import Timer
 from textual import on
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 import asyncio
 import difflib
 
@@ -50,12 +50,26 @@ from ayder_cli.tui.commands import COMMAND_MAP, do_clear
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
 
+@dataclass
+class TurnRequest:
+    """A single queued unit of work for the serial turn consumer.
+
+    ``prepare`` runs while no turn is active (quiescent); if ``run_loop`` is
+    True the consumer then starts one ``ChatLoop.run()`` and awaits its full
+    teardown before pulling the next request.
+    """
+
+    prepare: Callable[[], None] | None = None
+    run_loop: bool = True
+    no_tools: bool = False
+
+
 class AppCallbacks:
     """Implements TuiCallbacks by dispatching to Textual widgets."""
 
     def __init__(self, app: "AyderApp") -> None:
         self._app = app
-        self._worker: Any | None = None
+        self._cancel_event: asyncio.Event | None = None
 
     def on_thinking_start(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
@@ -115,9 +129,8 @@ class AppCallbacks:
         return await self._app._request_confirmation(name, arguments)
 
     def is_cancelled(self) -> bool:
-        if self._worker is None:
-            return False
-        return self._worker.is_cancelled
+        ev = self._cancel_event
+        return ev is not None and ev.is_set()
 
 
 class AyderApp(App):
@@ -167,8 +180,9 @@ class AyderApp(App):
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
 
-        self._pending_messages: list[str] = []
-        self._is_processing = False
+        self._requests: asyncio.Queue[TurnRequest] = asyncio.Queue()
+        self._run_task: asyncio.Task | None = None
+        self._cancel_event: asyncio.Event | None = None
         self._verbose_mode: bool = False
         self._show_thinking: bool = False
         self._active_skill: str | None = None
@@ -384,8 +398,9 @@ class AyderApp(App):
         """Inject or replace the active skill system message."""
         from ayder_cli.prompts import SKILL_INJECTION_TEMPLATE
 
-        # Remove previous skill message if any
-        self.messages = [
+        # Remove previous skill message if any (in place so chat_loop.messages
+        # keeps referencing the same list object)
+        self.messages[:] = [
             m for m in self.messages
             if not (
                 m.get("role") == "system"
@@ -545,6 +560,9 @@ class AyderApp(App):
         """Called when app is mounted."""
         self.title = f"ayder - {self.model}"
 
+        # Start the single serial turn consumer (owns the turn lifecycle)
+        self._engine_task = asyncio.create_task(self._turn_consumer())
+
         # Set the event loop on the agent registry now that it's running (Part 3)
         if self._agent_registry:
             self._agent_registry.set_loop(asyncio.get_running_loop())
@@ -573,61 +591,77 @@ class AyderApp(App):
         self._banner_spacer.styles.height = spacer_h
         chat_view.scroll_end(animate=False)
 
-    @on(CLIInputBar.Submitted)
-    def handle_input_submitted(self, event: CLIInputBar.Submitted) -> None:
-        """Handle user input submission."""
-        user_input = event.value
+    @property
+    def _is_processing(self) -> bool:
+        """Back-compat read of "a turn is running" (was an eager flag)."""
+        return self._run_task is not None
 
-        # New user message = new cycle, reset re-dispatch guard
-        if self._agent_registry and not user_input.startswith("/"):
-            self._agent_registry.reset_settled()
+    @property
+    def is_turn_running(self) -> bool:
+        """True while the active turn's ChatLoop.run() coroutine is in flight."""
+        return self._run_task is not None
 
-        if user_input.startswith("/"):
-            self._handle_command(user_input)
-            return
+    async def _turn_consumer(self) -> None:
+        """Serial owner of the turn lifecycle.
 
-        self._pending_messages.append(user_input)
-
-        if not self._is_processing:
-            self._process_next_message()
-
-    def _process_next_message(self) -> None:
-        """Process the next pending message."""
-        if not self._pending_messages:
-            self._is_processing = False
-            return
-
-        self._is_processing = True
-        user_input = self._pending_messages.pop(0)
-
-        chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.add_user_message(user_input)
-
-        self.messages.append({"role": "user", "content": user_input})
-
-        self.start_llm_processing()
-
-    def start_llm_processing(self, *, no_tools: bool = False) -> None:
-        """Launch the chat loop worker.
-
-        Called from _process_next_message and from command handlers.
+        Pulls one TurnRequest at a time. Runs ``prepare`` while quiescent (no
+        turn active), then optionally starts a single ``ChatLoop.run()`` and
+        awaits its full teardown (including cancellation) before pulling the
+        next request. This is the single point of serialization that replaces
+        Textual's non-awaiting ``exclusive=True`` worker.
         """
-        self.run_worker(self._run_chat_loop(no_tools=no_tools), exclusive=True)
+        while True:
+            req = await self._requests.get()
+            try:
+                if req.prepare is not None:
+                    req.prepare()                      # quiescent: no turn running here
+            except Exception as e:
+                self._report_turn_error(e)
+                continue
+            if not req.run_loop:
+                continue
+            self._cancel_event = asyncio.Event()
+            callbacks = getattr(self, "_callbacks", None)
+            if callbacks is not None:
+                callbacks._cancel_event = self._cancel_event
+            self._run_task = asyncio.create_task(self.chat_loop.run(no_tools=req.no_tools))
+            try:
+                await self._run_task
+            except asyncio.CancelledError:
+                # A cancel targeting the consumer itself (e.g. app shutdown) must
+                # terminate the loop; a cancel that only targeted the active turn
+                # (Ctrl+C / interrupt) is swallowed so queued requests still run.
+                consumer_task = asyncio.current_task()
+                if consumer_task is not None and consumer_task.cancelling():
+                    raise
+            except Exception as e:
+                self._report_turn_error(e)
+            finally:
+                self._run_task = None
+                self._after_turn_finished()
 
-    async def _run_chat_loop(self, *, no_tools: bool = False) -> None:
-        """Thin wrapper: sets worker on callbacks, runs loop, finishes."""
-        worker = get_current_worker()
-        self._callbacks._worker = worker
+    def request_turn(self, prepare: Callable[[], None] | None = None, *,
+                     run_loop: bool = True, no_tools: bool = False,
+                     interrupt: bool = False) -> None:
+        """Enqueue a unit of work for the serial turn consumer.
+
+        ``prepare`` runs when quiescent (no turn active). With ``interrupt`` the
+        active turn is cancelled so this request runs sooner; queued requests
+        are never discarded.
+        """
+        self._requests.put_nowait(TurnRequest(prepare, run_loop, no_tools))
+        if interrupt and self._run_task is not None:
+            cancel_event = getattr(self, "_cancel_event", None)
+            if cancel_event is not None:
+                cancel_event.set()
+            self._run_task.cancel()
+
+    def _report_turn_error(self, exc: Exception) -> None:
+        """Surface a turn/prepare error in the chat view (best effort)."""
         try:
-            await self.chat_loop.run(no_tools=no_tools)
-        except asyncio.CancelledError:
-            pass  # Worker cancellation is normal (Ctrl+C / exclusive worker)
-        except Exception as e:
-            if not worker.is_cancelled:
-                chat_view = self.query_one("#chat-view", ChatView)
-                chat_view.add_system_message(f"Error: {e}")
-        finally:
-            self.call_later(self._finish_processing)
+            self.query_one("#chat-view", ChatView).add_system_message(f"Error: {exc}")
+        except Exception:
+            pass
 
     def _handle_command(self, cmd: str) -> None:
         """Handle slash commands - dispatch to tui.commands handlers."""
@@ -649,31 +683,48 @@ class AyderApp(App):
         except Exception as e:
             chat_view.add_system_message(f"Command error: {type(e).__name__}: {e}")
 
-    def _finish_processing(self) -> None:
-        """Finish processing - clear activity bar and process next message."""
-        self._maybe_stop_activity_timer()  # Agent-aware: won't stop timer if agents still running
+    @on(CLIInputBar.Submitted)
+    def handle_input_submitted(self, event: CLIInputBar.Submitted) -> None:
+        """Handle user input submission.
 
-        activity = self.query_one("#activity-bar", ActivityBar)
-        activity.clear()
+        Plain messages are echoed immediately but only appended to
+        ``self.messages`` inside ``prepare`` (when the consumer is quiescent),
+        so message order across messages and commands is unambiguous.
+        """
+        user_input = event.value
+        if user_input.startswith("/"):
+            self._handle_command(user_input)
+            return
+        try:
+            self.query_one("#chat-view", ChatView).add_user_message(user_input)  # echo now
+        except Exception:
+            pass
 
-        input_bar = self.query_one("#input-bar", CLIInputBar)
-        input_bar.focus_input()
-
-        if self._pending_messages:
-            self._process_next_message()
-        else:
-            self._is_processing = False
+        def _prepare(text=user_input):
             if self._agent_registry:
-                self._maybe_nudge()                     # turn-finished nudge
+                self._agent_registry.reset_settled()   # finding 5: at turn-prep, not submit
+            self.messages.append({"role": "user", "content": text})
+
+        self.request_turn(prepare=_prepare)
+
+    def _after_turn_finished(self) -> None:
+        """UI teardown after a turn fully exits; the consumer pulls the next one."""
+        self._maybe_stop_activity_timer()
+        try:
+            self.query_one("#activity-bar", ActivityBar).clear()
+            self.query_one("#input-bar", CLIInputBar).focus_input()
+        except Exception:
+            pass
+        if self._agent_registry:
+            self._maybe_nudge()
 
     def _maybe_nudge(self) -> None:
         """Wake the LLM once when it left a finished agent result unread while idle.
 
-        Phase-A limitation: start_llm_processing() does not set _is_processing,
-        so this guard does not suppress a nudge while a nudge-launched turn is
-        already running — a second mid-turn completion can cancel it via the
-        exclusive worker. Task 9's serial turn consumer (request_turn) removes
-        this hazard; the guard is correct for the user-turn path it gates today.
+        Only fires while quiescent (from _after_turn_finished or the 1 s timer,
+        guarded by the _is_processing check below), so appending the nudge text to
+        self.messages here is race-free without a prepare closure — no turn is
+        reading the list when this runs.
         """
         if self._is_processing or not self._agent_registry:
             return
@@ -684,34 +735,28 @@ class AyderApp(App):
         self.messages.append({"role": "user", "content":
             f"[system] {n} agent result(s) are ready and unread. "
             f"Call agent_status() then read_agent_result(run_id) to collect."})
-        self.start_llm_processing()                 # Phase B swaps this for request_turn
+        self.request_turn()                         # serial consumer enqueues the nudge turn
         self._agent_registry.mark_nudged(pending)   # finding A: AFTER enqueue
 
     def action_cancel(self) -> None:
-        """Cancel current operation."""
+        """Cancel the active turn only; queued requests survive and proceed."""
         if self._activity_timer:
             self._activity_timer.stop()
             self._activity_timer = None
 
-        for worker in self.workers:
-            worker.cancel()
+        cancel_event = getattr(self, "_cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
+        if self._run_task is not None:
+            self._run_task.cancel()          # active turn only — do NOT drain self._requests
 
         activity = self.query_one("#activity-bar", ActivityBar)
         activity.clear()
 
-        pending_count = len(self._pending_messages)
-        self._pending_messages.clear()
-        self._is_processing = False
-
         input_bar = self.query_one("#input-bar", CLIInputBar)
         input_bar.focus_input()
         chat_view = self.query_one("#chat-view", ChatView)
-        if pending_count > 0:
-            chat_view.add_system_message(
-                f"Operation cancelled ({pending_count} pending messages cleared)."
-            )
-        else:
-            chat_view.add_system_message("Operation cancelled.")
+        chat_view.add_system_message("Turn cancelled.")
 
     def action_toggle_tools(self) -> None:
         """Toggle the tool context panel."""

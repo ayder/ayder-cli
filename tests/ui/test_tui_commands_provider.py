@@ -10,6 +10,11 @@ from ayder_cli.tui.screens import CLISelectScreen
 
 def _make_app() -> SimpleNamespace:
     status_bar = MagicMock()
+    # _apply_provider_switch now defers the COMMIT into request_turn(prepare=...);
+    # run the captured prepare synchronously so these tests assert the effect.
+    request_turn = MagicMock(
+        side_effect=lambda prepare=None, **kw: prepare() if prepare else None
+    )
     app = SimpleNamespace(
         config=Config(provider="openai"),
         llm=MagicMock(),
@@ -17,6 +22,7 @@ def _make_app() -> SimpleNamespace:
         push_screen=MagicMock(),
         query_one=MagicMock(return_value=status_bar),
         update_system_prompt_model=MagicMock(),
+        request_turn=request_turn,
         chat_loop=SimpleNamespace(
             llm=MagicMock(),
             config=SimpleNamespace(model="qwen3-coder:latest", num_ctx=65536),
