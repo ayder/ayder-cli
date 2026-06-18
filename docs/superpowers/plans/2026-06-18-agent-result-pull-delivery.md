@@ -10,6 +10,8 @@
 
 **Tech Stack:** Python 3.12, Pydantic v2, Textual TUI, asyncio, pytest (+ `anyio`), ruff, mypy.
 
+**rev. 2 — plan-review corrections:** (1) `read_result`/`await_run` only drain **terminal** runs (a working-run read leaves `drained=False`, so the later completion still nudges) + regression test; (2) full `commands.py` audit — *every* state-mutating command (and conversation *reads* in `/compact`/`/save-context`) defers into `prepare`; `/clear`,`/load-context`,`/tools`,`/permission` use `run_loop=False`; (3) `_on_loop` **raises** if the loop is unset and `list_agents` marshals; (4) Ctrl+C cancels only the active turn — **queued requests preserved** (single `_requests` queue replaces `_pending_messages`); (5) `reset_settled()` deferred into the user request's `prepare`; (6) Phase-A tests migrated off `_is_processing` assignment.
+
 ## Global Constraints
 
 - Target Python **3.12**. Every task passes `uv run poe check-all` **and** `uv run poe test-all` (the latter is required — `poe test` ignores `tests/core/test_config.py`, `pyproject.toml:72`).
@@ -536,9 +538,13 @@ Change the `on_complete` type hint to `Callable[[int, AgentRun], None] | None`.
         return fn()
 
     def _on_loop(self, fn):
-        """Run fn() on the owning event loop from a worker thread; return its result."""
+        """Run fn() on the owning event loop from a worker thread; return its result.
+
+        Fails explicitly if the loop is unset — registry state is loop-owned, so a
+        worker thread must never read/mutate it directly (single-loop invariant, §4).
+        """
         if self._loop is None:
-            return fn()
+            raise RuntimeError("AgentRegistry loop not set (call set_loop first)")
         return asyncio.run_coroutine_threadsafe(self._on_loop_coro(fn), self._loop).result()
 ```
 
@@ -607,6 +613,7 @@ Change the `on_complete` type hint to `Callable[[int, AgentRun], None] | None`.
         return [r.to_status_dict(now=now) for r in runs]
 
     def _result_payload(self, run: AgentRun) -> dict:
+        """Full payload for a TERMINAL run; marks it drained. Never call on a working run."""
         run.drained = True
         return {"run_id": run.run_id, "name": run.agent_name, "status": run.status,
                 "result": run.result, "note_path": run.note_path,
@@ -616,19 +623,23 @@ Change the `on_complete` type hint to `Callable[[int, AgentRun], None] | None`.
         run = self._runs.get(run_id)
         if run is None or run.generation != self._current_generation:
             return None
-        return self._result_payload(run)
+        if run.status == "working":
+            return run.to_status_dict(now=time.monotonic())   # NOT drained (finding 1)
+        return self._result_payload(run)                       # terminal -> drains
 
     async def await_run(self, run_id: int, timeout_s: float) -> dict | None:
         run = self._runs.get(run_id)
         if run is None or run.generation != self._current_generation:
             return None
-        capped = max(0.0, min(float(timeout_s), float(self._agent_timeout)))
         if run.status == "working":
+            capped = max(0.0, min(float(timeout_s), float(self._agent_timeout)))
             try:
                 await asyncio.wait_for(run.done_event.wait(), timeout=capped)
             except asyncio.TimeoutError:
-                return run.to_status_dict(now=time.monotonic())  # still working
-        return self._result_payload(run)
+                return run.to_status_dict(now=time.monotonic())  # still working, NOT drained
+        if run.status == "working":
+            return run.to_status_dict(now=time.monotonic())      # spurious wake; NOT drained
+        return self._result_payload(run)                          # terminal -> drains
 
     def pending_nudge(self) -> list[AgentRun]:
         return [r for r in self._runs.values()
@@ -694,6 +705,23 @@ def test_pending_nudge_excludes_drained_and_nudged(registry):
     assert ids == [1]
     registry.mark_nudged(registry.pending_nudge())
     assert registry.pending_nudge() == []
+
+
+def test_read_while_working_does_not_drain_then_completion_still_nudges(registry):
+    # finding 1 regression: a non-blocking read of a WORKING run must not drain it,
+    # or the later completion would have no unread result and never nudge.
+    from ayder_cli.agents.run import AgentRun
+    registry._current_generation = 1
+    run = AgentRun(run_id=5, generation=1, agent_name="x", started_at=0.0, status="working")
+    registry._runs[5] = run
+    payload = registry.read_result(5)
+    assert payload["status"] == "working"
+    assert run.drained is False                       # NOT drained while working
+    # agent completes:
+    run.status, run.result = "done", "DELIVERABLE"
+    assert [r.run_id for r in registry.pending_nudge()] == [5]   # still nudge-eligible
+    assert registry.read_result(5)["result"] == "DELIVERABLE"
+    assert run.drained is True                          # terminal read drains
 ```
 (If the `registry` fixture passed `on_complete`/`drain` assertions, update them. Construct `AgentRun` positionally as `AgentRun(run_id, generation, agent_name, started_at, ...)`.)
 
@@ -857,6 +885,18 @@ def test_agent_status_returns_snapshot_json():
     assert data["agents"][0]["run_id"] == 7
 
 
+def test_list_agents_marshals_through_loop():
+    # finding 3: list_agents reads _active/_settled, so it must go through _on_loop.
+    from ayder_cli.agents.tool import create_list_agents_handler
+    reg = MagicMock()
+    reg.list_agents.return_value = [{"name": "r"}]
+    calls = []
+    reg._on_loop = lambda fn: (calls.append("on_loop"), fn())[1]
+    data = json.loads(create_list_agents_handler(reg)())
+    assert calls == ["on_loop"]                 # marshalled, not a direct read
+    assert data["agents"][0]["name"] == "r"
+
+
 @pytest.mark.anyio
 async def test_read_agent_result_wait_blocks_then_returns():
     from ayder_cli.agents.registry import AgentRegistry
@@ -940,6 +980,12 @@ def create_read_agent_result_handler(registry: AgentRegistry) -> Callable[..., s
     return handle_read_agent_result
 ```
 Add `import asyncio` at the top of `tool.py`.
+
+3c. **Marshal `list_agents` through the loop (finding 3).** It reads `_active`/`_settled`, so the existing direct call from the worker-thread handler races. Change `handle_list_agents` in `create_list_agents_handler`:
+```python
+    def handle_list_agents() -> str:
+        return json.dumps({"agents": registry._on_loop(lambda: registry.list_agents())}, indent=2)
+```
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -1247,6 +1293,60 @@ async def test_prepare_runs_only_when_quiescent(monkeypatch):
     engine.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await engine
+
+
+@pytest.mark.anyio
+async def test_run_loop_false_mutates_without_starting_a_turn(monkeypatch):
+    app = _app(monkeypatch)
+    ran = []
+
+    class FakeLoop:
+        async def run(self, *, no_tools=False):
+            ran.append(1)
+
+    app.chat_loop = FakeLoop()
+    engine = asyncio.create_task(app._turn_consumer())
+    done = []
+    app.request_turn(prepare=lambda: done.append("mutated"), run_loop=False)
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if done: break
+    assert done == ["mutated"] and ran == []     # prepare ran; no ChatLoop.run
+    engine.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await engine
+
+
+@pytest.mark.anyio
+async def test_ctrl_c_cancels_active_turn_but_preserves_queue(monkeypatch):
+    # finding 4: action_cancel cancels only the active turn; queued requests survive.
+    app = _app(monkeypatch)
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: MagicMock())
+    app._activity_timer = None
+    app._cancel_event = None
+    started = []
+    a_in = asyncio.Event()
+
+    class FakeLoop:
+        async def run(self, *, no_tools=False):
+            started.append("turn")
+            if len(started) == 1:
+                a_in.set()
+                await asyncio.sleep(3600)        # A blocks until cancelled
+
+    app.chat_loop = FakeLoop()
+    engine = asyncio.create_task(app._turn_consumer())
+    app.request_turn()                            # A (runs, blocks)
+    await asyncio.wait_for(a_in.wait(), 1)
+    app.request_turn()                            # B queued behind A
+    app.action_cancel()                           # Ctrl+C — must NOT drain B
+    for _ in range(100):
+        await asyncio.sleep(0)
+        if len(started) == 2: break
+    assert started == ["turn", "turn"]            # B still ran after A was cancelled
+    engine.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await engine
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1262,10 +1362,11 @@ class TurnRequest:
     run_loop: bool = True
     no_tools: bool = False
 ```
-In `__init__`, replace `self._is_processing = False` with the queue/task state:
+In `__init__`, **remove** `self._pending_messages: list[str] = []` and `self._is_processing = False` (the single `_requests` queue replaces the user backlog); add:
 ```python
         self._requests: asyncio.Queue[TurnRequest] = asyncio.Queue()
         self._run_task: asyncio.Task | None = None
+        self._cancel_event: asyncio.Event | None = None
 ```
 Add a compatibility property so existing `self._is_processing` reads keep working, plus the consumer:
 ```python
@@ -1315,7 +1416,7 @@ Add a compatibility property so existing `self._is_processing` reads keep workin
         except Exception:
             pass
 ```
-Replace `_finish_processing` with `_after_turn_finished` (same body, minus the `_is_processing` assignments which the property now derives):
+Replace `_finish_processing` with `_after_turn_finished` (UI teardown + nudge only; the consumer pulls the next queued request itself, so there is no `_pending_messages` pumping):
 ```python
     def _after_turn_finished(self) -> None:
         self._maybe_stop_activity_timer()
@@ -1324,9 +1425,7 @@ Replace `_finish_processing` with `_after_turn_finished` (same body, minus the `
             self.query_one("#input-bar", CLIInputBar).focus_input()
         except Exception:
             pass
-        if self._pending_messages:
-            self._process_next_message()
-        elif self._agent_registry:
+        if self._agent_registry:
             self._maybe_nudge()
 ```
 Delete `start_llm_processing` and `_run_chat_loop`. Start the consumer in `on_mount` (after `set_loop`):
@@ -1341,46 +1440,38 @@ Delete `start_llm_processing` and `_run_chat_loop`. Start the consumer in `on_mo
         return ev is not None and ev.is_set()
 ```
 
-- [ ] **Step 5: Route user input + nudge through `request_turn`** —
-`_process_next_message` becomes:
+- [ ] **Step 5: Route user input through `request_turn` (single queue)** — there is no separate `_pending_messages` backlog: every user message and command is a `TurnRequest`, so order across messages and commands is unambiguous and the consumer serializes them. The message is **echoed to the UI immediately** but appended to `self.messages` only in `prepare` (when quiescent). `reset_settled()` moves into `prepare` too (finding 5 — otherwise a racing completion repopulates `_settled` before the queued turn starts). Rewrite `handle_input_submitted` and **delete** `_process_next_message`:
 ```python
-    def _process_next_message(self) -> None:
-        if not self._pending_messages:
+    @on(CLIInputBar.Submitted)
+    def handle_input_submitted(self, event: CLIInputBar.Submitted) -> None:
+        user_input = event.value
+        if user_input.startswith("/"):
+            self._handle_command(user_input)
             return
-        text = self._pending_messages.pop(0)
+        try:
+            self.query_one("#chat-view", ChatView).add_user_message(user_input)  # echo now
+        except Exception:
+            pass
 
-        def _prepare(text=text):
-            try:
-                self.query_one("#chat-view", ChatView).add_user_message(text)
-            except Exception:
-                pass
+        def _prepare(text=user_input):
+            if self._agent_registry:
+                self._agent_registry.reset_settled()   # finding 5: at turn-prep, not submit
             self.messages.append({"role": "user", "content": text})
 
         self.request_turn(prepare=_prepare)
 ```
-`handle_input_submitted`: replace `if not self._is_processing: self._process_next_message()` with:
-```python
-        if not self.is_turn_running:
-            self._process_next_message()
-```
-In `_maybe_nudge` (Task 3), replace `self.start_llm_processing()` with `self.request_turn()`.
+Remove the old top-of-`handle_input_submitted` `reset_settled()` call (now in `_prepare`). In `_maybe_nudge` (Task 3), replace `self.start_llm_processing()` with `self.request_turn()`.
 
-- [ ] **Step 6: Rewire `action_cancel`** — replace the `for worker in self.workers: worker.cancel()` block:
+- [ ] **Step 6: Rewire `action_cancel`** — cancel the **active turn only**; queued requests survive and proceed (finding 4 / policy §12). Replace the `for worker in self.workers: worker.cancel()` block and remove the `self._pending_messages.clear()` and `self._is_processing = False` lines:
 ```python
         if getattr(self, "_cancel_event", None) is not None:
             self._cancel_event.set()
         if self._run_task is not None:
-            self._run_task.cancel()
-        # drain queued requests
-        while not self._requests.empty():
-            try:
-                self._requests.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+            self._run_task.cancel()          # active turn only — do NOT drain self._requests
 ```
-Remove the `self._is_processing = False` line (now a derived property).
+Change the cancel message to `"Turn cancelled."` (drop the "N pending messages cleared" wording — queued requests are no longer discarded).
 
-- [ ] **Step 7: Convert breaking commands to deferred mutation** — in `src/ayder_cli/tui/commands.py`, every handler that currently mutates `app.messages`/runtime and then calls `app.start_llm_processing(...)` instead defers the mutation into `prepare` and calls `app.request_turn(...)`. Pattern (`/ask`):
+- [ ] **Step 7: Audit and convert every state-mutating command** (`src/ayder_cli/tui/commands.py`; `do_clear`/`apply_pending_compact` in `app.py`). Finding 2: *every* handler that mutates conversation/provider/model/prompt/tool-tags/permissions/context-manager/registry state — **not only those calling `start_llm_processing`** — defers that work into `prepare`. Handlers that *read* the conversation (`/compact`, `/save-context` build `conversation_text`) defer the **read** into `prepare` too, so a queued command sees post-turn state, not a stale snapshot. Echo any user-visible line via `chat_view` immediately; do all state work in `prepare`. Pattern (`/ask`):
 ```python
 def handle_ask(app, args, chat_view):
     q = args.strip()
@@ -1389,31 +1480,48 @@ def handle_ask(app, args, chat_view):
         return
     def _prepare():
         app.messages.append({"role": "user", "content": q})
-        chat_view.add_user_message(q)
     app.request_turn(prepare=_prepare, no_tools=True)
 ```
-Apply, replacing each `start_llm_processing(...)` call (the 7 sites: `commands.py:363,380,394,427,483,783,869`) with `request_turn(...)` and moving its preceding `app.messages`/state mutation into `prepare`:
+Full classification:
 
-| Command | `request_turn` call | `prepare` body |
+| Command(s) | `request_turn` | `prepare` body (deferred) |
 |---|---|---|
-| `/ask` | `no_tools=True` | append the question (above) |
-| `/plan`, `/implement` | default | append the command's prompt + `chat_view.add_user_message` |
-| `/compact` (`handle_compact`) | default | existing message surgery + `app._agent_registry.new_generation()` (Task 8) |
-| `/skill` (`handle_skill`) | default | `app.inject_skill(...)` + `new_generation()` |
-| `/provider`, `/model` | `run_loop=False` | rebuild runtime (existing `_apply_*`) + `new_generation()`; start no turn |
+| `/ask` | `no_tools=True` | append the question |
+| `/plan`, `/implement` | `run_loop=True` | append the command's prompt |
+| `/compact` (`handle_compact`) | `run_loop=True` | **read** `conversation_text` from `app.messages`, clear (keep system), append `compact_prompt`, `new_generation()` |
+| `/save-context` (`handle_save_context`) | `run_loop=True` | **read** `conversation_text`, append the save prompt (no `new_generation`) |
+| `/skill` (`handle_skill`/`_apply_skill`) | `run_loop=True` | `app.inject_skill(...)` (in-place, below), append command, `new_generation()` |
+| `/provider` (`_apply_provider_switch`), `/model` (`handle_model`) | `run_loop=False` | rebuild runtime (existing body) + `update_system_prompt_model()` + `new_generation()`; start no turn |
+| `/clear` (`do_clear`), `/load-context` (`handle_load_context`) | `run_loop=False` | `/clear`: clear messages (keep system) + `context_manager.clear()` + `new_generation()`. `/load-context`: append the context message (no `new_generation` — append semantics, §8) |
+| `/tools`, `/permission`, `/verbose` | `run_loop=False` | mutate `chat_loop.config.tool_tags` / `permissions` / `verbose` |
 
-For `/provider` and `/model`, `run_loop=False` applies the runtime change when quiescent and starts no new turn. `inject_skill` must mutate in place — change its `self.messages = [...]` (app.py:427) to `self.messages[:] = [...]` so `chat_loop.messages` stays the same list.
+Read-only / non-turn-state commands run **immediately** on the loop (no `request_turn`): `/help`, `/tasks`, `/notes`, `/list-contexts`, `/context-stats`, `/archive-completed-tasks`, `/logging`, `/plugin`, `/temporal`, `/agent`. (`/agent` reads/cancels registry state on the loop, safe under single-loop ownership — §4 — so no marshalling.)
 
-- [ ] **Step 8: Run consumer + tui suites**
+Notes: `inject_skill` must mutate **in place** — change `self.messages = [...]` (app.py:427) to `self.messages[:] = [...]` so `chat_loop.messages` stays the same list. `do_clear` is called by both `/clear` and Ctrl+L (`action_clear`); wrap its body in the `_prepare` + `request_turn(run_loop=False)` shape so Ctrl+L is serialized too. `apply_pending_compact` already runs inside the chat-loop's pre-iteration hook (on-loop, during a turn) — leave it; its `new_generation()` from Task 8 stays.
+
+- [ ] **Step 8: Migrate Phase-A tests to the property (finding 6)** — `tests/tui/test_pull_delivery.py`'s `_app` helper assigns `app._is_processing`, now a read-only property. Set the backing task instead:
+```python
+def _app(reg, processing=False):
+    from ayder_cli.tui.app import AyderApp
+    app = AyderApp.__new__(AyderApp)
+    app._agent_registry = reg
+    app._run_task = object() if processing else None   # property derives _is_processing
+    app.messages = []
+    app.request_turn = MagicMock()                      # nudge now calls request_turn
+    return app
+```
+In `test_nudges_once_when_idle_with_unread`, assert on `app.request_turn` instead of `app.start_llm_processing` (and drop the `app.start_llm_processing = MagicMock()` line).
+
+- [ ] **Step 9: Run consumer + tui suites**
 
 Run: `uv run pytest tests/tui/ tests/agents/ -v`
-Expected: PASS. Fix any remaining `start_llm_processing`/`_run_chat_loop`/`self.workers`/`_is_processing =` (assignment) references (grep `src/`).
+Expected: PASS. Fix any remaining `start_llm_processing`/`_run_chat_loop`/`self.workers`/`_pending_messages`/`_process_next_message`/`_is_processing =` (assignment) references (grep `src/`).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/ayder_cli/tui/app.py src/ayder_cli/tui/commands.py tests/tui/test_turn_consumer.py
-git commit -m "feat(tui): serial turn consumer + request_turn; commands defer mutations; Ctrl+C cancels"
+git add src/ayder_cli/tui/app.py src/ayder_cli/tui/commands.py tests/tui/test_turn_consumer.py tests/tui/test_pull_delivery.py
+git commit -m "feat(tui): serial turn consumer + request_turn; full command audit; Ctrl+C cancels active turn only"
 ```
 
 ---
@@ -1424,7 +1532,7 @@ git commit -m "feat(tui): serial turn consumer + request_turn; commands defer mu
 
 - [ ] **Step 2: Straggler grep** — confirm the old model is gone:
 
-Run: `grep -rnE "AgentSummary|_summary_queue|drain_summaries|has_pending_summaries|_wake_for_pending_agents|_parse_summary|start_llm_processing|_run_chat_loop|self\._is_processing\s*=" src/`
+Run: `grep -rnE "AgentSummary|_summary_queue|drain_summaries|has_pending_summaries|_wake_for_pending_agents|_parse_summary|start_llm_processing|_run_chat_loop|_pending_messages|_process_next_message|self\._is_processing\s*=" src/`
 Expected: no matches (the `_is_processing` **property** definition is allowed; only assignments must be gone).
 
 - [ ] **Step 3: Commit fixups**
@@ -1439,6 +1547,8 @@ git add -A && git commit -m "chore: full-suite green for agent-result pull deliv
 
 **Spec coverage:** `AgentRun` + status vocab (Task 3 / §3). Single-loop ownership: `_on_loop`, `await_run`, loop-side mutation (Tasks 3-4 / §4). Pull tools + capped `timeout_s` + CLI/TUI registration (Tasks 4-5 / §5). Capability prompt (Task 6 / §5). Serial consumer + `prepare` deferral + Ctrl+C (Task 9 / §6, §12). Event+timer nudges, `nudged`-after-enqueue, no loop (Tasks 3/9 / §7, findings A/D). Generation filter, no run dropping (Tasks 3/8 / §8, finding 1). Data flow (Tasks 3-4 / §9). Notes = durable copy, auto-written (Tasks 1-2 / §10, finding C). Deletions (Tasks 3/9 / §11). CLI registration (Task 5 / finding 4). ✓
 
-**Placeholder scan:** none — every code/edit step carries concrete content; command conversions enumerated in a table with the full pattern.
+**rev. 2 finding coverage:** read-while-working no-drain (Task 3 `read_result`/`await_run` + regression test); full command audit incl. deferred reads (Task 9 Step 7 table); `_on_loop` raises + `list_agents` marshals (Tasks 3/4 + test); Ctrl+C preserves queue (Task 9 Step 6 + test); `reset_settled` at prepare time (Task 9 Step 5); Phase-A test migration (Task 9 Step 8). ✓
+
+**Placeholder scan:** none — every code/edit step carries concrete content; command conversions enumerated in a table with the full pattern; no `_pending_messages`/`_process_next_message` survive (single `_requests` queue).
 
 **Type consistency:** `AgentRunOutcome(status, content, error, note_path)` (Task 2) consumed by `_run_and_queue` (Task 3); `AgentRun(run_id, generation, agent_name, started_at, …)` constructed identically in tests/registry; `create_run`/`snapshot`/`read_result`/`await_run`/`pending_nudge`/`mark_nudged`/`new_generation`/`_on_loop` defined in Task 3, consumed in Tasks 4-5/9; `request_turn(prepare=None, *, run_loop=True, no_tools=False, interrupt=False)` defined Task 9, used by user-input/nudge/commands; `_maybe_nudge` defined Task 3, re-pointed to `request_turn` in Task 9; `write_agent_note(..., generation=…)` (Task 1) called by runner (Task 2).

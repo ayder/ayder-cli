@@ -70,6 +70,8 @@ All `AgentRun`/registry **state is owned by the event loop**; nothing mutates it
 
 This makes finding 2 structural rather than hope-based, and it keeps `dispatch`'s state creation on the loop too.
 
+- **On-loop code accesses the registry directly — only worker threads marshal.** Slash-command handlers run synchronously on the event loop (no `await`), so they read/mutate registry state atomically with respect to the turn coroutine and need no marshalling. `_on_loop` is for worker-thread tool handlers only, and it **raises** if the loop is unset (rather than silently running locally) so the ownership invariant can't be violated. The `list_agents` tool handler marshals too (it reads `_active`/`_settled`).
+
 ## 5. Tools — the LLM pulls (registered in CLI and TUI)
 
 ### `call_agent(name, task)` — *changed return only*
@@ -94,7 +96,7 @@ Deliberately omits `result` (drain is a separate step, so terse output isn't bur
 
 Returns `{run_id, name, status, result, note_path, working_time_s, error}` and sets `drained=True`.
 
-- `wait=false`: returns immediately; if still `working`, returns the `working` state with empty `result`.
+- `wait=false`: returns immediately; if still `working`, returns the `working` state with empty `result` **and does not mark the run `drained`** (only a terminal `done`/`error` read drains — otherwise a poll-before-completion would suppress the later nudge).
 - `wait=true`: blocks on `done_event` until the run finishes or `timeout_s` elapses, then returns. Folds the model's "poll every minute" loop into one call. On timeout, returns the current `working` state (no error).
 - **`timeout_s` is validated and capped** to `[0, agent_timeout]` (finding B). The blocking wait runs inside a worker-thread `to_thread` call and **cannot be cancelled mid-wait** (only times out), so the cap is the sole guard against a model occupying a worker thread.
 
@@ -219,7 +221,9 @@ Kept. `write_agent_note(...)` and the runner auto-persisting the **final message
 
 **In scope:** `AgentRun` + pull tools (CLI **and** TUI), single-loop ownership, the serial turn/command consumer, generation-based staleness, event+timer nudges (TUI), auto-notes, capability-prompt rewrite.
 
-**v1 interrupt policy (decided):** breaking commands **queue** behind a running turn; **Ctrl+C** cancels the active turn (existing binding). Per-command `interrupt=True` preemption is deferred — the machinery supports it when wanted.
+**v1 interrupt policy (decided):** breaking commands **queue** behind a running turn; **Ctrl+C** cancels **only the active turn** (existing binding) — queued requests (user messages and commands) are preserved and proceed after it. Per-command `interrupt=True` preemption is deferred — the machinery supports it when wanted.
+
+**Command serialization (audit, finding 2):** *every* command that mutates conversation, provider, model, prompt, tool-tags, permissions, the context manager, or registry state — **not just those that start an LLM turn** — defers its mutation into the request's `prepare`. Commands that also *read* the conversation (`/compact`, `/save-context` build a `conversation_text`) defer that read into `prepare` too, so a queued command operates on post-turn state, not a stale snapshot. Read-only/UI commands (`/help`, `/tasks`, `/notes`, `/agent` status, …) run immediately on the loop (no `prepare`). State-mutating commands with no LLM turn (`/clear`, `/load-context`, `/provider`, `/model`, `/tools`, `/permission`) use `run_loop=False`.
 
 **Out of scope / deferred:**
 - Model-callable agent cancellation — next phase.
