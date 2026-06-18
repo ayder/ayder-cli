@@ -1,4 +1,4 @@
-# Agent-Result Push Delivery Implementation Plan (rev. 4 — turn leases)
+# Agent-Result Push Delivery Implementation Plan (rev. 5 — serial turn engine)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -6,9 +6,9 @@
 
 **Goal:** Deliver each sub-agent's final deliverable into the main conversation and wake the main LLM as soon as it's ready — no head-of-line blocking, no stale/competing turns, with a single turn arbiter enforcing one turn at a time.
 
-**Architecture:** A pure `TurnArbiter` owns turn state (`IDLE`/`DEBOUNCING`/`RUNNING`), a debounce timer + generation token, and a **monotonic turn lease**; **every** LLM-start path goes through it. `begin_turn()` grants a fresh lease (interrupt-capable); `end_turn(turn_id)` no-ops unless that lease still owns the turn, so a cancelled/replaced worker's stale finish cannot end a newer turn. Agents return their **final assistant message** (the deliverable, conforming to a caller-specified structure), injected as a **user-role** labeled block at the conversation tail (path-only when oversized). A per-dispatch `cycle_id` rejects results from a replaced conversation. Each run is also persisted to `.ayder/notes/`.
+**Architecture:** A single serial **`TurnEngine`** (one consumer task) owns turn execution: requests carry a `prepare` callback (state mutation) + `run_loop` flag; the engine runs one `ChatLoop.run()` at a time and **awaits each turn's teardown before starting the next**, so an interrupting request can never overlap the cancelled turn on the shared `chat_loop`/`callbacks`/`messages`. A small pure **`WakeDebouncer`** coalesces agent completions into one delayed wake (gated by "is a turn running?"). Agents return their **final assistant message** (the deliverable, conforming to a caller-specified structure), injected as a **user-role** labeled block (path-only when oversized). A per-dispatch `cycle_id` rejects results from a replaced conversation. Each run is also persisted to `.ayder/notes/`.
 
-**Revision 4** addresses the second review (`.ayder/020-codex-multi-agent-review.md`): turn leases (F1/F2), always-construct arbiter (F3), failure rollback (F4), centralized cycle invalidation (F5), non-overwriting + YAML-safe notes (F6/F7), error classification independent of cumulative content (F8), result-before-user ordering (F9), oversized hard-cap → path-only (F10), optional-note prompt wording (F11), and concrete (no-placeholder) Task 8 tests. Per product decision, breaking commands **interrupt** a running turn (the review's "reject concurrent starts" is intentionally not adopted); the lease makes that safe.
+**Revision 5** addresses the fourth review (`.ayder/020-codex-multi-agent-review.md`, rev-4 re-review): the lease-based arbiter fixed *bookkeeping* but not the physical overlap of two `ChatLoop.run()`s under Textual's non-awaiting `exclusive=True`. Rev. 5 replaces it with the serial `TurnEngine` + a **command-transition API** (`SOFT` / `INTERRUPT_AND_RUN` / `INTERRUPT_AND_MUTATE`) so breaking commands mutate state only when quiescent (F1/F2); in-place `self.messages[:]` so `chat_loop.messages` stays connected (F3); the engine's `try/finally` subsumes the lease rollback (F4); a corrected cycle-invalidation map (`/load-context` appends → no bump; `apply_pending_compact` is in `tui/app.py`) (F5); `json.dumps` YAML scalars (F6); and a real async serialization lifecycle test (F7). Product decision: provider/model switches are `INTERRUPT_AND_MUTATE` (cancel the turn, apply the runtime change when quiescent, start no new turn). Earlier-review fixes (final-message payload, user-role injection, oversized hard-cap, notes collision/escaping, error classification, result-before-user ordering, optional-note wording) carry forward from rev. 4.
 
 **Tech Stack:** Python 3.12, Pydantic v2, Textual TUI, asyncio, pytest (+ `anyio`), ruff, mypy.
 
@@ -18,10 +18,11 @@
 - Async tests use `@pytest.mark.anyio` (see `tests/loops/test_chat_loop_hook.py`).
 - Injected results use **`role: "user"`** (NOT `system`) — provider-neutral; Claude/Gemini hoist system messages into the master prompt (`claude.py:170-171`, `gemini.py:176-177`).
 - **Payload = final assistant message only**, captured from conversation history, **never the raw transcript/context**. Injected in full unless it exceeds `agent_result_inline_limit` (F10), in which case a **path-only** block points at the always-written note. The main LLM validates the requested structure and treats a non-conforming result as failed (prompt-level contract, not code).
-- **I1 (single turn) via leases:** `begin_turn()` grants a fresh monotonic lease and marks `RUNNING`; `end_turn(turn_id)` only ends the turn that lease owns. A cancelled/replaced worker's delayed finish carries a stale lease and is ignored (F2). `cancel()` invalidates the lease.
-- **Interrupt model:** breaking commands (`/ask`, `/plan`, `/compact`, `/implement`, `/skill`) **interrupt** a running turn (a fresh lease + exclusive worker); user *text* queues; agent wakes never interrupt. Soft commands (`/notes`, `/tasks`, `/permission`) don't start turns.
-- **Arbiter is always constructed** (F3), independent of whether an agent registry exists, so the turn lock also coordinates the no-agent case.
-- **Failure rollback (F4):** a failing `schedule`/`drain_inject`/`start` restores `IDLE`; `cancel_timer` failures are swallowed.
+- **I1 (single turn) via the serial engine:** one `_turn_engine()` consumer runs exactly one `ChatLoop.run()` at a time. Every turn and every runtime mutation goes through `request_turn(...)`. An interrupt cancels the active `_run_task`; the engine **`await`s its teardown** before processing the next request — no overlap on shared `chat_loop`/`callbacks`/`messages` (F1/F2).
+- **Quiescent mutation (F2):** breaking commands defer their state change into a `prepare` callback that the engine runs **only when no turn is executing**. Command transitions: `SOFT` (no `request_turn`), `INTERRUPT_AND_RUN` (`/ask`,`/plan`,`/compact`,`/implement`,`/skill`), `INTERRUPT_AND_MUTATE` (`/provider`,`/model` — `run_loop=False`, no new turn). User *text* queues (never interrupts); agent wakes never interrupt.
+- **Engine + debouncer always constructed** (F3), independent of an agent registry, so coordination holds in the no-agent case.
+- **Non-cancellable tool side effects:** a turn cancelled while inside `asyncio.to_thread` cannot stop the thread; its result is discarded (the loop has unwound) and does not re-enter the conversation. Documented, not prevented.
+- **Failure handling (F4):** the engine's `try/finally` always clears `_run_task` and runs `_finish_turn`; a `prepare` failure is reported and the request is skipped. The `WakeDebouncer` rolls back to `IDLE` on schedule failure.
 - **Error classification (F8):** terminal status is `error` whenever `callbacks.last_system_error` is set — independent of cumulative `last_content`.
 - **Cycle invalidation (F5)** is centralized in `AyderApp._new_conversation_cycle()` and called from every conversation-replacement path (`/clear`, `/compact`, `apply_pending_compact`, skill, load-context, provider/model switch).
 - **Notes (F6/F7):** non-overwriting (exclusive create + numeric suffix, unique across restarts) and YAML-safe (quoted/escaped scalars).
@@ -43,11 +44,11 @@
 - `src/ayder_cli/tools/builtins/notes.py` — extract a shared `_write_note`; add `write_agent_note` (collision-proof filename, best-effort, all statuses).
 - `src/ayder_cli/agents/registry.py` — rename queue/methods to `_result_queue` / `drain_results` / `has_pending_results`; add `cycle_id` tracking (`new_cycle()`, stamp at dispatch, drop stale before enqueue); push-semantics capability prompt.
 - `src/ayder_cli/application/runtime_factory.py` — replace summary suffix with a final-message/structure contract.
-- `src/ayder_cli/core/config.py` — add `agent_wake_debounce_ms`.
-- `src/ayder_cli/agents/turn_arbiter.py` — **new** `TurnArbiter` (pure state machine; heart of F1/F2/F6/F7).
-- `src/ayder_cli/tui/app.py` — replace `_is_processing` with the arbiter; route `start_llm_processing` through `begin_turn`; `_agent_complete` → `request_agent_wake`; user-role + cycle-filtered `inject_agent_results`; `action_cancel`/`do_clear` → `arbiter.cancel()` + queue purge.
-- `src/ayder_cli/tui/commands.py` — no per-site edits (they call `start_llm_processing`, now arbiter-routed); verify in tests.
-- Tests: `tests/agents/test_summary.py`, `tests/agents/test_runner.py`, `tests/agents/test_registry.py`, `tests/agents/test_turn_arbiter.py` (new), `tests/application/test_runtime_factory.py`, `tests/core/test_agent_wake_config.py` (new, **non-ignored** name), `tests/ui/test_agent_wake_injection.py` (new), `tests/providers/test_agent_result_roundtrip.py` (new), `tests/tui/test_agent_wake_integration.py` (new, Pilot), `tests/tools/test_agent_notes.py` (new).
+- `src/ayder_cli/core/config.py` — add `agent_wake_debounce_ms` + `agent_result_inline_limit`.
+- `src/ayder_cli/agents/wake_debouncer.py` — **new** `WakeDebouncer` (pure; coalesces agent completions into one delayed wake).
+- `src/ayder_cli/tui/app.py` — **new** serial `TurnEngine` (`_requests`/`_run_task`/`_turn_engine`/`request_turn`/`_finish_turn`/`is_turn_running`); `WakeDebouncer` wiring; user-role + cycle-filtered `inject_agent_results`; in-place `inject_skill`; `_new_conversation_cycle`; `action_cancel` cancels the active `_run_task`.
+- `src/ayder_cli/tui/commands.py` — command-transition API: breaking commands defer state mutation into `prepare` + `interrupt=True`; `/provider`,`/model` use `run_loop=False`; correct cycle-bump sites.
+- Tests: `tests/agents/test_summary.py`, `tests/agents/test_runner.py`, `tests/agents/test_registry.py`, `tests/agents/test_wake_debouncer.py` (new), `tests/application/test_runtime_factory.py`, `tests/core/test_agent_wake_config.py` (new, **non-ignored** name), `tests/ui/test_agent_wake_injection.py` (new), `tests/providers/test_agent_result_roundtrip.py` (new), `tests/tui/test_agent_wake_integration.py` (new, async lifecycle), `tests/tools/test_agent_notes.py` (new).
 
 ---
 
@@ -523,14 +524,15 @@ def test_same_run_does_not_overwrite(tmp_path):
 
 
 def test_frontmatter_escapes_unsafe_agent_name(tmp_path):
-    # F7: quotes/colons/newlines in the name must not corrupt or inject frontmatter keys.
+    # F6/F7: quotes/colons/newlines/tabs/controls must not corrupt or inject frontmatter keys.
     ctx = ProjectContext(str(tmp_path))
-    rel = write_agent_note(ctx, agent_name='weird: "name"\ninjected: true',
+    rel = write_agent_note(ctx, agent_name='weird:\t"name"\ninjected: true',
                            run_id=1, cycle_id=1, status="completed",
                            task="t", content="c", timestamp="20260618-120000")
     text = (tmp_path / rel).read_text(encoding="utf-8")
     frontmatter = text.split("---", 2)[1]
     assert "\ninjected: true" not in frontmatter      # the newline did NOT create a new key
+    assert "\t" not in frontmatter                    # the tab was escaped, not embedded raw
     assert 'agent: "weird:' in frontmatter            # one quoted scalar
 
 
@@ -560,9 +562,14 @@ Expected: FAIL — `ImportError: cannot import name 'write_agent_note'`.
 
 ```python
 def _yaml_scalar(value: object) -> str:
-    """Render a value as a safely double-quoted YAML scalar (F7)."""
-    s = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
-    return f'"{s}"'
+    """Render a value as a safely double-quoted YAML scalar (F6/F7).
+
+    json.dumps emits a double-quoted string that escapes quotes, backslashes,
+    newlines, tabs, and other control characters — and a JSON string is a valid
+    YAML 1.2 flow scalar. (Replaces the hand-rolled escaper, which missed tabs.)
+    """
+    import json
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def _write_note(
@@ -875,81 +882,60 @@ git commit -m "test(providers): agent-result user block stays an ordered turn (C
 
 ---
 
-### Task 5: TurnArbiter (single-turn state machine) — the heart
+### Task 5: WakeDebouncer — coalesce agent completions
+
+> **Rev. 5 change (re-review v4, F1/F2/F4):** the lease-based `TurnArbiter` is replaced by two pieces — this small **`WakeDebouncer`** (coalescing only) and the **`TurnEngine`** (Task 6, a single serial consumer that owns turn execution). Serialization is now *structural* (one engine awaits each turn's teardown before the next), so the lease, `begin_turn`/`end_turn`, and the `RUNNING` state are gone, and the F4 rollback collapses into the engine's `try/finally`.
 
 **Files:**
-- Create: `src/ayder_cli/agents/turn_arbiter.py`
-- Test: `tests/agents/test_turn_arbiter.py`
+- Create: `src/ayder_cli/agents/wake_debouncer.py`
+- Test: `tests/agents/test_wake_debouncer.py`
 
 **Interfaces:**
-- Produces:
-  ```
-  TurnArbiter(*, has_pending: Callable[[], bool], drain_inject: Callable[[], int],
-              start: Callable[[bool], None], schedule: Callable[[float, Callable[[], None]], object],
-              cancel_timer: Callable[[object], None], debounce_s: float)
-  ```
-  - `is_running -> bool`, `state -> str` (`"idle"|"debouncing"|"running"`).
-  - `begin_turn() -> int`: called by `start_llm_processing` for ANY turn. **Interrupt-capable** (breaking commands interrupt a running turn — product decision): always grants a fresh monotonic **turn-id lease**, cancels any pending wake, sets `RUNNING`, returns the lease. A prior worker is cancelled by the exclusive Textual worker; its finish no-ops via the lease.
-  - `request_agent_wake() -> None`: on completion / post-turn re-check; if `IDLE` and pending, reserves one debounced wake. Never interrupts (only acts when `IDLE`).
-  - `end_turn(turn_id: int) -> bool`: worker finished. **No-ops unless `turn_id` owns the active lease** (F2: a cancelled/replaced worker's stale finish cannot end a newer turn). Returns `True` iff the caller owned the active turn → `IDLE`.
-  - `cancel() -> None`: cancel/clear/shutdown; invalidate the pending wake **and the active lease**; → `IDLE`.
-  - Rollback (F4): if `schedule`/`drain_inject`/`start` raise, state is restored to `IDLE` before propagating; `cancel_timer` failures are swallowed.
-  - `drain_inject()` returns count injected; `start(no_tools)` runs the worker (which calls `begin_turn`).
+- Produces: `WakeDebouncer(*, is_running: Callable[[], bool], has_pending: Callable[[], bool], fire: Callable[[], None], schedule: Callable[[float, Callable[[], None]], object], cancel_timer: Callable[[object], None], debounce_s: float)`.
+  - `request_wake() -> None`: on agent completion / post-turn re-check. Schedules ONE debounced wake when `IDLE` **and** not running **and** pending; further calls during the window coalesce.
+  - On timer expiry: if still not running, calls `fire()` (the app drains ready results and enqueues a turn if any). If a turn started during the window, it does nothing (the running turn drains pending results via its pre-iteration hook).
+  - `cancel() -> None`: drop the pending wake.
+  - `state -> str` (`"idle"|"debouncing"`).
+  - It does **not** run, serialize, or own turns. No lease, no `RUNNING` state. Schedule failures roll back to `IDLE`.
 
-- [ ] **Step 1: Write the failing tests** — create `tests/agents/test_turn_arbiter.py`:
+- [ ] **Step 1: Write the failing tests** — create `tests/agents/test_wake_debouncer.py`:
 
 ```python
-"""Tests for TurnArbiter — single-turn lease, debounce, preemption, interrupt,
-stale-finish safety, and failure rollback."""
+"""Tests for WakeDebouncer — coalescing agent completions into one delayed wake."""
 
 import pytest
 
-from ayder_cli.agents.turn_arbiter import TurnArbiter
+from ayder_cli.agents.wake_debouncer import WakeDebouncer
 
 
 class Harness:
-    def __init__(self, debounce_s=0.2, pending=0, inject=None,
-                 schedule_raises=False, drain_raises=False, start_raises=False):
+    def __init__(self, debounce_s=0.2, pending=1, running=False, schedule_raises=False):
         self.pending = pending
-        self.inject_count = pending if inject is None else inject
-        self.starts = []        # no_tools flags, one per worker start
-        self.leases = []        # lease returned by each start's begin_turn
-        self.timers = []        # {delay, cb, alive}
+        self.running = running
+        self.fired = 0
+        self.timers = []
         self._schedule_raises = schedule_raises
-        self._drain_raises = drain_raises
-        self._start_raises = start_raises
-        self.arb = TurnArbiter(
+        self.wd = WakeDebouncer(
+            is_running=lambda: self.running,
             has_pending=lambda: self.pending > 0,
-            drain_inject=self._drain_inject,
-            start=self._start,
+            fire=self._fire,
             schedule=self._schedule,
             cancel_timer=self._cancel_timer,
             debounce_s=debounce_s,
         )
 
-    def _drain_inject(self):
-        if self._drain_raises:
-            raise RuntimeError("drain failed")
-        n = self.inject_count
-        self.pending = 0
-        self.inject_count = 0
-        return n
-
-    def _start(self, no_tools):
-        if self._start_raises:
-            raise RuntimeError("start failed")
-        self.starts.append(no_tools)
-        self.leases.append(self.arb.begin_turn())   # mirrors start_llm_processing
+    def _fire(self):
+        self.fired += 1
 
     def _schedule(self, delay, cb):
         if self._schedule_raises:
             raise RuntimeError("schedule failed")
-        handle = {"delay": delay, "cb": cb, "alive": True}
-        self.timers.append(handle)
-        return handle
+        h = {"delay": delay, "cb": cb, "alive": True}
+        self.timers.append(h)
+        return h
 
-    def _cancel_timer(self, handle):
-        handle["alive"] = False
+    def _cancel_timer(self, h):
+        h["alive"] = False
 
     def fire_last_timer(self):
         h = self.timers[-1]
@@ -957,139 +943,80 @@ class Harness:
             h["cb"]()
 
 
-def test_idle_completion_debounces_then_one_turn():        # case 1
+def test_idle_pending_schedules_one_wake():
     h = Harness(pending=2)
-    h.arb.request_agent_wake()
-    assert h.arb.state == "debouncing"
+    h.wd.request_wake()
+    assert h.wd.state == "debouncing"
     assert h.timers[-1]["delay"] == 0.2
-    assert h.starts == []
     h.fire_last_timer()
-    assert h.arb.state == "running"
-    assert h.starts == [False]
+    assert h.fired == 1
 
 
-def test_completion_while_running_is_noop():               # case 2
+def test_coalesces_multiple_completions():
     h = Harness(pending=1)
-    h.arb.begin_turn()
-    h.arb.request_agent_wake()
-    assert h.timers == []                                  # pre-iteration drain handles it
-
-
-def test_post_turn_recheck_for_straggler():                # case 3
-    h = Harness(pending=1)
-    lease = h.arb.begin_turn()
-    assert h.arb.end_turn(lease) is True
-    assert h.arb.state == "idle"
-    h.arb.request_agent_wake()
-    assert h.arb.state == "debouncing"
+    h.wd.request_wake()
+    h.pending = 3
+    h.wd.request_wake()
+    h.wd.request_wake()
+    assert len(h.timers) == 1                  # one timer for the whole burst
     h.fire_last_timer()
-    assert h.starts == [False]
+    assert h.fired == 1
 
 
-def test_begin_turn_interrupts_and_issues_fresh_lease():   # F1 — breaking commands interrupt
-    h = Harness()
-    a = h.arb.begin_turn()
-    b = h.arb.begin_turn()                                 # interrupt while running
-    assert b > a
-    assert h.arb.is_running
+def test_no_wake_while_running():
+    h = Harness(pending=1, running=True)
+    h.wd.request_wake()
+    assert h.timers == []                      # the running turn drains pending results itself
 
 
-def test_stale_worker_finish_does_not_end_newer_turn():    # F2
-    h = Harness()
-    a = h.arb.begin_turn()
-    b = h.arb.begin_turn()                                 # replacement turn
-    assert h.arb.end_turn(a) is False                      # old worker's delayed finish — no-op
-    assert h.arb.is_running                                # replacement still owns
-    assert h.arb.end_turn(b) is True
-    assert h.arb.state == "idle"
+def test_no_wake_without_pending():
+    h = Harness(pending=0)
+    h.wd.request_wake()
+    assert h.timers == []
 
 
-def test_user_preempts_debounce():                         # case 4 / F7
+def test_turn_started_during_debounce_suppresses_fire():
     h = Harness(pending=1)
-    h.arb.request_agent_wake()
-    h.arb.begin_turn()
-    assert h.arb.state == "running"
-    assert h.timers[-1]["alive"] is False                 # debounce cancelled
-    h.fire_last_timer()                                   # stale callback no-ops
-    assert h.starts == []
+    h.wd.request_wake()
+    h.running = True                           # a turn started during the window
+    h.fire_last_timer()
+    assert h.fired == 0                        # running turn will drain instead
+    assert h.wd.state == "idle"
 
 
-def test_cancel_during_running_then_stale_finish_noops():  # F2 — cancel path
-    h = Harness()
-    lease = h.arb.begin_turn()
-    h.arb.cancel()
-    assert h.arb.state == "idle"
-    assert h.arb.end_turn(lease) is False                  # cancelled worker's finish no-ops
-    assert h.arb.state == "idle"
-
-
-def test_cancel_during_debounce_no_stale_restart():        # case 6
+def test_cancel_drops_pending_wake():
     h = Harness(pending=1)
-    h.arb.request_agent_wake()
-    h.arb.cancel()
-    assert h.arb.state == "idle"
-    h.fire_last_timer()
-    assert h.starts == []
-    assert h.arb.state == "idle"
+    h.wd.request_wake()
+    h.wd.cancel()
+    assert h.wd.state == "idle"
+    h.fire_last_timer()                        # stale
+    assert h.fired == 0
 
 
-def test_empty_drain_starts_no_turn():                     # case 8 / F6
-    h = Harness(pending=1, inject=0)
-    h.arb.request_agent_wake()
-    h.fire_last_timer()
-    assert h.starts == []
-    assert h.arb.state == "idle"
-
-
-def test_schedule_failure_rolls_back_to_idle():            # F4
+def test_schedule_failure_rolls_back_to_idle():
     h = Harness(pending=1, schedule_raises=True)
     with pytest.raises(RuntimeError):
-        h.arb.request_agent_wake()
-    assert h.arb.state == "idle"
-
-
-def test_drain_failure_rolls_back_to_idle():               # F4
-    h = Harness(pending=1, drain_raises=True)
-    h.arb.request_agent_wake()
-    with pytest.raises(RuntimeError):
-        h.fire_last_timer()
-    assert h.arb.state == "idle"
-
-
-def test_start_failure_rolls_back_to_idle():               # F4
-    h = Harness(pending=1, start_raises=True)
-    h.arb.request_agent_wake()
-    with pytest.raises(RuntimeError):
-        h.fire_last_timer()
-    assert h.arb.state == "idle"
+        h.wd.request_wake()
+    assert h.wd.state == "idle"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/agents/test_turn_arbiter.py -v`
-Expected: FAIL — `ModuleNotFoundError: ...turn_arbiter`.
+Run: `uv run pytest tests/agents/test_wake_debouncer.py -v`
+Expected: FAIL — `ModuleNotFoundError: ...wake_debouncer`.
 
-- [ ] **Step 3: Create `src/ayder_cli/agents/turn_arbiter.py`**
+- [ ] **Step 3: Create `src/ayder_cli/agents/wake_debouncer.py`**
 
 ```python
-"""TurnArbiter — the single authority for starting a main-LLM turn.
+"""WakeDebouncer — coalesces agent completions into a single delayed wake.
 
-Every start path (user input, slash commands, agent-result wakes) goes through
-this object. It owns:
-  - turn state: IDLE -> DEBOUNCING -> RUNNING -> IDLE
-  - a debounce timer handle (cancelable) + a generation token so a cancelled or
-    preempted timer that still fires is recognised as stale and does nothing
-  - a monotonic TURN LEASE (`_running_turn`): begin_turn() grants a fresh lease;
-    end_turn(turn_id) only ends the turn it was given, so a cancelled/replaced
-    worker's delayed finish cannot end a newer turn (F2)
+It does NOT run or serialize turns (the TurnEngine owns execution). When agents
+complete while the main LLM is idle, it waits a short debounce window, then
+fires once so near-simultaneous completions are delivered together. While a turn
+is running it stays out of the way — the running turn drains pending results via
+its pre-iteration hook.
 
-Interrupt model (product decision): breaking commands (/ask, /plan, /compact,
-/implement, /skill) interrupt a running turn. begin_turn() therefore never
-rejects — it always grants a new lease; the prior worker is cancelled by the
-exclusive Textual worker and its finish no-ops via the lease.
-
-All side effects are injected callables; this is unit-testable without Textual
-or a running event loop. Failed callables roll state back to IDLE (F4).
+Pure: all side effects are injected callables; unit-testable without Textual.
 """
 
 from __future__ import annotations
@@ -1097,61 +1024,39 @@ from __future__ import annotations
 from typing import Callable
 
 
-class TurnArbiter:
+class WakeDebouncer:
     IDLE = "idle"
     DEBOUNCING = "debouncing"
-    RUNNING = "running"
 
     def __init__(
         self,
         *,
+        is_running: Callable[[], bool],
         has_pending: Callable[[], bool],
-        drain_inject: Callable[[], int],
-        start: Callable[[bool], None],
+        fire: Callable[[], None],
         schedule: Callable[[float, Callable[[], None]], object],
         cancel_timer: Callable[[object], None],
         debounce_s: float,
     ) -> None:
+        self._is_running = is_running
         self._has_pending = has_pending
-        self._drain_inject = drain_inject
-        self._start = start
+        self._fire = fire
         self._schedule = schedule
         self._cancel_timer = cancel_timer
         self._debounce_s = debounce_s
         self._state = self.IDLE
         self._timer: object | None = None
-        self._gen = 0                       # debounce-timer generation
-        self._turn_id = 0                   # monotonic lease counter
-        self._running_turn: int | None = None  # lease id of the active turn
+        self._gen = 0
 
     @property
     def state(self) -> str:
         return self._state
 
-    @property
-    def is_running(self) -> bool:
-        return self._state == self.RUNNING
-
-    # -- start paths --------------------------------------------------------
-
-    def begin_turn(self) -> int:
-        """Acquire the turn (INTERRUPT-capable). Returns a fresh turn-id lease.
-
-        Always grants a new lease and marks RUNNING — breaking commands may
-        interrupt a running turn. The previous worker is cancelled by the
-        exclusive Textual worker; its finish no-ops because end_turn() checks
-        the lease.
-        """
-        self._cancel_wake()
-        self._turn_id += 1
-        self._running_turn = self._turn_id
-        self._state = self.RUNNING
-        return self._turn_id
-
-    def request_agent_wake(self) -> None:
-        """On agent completion or post-turn re-check. Never interrupts."""
-        if self._state != self.IDLE:
-            return  # RUNNING: pre-iteration drain handles it; DEBOUNCING: already armed
+    def request_wake(self) -> None:
+        if self._state == self.DEBOUNCING:
+            return                          # already armed — coalesce
+        if self._is_running():
+            return                          # running turn drains pending results itself
         if not self._has_pending():
             return
         self._state = self.DEBOUNCING
@@ -1161,91 +1066,61 @@ class TurnArbiter:
             self._timer = self._schedule(self._debounce_s, lambda: self._on_timer(gen))
         except Exception:
             self._timer = None
-            self._state = self.IDLE         # F4: rollback on schedule failure
+            self._state = self.IDLE         # rollback on schedule failure
             raise
 
     def _on_timer(self, gen: int) -> None:
         if gen != self._gen or self._state != self.DEBOUNCING:
-            return  # stale (cancelled/preempted)
+            return                          # stale / cancelled
         self._timer = None
-        try:
-            injected = self._drain_inject()
-        except Exception:
-            self._state = self.IDLE         # F4: rollback on drain failure
-            raise
-        if injected > 0:
-            try:
-                self._start(False)          # -> start_llm_processing -> begin_turn() (new lease)
-            except Exception:
-                self._state = self.IDLE     # F4: rollback on start failure
-                raise
-        else:
-            self._state = self.IDLE         # F6: never start an empty turn
-            self.request_agent_wake()       # re-check in case a result raced in
-
-    # -- lifecycle ----------------------------------------------------------
-
-    def end_turn(self, turn_id: int) -> bool:
-        """End the turn IFF turn_id owns the active lease.
-
-        A cancelled or replaced worker's delayed finish carries a stale id and
-        is ignored (F2). Returns True iff this caller owned the active turn.
-        """
-        if turn_id != self._running_turn:
-            return False
-        self._running_turn = None
         self._state = self.IDLE
-        return True
+        if not self._is_running():
+            self._fire()                    # app: drain ready results + enqueue a turn if any
 
     def cancel(self) -> None:
-        """Hard cancel: Ctrl+C, /clear, conversation replacement, shutdown.
-
-        Invalidates the pending wake AND the active lease, so the cancelled
-        worker's finish no-ops.
-        """
-        self._cancel_wake()
-        self._running_turn = None
-        self._state = self.IDLE
-
-    def _cancel_wake(self) -> None:
-        self._gen += 1  # invalidate any in-flight timer callback
+        self._gen += 1                      # invalidate any in-flight timer callback
         if self._timer is not None:
             try:
                 self._cancel_timer(self._timer)
             except Exception:
-                pass    # F4: a cancel-timer failure must not strand state
+                pass
             self._timer = None
-        if self._state == self.DEBOUNCING:
-            self._state = self.IDLE
+        self._state = self.IDLE
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/agents/test_turn_arbiter.py -v`
-Expected: PASS (13 tests: race-matrix cases 1-4/6/8 + interrupt lease (F1), stale-finish (F2), cancel path, and three F4 rollbacks).
+Run: `uv run pytest tests/agents/test_wake_debouncer.py -v`
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/ayder_cli/agents/turn_arbiter.py tests/agents/test_turn_arbiter.py
-git commit -m "feat(agents): TurnArbiter — single-turn state machine with debounce + stale-safety"
+git add src/ayder_cli/agents/wake_debouncer.py tests/agents/test_wake_debouncer.py
+git commit -m "feat(agents): WakeDebouncer — coalesce agent completions into one delayed wake"
 ```
 
 ---
 
-### Task 6: Wire TurnArbiter into AyderApp (remove batch gate; user-role + cycle-filtered injection)
+### Task 6: TurnEngine — serialized turn execution + command-transition API
+
+> **Rev. 5 (re-review v4, F1/F2/F3/F5):** replaces the Textual `exclusive=True` worker model with a single serial **TurnEngine**. Only one `ChatLoop.run()` ever executes; an interrupting request cancels the current run and the engine **awaits its teardown before starting the next**, eliminating overlap on the shared `self.chat_loop`/`self._callbacks`/`self.messages`. Breaking commands defer their state mutation into a `prepare` callback that runs only while the engine is quiescent (F2).
 
 **Files:**
-- Modify: `src/ayder_cli/tui/app.py` (import; `_wake_for_pending_agents` → `inject_agent_results`; `_agent_complete`; **always-construct** `_arbiter` in `__init__`; `_fire_drain_inject`; `_new_conversation_cycle`; `_composed_pre_iteration`; lease-threaded `start_llm_processing` / `_run_chat_loop` / `_finish_processing`; `handle_input_submitted`; `_process_next_message` ordering; `action_cancel`)
-- Modify: `src/ayder_cli/tui/commands.py` (`do_clear`, `handle_compact`, `handle_skill`, `handle_load_context`, `handle_provider`, `handle_model` → call `app._new_conversation_cycle()`)
-- Modify: `src/ayder_cli/application/` `apply_pending_compact` → call `app._new_conversation_cycle()`
-- Test: `tests/ui/test_agent_wake_injection.py` (new)
+- Modify: `src/ayder_cli/tui/app.py` (TurnEngine: `_requests`/`_run_task`/`_turn_engine`/`request_turn`/`_finish_turn`/`is_turn_running`; `WakeDebouncer` wiring + `_fire_agent_wake`; `inject_agent_results`; `_new_conversation_cycle`; `_process_next_message`; `handle_input_submitted`; `_agent_complete`; `action_cancel`; `inject_skill` in-place; start the engine in `on_mount`)
+- Modify: `src/ayder_cli/tui/commands.py` (command-transition API — breaking commands defer mutation into `prepare` + `interrupt=True`; `/provider`,`/model` use `run_loop=False`; cycle bumps in the right places)
+- Test: `tests/ui/test_agent_wake_injection.py` (new). (Lifecycle/interrupt + F3 identity tests live in Task 8.)
 
 **Interfaces:**
-- Consumes: `TurnArbiter` (Task 5), `AgentResult.render_for_injection` (Task 1), `Config.agent_wake_debounce_ms` + `agent_result_inline_limit` (Task 3), `registry.drain_results()/has_pending_results()/current_cycle/new_cycle()`.
-- Produces: `inject_agent_results(registry, messages: list[dict], inline_limit: int | None = None) -> int`; `AyderApp._fire_drain_inject() -> int`; `AyderApp._new_conversation_cycle() -> None`; lease-threaded `start_llm_processing(no_tools)` → `_run_chat_loop(no_tools, turn_id)` → `_finish_processing(turn_id)`. The **always-present** arbiter replaces `_is_processing` (which becomes a read-only property).
+- Consumes: `WakeDebouncer` (Task 5), `AgentResult.render_for_injection` (Task 1), `Config.agent_wake_debounce_ms`/`agent_result_inline_limit` (Task 3), `registry.drain_results()/has_pending_results()/current_cycle/new_cycle()`.
+- Produces:
+  - `inject_agent_results(registry, messages, inline_limit=None) -> int`.
+  - `TurnRequest(prepare: Callable[[], None] | None = None, no_tools: bool = False, run_loop: bool = True)`.
+  - `AyderApp.request_turn(prepare=None, *, no_tools=False, run_loop=True, interrupt=False) -> None` — the SINGLE entry for every turn and every runtime mutation under one.
+  - `AyderApp.is_turn_running -> bool`; `_fire_agent_wake() -> None`; `_new_conversation_cycle() -> None`.
+  - **Command transition policies:** `SOFT` (no `request_turn`), `INTERRUPT_AND_RUN` (`prepare` + `interrupt=True`), `INTERRUPT_AND_MUTATE` (`run_loop=False` + `interrupt=True`).
 
-- [ ] **Step 1: Write the failing test** — create `tests/ui/test_agent_wake_injection.py`:
+- [ ] **Step 1: Write the failing injection test** — create `tests/ui/test_agent_wake_injection.py`:
 
 ```python
 """Tests for inject_agent_results — user-role blocks, order, cycle filter, oversized cap."""
@@ -1297,7 +1172,6 @@ def test_drops_stale_cycle_results():
 
 
 def test_oversized_result_injects_path_only(tmp_path):
-    # F10: over the inline limit + a note exists → path-only block, not the full body.
     big = "X" * 5000
     reg = FakeRegistry([AgentResult(1, 1, "r", "completed", big, None,
                                     note_path=".ayder/notes/n.md")])
@@ -1306,7 +1180,7 @@ def test_oversized_result_injects_path_only(tmp_path):
     block = messages[0]["content"]
     assert 'truncated="true"' in block
     assert 'note=".ayder/notes/n.md"' in block
-    assert big not in block                          # full body NOT inlined
+    assert big not in block
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1314,19 +1188,27 @@ def test_oversized_result_injects_path_only(tmp_path):
 Run: `uv run pytest tests/ui/test_agent_wake_injection.py -v`
 Expected: FAIL — `ImportError: cannot import name 'inject_agent_results'`.
 
-- [ ] **Step 3: Add the import in `src/ayder_cli/tui/app.py`** (near line 31):
-```python
-from ayder_cli.agents.turn_arbiter import TurnArbiter
-```
-
-- [ ] **Step 4: Replace module-level `_wake_for_pending_agents` (lines ~50-72) with `inject_agent_results`**
+- [ ] **Step 3: app.py imports + module-level `TurnRequest` + `inject_agent_results`** (near line 31, and replacing the old `_wake_for_pending_agents`):
 
 ```python
+import asyncio
+from dataclasses import dataclass
+from collections.abc import Callable
+
+from ayder_cli.agents.wake_debouncer import WakeDebouncer
+
+
+@dataclass
+class TurnRequest:
+    prepare: Callable[[], None] | None = None
+    no_tools: bool = False
+    run_loop: bool = True               # False => runtime mutation only (no chat loop)
+
+
 def inject_agent_results(registry, messages: list[dict], inline_limit: int | None = None) -> int:
     """Drain ready agent results, drop stale-cycle ones, append each as a user block.
 
-    Returns the count injected. Order is FIFO (≈ completion order). Appended at
-    the tail; uses role 'user' so all provider adapters keep it at the completion
+    FIFO order; role 'user' so every provider adapter keeps it at the completion
     point. Oversized results render path-only via render_for_injection (F10).
     """
     injected = 0
@@ -1338,16 +1220,135 @@ def inject_agent_results(registry, messages: list[dict], inline_limit: int | Non
     return injected
 ```
 
-- [ ] **Step 5: Rewrite nested `_agent_complete` (lines ~259-283)**
+- [ ] **Step 4: Add the TurnEngine to `AyderApp`** (the serial consumer — the F1/F2 fix):
 
 ```python
+    # in __init__:
+    self._requests: asyncio.Queue = asyncio.Queue()
+    self._run_task: asyncio.Task | None = None
+    self._engine_task: asyncio.Task | None = None
+
+    @property
+    def is_turn_running(self) -> bool:
+        return self._run_task is not None
+
+    async def _turn_engine(self) -> None:
+        """Single serial consumer of turn requests. Guarantees one ChatLoop.run()
+        at a time and AWAITS each turn's teardown before starting the next."""
+        while True:
+            req = await self._requests.get()
+            try:
+                if req.prepare is not None:
+                    req.prepare()              # F2: mutate messages/runtime ONLY while quiescent
+            except Exception as e:
+                self._report_turn_error(e)
+                continue
+            if not req.run_loop:
+                continue                       # runtime mutation only (provider/model switch)
+            self._run_task = asyncio.create_task(self.chat_loop.run(no_tools=req.no_tools))
+            try:
+                await self._run_task           # <-- the serialized wait; teardown completes here
+            except asyncio.CancelledError:
+                pass                           # interrupted by a later request
+            except Exception as e:
+                self._report_turn_error(e)
+            finally:
+                self._run_task = None
+                self._finish_turn()
+
+    def request_turn(self, prepare=None, *, no_tools: bool = False,
+                     run_loop: bool = True, interrupt: bool = False) -> None:
+        """The single entry for starting a turn or mutating runtime under one."""
+        self._requests.put_nowait(TurnRequest(prepare, no_tools, run_loop))
+        if interrupt and self._run_task is not None:
+            self._run_task.cancel()            # engine awaits teardown, THEN processes this request
+
+    def _finish_turn(self) -> None:
+        try:
+            self._maybe_stop_activity_timer()
+            self.query_one("#activity-bar", ActivityBar).clear()
+            self.query_one("#input-bar", CLIInputBar).focus_input()
+        except Exception:
+            pass
+        if self._pending_messages:
+            self._process_next_message()       # queued user input
+        elif self._agent_registry:
+            self._debouncer.request_wake()     # re-check stragglers
+
+    def _report_turn_error(self, exc: Exception) -> None:
+        try:
+            self.query_one("#chat-view", ChatView).add_system_message(f"Error: {exc}")
+        except Exception:
+            pass
+```
+
+- [ ] **Step 5: Construct the WakeDebouncer (always) + the fire callback** — in `__init__`:
+
+```python
+        debounce_ms = getattr(self.config, "agent_wake_debounce_ms", 200)
+        self._debouncer = WakeDebouncer(
+            is_running=lambda: self.is_turn_running,
+            has_pending=lambda: bool(self._agent_registry) and self._agent_registry.has_pending_results(),
+            fire=self._fire_agent_wake,
+            schedule=lambda delay, cb: self.set_timer(delay, cb),
+            cancel_timer=lambda h: h.stop(),
+            debounce_s=debounce_ms / 1000.0,
+        )
+```
+and the methods:
+```python
+    def _result_inline_limit(self) -> int:
+        return getattr(self.config, "agent_result_inline_limit", 24000)
+
+    def _fire_agent_wake(self) -> None:
+        """Debouncer fired while idle: drain ready results, enqueue a turn if any (F6: skip if empty)."""
+        if not self._agent_registry:
+            return
+        n = inject_agent_results(self._agent_registry, self.messages, self._result_inline_limit())
+        if n > 0:
+            self.request_turn()                # run a turn over the freshly injected results
+```
+
+- [ ] **Step 6: Start the engine in `on_mount`** (event loop is running there):
+```python
+        self._engine_task = asyncio.create_task(self._turn_engine())
+```
+Also delete any `self._is_processing = ...` init and add a compatibility property:
+```python
+    @property
+    def _is_processing(self) -> bool:
+        return self.is_turn_running
+```
+
+- [ ] **Step 7: User input path — `handle_input_submitted` + `_process_next_message`** (F9 ordering inside `prepare`):
+```python
+        # handle_input_submitted (after appending to _pending_messages):
+        if not self.is_turn_running:
+            self._process_next_message()
+
+    def _process_next_message(self) -> None:
+        if not self._pending_messages:
+            return
+        text = self._pending_messages.pop(0)
+
+        def _prepare(text=text):
+            try:
+                self.query_one("#chat-view", ChatView).add_user_message(text)
+            except Exception:
+                pass
+            if self._agent_registry:           # F9: results (context) BEFORE the user instruction
+                inject_agent_results(self._agent_registry, self.messages, self._result_inline_limit())
+            self.messages.append({"role": "user", "content": text})
+
+        self.request_turn(prepare=_prepare, no_tools=False)
+```
+
+- [ ] **Step 8: `_agent_complete` → debouncer**:
+```python
             def _agent_complete(run_id, result):
-                """Agent finished: update UI, then ask the arbiter to wake the LLM."""
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
-                    self.call_later(
-                        lambda: panel.complete_agent(run_id, result.content, result.status)
-                    )
+                    self.call_later(lambda: panel.complete_agent(run_id, result.content, result.status))
                 except Exception:
                     pass
                 try:
@@ -1356,148 +1357,100 @@ def inject_agent_results(registry, messages: list[dict], inline_limit: int | Non
                     self.call_later(lambda: activity.set_agents_running(count))
                 except Exception:
                     pass
-                self._arbiter.request_agent_wake()
+                self._debouncer.request_wake()
 ```
 
-- [ ] **Step 6: ALWAYS construct the arbiter in `__init__` (F3)** — outside the `if self._agent_registry:` block, so the turn lock exists even with no agents. Lambdas resolve the registry dynamically so they are no-ops when it is absent:
-
+- [ ] **Step 9: `action_cancel` + `_new_conversation_cycle`**:
 ```python
-        debounce_ms = getattr(self.config, "agent_wake_debounce_ms", 200)
-        self._arbiter = TurnArbiter(
-            has_pending=lambda: bool(self._agent_registry) and self._agent_registry.has_pending_results(),
-            drain_inject=self._fire_drain_inject,
-            start=lambda no_tools: self.start_llm_processing(no_tools=no_tools),
-            schedule=lambda delay, cb: self.set_timer(delay, cb),
-            cancel_timer=lambda handle: handle.stop(),
-            debounce_s=debounce_ms / 1000.0,
-        )
-```
+    # action_cancel — replace the worker-cancel/_is_processing lines with:
+        if self._run_task is not None:
+            self._run_task.cancel()            # cancel the active turn (engine awaits its teardown)
+        self._debouncer.cancel()
+        self._pending_messages.clear()
+        self._new_conversation_cycle()
 
-And the drain callback (returns 0 when no registry):
-```python
-    def _fire_drain_inject(self) -> int:
-        if not self._agent_registry:
-            return 0
-        return inject_agent_results(
-            self._agent_registry, self.messages, self._result_inline_limit()
-        )
-
-    def _result_inline_limit(self) -> int:
-        return getattr(self.config, "agent_result_inline_limit", 24000)
-```
-
-- [ ] **Step 7: Replace `_is_processing` with the arbiter (now always present — drop the getattr guards)**
-
-7a. Delete the `self._is_processing = ...` initialization (line ~193). Add a read-only property:
-```python
-    @property
-    def _is_processing(self) -> bool:
-        return self._arbiter.is_running
-```
-
-7b. `_composed_pre_iteration` (lines ~359-377) — replace the inline drain loop:
-```python
-            if self._agent_registry:
-                inject_agent_results(self._agent_registry, messages, self._result_inline_limit())
-```
-
-7c. **Lease threading** — `start_llm_processing` / `_run_chat_loop` / `_finish_processing`:
-```python
-    def start_llm_processing(self, *, no_tools: bool = False) -> None:
-        turn_id = self._arbiter.begin_turn()   # fresh lease; interrupts any running turn
-        self.run_worker(self._run_chat_loop(no_tools=no_tools, turn_id=turn_id), exclusive=True)
-
-    async def _run_chat_loop(self, *, no_tools: bool = False, turn_id: int = 0) -> None:
-        worker = get_current_worker()
-        self._callbacks._worker = worker
-        try:
-            await self.chat_loop.run(no_tools=no_tools)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            if not worker.is_cancelled:
-                self.query_one("#chat-view", ChatView).add_system_message(f"Error: {e}")
-        finally:
-            self.call_later(lambda: self._finish_processing(turn_id))
-```
-
-7d. `handle_input_submitted` (lines ~627-630) — queue while a turn runs (user text never interrupts):
-```python
-        if not self._arbiter.is_running:
-            self._process_next_message()
-```
-
-7e. `_process_next_message` (lines ~632-646) — drop the `_is_processing` writes, and **inject pending agent results BEFORE the user's message** (F9: results are context, the user instruction stays last/primary):
-```python
-    def _process_next_message(self) -> None:
-        if not self._pending_messages:
-            return
-        user_input = self._pending_messages.pop(0)
-        chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.add_user_message(user_input)
-        if self._agent_registry:
-            inject_agent_results(self._agent_registry, self.messages, self._result_inline_limit())
-        self.messages.append({"role": "user", "content": user_input})
-        self.start_llm_processing()
-```
-
-7f. `_finish_processing` — **lease-aware** (a stale/replaced worker's finish must not touch the active turn, F2):
-```python
-    def _finish_processing(self, turn_id: int = 0) -> None:
-        if not self._arbiter.end_turn(turn_id):
-            return  # stale/replaced worker — the active turn is owned by someone else
-        self._maybe_stop_activity_timer()
-        self.query_one("#activity-bar", ActivityBar).clear()
-        self.query_one("#input-bar", CLIInputBar).focus_input()
-
-        if self._pending_messages:
-            self._process_next_message()        # queued user input wins
-        elif self._agent_registry:
-            self._arbiter.request_agent_wake()  # re-check stragglers
-```
-
-7g. `action_cancel` (lines ~710-724) — replace `self._is_processing = False` with arbiter cancel + cycle reset:
-```python
-        self._arbiter.cancel()                 # invalidate active lease + pending wake
-        self._new_conversation_cycle()         # in-flight agents' results become stale + purge
-```
-
-- [ ] **Step 8: Add the centralized conversation-reset method (F5)** — in `AyderApp`:
-
-```python
     def _new_conversation_cycle(self) -> None:
-        """Invalidate in-flight agent results when the conversation is replaced
-        (clear / compact / skill / load-context / provider or model switch), so a
-        result from a prior cycle cannot inject into the new conversation.
+        """Invalidate in-flight agent results when the conversation is REPLACED
+        (clear / compact / skill / provider or model switch). A prior-cycle result
+        cannot then inject into the new conversation.
         """
         if self._agent_registry:
             self._agent_registry.new_cycle()
             self._agent_registry.drain_results()
 ```
 
-- [ ] **Step 9: Run the injection + agent + tui regression tests**
+- [ ] **Step 10: Fix `inject_skill` to mutate in place (F3)** — `src/ayder_cli/tui/app.py:427`:
+```python
+        # was: self.messages = [ ... ]
+        self.messages[:] = [ ... ]             # in-place — keeps chat_loop.messages connected
+```
+(The identity test `app.chat_loop.messages is app.messages` lives in Task 8.)
+
+- [ ] **Step 11: Command-transition API** — `src/ayder_cli/tui/commands.py`. Breaking commands stop mutating inline + calling `start_llm_processing`; they defer the mutation into `prepare` and pass `interrupt=True`.
+
+`INTERRUPT_AND_RUN` example — `handle_ask`:
+```python
+def handle_ask(app, args, chat_view):
+    q = args.strip()
+    if not q:
+        chat_view.add_system_message("Usage: /ask <question>")
+        return
+
+    def _prepare():
+        app.messages.append({"role": "user", "content": q})
+        chat_view.add_user_message(q)
+
+    app.request_turn(prepare=_prepare, no_tools=True, interrupt=True)
+```
+
+`INTERRUPT_AND_RUN` with conversation reset — `handle_compact`:
+```python
+def handle_compact(app, args, chat_view):
+    def _prepare():
+        # ... existing surgery: build conversation_text, clear, append compact_prompt ...
+        app._new_conversation_cycle()          # invalidate in-flight agent results
+        chat_view.add_system_message("Compacting: summarize → save → clear → load")
+
+    app.request_turn(prepare=_prepare, no_tools=False, interrupt=True)
+```
+
+`INTERRUPT_AND_MUTATE` — `handle_provider` (and `handle_model`): cancel the turn, apply runtime change when quiescent, start NO new turn:
+```python
+def handle_provider(app, args, chat_view):
+    # ... resolve target provider (or open the selection screen; its callback uses this same path) ...
+    def _prepare():
+        app._apply_provider(target)            # rebuild llm/chat_loop/system prompt;
+                                               # MUST keep chat_loop.messages is app.messages (mutate in place)
+        app._new_conversation_cycle()
+        chat_view.add_system_message(f"Provider → {target}")
+
+    app.request_turn(prepare=_prepare, run_loop=False, interrupt=True)
+```
+
+Apply the matching shape to the rest:
+
+| Command | Policy | Notes |
+|---------|--------|-------|
+| `/ask`, `/plan`, `/implement` | INTERRUPT_AND_RUN | defer the prompt append into `prepare` |
+| `/skill <name> <cmd>` | INTERRUPT_AND_RUN | `prepare` does the in-place skill replacement (Step 10) + `_new_conversation_cycle()` |
+| `/compact` | INTERRUPT_AND_RUN | `prepare` does message surgery + `_new_conversation_cycle()` |
+| `/provider`, `/model` (incl. selection-screen callbacks) | INTERRUPT_AND_MUTATE | `run_loop=False`; rebuild runtime in `prepare` + `_new_conversation_cycle()` |
+| `/clear` (`do_clear`) | — | in-place `app.messages.clear()` + `_new_conversation_cycle()`; if a turn runs, `app._run_task.cancel()` |
+| `/load-context` | SOFT-append | **APPENDS** a user message (`commands.py:886`) → **NO** cycle bump (prior-cycle results stay valid) |
+| `/notes`, `/tasks`, `/permission`, `/save-context` | SOFT | no `request_turn`, no cycle bump |
+
+- [ ] **Step 12: Corrected cycle-invalidation map (F5)** — `apply_pending_compact` is in **`src/ayder_cli/tui/app.py:808`** (not `application/`); after it reconstructs history, call `self._new_conversation_cycle()`. Confirm the only cycle-bump sites are: `action_cancel`, `do_clear`, `handle_compact`, `apply_pending_compact`, `handle_skill`, `handle_provider`, `handle_model` (and the provider/model selection-screen callbacks). **`/load-context` must NOT bump** (append semantics).
+
+- [ ] **Step 13: Run the injection + agent + tui regressions**
 
 Run: `uv run pytest tests/ui/ tests/tui/ tests/agents/ -v`
-Expected: PASS. Update any test referencing `_wake_for_pending_agents`, `.summary`, or `_is_processing` writes.
+Expected: PASS. Update any test referencing `_wake_for_pending_agents`, `.summary`, `_is_processing` writes, or `start_llm_processing`.
 
-- [ ] **Step 10: Wire `_new_conversation_cycle()` into every conversation-replacement path (F5)**
-
-Add `app._new_conversation_cycle()` immediately after the conversation is cleared/rebuilt in each handler:
-- `src/ayder_cli/tui/commands.py`: `do_clear` (after `app.messages.clear()`), `handle_compact` (after the `app.messages.clear()` at ~353), `handle_skill` (after it assigns/clears `app.messages`), `handle_load_context` (after it replaces history), `handle_provider` and `handle_model` (after the runtime/system-prompt rebuild).
-- `apply_pending_compact` (the compaction consumer): after it reconstructs history, call `app._new_conversation_cycle()`.
-
-`/load-context` REPLACES history → new cycle. (Plain context *append*, if any, would not.) `do_clear` additionally calls `app._arbiter.cancel()` (a clear hard-stops any running turn).
-
-- [ ] **Step 11: Run clear/compact coordination regressions**
-
-Run: `uv run pytest tests/tui/test_do_clear_coordination.py tests/tui/test_pending_compact_consumer.py -v`
-Expected: PASS (adjust any test that asserted the old `_is_processing` flag directly).
-
-- [ ] **Step 12: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
-git add src/ayder_cli/tui/app.py src/ayder_cli/tui/commands.py src/ayder_cli/application/ tests/ui/test_agent_wake_injection.py
-git commit -m "feat(tui): lease-based TurnArbiter wiring; user-role injection; centralized cycle invalidation"
+git add src/ayder_cli/tui/app.py src/ayder_cli/tui/commands.py tests/ui/test_agent_wake_injection.py
+git commit -m "feat(tui): serial TurnEngine + command-transition API; user-role injection; cycle invalidation"
 ```
 
 ---
@@ -1574,28 +1527,34 @@ git commit -m "docs(agents): capability prompt — push delivery + caller-specif
 
 ---
 
-### Task 8: TUI integration tests (race matrix) + CLI scope note
+### Task 8: TurnEngine lifecycle + wiring tests + CLI scope note
 
-**Coverage split:** the concurrency race matrix (single-turn lease, stale-finish no-op, debounce, preemption, empty-drain, failure rollback) is proven deterministically in `tests/agents/test_turn_arbiter.py` (Task 5); delimiter safety in `test_summary.py` (Task 1); provider role/order in `test_agent_result_roundtrip.py` (Task 4). **This task** proves the *AyderApp wiring* — that the app actually threads the lease, queues user text, orders results before the user instruction (F9), and invalidates the cycle. No Textual `run_test()` is needed: the app is constructed with `create_runtime` patched and `run_worker`/`query_one`/`set_timer`/`call_later` stubbed, then the lifecycle methods are driven directly.
+**Coverage split:** debounce coalescing is proven in `tests/agents/test_wake_debouncer.py` (Task 5); delimiter safety in `test_summary.py` (Task 1); provider role/order in `test_agent_result_roundtrip.py` (Task 4). **This task** proves the engine itself: (F7) a real async test that an interrupt is **serialized** — the cancelled turn fully exits before the replacement starts; (F3) skill replacement keeps `chat_loop.messages is app.messages`; (F9) results precede the user instruction; (F5) cycle reset purges. The app is constructed with `create_runtime` patched and `query_one`/`set_timer`/`call_later` stubbed; the engine is started manually and `chat_loop` swapped for a controllable fake.
 
 **Files:**
 - Test: `tests/tui/test_agent_wake_integration.py` (new)
 - Modify: `src/ayder_cli/cli_runner.py` (comment only — document TUI-only push scope)
 
 **Interfaces:**
-- Consumes: `AyderApp`, `AgentResult` (Task 1), `inject_agent_results` (Task 6), `TurnArbiter` (Task 5).
+- Consumes: `AyderApp` (`request_turn`, `_turn_engine`, `is_turn_running`, `_process_next_message`, `_new_conversation_cycle`, `inject_skill`), `AgentResult` (Task 1).
+
+**Note on backend:** these async tests assume the asyncio anyio backend (`asyncio.create_task`/`Queue`). If the project's `anyio_backend` fixture also yields `trio`, restrict with `@pytest.mark.anyio` + an `anyio_backend` of `"asyncio"` for this module.
 
 - [ ] **Step 1: Write the failing tests** — create `tests/tui/test_agent_wake_integration.py`:
 
 ```python
-"""AyderApp wiring tests for agent-result push delivery.
+"""AyderApp TurnEngine lifecycle + wiring tests.
 
-The concurrency race matrix is proven in tests/agents/test_turn_arbiter.py.
-Here we exercise the REAL app methods with run_worker/query_one/set_timer/
-call_later stubbed (no Textual run loop, no real LLM).
+Debounce coalescing is proven in tests/agents/test_wake_debouncer.py. Here we
+drive the REAL engine: serialization on interrupt (F7), skill list identity
+(F3), result-before-user ordering (F9), and cycle invalidation (F5).
 """
 
+import asyncio
+import contextlib
 from unittest.mock import MagicMock
+
+import pytest
 
 from ayder_cli.agents.summary import AgentResult
 
@@ -1626,52 +1585,88 @@ def _fake_rt():
 
 
 def _build_app(monkeypatch):
-    from ayder_cli.application import runtime_factory
+    from ayder_cli.application import runtime_factory  # noqa: F401 (patched below)
     from ayder_cli.tui import app as app_mod
     monkeypatch.setattr(app_mod, "create_runtime", lambda **k: _fake_rt())
-    app = app_mod.AyderApp()
+    app = app_mod.AyderApp()             # builds _requests, _debouncer; engine NOT started
     monkeypatch.setattr(app, "query_one", lambda *a, **k: MagicMock())
     monkeypatch.setattr(app, "call_later", lambda fn, *a, **k: fn(*a, **k))
     monkeypatch.setattr(app, "set_timer", lambda delay, cb: {"delay": delay, "cb": cb})
-
-    def _run_worker(coro, **k):
-        try:
-            coro.close()                 # we never run the chat loop; avoid "never awaited"
-        except Exception:
-            pass
-        return MagicMock()
-
-    monkeypatch.setattr(app, "run_worker", _run_worker)
     return app
 
 
-def test_lease_threading_and_stale_finish_is_ignored(monkeypatch):
-    # F1/F2 at the app level: interrupt issues a fresh lease; the old worker's
-    # finish (stale lease) must NOT end the replacement turn.
+async def _drain_engine(app):
+    app._engine_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await app._engine_task
+
+
+@pytest.mark.anyio
+async def test_interrupt_is_serialized(monkeypatch):
+    # F7: the cancelled turn must FULLY exit before the replacement turn starts.
     app = _build_app(monkeypatch)
-    app.start_llm_processing()                       # turn A
-    a = app._arbiter._running_turn
-    assert app._arbiter.is_running
-    app.start_llm_processing()                       # breaking command interrupts -> turn B
-    b = app._arbiter._running_turn
-    assert b != a
-    app._finish_processing(a)                        # stale finish from worker A
-    assert app._arbiter.is_running                   # replacement B still owns the turn
-    app._finish_processing(b)                        # real finish
-    assert not app._arbiter.is_running
+    order = []
+    a_in = asyncio.Event()
+
+    class FakeLoop:
+        def __init__(self):
+            self.messages = app.messages
+        async def run(self, *, no_tools=False):
+            if not a_in.is_set():
+                a_in.set()
+                order.append("A-start")
+                try:
+                    await asyncio.sleep(3600)      # block until cancelled
+                finally:
+                    order.append("A-exit")
+            else:
+                order.append("B-start")
+
+    app.chat_loop = FakeLoop()
+    app._engine_task = asyncio.create_task(app._turn_engine())
+    app.request_turn()                             # turn A
+    await asyncio.wait_for(a_in.wait(), 1)
+    app.request_turn(interrupt=True)               # turn B interrupts A
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if order[-1:] == ["B-start"]:
+            break
+    assert order == ["A-start", "A-exit", "B-start"]   # A fully exits BEFORE B starts
+    await _drain_engine(app)
 
 
-def test_process_next_message_injects_results_before_user(monkeypatch):
-    # F9: pending agent results are CONTEXT and must precede the user's instruction.
+def test_skill_replacement_keeps_chat_loop_messages_connected(monkeypatch):
+    # F3: inject_skill must mutate in place so chat_loop keeps the same list.
+    app = _build_app(monkeypatch)
+    assert app.chat_loop.messages is app.messages      # connected at construction
+    app.inject_skill("demo", "skill content")
+    assert app.chat_loop.messages is app.messages      # STILL the same list (in-place)
+
+
+@pytest.mark.anyio
+async def test_results_precede_user_message_in_turn(monkeypatch):
+    # F9: results (context) are injected before the user's instruction, inside the turn.
     app = _build_app(monkeypatch)
     reg = FakeRegistry()
     reg.complete(AgentResult(1, 1, "a", "completed", "RESULT-BODY", None))
     app._agent_registry = reg
     app.messages = []
+    ran = asyncio.Event()
+
+    class FakeLoop:
+        def __init__(self):
+            self.messages = app.messages
+        async def run(self, *, no_tools=False):
+            ran.set()
+
+    app.chat_loop = FakeLoop()
+    app._engine_task = asyncio.create_task(app._turn_engine())
     app._pending_messages = ["USER ASK"]
-    app._process_next_message()
-    assert "RESULT-BODY" in app.messages[0]["content"]   # result first
+    app._process_next_message()                        # enqueues request_turn(prepare=inject+append)
+    await asyncio.wait_for(ran.wait(), 1)
+    assert "RESULT-BODY" in app.messages[0]["content"]
     assert app.messages[1] == {"role": "user", "content": "USER ASK"}
+    await _drain_engine(app)
 
 
 def test_new_conversation_cycle_invalidates_and_purges(monkeypatch):
@@ -1682,31 +1677,31 @@ def test_new_conversation_cycle_invalidates_and_purges(monkeypatch):
     app._agent_registry = reg
     app._new_conversation_cycle()
     assert reg.current_cycle == 2
-    assert reg.drain_results() == []                     # purged
+    assert reg.drain_results() == []
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/tui/test_agent_wake_integration.py -v`
-Expected: FAIL — methods/attributes not yet implemented (Tasks 5/6). (If `AyderApp()` construction needs an extra `rt` attribute beyond the MagicMock defaults, set it in `_fake_rt`; the constructor reads `config`, `llm_provider`, `tool_registry`, `process_manager`, `project_ctx`, `system_prompt`, `context_manager` — all MagicMock-satisfiable except `config`, which is a real `Config()`.)
+Expected: FAIL — engine/methods not yet implemented (Tasks 5/6). (If `AyderApp()` needs an extra `rt` attribute, set it in `_fake_rt`; the constructor reads `config`, `llm_provider`, `tool_registry`, `process_manager`, `project_ctx`, `system_prompt`, `context_manager` — all MagicMock-satisfiable except `config`, a real `Config()`.)
 
 - [ ] **Step 3: Run after Tasks 5/6 are implemented**
 
 Run: `uv run pytest tests/tui/test_agent_wake_integration.py -v`
-Expected: PASS.
+Expected: PASS (4 tests).
 
 - [ ] **Step 4: Document CLI scope** — add to `src/ayder_cli/cli_runner.py` near the agent-registry wiring (line ~56):
 ```python
-        # NOTE: push-delivery (TurnArbiter/debounce) is a TUI concern. In single-shot
+        # NOTE: the TurnEngine/debouncer push model is a TUI concern. In single-shot
         # CLI mode the call_agent result is consumed by the same blocking run; if
-        # interactive CLI gains background agents, lift the arbiter above this adapter.
+        # interactive CLI gains background agents, lift the engine above this adapter.
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add tests/tui/test_agent_wake_integration.py src/ayder_cli/cli_runner.py
-git commit -m "test(tui): app-wiring tests for lease threading, F9 ordering, cycle reset; CLI scope note"
+git commit -m "test(tui): engine serialization (F7) + skill identity (F3) + ordering/cycle; CLI scope note"
 ```
 
 ---
@@ -1734,14 +1729,14 @@ git add -A && git commit -m "chore: full-suite green for agent-result push deliv
 ## Self-Review
 
 **1. Spec / review coverage**
-- F1 single turn lock → Task 5 `TurnArbiter` + Task 6 routing `start_llm_processing` (covers all 7 command sites) + `is_running` guard. ✓
-- F2 stale timers on cancel/clear → Task 5 generation token + `cancel()`; Task 6 `action_cancel`/`do_clear` → `arbiter.cancel()` + queue purge + `new_cycle()`. ✓
+- F1 single turn → serial `TurnEngine` (Task 6); every start goes through `request_turn`; `test_interrupt_is_serialized` (Task 8). ✓
+- F2 stale finish on cancel/clear → engine awaits teardown; `action_cancel` cancels `_run_task`; `_new_conversation_cycle()` purges (Task 6). ✓
 - F3 `last_content` ≠ final → Task 1 `_final_message` from history + runner test with tool-then-final. ✓
-- F4 system authority → resolved by decision: user-role block (Task 6 Step 4) + delimiter/name sanitization (Task 1). ✓
+- F4 system authority → resolved by decision: user-role block + delimiter/name sanitization (Tasks 1/6). ✓
 - F5 provider semantics → user role + Task 4 Claude/Gemini round-trip test. ✓
-- F6 failure paths → Task 5 empty-drain guard + generation re-check; arbiter never starts an empty turn. ✓
-- F7 user priority in debounce → Task 5 `begin_turn` preemption + Task 6 `is_running` guard; arbiter test `test_user_preempts_debounce`. ✓
-- F8 tests → arbiter unit (cases 1,2,3,4,6,8) + Task 8 Pilot integration (1,4,7) + Task 4 (10) + Task 1 (9). ✓
+- F6 failure paths → engine `try/finally`; `_fire_agent_wake` skips when zero injected (Tasks 5/6). ✓
+- F7 user priority → user text queues while `is_turn_running`; debouncer stays out while running (Task 5 `test_no_wake_while_running`, Task 6). ✓
+- F8 tests → debouncer unit (Task 5) + Task 8 async lifecycle + Task 4 (provider) + Task 1 (delimiter). ✓
 - cycle ownership → Task 1 `cycle_id` + registry `new_cycle`/stamp/drop; Task 6 filter + bump sites. ✓
 - "as soon as" wording, completion-order semantics, error-as-metadata → Task 7 prompt + Task 1 format. ✓
 - naming migration → Task 1 `drain_results`/`has_pending_results`/`_result_queue`. ✓
@@ -1752,19 +1747,28 @@ git add -A && git commit -m "chore: full-suite green for agent-result push deliv
 - Agent cancellation → explicitly next phase (Global Constraints). ✓
 - Agent notes (spec `2026-06-18-agent-notes-design.md`) → `AgentResult.note_path` + `format_for_injection` `note=` (Task 1); `write_agent_note` + `_write_note` extraction + runner `_persist_note` wiring (Task 2b); capability `note=` line (Task 7); best-effort, all statuses, never fails the run; reuses existing `/notes` browser. ✓
 
-**Re-review (rev. 4) coverage:**
-- F1 begin_turn reject → **pushed back** (breaking commands interrupt, per product decision); lease makes interrupt safe (Task 5). ✓
-- F2 stale worker finish → `end_turn(turn_id)` lease check (Task 5) + lease-threaded `_finish_processing` (Task 6 Step 7f); tests `test_stale_worker_finish...` + `test_lease_threading...`. ✓
-- F3 no-agent coordination → always-construct arbiter (Task 6 Step 6). ✓
-- F4 failure rollback → try/except in arbiter (Task 5) + three rollback tests. ✓
-- F5 cycle invalidation → `_new_conversation_cycle()` + wired into all replacement paths (Task 6 Steps 8/10). ✓
-- F6 note collisions → exclusive create + suffix; `test_same_run_does_not_overwrite` (Task 2b). ✓
-- F7 YAML escaping → `_yaml_scalar`; `test_frontmatter_escapes_unsafe_agent_name` (Task 2b). ✓
-- F8 error classification → status `error` on `last_system_error`; `test_runner_reports_error_when_stream_fails_after_tool_text` (Task 1). ✓
-- F9 ordering → results before user message; `test_process_next_message_injects_results_before_user` (Task 8). ✓
-- F10 oversized → `render_for_injection` path-only cap + `agent_result_inline_limit` (Tasks 1/3/6). ✓
-- F11 optional note → "MAY carry / best-effort" prompt + test (Task 7). ✓
+**Review v3 findings — carried into rev. 5:**
+- F1/F2 single-turn / stale finish → now solved by the **serial `TurnEngine`** (awaits each turn's teardown before the next), which supersedes the lease. ✓
+- F3 no-agent coordination → engine + debouncer always constructed (Task 6 Steps 4-6). ✓
+- F4 failure handling → engine `try/finally` + debouncer schedule-rollback (Tasks 5/6). ✓
+- F5 cycle invalidation → `_new_conversation_cycle()` (Task 6 Steps 9/12). ✓
+- F6 note collisions → exclusive create + suffix (Task 2b). ✓
+- F7 YAML safety → `json.dumps` scalars (Task 2b). ✓
+- F8 error classification → `error` on `last_system_error` (Task 1). ✓
+- F9 ordering → results before user message (Tasks 6/8). ✓
+- F10 oversized → path-only cap (Tasks 1/3/6). ✓
+- F11 optional note → prompt wording (Task 7). ✓
 
-**2. Placeholder scan** — clean. Task 8 now contains complete, runnable tests (real-app construction with `create_runtime` patched and `run_worker`/`query_one` stubbed — no Textual run loop, no `...`). Every code/test step is complete.
+**Re-review v4 findings (rev. 5):**
+- v4-F1 serialized interrupt → serial `TurnEngine` awaits teardown before replacement; `test_interrupt_is_serialized` (Task 8). ✓
+- v4-F2 quiescent mutation → command-transition API; breaking commands mutate inside `prepare` (Task 6 Step 11). ✓
+- v4-F3 skill list identity → in-place `self.messages[:]`; `test_skill_replacement_keeps_chat_loop_messages_connected` (Tasks 6/8). ✓
+- v4-F4 worker-start rollback → dissolved by the single-consumer engine `try/finally` (no lease) (Task 6 Step 4). ✓
+- v4-F5 cycle map → corrected: `/load-context` appends (no bump), `apply_pending_compact` in `tui/app.py` (Task 6 Step 12). ✓
+- v4-F6 YAML tabs/controls → `json.dumps`; tab test (Task 2b). ✓
+- v4-F7 lifecycle test → real async serialization test (Task 8). ✓
+- Provider/model policy → `INTERRUPT_AND_MUTATE` (product decision). ✓
 
-**3. Type consistency** — `AgentResult(run_id, cycle_id, agent_name, status, content, error, note_path=None)` identical across Tasks 1/4/6/8 (the trailing `note_path` defaults to `None`, so the 6-positional constructions in Tasks 4/6/8 stay valid); `render_for_injection(inline_limit=None)` (Task 1) consumed by `inject_agent_results(registry, messages, inline_limit=None) -> int` (Task 6); `write_agent_note(...) -> str | None` (Task 2b) consumed by the runner's `_persist_note`, result → `AgentResult.note_path`; **lease types** — `begin_turn() -> int` and `end_turn(turn_id: int) -> bool` (Task 5) threaded through `start_llm_processing` → `_run_chat_loop(turn_id)` → `_finish_processing(turn_id)` (Task 6 Step 7); `TurnArbiter` constructor kwargs match Task 5 definition and Task 6 Step 6 wiring; `drain_results`/`has_pending_results`/`current_cycle`/`new_cycle` defined Task 1 and consumed Tasks 5/6/8; `_new_conversation_cycle()` defined Task 6 Step 8 and called Step 10.
+**2. Placeholder scan** — clean. Task 8 contains complete, runnable tests, incl. a real async serialization lifecycle test (engine started manually, `chat_loop` swapped for a controllable fake). No `...`.
+
+**3. Type consistency** — `AgentResult(run_id, cycle_id, agent_name, status, content, error, note_path=None)` identical across Tasks 1/4/6/8; `render_for_injection(inline_limit=None)` (Task 1) consumed by `inject_agent_results(registry, messages, inline_limit=None) -> int` (Task 6); `write_agent_note(...) -> str | None` (Task 2b) → `AgentResult.note_path`; **`WakeDebouncer(*, is_running, has_pending, fire, schedule, cancel_timer, debounce_s)`** (Task 5) constructed in Task 6 Step 5; **`TurnRequest`** + **`request_turn(prepare=None, *, no_tools=False, run_loop=True, interrupt=False)`** + `is_turn_running` + `_turn_engine`/`_run_task`/`_finish_turn`/`_fire_agent_wake` (Task 6) used by the command-transition API (Step 11) and Task 8; `drain_results`/`has_pending_results`/`current_cycle`/`new_cycle` (Task 1) consumed Tasks 5/6/8; `_new_conversation_cycle()` defined Task 6 Step 9, called Steps 11-12.
