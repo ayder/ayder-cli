@@ -16,9 +16,13 @@ from pathlib import Path
 from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.tool import (
     AGENT_TOOL_DEFINITION,
+    AGENT_STATUS_TOOL_DEFINITION,
     LIST_AGENTS_TOOL_DEFINITION,
+    READ_AGENT_RESULT_TOOL_DEFINITION,
     create_call_agent_handler,
+    create_agent_status_handler,
     create_list_agents_handler,
+    create_read_agent_result_handler,
 )
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.providers import ProviderUnavailableError
@@ -65,6 +69,10 @@ def _run_loop(
         rt.tool_registry.register_dynamic_tool(LIST_AGENTS_TOOL_DEFINITION, list_handler)
         handler = create_call_agent_handler(agent_registry)
         rt.tool_registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
+        rt.tool_registry.register_dynamic_tool(
+            AGENT_STATUS_TOOL_DEFINITION, create_agent_status_handler(agent_registry))
+        rt.tool_registry.register_dynamic_tool(
+            READ_AGENT_RESULT_TOOL_DEFINITION, create_read_agent_result_handler(agent_registry))
 
         cap_prompts = agent_registry.get_capability_prompts()
         if cap_prompts and messages[0].get("role") == "system":
