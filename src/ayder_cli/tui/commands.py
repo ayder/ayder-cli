@@ -305,16 +305,14 @@ def handle_tools(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def handle_verbose(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /verbose command."""
-
-    def _prepare() -> None:
-        current = getattr(app, "_verbose_mode", False)
-        app._verbose_mode = not current
-        if hasattr(app, "chat_loop"):
-            app.chat_loop.config.verbose = app._verbose_mode
-        status = "ON" if app._verbose_mode else "OFF"
-        chat_view.add_system_message(f"Verbose mode: {status}")
-
-    app.request_turn(prepare=_prepare, run_loop=False)
+    # Loop-safe scalar mutation: apply immediately (NOT deferred), same as
+    # /permission — toggling a debug flag does not race the running turn.
+    current = getattr(app, "_verbose_mode", False)
+    app._verbose_mode = not current
+    if hasattr(app, "chat_loop"):
+        app.chat_loop.config.verbose = app._verbose_mode
+    status = "ON" if app._verbose_mode else "OFF"
+    chat_view.add_system_message(f"Verbose mode: {status}")
 
 
 def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -707,15 +705,16 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     def on_result(new_permissions: set | None):
         if new_permissions is not None:
-            def _prepare() -> None:
-                app.permissions = new_permissions
-                app.chat_loop.config.permissions = new_permissions
-                status_bar = app.query_one("#status-bar", StatusBar)
-                status_bar.update_permissions(new_permissions)
-                mode_str = "".join(sorted(new_permissions))
-                chat_view.add_system_message(f"Permissions updated: mode {mode_str}")
-
-            app.request_turn(prepare=_prepare, run_loop=False)
+            # Loop-safe scalar mutation: apply immediately (NOT deferred) so a
+            # grant/revoke takes effect on the in-flight turn. on_result runs on
+            # the event loop, and `permissions` is a single config field read at
+            # each tool gate — no race with the cooperatively-scheduled chat loop.
+            app.permissions = new_permissions
+            app.chat_loop.config.permissions = new_permissions
+            status_bar = app.query_one("#status-bar", StatusBar)
+            status_bar.update_permissions(new_permissions)
+            mode_str = "".join(sorted(new_permissions))
+            chat_view.add_system_message(f"Permissions updated: mode {mode_str}")
 
     app.push_screen(CLIPermissionScreen(app.permissions), on_result)
 

@@ -77,6 +77,8 @@ class AgentRegistry:
         out of delivery (snapshot/read/nudge) for the new conversation."""
         self._current_generation += 1
         self._settled = {}
+        logger.debug("agent generation -> %d (settled reset; %d run(s) retained)",
+                     self._current_generation, len(self._runs))
         return self._current_generation
 
     async def _on_loop_coro(self, fn):
@@ -178,6 +180,7 @@ class AgentRegistry:
                        agent_name=name, started_at=time.monotonic())
         self._runs[run_id] = run
         self._active[run_id] = runner
+        logger.debug("agent dispatch: run #%d agent='%s' gen=%d", run_id, name, self._current_generation)
         asyncio.create_task(self._run_and_queue(run, runner, task))
         return run_id
 
@@ -197,6 +200,9 @@ class AgentRegistry:
                 run.note_path = outcome.note_path
             run.finished_at = time.monotonic()
             run.done_event.set()
+            logger.debug("agent done: run #%d agent='%s' status='%s' %ds",
+                         run.run_id, run.agent_name, run.status,
+                         run.working_time(now=run.finished_at))
             if run.generation == self._current_generation and outcome is not None:
                 self._settled[run.agent_name] = outcome.status
             if self._on_complete is not None:
@@ -213,6 +219,9 @@ class AgentRegistry:
 
     def _result_payload(self, run: AgentRun) -> dict:
         """Full payload for a TERMINAL run; marks it drained. Never call on a working run."""
+        if not run.drained:
+            logger.debug("agent result drained: run #%d agent='%s' status='%s'",
+                         run.run_id, run.agent_name, run.status)
         run.drained = True
         return {"run_id": run.run_id, "name": run.agent_name, "status": run.status,
                 "result": run.result, "note_path": run.note_path,
