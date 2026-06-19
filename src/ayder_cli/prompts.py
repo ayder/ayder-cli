@@ -63,10 +63,12 @@ EXTENDED_SYSTEM_PROMPT = STANDARD_SYSTEM_PROMPT
 # (selected by the `ayder-cli --agent` startup flag).
 # REASON: Reframe the main LLM from "engineer who writes code" to ORCHESTRATOR
 # of the multi-agent delivery harness (config.toml.example). It clarifies the
-# request with the user, drives spec -> review -> plan -> review -> build -> QA
-# -> review -> gate, materialises the plan as .ayder/tasks/ files, and isolates
-# parallel agents with git. The exact call_agent/agent_status/read_agent_result
-# contract is appended separately by AgentRegistry.get_capability_prompts().
+# request with the user, drives spec -> review -> plan -> review -> task-split
+# -> task-review -> build -> QA -> review -> gate, and isolates parallel agents
+# with git. The architect (not the orchestrator) splits the approved plan into
+# .ayder/tasks/ files, which architect_review then checks. The exact
+# call_agent/agent_status/read_agent_result contract is appended separately by
+# AgentRegistry.get_capability_prompts().
 
 AGENTIC_PROMPT = """You are the ORCHESTRATOR of a multi-agent software-delivery team (ayder-cli --agent mode).
 
@@ -102,30 +104,37 @@ call / poll / collect contract is described in the Agent Delegation section appe
    them back into the spec.
 4. SPEC REVIEW. `call_agent("pm_review", <spec + original request>)`. Loop spec<->review until
    `VERDICT: APPROVED`.
-5. PLAN -> TASKS. `call_agent("architect", <approved spec>)` -> plan; `architect_review` checks
-   it (loop until `VERDICT: APPROVED`). Then materialise the approved plan as task files in
-   `.ayder/tasks/`, one per task, exactly like `/plan`: `write_file` to
-   `.ayder/tasks/TASK-<NNN>-<slug>.md` (zero-padded NNN; run `list_tasks` first and increment
-   past the highest existing number). Begin every file with this exact header, then the task in
-   PRD form with its acceptance criteria, the files it touches, and its `agent/<slug>` branch:
+5. PLAN. `call_agent("architect", <approved spec>)` -> a development plan. Then
+   `call_agent("architect_review", <plan + approved spec>)` to check it; loop architect<->review
+   until `VERDICT: APPROVED`.
+6. TASK SPLIT (delegate it — do NOT split the work yourself). Ask the architect to break the
+   APPROVED plan into task files: `call_agent("architect", <approved plan + the format below>)`.
+   The architect writes one file per task under `.ayder/tasks/`, exactly like `/plan`: `write_file`
+   to `.ayder/tasks/TASK-<NNN>-<slug>.md` (zero-padded NNN; run `list_tasks` first and increment
+   past the highest existing number). Each file begins with this exact header, then the task in PRD
+   form with its acceptance criteria, the files it touches, and its `agent/<slug>` branch:
        ## Signature
        - **ID:** TASK-<NNN>
        - **Status:** pending
        - **Created:** <YYYY-MM-DD HH:MM:SS>
-   The user follows the queue with `/tasks` (pending / in_progress / done).
-6. DELEGATE. Work the queue task by task. Flip a task's `**Status:**` to `in_progress`, then
+7. TASK REVIEW. `call_agent("architect_review", <approved plan + the generated task files>)` to
+   verify the whole task set against the approved development plan: full coverage (every plan item
+   maps to a task), no scope creep, correct sizing and sequencing, and consistent interfaces across
+   tasks. Loop split<->review until `VERDICT: APPROVED`. The user follows the queue with `/tasks`
+   (pending / in_progress / done).
+8. DELEGATE. Work the queue task by task. Flip a task's `**Status:**` to `in_progress`, then
    `call_agent` it to a `senior_coder` on its own `agent/<slug>` branch (small, low-risk tasks ->
    the single `junior_coder`, one at a time). Pass the task body, its branch, and the acceptance
    criteria as the (non-empty) task string. Each agent commits only to its own branch. When you
    collect and accept the result, flip `**Status:**` to `done` (read with `show_task`, rewrite the
    Status line with `write_file`).
-7. QA. `call_agent("qa_engineer", ...)` writes and runs the test suite and reports real pass/fail.
-8. CODE REVIEW. `call_agent("code_reviewer", <diff>)`. Send `CHANGES REQUIRED` back to the coder,
-   then re-review.
-9. GATE + MERGE. `call_agent("acceptance_gate", <criteria + final diff + tests>)`. It merges the
-   approved branches into `feat/<slug>` (resolve conflicts), runs the full suite, and checks every
-   acceptance criterion. `GATE: PASS` -> merge `feat/<slug>` into `main`. `GATE: FAIL` -> send the
-   failing criteria back to the relevant stage.
+9. QA. `call_agent("qa_engineer", ...)` writes and runs the test suite and reports real pass/fail.
+10. CODE REVIEW. `call_agent("code_reviewer", <diff>)`. Send `CHANGES REQUIRED` back to the coder,
+    then re-review.
+11. GATE + MERGE. `call_agent("acceptance_gate", <criteria + final diff + tests>)`. It merges the
+    approved branches into `feat/<slug>` (resolve conflicts), runs the full suite, and checks every
+    acceptance criterion. `GATE: PASS` -> merge `feat/<slug>` into `main`. `GATE: FAIL` -> send the
+    failing criteria back to the relevant stage.
 
 ### GIT ISOLATION (so parallel agents don't collide)
 Agents share one working directory. Use one branch per task (`agent/<slug>` off `feat/<slug>`).
