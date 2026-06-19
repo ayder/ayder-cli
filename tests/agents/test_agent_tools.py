@@ -77,7 +77,7 @@ def test_cli_registers_pull_tools(monkeypatch):
                           max_output_tokens=1, stop_sequences=[], tool_tags=None, max_history_messages=30,
                           verbose=False)
     rt.tool_registry = fake_registry_obj
-    monkeypatch.setattr(cli, "create_runtime", lambda: rt)
+    monkeypatch.setattr(cli, "create_runtime", lambda **k: rt)
     monkeypatch.setattr(cli, "AgentRegistry", lambda **k: fake_reg)
     monkeypatch.setattr(cli, "ChatLoop", MagicMock())
     monkeypatch.setattr(cli.asyncio, "run", lambda coro: coro.close())

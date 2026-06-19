@@ -94,10 +94,22 @@ class AppCallbacks:
         chat_view.add_thinking_message(text)
 
     def on_token_usage(self, total_tokens: int) -> None:
+        # Show LIVE context-window fill (current / window size), not the
+        # cumulative session counter. The context manager's stats were just
+        # refreshed via update_from_response before this callback fired.
+        cm = getattr(self._app, "context_manager", None)
+        if cm is None or not hasattr(cm, "get_stats"):
+            return
+        try:
+            stats = cm.get_stats()
+            used = int(stats.total_tokens)
+            total = int(stats.total_tokens + stats.available_tokens)
+        except Exception:
+            return
         self._app.call_later(
-            lambda t=total_tokens: self._app.query_one(
+            lambda u=used, t=total: self._app.query_one(
                 "#status-bar", StatusBar
-            ).update_token_usage(t)
+            ).update_context_usage(u, t)
         )
 
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
@@ -169,6 +181,7 @@ class AyderApp(App):
         model: str = "default",
         safe_mode: bool = False,
         permissions: set | None = None,
+        agent_mode: bool = False,
         **kwargs,
     ):
         """
@@ -178,6 +191,8 @@ class AyderApp(App):
             model: The LLM model name to use
             safe_mode: Whether to enable safe mode
             permissions: Set of granted permission levels ("r", "w", "x")
+            agent_mode: When True, drive the multi-agent harness — inject the
+                AGENTIC orchestrator system prompt (ayder-cli --agent).
         """
         super().__init__(**kwargs)
         self.safe_mode = safe_mode
@@ -191,7 +206,7 @@ class AyderApp(App):
         self._active_skill: str | None = None
 
         # Build all shared runtime components via the factory
-        rt = create_runtime()
+        rt = create_runtime(prompt_tier="AGENTIC" if agent_mode else None)
         self.config = rt.config
         if isinstance(self.config, Config) and not is_logging_configured():
             setup_logging(self.config)
@@ -793,17 +808,37 @@ class AyderApp(App):
         self.push_screen(CLIHelpScreen())
 
     def action_scroll_chat_up(self) -> None:
-        """Scroll chat view up one page."""
+        """PageUp: scroll the agents panel if it is open, else the chat view."""
+        if self._scroll_agent_panel("page_up"):
+            return
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.disable_follow_mode()
         chat_view.scroll_page_up(animate=False)
 
     def action_scroll_chat_down(self) -> None:
-        """Scroll chat view down one page."""
+        """PageDown: scroll the agents panel if it is open, else the chat view."""
+        if self._scroll_agent_panel("page_down"):
+            return
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.scroll_page_down(animate=False)
         if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
             chat_view.enable_follow_mode()
+
+    def _scroll_agent_panel(self, motion: str) -> bool:
+        """Scroll the agents panel when it is visible (Ctrl+G).
+
+        ``motion`` is a Widget.scroll_* suffix ('page_up', 'page_down', 'up',
+        'down', 'home', 'end'). Returns True when the panel handled the scroll
+        so the caller leaves the chat view alone; False otherwise (hidden/absent).
+        """
+        try:
+            panel = self.query_one("#agent-panel", AgentPanel)
+        except Exception:
+            return False
+        if not panel.display:
+            return False
+        getattr(panel, f"scroll_{motion}")(animate=False)
+        return True
 
     def action_clear(self) -> None:
         """Clear chat history."""

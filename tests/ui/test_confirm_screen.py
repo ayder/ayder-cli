@@ -320,6 +320,7 @@ class TestRunTuiPermissions:
                 model="default",
                 safe_mode=False,
                 permissions={"r", "w"},
+                agent_mode=False,
             )
 
     def test_run_tui_default_permissions(self):
@@ -334,6 +335,7 @@ class TestRunTuiPermissions:
                 model="default",
                 safe_mode=False,
                 permissions=None,
+                agent_mode=False,
             )
 
 

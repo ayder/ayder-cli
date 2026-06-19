@@ -43,6 +43,7 @@ def create_runtime(
     config: Config | None = None,
     project_root: str = ".",
     model_name: str | None = None,
+    prompt_tier: str | None = None,
 ) -> RuntimeComponents:
     """Assemble and return all shared runtime components.
 
@@ -50,6 +51,8 @@ def create_runtime(
         config: Pre-built Config object; loads from disk if None.
         project_root: Project root directory (default: current directory).
         model_name: Override model name from config when provided.
+        prompt_tier: Override the system-prompt tier from config when provided
+            (e.g. "AGENTIC" for `ayder-cli --agent`). See prompts.get_system_prompt.
 
     Returns:
         RuntimeComponents with all dependencies wired.
@@ -58,6 +61,9 @@ def create_runtime(
 
     if model_name:
         cfg = cfg.model_copy(update={"model": model_name})
+
+    if prompt_tier:
+        cfg = cfg.model_copy(update={"prompt": prompt_tier})
 
     llm_provider: AIProvider = provider_orchestrator.create(cfg)
     project_ctx = ProjectContext(project_root)

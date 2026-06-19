@@ -19,7 +19,7 @@ class TestRunCommand:
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "test prompt", permissions={"r"}
+            "test prompt", permissions={"r"}, agent_mode=False
         )
 
     @patch('ayder_cli.cli_runner._run_loop', side_effect=Exception("Loop error"))
@@ -41,7 +41,19 @@ class TestRunCommand:
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "test prompt", permissions={"r", "w"}
+            "test prompt", permissions={"r", "w"}, agent_mode=False
+        )
+
+    @patch('ayder_cli.cli_runner._run_loop', return_value=0)
+    def test_run_command_agent_mode_propagates(self, mock_run_loop):
+        """--agent flows through run_command -> _run_loop as agent_mode=True."""
+        from ayder_cli.cli_runner import run_command
+
+        result = run_command("build X", permissions={"r"}, agent_mode=True)
+
+        assert result == 0
+        mock_run_loop.assert_called_once_with(
+            "build X", permissions={"r"}, agent_mode=True
         )
 
 
@@ -372,6 +384,31 @@ class TestMainPermissionHandling:
             call_kwargs = mock_run.call_args[1]
             assert 'http' in call_kwargs['permissions']
             assert 'r' in call_kwargs['permissions']
+
+    def test_main_agent_flag_implies_write_execute_http(self):
+        """--agent implies w+x+http and forwards agent_mode=True to run_command."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+
+        mock_config = Config(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+        )
+
+        with patch.object(sys, 'argv', ['ayder', '--agent', 'build a feature']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+
+            with pytest.raises(SystemExit):
+                main()
+
+            call_kwargs = mock_run.call_args[1]
+            assert {'r', 'w', 'x', 'http'} <= call_kwargs['permissions']
+            assert call_kwargs['agent_mode'] is True
 
     def test_main_default_permissions_only_read(self):
         """Test that default permissions only include 'r'."""

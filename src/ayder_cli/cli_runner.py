@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 def _run_loop(
     prompt: str,
     permissions: set | None = None,
+    agent_mode: bool = False,
 ) -> int:
     """Create a ChatLoop with CliCallbacks and run it.
 
@@ -44,11 +45,13 @@ def _run_loop(
     Args:
         prompt: The user prompt to send to the loop.
         permissions: Granted permission categories.
+        agent_mode: When True, inject the AGENTIC orchestrator system prompt
+            (ayder-cli --agent) so the main LLM drives the multi-agent harness.
 
     Returns:
         Exit code (0 for success, 1 for error).
     """
-    rt = create_runtime()
+    rt = create_runtime(prompt_tier="AGENTIC" if agent_mode else None)
 
     messages: list[dict] = [
         {"role": "system", "content": rt.system_prompt},
@@ -116,9 +119,10 @@ def _run_loop(
 class CommandRunner:
     """Runner for single command execution mode."""
 
-    def __init__(self, prompt: str, permissions=None):
+    def __init__(self, prompt: str, permissions=None, agent_mode: bool = False):
         self.prompt = prompt
         self.permissions = permissions
+        self.agent_mode = agent_mode
 
     def run(self) -> int:
         """Execute the command and return exit code.
@@ -130,6 +134,7 @@ class CommandRunner:
             return _run_loop(
                 self.prompt,
                 permissions=self.permissions,
+                agent_mode=self.agent_mode,
             )
         except ProviderUnavailableError as e:
             print(str(e), file=sys.stderr)   # message already starts with "Error:"
@@ -139,17 +144,18 @@ class CommandRunner:
             return 1
 
 
-def run_command(prompt: str, permissions=None) -> int:
+def run_command(prompt: str, permissions=None, agent_mode: bool = False) -> int:
     """Execute a single command and return exit code.
 
     Args:
         prompt: The command/prompt to execute
         permissions: Set of granted permission categories (e.g. {"r", "w", "x", "http"})
+        agent_mode: When True, inject the AGENTIC orchestrator system prompt (ayder-cli --agent).
 
     Returns:
         Exit code (0 for success, 1 for error)
     """
-    runner = CommandRunner(prompt, permissions=permissions)
+    runner = CommandRunner(prompt, permissions=permissions, agent_mode=agent_mode)
     return runner.run()
 
 

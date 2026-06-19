@@ -571,6 +571,8 @@ class _SubmitTextArea(TextArea):
         if event.key == "pageup":
             event.prevent_default()
             event.stop()
+            if self._scroll_agent_panel("page_up"):
+                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.disable_follow_mode()
             chat_view.scroll_page_up(animate=False)
@@ -579,6 +581,8 @@ class _SubmitTextArea(TextArea):
         if event.key == "pagedown":
             event.prevent_default()
             event.stop()
+            if self._scroll_agent_panel("page_down"):
+                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.scroll_page_down(animate=False)
             if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
@@ -588,6 +592,8 @@ class _SubmitTextArea(TextArea):
         if event.key == "ctrl+pageup":
             event.prevent_default()
             event.stop()
+            if self._scroll_agent_panel("up"):
+                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.disable_follow_mode()
             chat_view.scroll_up(animate=False)
@@ -596,6 +602,8 @@ class _SubmitTextArea(TextArea):
         if event.key == "ctrl+pagedown":
             event.prevent_default()
             event.stop()
+            if self._scroll_agent_panel("down"):
+                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.scroll_down(animate=False)
             if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
@@ -605,6 +613,8 @@ class _SubmitTextArea(TextArea):
         if event.key == "home":
             event.prevent_default()
             event.stop()
+            if self._scroll_agent_panel("home"):
+                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.disable_follow_mode()
             chat_view.scroll_home(animate=False)
@@ -613,12 +623,30 @@ class _SubmitTextArea(TextArea):
         if event.key == "end":
             event.prevent_default()
             event.stop()
+            if self._scroll_agent_panel("end"):
+                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.enable_follow_mode()
             chat_view.scroll_end(animate=False)
             return
 
         self._reset_tab_cycle()
+
+    def _scroll_agent_panel(self, motion: str) -> bool:
+        """Route a scroll motion to the agents panel when it is open (Ctrl+G).
+
+        ``motion`` is a Widget.scroll_* suffix: 'page_up', 'page_down', 'up',
+        'down', 'home', 'end'. Returns True when the panel is visible and
+        handled the scroll, so the caller leaves the chat view alone.
+        """
+        try:
+            panel = self.app.query_one("#agent-panel", AgentPanel)
+        except Exception:
+            return False
+        if not panel.display:
+            return False
+        getattr(panel, f"scroll_{motion}")(animate=False)
+        return True
 
     async def _on_paste(self, event) -> None:
         """Handle bracketed paste — collapse multi-line pastes.
@@ -773,7 +801,7 @@ class StatusBar(Horizontal):
         mode_str = "".join(sorted(self._permissions))
         yield Label(f"model: {self.model}", id="model-label")
         yield Label(f" | mode: {mode_str}", id="mode-label")
-        yield Label(" | tokens: 0", id="token-label")
+        yield Label(" | ctx: —", id="token-label")
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
         yield Static(classes="spacer")
@@ -785,11 +813,23 @@ class StatusBar(Horizontal):
         label = self.query_one("#model-label", Label)
         label.update(f"model: {model}")
 
-    def update_token_usage(self, count: int) -> None:
-        """Update token count display."""
-        self.token_count = count
+    def update_context_usage(self, used: int, total: int) -> None:
+        """Update the live context-window usage: current tokens / window size.
+
+        Shows how full the MAIN LLM's context is right now (drives compaction),
+        not a cumulative session counter.
+        """
+        self.token_count = used
+        pct = (used / total * 100.0) if total > 0 else 0.0
         label = self.query_one("#token-label", Label)
-        label.update(f" | tokens: {count:,}")
+        label.update(
+            f" | ctx: {self._fmt_tokens(used)}/{self._fmt_tokens(total)} ({pct:.0f}%)"
+        )
+
+    @staticmethod
+    def _fmt_tokens(n: int) -> str:
+        """Compact token count for the bar: 1234 -> '1K', 131072 -> '131K'."""
+        return f"{n / 1000:.0f}K" if n >= 1000 else str(n)
 
     def update_permissions(self, permissions: set) -> None:
         """Update permission mode display."""
@@ -872,9 +912,11 @@ class AgentPanel(Container):
             return
         entry.completed = True
 
-        # Update status line
+        # Update status line. A successful run reports status "done" (the pull
+        # delivery vocabulary); treat that — and the legacy "completed" — as
+        # success so it gets the green check, not the red ✗.
         text = Text()
-        if status == "completed":
+        if status in ("done", "completed"):
             text.append("  ✓ ", style="bold green")
         elif status == "timeout":
             text.append("  ⏱ ", style="bold yellow")
@@ -885,7 +927,7 @@ class AgentPanel(Container):
         text.append(f" — {preview}", style="dim")
         entry.status_widget.update(text)
         entry.status_widget.remove_class("running")
-        status_class = "completed" if status == "completed" else status
+        status_class = "completed" if status in ("done", "completed") else status
         entry.status_widget.add_class(status_class)
 
         # Add detail block with full summary

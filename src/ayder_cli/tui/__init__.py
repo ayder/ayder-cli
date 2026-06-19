@@ -31,6 +31,7 @@ def run_tui(
     model: str = "default",
     safe_mode: bool = False,
     permissions: set | None = None,
+    agent_mode: bool = False,
 ) -> None:
     """
     Run the CLI-style TUI application.
@@ -39,13 +40,16 @@ def run_tui(
         model: The LLM model name to use
         safe_mode: Whether to enable safe mode
         permissions: Set of granted permission levels ("r", "w", "x")
+        agent_mode: When True, inject the AGENTIC orchestrator system prompt
+            so the main LLM drives the multi-agent harness (ayder-cli --agent).
     """
     import sys
     from ayder_cli.providers import ProviderUnavailableError
 
     try:
         app = AyderApp(
-            model=model, safe_mode=safe_mode, permissions=permissions
+            model=model, safe_mode=safe_mode, permissions=permissions,
+            agent_mode=agent_mode,
         )
     except ProviderUnavailableError as e:
         print(str(e), file=sys.stderr)

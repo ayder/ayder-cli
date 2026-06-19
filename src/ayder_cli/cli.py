@@ -83,6 +83,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Auto-approve web/network tools (fetch_web)",
     )
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="Agent harness mode: inject the AGENTIC orchestrator system prompt so the "
+        "main LLM drives the configured agents (spec -> plan -> build -> QA -> review -> gate). "
+        "Implies write+execute+http permissions (the agents run unattended)",
+    )
 
     parser.add_argument(
         "--verbose",
@@ -289,6 +296,10 @@ def main():
         granted.add("x")
     if args.http:
         granted.add("http")
+    # --agent runs an autonomous orchestrator whose agents must write code, run
+    # commands, and fetch docs unattended — imply write+execute+http.
+    if args.agent:
+        granted.update({"w", "x", "http"})
 
     from ayder_cli.core.config import load_config
 
@@ -302,6 +313,14 @@ def main():
         level_override=effective_log_level,
         console_stream=sys.stdout if args.verbose is not None else None,
     )
+
+    # --agent: warn early if the harness has nothing to orchestrate.
+    if args.agent and not (isinstance(cfg.agents, dict) and cfg.agents):
+        print(
+            "Warning: --agent set but no agents are configured in config.toml "
+            "([agents.*] sections). See docs/config.toml.example.",
+            file=sys.stderr,
+        )
 
     # Handle task-related CLI options
     if args.tasks:
@@ -352,10 +371,10 @@ def main():
         # Default: TUI mode
         from ayder_cli.tui import run_tui
 
-        run_tui(permissions=granted)
+        run_tui(permissions=granted, agent_mode=args.agent)
         return
 
-    sys.exit(run_command(prompt, permissions=granted))
+    sys.exit(run_command(prompt, permissions=granted, agent_mode=args.agent))
 
 
 def _install_plugin_deps(dependencies: dict[str, str]) -> None:

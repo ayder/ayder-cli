@@ -77,6 +77,36 @@ class TestAgentPanelDataModel:
     @patch("ayder_cli.tui.widgets.Static.update")
     @patch.object(AgentPanel, "scroll_end")
     @patch.object(AgentPanel, "mount")
+    def test_complete_agent_done_shows_green_check(self, mock_mount, mock_scroll, mock_update, mock_remove_class, mock_add_class):
+        # A successful run reports status "done" (pull-delivery vocabulary): it
+        # must render the green check + "completed" CSS class, never the red ✗.
+        panel = AgentPanel()
+        panel.add_agent("web_parser", run_id=5)
+        panel.complete_agent(5, "Found 3 results", "done")
+        rendered = mock_update.call_args[0][0].plain
+        assert "✓" in rendered
+        assert "✗" not in rendered
+        mock_add_class.assert_any_call("completed")
+
+    @patch("ayder_cli.tui.widgets.Static.add_class")
+    @patch("ayder_cli.tui.widgets.Static.remove_class")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(AgentPanel, "scroll_end")
+    @patch.object(AgentPanel, "mount")
+    def test_complete_agent_error_shows_red_x(self, mock_mount, mock_scroll, mock_update, mock_remove_class, mock_add_class):
+        panel = AgentPanel()
+        panel.add_agent("web_parser", run_id=5)
+        panel.complete_agent(5, "boom", "error")
+        rendered = mock_update.call_args[0][0].plain
+        assert "✗" in rendered
+        assert "✓" not in rendered
+        mock_add_class.assert_any_call("error")
+
+    @patch("ayder_cli.tui.widgets.Static.add_class")
+    @patch("ayder_cli.tui.widgets.Static.remove_class")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(AgentPanel, "scroll_end")
+    @patch.object(AgentPanel, "mount")
     def test_complete_agent_stores_detail(self, mock_mount, mock_scroll, mock_update, mock_remove_class, mock_add_class):
         panel = AgentPanel()
         panel.add_agent("web_parser", run_id=5)

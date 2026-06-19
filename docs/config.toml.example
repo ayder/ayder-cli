@@ -1,314 +1,361 @@
 # =============================================================================
-# ayder-cli Configuration (Schema v2.0)
+# ayder-cli — Multi-Agent SDLC Harness (example config)
 # =============================================================================
 #
-# Location: ~/.ayder/config.toml
+# A 9-role software-delivery pipeline backed by Ollama Cloud models, plus one
+# local model. Roles are matched to model strengths: reasoning-optimized models
+# drive planning / review / gating; coding-optimized models do the writing and
+# testing.
 #
-# This file configures ayder-cli's LLM providers, agents, context management,
-# and application behavior. Copy this file to ~/.ayder/config.toml and
-# customize to your needs.
+# Pipeline (orchestrator dispatches agents in this order):
 #
-# Key concepts:
-#   - "provider" selects which [llm.*] profile is active
-#   - "driver" determines the SDK used (openai, ollama, anthropic, google)
-#   - Agents can use different providers/models than the main config
-#   - Context manager behavior adapts per driver (Ollama gets KV-cache awareness)
+#   pm_spec ──▶ pm_review ──▶ architect ──▶ architect_review
+#                                                 │
+#        ┌────────────────────────────────────────┘
+#        ▼
+#   senior_coder ×2-3  (+ junior_coder for small local tasks, 1 instance)
+#        │
+#        ▼
+#   qa_engineer ──▶ code_reviewer ──▶ acceptance_gate
+#
+# Model → role assignment (grounded in published SWE-bench data, June 2026):
+#
+#   Role               Model                              Why
+#   ----------------   --------------------------------   --------------------------------
+#   pm_spec            glm-5.2:cloud                      strong, token-efficient reasoning + structured writing
+#   pm_review          deepseek-v4-pro:cloud              apex reasoner (~80.6% SWE-bench Verified); diff family from pm_spec
+#   architect          deepseek-v4-pro:cloud              hardest reasoning task: system design
+#   architect_review   gpt-oss:120b:cloud                 independent reviewer, tunable high reasoning effort; diff family
+#   senior_coder       kimi-k2.7-code:cloud               1T coding specialist; best agentic coder
+#   qa_engineer        deepseek-v4-flash:cloud            fast distilled coder for high-throughput test authoring
+#   junior_coder       qwen3.6:35b-a3b-coding-nvfp4       LOCAL MoE coder (3B active, nvfp4); only ONE active (memory)
+#   code_reviewer      glm-5.2:cloud                      code-strong reasoner; diff family from the coders
+#   acceptance_gate    minimax-m3:cloud                   long-context lineage; holds spec + criteria + diff + tests at once
+#
+# Review boundaries deliberately cross model families so a reviewer does not
+# share the author's blind spots (glm↔deepseek, deepseek↔gpt-oss, kimi↔glm,
+# everything↔minimax at the final gate).
+#
+# gemma4:31b-cloud is the lightest dense model in your set. It is NOT wired to a
+# frontier gate on purpose (under-powering a gate defeats it); it is provided
+# below as a ready budget/throughput swap — see [llm.ollama_cloud_budget].
+#
+# AUTH — two ways to reach `:cloud` models (this file defaults to #1):
+#   1. Via the LOCAL daemon (recommended): base_url = "http://localhost:11434".
+#      The daemon authenticates cloud models with ~/.ollama/id_ed25519 after a
+#      one-time `ollama signin`. No env var needed. (Requires the daemon running.)
+#   2. Direct to cloud: base_url = "https://ollama.com" (no /v1) AND
+#      `export OLLAMA_API_KEY="<key>"`. The api_key config field is INERT on the
+#      native path, so a missing env var ⇒ 401 Unauthorized.
+#
+# NOTE on `think`: value is model/driver-dependent. Recent Ollama accepts
+#       true/false for most models and "low"|"medium"|"high" for reasoning
+#       models like gpt-oss. Adjust per model if a value is rejected.
+# =============================================================================
 
 config_version = "2.0"
 
-
-# =============================================================================
-# Application Settings
-# =============================================================================
-
 [app]
-# Which LLM profile to use (must match a key under [llm.*] below)
-provider = "openai"
-
-# System editor for file editing operations
+provider = "ollama_cloud"          # active profile for the ORCHESTRATOR session (see [llm.ollama_cloud])
 editor = "vim"
-
-# Enable verbose debug output
 verbose = false
-
-# Maximum concurrent background tool processes (1-20)
-max_background_processes = 5
-
-# Maximum conversation history messages (0 = unlimited)
+prompt = "STANDARD"                 # MINIMAL | STANDARD | EXTENDED
+max_background_processes = 5        # cap on concurrent background processes (e.g. test runs)
+max_output_tokens = 8192            # orchestrator response cap
 max_history_messages = 30
-
-# Agent execution timeout in seconds
-agent_timeout = 300
-
-
-# =============================================================================
-# Logging
-# =============================================================================
+agent_timeout = 1800               # seconds before a background agent is cancelled (30 min; reasoning+coding can be slow)
+# Tools the agents inherit. A coding harness needs file/shell/search (core),
+# tasks/notes (metadata), background process control for test suites
+# (background), and web fetch (http). See /plugin for the full tag list.
+tool_tags = ["core", "metadata", "background", "http"]
 
 [logging]
 file_enabled = true
 file_path = ".ayder/log/ayder.log"
 rotation = "10 MB"
 retention = "7 days"
-# Optional: NONE, ERROR, WARNING, INFO, DEBUG
-# level = "INFO"
-
-
-# =============================================================================
-# LLM Provider Profiles
-# =============================================================================
-#
-# Each [llm.<name>] section defines a provider profile. Set [app].provider
-# to the profile name you want to use.
-#
-# driver may be: openai, ollama, deepseek (core, always available),
-#                anthropic, google, qwen (or dashscope), glm (or zhipu).
-# Non-core drivers require their extra, e.g.:
-#                  pip install ayder-cli[anthropic]
-#
-# Required fields per profile:
-#   driver    - SDK backend: "openai", "ollama", "anthropic", "google",
-#               "deepseek", "qwen", or "glm"
-#   model     - Model identifier
-#
-# Optional fields:
-#   base_url  - API endpoint (required for openai/ollama drivers)
-#   api_key   - Authentication key
-#   num_ctx   - Context window size in tokens
-#   max_output_tokens - Maximum response length
-#   chat_protocol     - "ollama" (native tool calls) or "xml" (XML fallback)
-#   stop_sequences    - Custom stop tokens
-#   tool_tags         - Which tool groups to expose: ["core", "metadata"]
-
-
-# -----------------------------------------------------------------------------
-# Ollama (Local LLMs)
-# -----------------------------------------------------------------------------
-# Driver: "ollama" — uses native ollama SDK with full timing/cache observability
-#
-# Prerequisites:
-#   1. Install Ollama: https://ollama.com
-#   2. Pull a model: ollama pull qwen3-coder
-#   3. Ollama runs on localhost:11434 by default
-#
-# The "ollama" driver provides:
-#   - KV-cache-aware context management (stable prefix, no reordering)
-#   - Real token counts from prompt_eval_count (not estimates)
-#   - Cache hit detection via timing data (prompt_eval_duration)
-#   - Adaptive compaction that preserves hot cache
-#   - Native thinking support (message.thinking field)
-#   - keep_alive=-1 to prevent model unloading mid-session
-
-[llm.openai]
-driver       = "ollama"
-base_url     = "http://localhost:11434"
-api_key      = "ollama"                 # Ollama ignores this, but field is required
-model        = "qwen3-coder:latest"
-num_ctx      = 65536                    # Context window — match your model's max
-max_output_tokens = 4096
-chat_protocol = "ollama"                # "ollama" = native tool calls, "xml" = fallback
-tool_tags     = ["core", "metadata"]
-
-# Alternative Ollama models:
-# model = "deepseek-r1:14b"            # Strong reasoning, uses <think> tags
-# model = "llama3.3:70b"               # Large, high quality
-# model = "codellama:13b"              # Code-focused
-# model = "qwen3:32b"                  # Good balance of speed and quality
-# model = "gemma3:27b"                 # Google's open model
-
-
-# -----------------------------------------------------------------------------
-# OpenAI
-# -----------------------------------------------------------------------------
-# Driver: "openai" — standard OpenAI SDK
-#
-# Get your API key: https://platform.openai.com/api-keys
-# The openai driver also works with any OpenAI-compatible API (vLLM, LM Studio,
-# Together AI, Groq, etc.) — just change base_url.
-
-[llm.openai-cloud]
-driver       = "openai"
-base_url     = "https://api.openai.com/v1"
-api_key      = "sk-..."                 # Your OpenAI API key
-model        = "gpt-4o"
-num_ctx      = 128000
-max_output_tokens = 4096
-
-# OpenAI-compatible endpoints (same driver, different base_url):
-#
-# [llm.deepseek]
-# driver    = "openai"
-# base_url  = "https://api.deepseek.com/v1"
-# api_key   = "sk-..."
-# model     = "deepseek-chat"
-# num_ctx   = 65536
-#
-# [llm.together]
-# driver    = "openai"
-# base_url  = "https://api.together.xyz/v1"
-# api_key   = "..."
-# model     = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
-# num_ctx   = 131072
-#
-# [llm.groq]
-# driver    = "openai"
-# base_url  = "https://api.groq.com/openai/v1"
-# api_key   = "gsk_..."
-# model     = "llama-3.3-70b-versatile"
-# num_ctx   = 131072
-#
-# [llm.lmstudio]
-# driver    = "openai"
-# base_url  = "http://localhost:1234/v1"
-# api_key   = "lm-studio"
-# model     = "local-model"
-# num_ctx   = 32768
-
-
-# -----------------------------------------------------------------------------
-# Anthropic (Claude)
-# -----------------------------------------------------------------------------
-# Driver: "anthropic" — native Anthropic SDK with prompt caching
-#
-# Get your API key: https://console.anthropic.com/settings/keys
-# Claude models handle context management server-side (prompt caching,
-# 200K+ context windows), so the local context manager uses DefaultContextManager.
-
-[llm.anthropic]
-driver       = "anthropic"
-api_key      = "sk-ant-..."             # Your Anthropic API key
-model        = "claude-sonnet-4-5-20250929"
-num_ctx      = 200000                   # Claude supports up to 200K tokens
-max_output_tokens = 8192
-
-# Other Claude models:
-# model = "claude-opus-4-5-20250929"    # Most capable, highest cost
-# model = "claude-haiku-4-5-20250929"   # Fastest, lowest cost
-
-
-# -----------------------------------------------------------------------------
-# Google (Gemini)
-# -----------------------------------------------------------------------------
-# Driver: "google" — native Google Generative AI SDK
-#
-# Get your API key: https://aistudio.google.com/apikey
-# Gemini models support very large context windows (1M+ tokens).
-
-[llm.gemini]
-driver       = "google"
-api_key      = "AIza..."               # Your Google AI API key
-model        = "gemini-2.5-flash"
-num_ctx      = 1048576                  # Gemini supports up to 1M tokens
-max_output_tokens = 8192
-
-# Other Gemini models:
-# model = "gemini-2.5-pro"             # Most capable
-# model = "gemini-2.0-flash-lite"      # Fastest, lowest cost
-
-
-# =============================================================================
-# Context Manager
-# =============================================================================
-#
-# Controls how conversation history is managed within the context window.
-#
-# Behavior varies by driver:
-#   - "ollama" driver  → OllamaContextManager (KV-cache aware, stable prefix)
-#   - All other drivers → DefaultContextManager (tiered trimming)
-#
-# The factory automatically selects the right implementation based on driver.
 
 [context_manager]
-enabled               = true
-max_context_tokens    = 8192            # Fallback if provider doesn't report
-reserve_ratio         = 0.30            # Reserve 30% for response generation
-compaction_threshold  = 0.70            # Trigger compaction at 70% utilization
-tool_result_compress_age = 5            # Compress tool results older than N turns
-max_tool_result_length   = 2048         # Max chars per tool result before truncation
-compress_tool_results    = true         # Enable automatic tool result compression
+enabled = true
+# On the native Ollama path, OllamaContextManager auto-detects the model's real
+# window from /api/show; max_context_tokens is ignored there and only matters on
+# the openai/non-ollama path. reserve_ratio + compaction_threshold ARE read.
+max_context_tokens = 131072
+reserve_ratio = 0.30
+compaction_threshold = 0.80
 
+[retry]
+enabled = true
+max_attempts = 3
+initial_delay_seconds = 0.5
+max_delay_seconds = 30.0
+backoff_coefficient = 2.0
+jitter = true
+
+# -----------------------------------------------------------------------------
+# Provider profiles
+# -----------------------------------------------------------------------------
+
+[llm.ollama_cloud]
+driver = "ollama"
+base_url = "http://localhost:11434"  # route :cloud models through the LOCAL daemon (auth via ~/.ollama/id_ed25519, one-time `ollama signin`)
+model = "deepseek-v4-pro:cloud"    # orchestrator default; per-agent `model` overrides this
+num_ctx = 131072
+# To hit ollama.com directly instead, swap the line above for:
+#   base_url = "https://ollama.com"   # no /v1; then `export OLLAMA_API_KEY=<key>` (the api_key field is inert on this path)
+
+[llm.ollama_local]
+driver = "ollama"
+base_url = "http://localhost:11434"
+model = "qwen3.6:35b-a3b-coding-nvfp4"
+num_ctx = 32768                     # keep modest: local VRAM is the constraint
+
+# Budget/throughput alternative — swap any cloud agent's `provider` to this, or
+# point a duplicate reviewer at it for cheap parallel passes.
+# [llm.ollama_cloud_budget]
+# driver = "ollama"
+# base_url = "https://ollama.com"
+# model = "gemma4:31b-cloud"
+# num_ctx = 131072
 
 # =============================================================================
 # Agents
 # =============================================================================
-#
-# Agents are autonomous sub-tasks that can use different LLM providers/models.
-# Each agent inherits from [app].provider unless overridden.
-#
-# Fields:
-#   provider       - LLM profile name (optional, inherits from app)
-#   model          - Model override (optional, inherits from provider profile)
-#   system_prompt  - Agent-specific instructions (required)
 
-[agents.code-reviewer]
-provider      = "anthropic"
-model         = "claude-sonnet-4-5-20250929"
-system_prompt = """You are a senior code reviewer. Review the code for:
-- Correctness and edge cases
-- Security vulnerabilities (OWASP top 10)
-- Performance issues
-- Code style and readability
-Provide specific, actionable feedback with file:line references."""
+# --- Stage 1: Specification --------------------------------------------------
 
-[agents.test-writer]
-# Inherits provider and model from [app].provider
-system_prompt = """You are a test engineer. Write comprehensive unit tests that:
-- Cover happy paths and edge cases
-- Use appropriate mocking for external dependencies
-- Follow the existing test patterns in the codebase
-- Include clear test names that describe the expected behavior"""
+[agents.pm_spec]
+provider = "ollama_cloud"
+model = "glm-5.2:cloud"
+temperature = 0.4
+max_output_tokens = 8192
+think = "high"
+system_prompt = """
+You are Project Manager #1 — the requirements analyst and spec author.
 
-[agents.doc-generator]
-provider      = "gemini"
-model         = "gemini-2.5-flash"
-system_prompt = """You generate clear technical documentation. Focus on:
-- API usage examples with realistic inputs/outputs
-- Architecture decisions and trade-offs
-- Setup and configuration instructions
-Keep documentation concise and scannable."""
+INPUT: a raw user request (and any clarifying context the orchestrator gives you).
+OUTPUT: a complete, testable specification. Do NOT include implementation detail
+or technology choices — that is the Architect's job.
 
-[agents.quick-fix]
-provider      = "openai"               # Uses the Ollama local profile
-model         = "qwen3-coder:latest"
-system_prompt = """You are a quick bug fixer. Given a bug report:
-1. Identify the root cause
-2. Propose a minimal fix
-3. Write the fix and a regression test
-Stay focused — fix the bug, nothing else."""
+Produce, in this order:
+1. Problem & Goal — one paragraph: what outcome the user actually wants.
+2. Scope — explicit "In scope" and "Out of scope" bullet lists.
+3. Functional requirements — numbered, each a single observable behavior.
+4. Non-functional requirements — performance, security, compatibility, UX.
+5. Acceptance Criteria — a NUMBERED list (AC1, AC2, …). Every criterion MUST be
+   objectively verifiable by an automated test or a concrete manual check.
+   Use Given/When/Then phrasing where it adds precision. No vague words
+   ("fast", "robust", "user-friendly") unless quantified.
+6. Open Questions — anything genuinely ambiguous that needs a human decision.
 
-# Example: Agent using a cloud OpenAI model
-# [agents.architect]
-# provider      = "openai-cloud"
-# model         = "gpt-4o"
-# system_prompt = "You are a software architect..."
+Ruthlessly apply YAGNI: do not invent features the user did not ask for.
+If the request is too large for one spec, say so and propose a decomposition.
+"""
 
-# Example: Agent using DeepSeek for reasoning-heavy tasks
-# [agents.researcher]
-# provider      = "deepseek"
-# model         = "deepseek-reasoner"
-# system_prompt = "You research codebases and produce analysis reports..."
+[agents.pm_review]
+provider = "ollama_cloud"
+model = "deepseek-v4-pro:cloud"
+temperature = 0.2
+max_output_tokens = 4096
+think = "high"
+system_prompt = """
+You are Project Manager #2 — the independent spec reviewer.
 
+INPUT: the original user request AND PM#1's specification.
+OUTPUT: a verdict plus findings.
 
-# =============================================================================
-# Temporal (Optional — Workflow Orchestration)
-# =============================================================================
-#
-# Temporal enables durable workflow execution for long-running agent tasks.
-# Requires a running Temporal server. Most users can skip this section.
+Verify, point by point:
+- Coverage: does every part of the user request map to a requirement?
+- Testability: is each Acceptance Criterion objectively verifiable? Flag any
+  criterion that cannot be turned into a pass/fail check.
+- Clarity: any requirement open to two interpretations? Name both.
+- Scope: any requirement or AC that exceeds the user's actual ask (scope creep)?
+- Contradictions / gaps / missing non-functional requirements.
 
-[temporal]
-enabled       = false
-host          = "localhost:7233"
-namespace     = "default"
-metadata_dir  = ".ayder/temporal"
+End with exactly one verdict line:
+  VERDICT: APPROVED            — if the spec is complete, testable, and in scope.
+  VERDICT: CHANGES REQUIRED    — otherwise.
+Follow it with a numbered findings list; each finding cites the spec item and
+states the concrete change needed. Be specific and terse. No praise.
+"""
 
-[temporal.timeouts]
-workflow_schedule_to_close_seconds = 7200
-activity_start_to_close_seconds   = 900
-activity_heartbeat_seconds        = 30
+# --- Stage 2: Architecture ---------------------------------------------------
 
-[temporal.retry]
-initial_interval_seconds  = 5
-backoff_coefficient       = 2.0
-maximum_interval_seconds  = 60
-maximum_attempts          = 3
+[agents.architect]
+provider = "ollama_cloud"
+model = "deepseek-v4-pro:cloud"
+temperature = 0.3
+max_output_tokens = 8192
+think = "high"
+system_prompt = """
+You are the Architect — you turn an APPROVED spec into an implementation plan.
+
+INPUT: the approved specification.
+OUTPUT: a plan a competent engineer with zero prior context could execute.
+
+Include:
+1. File structure — exact paths to create/modify, one responsibility each.
+2. Components & interfaces — names, signatures, parameter/return types, and how
+   modules talk to each other. Make boundaries explicit and testable.
+3. Task breakdown — bite-sized tasks, each independently testable and tied to
+   the spec's Acceptance Criteria it advances. Order them so each builds on the
+   last. Note which tasks are parallelizable (for multiple senior_coder runs).
+4. Data flow & state ownership.
+5. Test strategy — what is unit-tested vs integration-tested, and how.
+6. Risks & mitigations.
+
+Follow existing codebase patterns; do not propose unrelated refactors. DRY,
+YAGNI, TDD. Every spec Acceptance Criterion must be covered by at least one task.
+"""
+
+[agents.architect_review]
+provider = "ollama_cloud"
+model = "gpt-oss:120b:cloud"
+temperature = 0.2
+max_output_tokens = 4096
+think = "high"
+system_prompt = """
+You are the Architecture Reviewer — independent of the Architect.
+
+INPUT: the approved spec AND the Architect's plan.
+OUTPUT: a verdict plus findings.
+
+Check:
+- Spec coverage: does every Acceptance Criterion map to a planned task? List gaps.
+- Interface soundness: are the named signatures/types consistent across tasks?
+  (A method called clearLayers() in one task and clearFullLayers() in another is a bug.)
+- Coupling & boundaries: any module doing too much, or leaky interfaces?
+- Test strategy: are the proposed tests real (asserting behavior), not vacuous?
+- Over-engineering: anything beyond what the spec requires (YAGNI violations)?
+- Task sizing & ordering: is each task independently testable and correctly sequenced?
+
+End with exactly one verdict line:
+  VERDICT: APPROVED
+  VERDICT: CHANGES REQUIRED
+Then a numbered findings list, each citing the plan item and the required change.
+"""
+
+# --- Stage 3: Implementation -------------------------------------------------
+
+# Dispatch this agent 2-3 times in parallel, one well-scoped task each.
+[agents.senior_coder]
+provider = "ollama_cloud"
+model = "kimi-k2.7-code:cloud"
+temperature = 0.2
+max_output_tokens = 8192
+system_prompt = """
+You are a Senior Software Engineer implementing ONE well-scoped task from the plan.
+
+INPUT: a single task (with its interfaces and the Acceptance Criteria it serves).
+OUTPUT: working, tested code for THAT task only — do not wander into other tasks.
+
+Work TDD:
+1. Write the failing test(s) for the behavior.
+2. Run them; confirm they fail for the right reason.
+3. Write the minimal implementation to pass.
+4. Run the tests; confirm green. Run any adjacent tests your change could break.
+5. Report exactly what changed (files + a one-line summary) and the test results.
+
+Match the surrounding code's style, naming, and patterns. DRY, YAGNI. If the
+task is ambiguous or the plan's interface won't work, stop and say so precisely
+rather than guessing.
+"""
+
+[agents.qa_engineer]
+provider = "ollama_cloud"
+model = "deepseek-v4-flash:cloud"
+temperature = 0.2
+max_output_tokens = 8192
+system_prompt = """
+You are the QA Engineer — you build and run the test/QA suite.
+
+INPUT: the implemented code, the plan's test strategy, and the spec's Acceptance Criteria.
+OUTPUT: tests and a QA report.
+
+Do:
+1. Author the integration/end-to-end and edge-case tests the unit tests miss,
+   following existing test patterns in the codebase.
+2. Run the full relevant suite (use the project's runner; run it in the background
+   if long) and capture real output.
+3. Report: command run, pass/fail counts, and the actual failure output verbatim
+   for anything red. Never claim green without showing the run.
+4. Map coverage back to Acceptance Criteria; name any criterion not yet exercised.
+
+Report failures faithfully. A skipped or flaky test is a finding, not a pass.
+"""
+
+# LOCAL agent — keep to ONE active instance (VRAM). Best for small, low-risk,
+# well-specified tasks: boilerplate, simple pure functions, mechanical edits.
+[agents.junior_coder]
+provider = "ollama_local"
+model = "qwen3.6:35b-a3b-coding-nvfp4"
+temperature = 0.2
+max_output_tokens = 4096
+num_ctx = 32768
+system_prompt = """
+You are a Junior Developer running on a LOCAL model. You take small, clearly
+specified, low-risk tasks (boilerplate, simple functions, renames, mechanical
+edits, fixture data).
+
+INPUT: one small, unambiguous task.
+OUTPUT: the minimal code change plus the relevant test, run to green.
+
+Rules:
+- Stay strictly within the task. Do not redesign or touch unrelated files.
+- Match existing patterns exactly.
+- If anything is ambiguous, risky, or larger than it first looked, STOP and
+  escalate ("BLOCKED: <reason>") instead of guessing — a senior_coder will take it.
+- Always run the test covering your change and report the result.
+"""
+
+# --- Stage 4: Review & Gate --------------------------------------------------
+
+[agents.code_reviewer]
+provider = "ollama_cloud"
+model = "glm-5.2:cloud"
+temperature = 0.1
+max_output_tokens = 4096
+think = "high"
+system_prompt = """
+You are the Code Reviewer. You review a diff for correctness and quality.
+
+INPUT: the diff (plus the plan/task it implements and the coding standards).
+OUTPUT: severity-tagged findings and a verdict.
+
+Review for:
+- Correctness & edge cases — logic errors, off-by-one, error handling, races.
+- Security — injection, unsafe input, secret handling, unsafe shell/file ops.
+- Tests — do they assert real behavior? Any vacuous or missing tests?
+- Spec/plan adherence — does the code do what the task required, no more (YAGNI)?
+- Readability & consistency with surrounding code.
+
+Tag each finding Critical / Important / Minor, cite file:line, and give the fix.
+End with exactly one verdict line:
+  VERDICT: APPROVED            — no Critical/Important findings.
+  VERDICT: CHANGES REQUIRED    — otherwise.
+Verify before asserting; if you cannot tell from the diff, say so explicitly.
+"""
+
+[agents.acceptance_gate]
+provider = "ollama_cloud"
+model = "minimax-m3:cloud"
+temperature = 0.1
+max_output_tokens = 4096
+think = "high"
+num_ctx = 262144                   # long window: holds spec + all criteria + diff + test output at once
+system_prompt = """
+You are the Acceptance Gate — the final, independent check before "done".
+
+INPUT: the spec's Acceptance Criteria AND the final implementation + test results.
+OUTPUT: a per-criterion verdict and an overall gate decision.
+
+For EACH Acceptance Criterion (AC1, AC2, …):
+- State PASS or FAIL.
+- Cite the concrete evidence: the test that proves it (and its result), or the
+  code path, or the manual check. No evidence ⇒ FAIL.
+
+Do not re-review style or design — only whether the spec's criteria are met.
+Be strict: partial or unverifiable ⇒ FAIL. End with exactly one line:
+  GATE: PASS    — every Acceptance Criterion is PASS with evidence.
+  GATE: FAIL    — otherwise (list the failing AC numbers).
+"""
