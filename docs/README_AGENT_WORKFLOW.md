@@ -1,10 +1,11 @@
 ## Domain
 Driving the multi-agent software-delivery harness defined in `config.toml.example`:
-a 9-role pipeline (spec → review → plan-to-tasks → build → QA → review → gate).
-After the spec is approved, the plan is written as task files in `.ayder/tasks/`
-(the same format `/plan` produces) so the user can follow the queue with `/tasks`;
-parallel builders are isolated by git branches and the gate agent collects and
-merges. This skill tells YOU — the main orchestrator LLM — how to run it.
+a 9-role pipeline (spec → review → plan → review → task-split → task-review →
+build → QA → review → gate). After the plan is approved, the **architect** splits
+it into task files in `.ayder/tasks/` (the same format `/plan` produces) and
+**architect_review** checks the task set, so the user can follow the queue with
+`/tasks`; parallel builders are isolated by git branches and the gate agent
+collects and merges. This skill tells YOU — the main orchestrator LLM — how to run it.
 
 ## Trigger
 A non-trivial software task ("build / implement / add feature X") where the
@@ -38,11 +39,12 @@ pipeline. Keep your own messages short; let the agents do the heavy lifting.
    is only touched by the final merge.
 2. **Spec.** `pm_spec` writes the spec + acceptance criteria → `pm_review` checks it.
    Loop until `pm_review` returns `VERDICT: APPROVED`.
-3. **Plan → tasks.** `architect` turns the approved spec into a task plan →
+3. **Plan.** `architect` turns the approved spec into a development plan →
    `architect_review` checks it. Loop until `VERDICT: APPROVED`. The plan marks
    which tasks are **parallel** and which are small/low-risk.
-   Then **materialise the approved plan as task files** in `.ayder/tasks/` — one
-   file per task, exactly like `/plan` — using `write_file`:
+4. **Task split (delegate it — don't split the work yourself).** Ask the
+   `architect` to break the **approved plan** into task files in `.ayder/tasks/`,
+   one file per task, exactly like `/plan`. Hand it this format to `write_file`:
    - Name each file `.ayder/tasks/TASK-<NNN>-<slug>.md` (zero-padded NNN;
      `list_tasks` first, then increment past the highest existing number).
    - Begin every file with this exact header, then the task in PRD form with its
@@ -53,8 +55,12 @@ pipeline. Keep your own messages short; let the agents do the heavy lifting.
      - **Status:** pending
      - **Created:** <YYYY-MM-DD HH:MM:SS>
      ```
-   The user can now follow the queue with `/tasks` (○ pending · ◐ in_progress · ✓ done).
-4. **Delegate (isolated — see git rules below).** Work the queue task by task:
+5. **Task review.** `architect_review` checks the **whole task set against the
+   approved plan**: full coverage (every plan item maps to a task), no scope
+   creep, correct sizing/sequencing, consistent interfaces across tasks. Loop
+   split↔review until `VERDICT: APPROVED`. The user can now follow the queue with
+   `/tasks` (○ pending · ◐ in_progress · ✓ done).
+6. **Delegate (isolated — see git rules below).** Work the queue task by task:
    - Flip the task's `**Status:**` to `in_progress`, then `call_agent` it to a
      `senior_coder` on its **own branch** (small, low-risk tasks → the single
      `junior_coder`, one at a time). Pass the task body, its branch, and the
@@ -64,10 +70,10 @@ pipeline. Keep your own messages short; let the agents do the heavy lifting.
    Update a status by rewriting the task file's `**Status:**` line (read it with
    `show_task`, write it back with `write_file`). This keeps `/tasks` accurate so
    the user always sees what is queued, in flight, and finished.
-5. **QA.** `qa_engineer` writes and runs the test suite, reports real pass/fail output.
-6. **Review.** `code_reviewer` reviews each branch's diff. Send `CHANGES REQUIRED`
+7. **QA.** `qa_engineer` writes and runs the test suite, reports real pass/fail output.
+8. **Review.** `code_reviewer` reviews each branch's diff. Send `CHANGES REQUIRED`
    findings back to the coder, then re-review.
-7. **Gate + merge.** `acceptance_gate` collects the approved branches, merges them
+9. **Gate + merge.** `acceptance_gate` collects the approved branches, merges them
    into `feat/<slug>`, resolves conflicts, runs the full suite, and checks every
    acceptance criterion. `GATE: PASS` → merge `feat/<slug>` into `main`.
    `GATE: FAIL` → send the failing criteria back to the relevant stage.
