@@ -850,28 +850,49 @@ class StatusBar(Horizontal):
         label.update(f" | skill: {skill_name}" if skill_name else "")
 
     @staticmethod
-    def _render_badges(statuses: dict[str, tuple[str, str]]) -> Text:
+    def _render_badges(
+        statuses: dict[str, tuple[str, str]],
+        enabled_tags: "frozenset | set | None" = None,
+    ) -> Text:
         """Build the status-bar text for plugin badges.
 
         ``statuses`` maps plugin name -> (label, color); each badge renders as
         `` | <label>`` with the label in its colour (e.g. green when an MCP
         server is connected, red when configured servers are unreachable).
+
+        When ``enabled_tags`` is given, a badge whose name is NOT enabled is shown
+        greyed out — the plugin is installed/connected but turned off via /plugin.
+        ``None`` means no tag filter is active (everything enabled), so the
+        registered colours are kept.
         """
         text = Text()
-        for _name, (label, color) in sorted(statuses.items()):
+        for name, (label, color) in sorted(statuses.items()):
+            display_color = color
+            if enabled_tags is not None and name not in enabled_tags:
+                display_color = "grey50"  # disabled via /plugin
             text.append(" | ", style="dim")
-            text.append(label, style=color)
+            text.append(label, style=display_color)
         return text
 
+    def _enabled_tags(self) -> "frozenset | None":
+        """Enabled tool tags from the running app (None = no filter / all on)."""
+        try:
+            chat_loop = getattr(self.app, "chat_loop", None)
+            if chat_loop is None:
+                return None
+            return chat_loop.config.tool_tags
+        except Exception:
+            return None
+
     def refresh_plugin_badges(self) -> None:
-        """Re-render plugin status badges from the plugin_status registry."""
+        """Re-render plugin status badges, greying out any disabled via /plugin."""
         from ayder_cli.tools import plugin_status
 
         try:
             label = self.query_one("#plugin-badges", Label)
         except Exception:
             return  # not mounted yet
-        label.update(self._render_badges(plugin_status.get_all()))
+        label.update(self._render_badges(plugin_status.get_all(), self._enabled_tags()))
 
 
 @dataclass

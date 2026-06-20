@@ -1009,6 +1009,17 @@ def _available_plugin_tags(
     return sorted(tags)
 
 
+def _refresh_status_badges(app: "AyderApp") -> None:
+    """Re-render status-bar plugin badges after the enabled tags change, so a
+    disabled plugin (e.g. mcp) greys out and a re-enabled one regains its colour."""
+    try:
+        from ayder_cli.tui.widgets import StatusBar
+
+        app.query_one("#status-bar", StatusBar).refresh_plugin_badges()
+    except Exception:
+        pass
+
+
 def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
     """Toggle dynamic tool plugins (e.g. venv, http, background, temporal)."""
     from ayder_cli.tools.definition import TOOL_DEFINITIONS
@@ -1043,6 +1054,7 @@ def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
                 tags.add(plugin_name)
                 status = "enabled"
             app.chat_loop.config.tool_tags = frozenset(tags)
+            _refresh_status_badges(app)
             chat_view.add_system_message(f"Plugin '{plugin_name}' {status}.")
 
         app.request_turn(prepare=_prepare, run_loop=False)
@@ -1065,6 +1077,7 @@ def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
                 base_tags = {"core", "metadata"}
                 new_tags = base_tags | result
                 app.chat_loop.config.tool_tags = frozenset(new_tags)
+                _refresh_status_badges(app)
                 enabled = sorted(result)
                 chat_view.add_system_message(
                     f"Plugins updated: {', '.join(enabled) if enabled else 'none enabled'}"

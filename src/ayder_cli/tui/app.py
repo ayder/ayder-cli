@@ -148,6 +148,29 @@ class AppCallbacks:
         return ev is not None and ev.is_set()
 
 
+def _enable_installed_plugin_tags(tool_tags, plugin_defs, status_names) -> frozenset | None:
+    """Auto-enable installed plugins' capability tags at startup.
+
+    A plugin the user deliberately installed (e.g. mcp-tool) should work without a
+    manual /plugin toggle, so its capability tags are merged into the effective
+    ``tool_tags``. Tags come from loaded plugin tool definitions and from any
+    status badge a plugin published (so an installed-but-disconnected plugin like
+    mcp-tool is still enabled). Builtin/optional tags stay governed by config.
+
+    ``tool_tags`` of ``None`` means "no filter / everything enabled" — left as-is.
+    """
+    if tool_tags is None:
+        return None
+    extra = {
+        tag
+        for td in plugin_defs
+        for tag in td.tags
+        if tag not in ("core", "metadata")
+    }
+    extra.update(name for name in status_names if name not in ("core", "metadata"))
+    return frozenset(tool_tags | extra) if extra else tool_tags
+
+
 class AyderApp(App):
     """
     Main CLI-style application for ayder-cli.
@@ -340,6 +363,13 @@ class AyderApp(App):
             raw_tags = getattr(self.config, "tool_tags", ["core", "metadata"])
             tool_tags_list = list(raw_tags) if raw_tags is not None else []
         tool_tags = frozenset(tool_tags_list) if tool_tags_list else None
+        # Auto-enable installed plugins so they work without a manual /plugin toggle.
+        from ayder_cli.tools import plugin_status
+        from ayder_cli.tools.definition import _GLOBAL_PLUGIN_DEFS
+
+        tool_tags = _enable_installed_plugin_tags(
+            tool_tags, _GLOBAL_PLUGIN_DEFS, plugin_status.get_all().keys()
+        )
         self.chat_loop = ChatLoop(
             llm=self.llm,
             registry=self.registry,
