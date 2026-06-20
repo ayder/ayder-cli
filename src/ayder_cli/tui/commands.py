@@ -988,18 +988,35 @@ def handle_context_stats(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 
 
+def _available_plugin_tags(
+    tool_definitions, statuses: dict[str, tuple[str, str]]
+) -> list[str]:
+    """Capability tags to offer in /plugin.
+
+    Combines tags from currently-loaded tools with tags for installed plugins
+    that published a status badge but contribute no live tools right now (e.g.
+    the mcp-tool plugin when its MCP server is configured but unreachable) — so
+    an installed plugin stays visible/toggleable regardless of live state. The
+    always-on ``core``/``metadata`` tags are excluded.
+    """
+    tags = {
+        tag
+        for td in tool_definitions
+        for tag in td.tags
+        if tag not in ("core", "metadata")
+    }
+    tags.update(name for name in statuses if name not in ("core", "metadata"))
+    return sorted(tags)
+
+
 def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
     """Toggle dynamic tool plugins (e.g. venv, http, background, temporal)."""
     from ayder_cli.tools.definition import TOOL_DEFINITIONS
+    from ayder_cli.tools import plugin_status
 
-    # Discover available non-core tags
-    available_plugins = set()
-    for td in TOOL_DEFINITIONS:
-        for tag in td.tags:
-            if tag not in ("core", "metadata"):
-                available_plugins.add(tag)
-
-    available_plugins_list = sorted(list(available_plugins))
+    available_plugins_list = _available_plugin_tags(
+        TOOL_DEFINITIONS, plugin_status.get_all()
+    )
 
     # Read current tags for the (eager) picker display; the MUTATION of
     # chat_loop.config.tool_tags is deferred into prepare (run_loop=False).

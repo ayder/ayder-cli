@@ -804,8 +804,14 @@ class StatusBar(Horizontal):
         yield Label(" | ctx: —", id="token-label")
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
+        yield Label("", id="plugin-badges")
         yield Static(classes="spacer")
         yield Label("Ctrl+H Help", classes="key-hint")
+
+    def on_mount(self) -> None:
+        # Plugins (e.g. mcp-tool) register their status badge at import time,
+        # before the TUI mounts, so a single refresh here picks it up.
+        self.refresh_plugin_badges()
 
     def set_model(self, model: str) -> None:
         """Update the displayed model."""
@@ -842,6 +848,30 @@ class StatusBar(Horizontal):
         """Update the active skill label."""
         label = self.query_one("#skill-label", Label)
         label.update(f" | skill: {skill_name}" if skill_name else "")
+
+    @staticmethod
+    def _render_badges(statuses: dict[str, tuple[str, str]]) -> Text:
+        """Build the status-bar text for plugin badges.
+
+        ``statuses`` maps plugin name -> (label, color); each badge renders as
+        `` | <label>`` with the label in its colour (e.g. green when an MCP
+        server is connected, red when configured servers are unreachable).
+        """
+        text = Text()
+        for _name, (label, color) in sorted(statuses.items()):
+            text.append(" | ", style="dim")
+            text.append(label, style=color)
+        return text
+
+    def refresh_plugin_badges(self) -> None:
+        """Re-render plugin status badges from the plugin_status registry."""
+        from ayder_cli.tools import plugin_status
+
+        try:
+            label = self.query_one("#plugin-badges", Label)
+        except Exception:
+            return  # not mounted yet
+        label.update(self._render_badges(plugin_status.get_all()))
 
 
 @dataclass
