@@ -254,7 +254,8 @@ class AyderApp(App):
                 """Forward agent events to AgentPanel and sync activity bar."""
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
-                    self.call_later(lambda: panel.update_agent(run_id, name, event, data))
+                    label = self._agent_registry.run_label(run_id) if self._agent_registry else None
+                    self.call_later(lambda: panel.update_agent(run_id, name, event, data, label))
                 except Exception:
                     pass
                 # Keep activity bar agent count in sync and ensure spinner animates

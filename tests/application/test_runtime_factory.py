@@ -233,6 +233,11 @@ class TestCreateAgentRuntime:
         assert "You are the specialized agent named 'test-agent'." in rt.system_prompt
         assert "When asked for your agent name, report this configured name exactly." in rt.system_prompt
         assert "You are a test." in rt.system_prompt
+        # Every agent is told it works in the live tree and must gather context itself,
+        # so a reviewer/QA agent runs `git diff` instead of waiting for a pasted diff.
+        assert "live working directory" in rt.system_prompt
+        assert "git diff" in rt.system_prompt
+        assert "NEVER reply" in rt.system_prompt and "not attached" in rt.system_prompt
 
     def test_agent_provider_override(self):
         """When agent specifies provider, load_config_for_provider is used."""

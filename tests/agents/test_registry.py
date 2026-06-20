@@ -5,9 +5,37 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
-from ayder_cli.agents.registry import AgentRegistry
+from ayder_cli.agents.registry import AgentRegistry, _compose_agent_prompt
 from ayder_cli.agents.run import AgentRun
 from ayder_cli.agents.runner import AgentRunOutcome
+
+
+class TestComposeAgentPrompt:
+    """The agent's user turn is built from task / task_id file / branch_name."""
+
+    def test_plain_task_unchanged(self):
+        # No task_id and no branch -> identical to the raw task (backward compatible).
+        assert _compose_agent_prompt("Review auth.py", None, None) == "Review auth.py"
+
+    def test_embeds_task_file_and_branch_and_directive(self):
+        out = _compose_agent_prompt(
+            "focus on the edge cases",
+            ("TASK-003", ".ayder/tasks/TASK-003-add-auth.md", "SPEC BODY"),
+            "agent/add-auth",
+        )
+        assert "TASK-003" in out
+        assert "SPEC BODY" in out                         # file embedded in full
+        assert ".ayder/tasks/TASK-003-add-auth.md" in out  # provenance for re-reads
+        assert "agent/add-auth" in out and "COMMIT" in out
+        assert "focus on the edge cases" in out
+
+    def test_branch_only(self):
+        out = _compose_agent_prompt("do the thing", None, "agent/x")
+        assert "do the thing" in out and "agent/x" in out
+
+    def test_task_id_without_free_text(self):
+        out = _compose_agent_prompt("", ("TASK-009", "p.md", "BODY"), None)
+        assert "TASK-009" in out and "BODY" in out
 
 
 @pytest.fixture
@@ -135,6 +163,104 @@ class TestAgentRegistry:
         assert "reviewer" in result
         assert "writer" in result
         assert "list_agents" in result
+
+    @pytest.mark.parametrize("task", ["", "   ", "\n\t  \n"])
+    def test_create_run_rejects_empty_task(self, registry, task):
+        """An empty/blank task (and no task_id) is rejected — never dispatched.
+
+        The prompt is the agent's ENTIRE user turn; a blank one makes the agent
+        reply 'I don't have a task assigned yet'. Guard it at the boundary
+        (the golden rule: no concrete task -> no dispatch) instead of wasting a run.
+        """
+        result = registry.create_run("reviewer", task)
+        assert isinstance(result, str)
+        assert "empty task" in result.lower()
+        # Nothing was scheduled: no run record, no active runner, counter untouched.
+        assert registry._runs == {}
+        assert registry._active == {}
+        assert registry._run_counter == 0
+
+    def test_create_run_unknown_task_id_fails_fast(self, registry, monkeypatch):
+        """task_id that resolves to no task file fails fast — no dispatch."""
+        monkeypatch.setattr("ayder_cli.agents.registry.read_task", lambda ctx, ident: None)
+        monkeypatch.setattr("ayder_cli.agents.registry.list_task_ids",
+                            lambda ctx: ["TASK-001", "TASK-002"])
+        result = registry.create_run("reviewer", "do it", task_id="TASK-009")
+        assert isinstance(result, str)
+        assert "task_id 'TASK-009'" in result and "not found" in result.lower()
+        assert "TASK-001" in result  # lists what does exist
+        assert registry._runs == {} and registry._run_counter == 0
+
+    @pytest.mark.anyio
+    async def test_create_run_task_id_embeds_file_and_records(self, registry, monkeypatch):
+        """A resolved task_id embeds the file in the prompt and is recorded on the run."""
+        registry.set_loop(asyncio.get_running_loop())
+        monkeypatch.setattr(
+            "ayder_cli.agents.registry.read_task",
+            lambda ctx, ident: ("TASK-003", ".ayder/tasks/TASK-003-add-auth.md", "DO THE AUTH WORK"),
+        )
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            # task may be empty when task_id carries the work.
+            rid = registry.create_run("reviewer", "", task_id="3", branch_name="agent/add-auth")
+            assert isinstance(rid, int)
+            await registry._runs[rid].done_event.wait()
+
+        prompt = mock_runner.run.call_args.args[0]
+        assert "TASK-003" in prompt
+        assert "DO THE AUTH WORK" in prompt          # the file is embedded, not just referenced
+        assert "agent/add-auth" in prompt            # branch directive folded in
+        assert registry._runs[rid].task_id == "TASK-003"
+        assert registry._runs[rid].branch_name == "agent/add-auth"
+
+    @pytest.mark.anyio
+    async def test_create_run_records_task_preview_and_run_label(self, registry):
+        """The free-text task is previewed on the run and surfaced via run_label."""
+        registry.set_loop(asyncio.get_running_loop())
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            rid = registry.create_run("reviewer", "Refactor auth.py to use JWT tokens")
+            await registry._runs[rid].done_event.wait()
+        assert registry._runs[rid].task_preview == "Refactor auth.py to use JWT tokens"
+        assert registry.run_label(rid) == "Refactor auth.py to use JWT tokens"
+        assert registry.run_label(9999) is None  # unknown run
+
+    @pytest.mark.anyio
+    async def test_result_payload_carries_task_binding_for_correlation(self, registry, monkeypatch):
+        """read_result exposes task_id + task_preview so the orchestrator can tell
+        whether the deliverable matches the task it dispatched."""
+        registry.set_loop(asyncio.get_running_loop())
+        monkeypatch.setattr(
+            "ayder_cli.agents.registry.read_task",
+            lambda ctx, ident: ("TASK-010", ".ayder/tasks/TASK-010-x.md", "BODY"),
+        )
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            rid = registry.create_run("reviewer", "write the integration tests", task_id="10")
+            await registry._runs[rid].done_event.wait()
+        payload = registry.read_result(rid)
+        assert payload["task_id"] == "TASK-010"
+        assert payload["task_preview"] == "write the integration tests"
+
+    @pytest.mark.anyio
+    async def test_create_run_backward_compatible_prompt_unchanged(self, registry):
+        """With no task_id and no branch_name, the prompt is exactly the task string."""
+        registry.set_loop(asyncio.get_running_loop())
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            rid = registry.create_run("reviewer", "Review auth.py")
+            await registry._runs[rid].done_event.wait()
+        assert mock_runner.run.call_args.args[0] == "Review auth.py"
+        assert registry._runs[rid].task_id is None
+        assert registry._runs[rid].branch_name is None
 
     @pytest.mark.anyio
     async def test_create_run_allows_same_agent_twice(self, registry):

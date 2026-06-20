@@ -192,6 +192,79 @@ def list_tasks(
     return ToolSuccess("\n".join(lines))
 
 
+def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | None:
+    """Resolve a task identifier to its file path, or None if no task matches.
+
+    Tries, in order: relative path from project root, filename in the tasks dir,
+    numeric ID lookup ("001"/"1"/"TASK-001"), then slug substring match. Shared
+    by show_task (the tool) and the agent harness (which resolves call_agent's
+    task_id), so both accept identifiers in the same flexible forms.
+    """
+    tasks_dir = _get_tasks_dir(project_ctx)
+
+    # Strategy 1: Try as relative path from project root
+    try:
+        candidate = project_ctx.root / identifier
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    except Exception:
+        pass
+
+    # Strategy 2: Try as filename in tasks dir
+    candidate = tasks_dir / identifier
+    if candidate.exists() and candidate.is_file():
+        return candidate
+
+    # Strategy 3: Try to extract numeric ID and lookup ("001", "1", "TASK-001", ...)
+    id_match = re.search(r"(\d+)", identifier)
+    if id_match:
+        path = _get_task_path_by_id(project_ctx, int(id_match.group(1)))
+        if path is not None:
+            return path
+
+    # Strategy 4: Try as slug substring match
+    slug_pattern = identifier.lower().strip()
+    if slug_pattern:
+        for candidate in tasks_dir.glob("*.md"):
+            if slug_pattern in candidate.stem.lower():
+                return candidate
+
+    return None
+
+
+def read_task(project_ctx: ProjectContext, identifier: str):
+    """Resolve a task identifier and read its file.
+
+    Returns a (canonical_id, project_relative_path, content) tuple, or None when
+    the identifier resolves to no task / cannot be read. canonical_id is the
+    "TASK-NNN" form when derivable from the filename, else the file stem.
+    """
+    path = resolve_task_path(project_ctx, identifier)
+    if path is None:
+        return None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    tid = _extract_id(path.name)
+    canonical = f"TASK-{tid:03d}" if tid is not None else path.stem
+    try:
+        rel = str(path.relative_to(project_ctx.root))
+    except ValueError:
+        rel = str(path)
+    return canonical, rel, content
+
+
+def list_task_ids(project_ctx: ProjectContext) -> list[str]:
+    """Return the canonical IDs ("TASK-NNN") of every task file, sorted."""
+    ids: list[str] = []
+    for path in sorted(_get_tasks_dir(project_ctx).glob("*.md")):
+        tid = _extract_id(path.name)
+        if tid is not None:
+            ids.append(f"TASK-{tid:03d}")
+    return ids
+
+
 def show_task(project_ctx: ProjectContext, identifier: str):
     """Read and return the contents of a task file.
 
@@ -207,40 +280,7 @@ def show_task(project_ctx: ProjectContext, identifier: str):
         ToolSuccess with file contents or ToolError if not found
     """
     _ensure_tasks_dir(project_ctx)
-    tasks_dir = _get_tasks_dir(project_ctx)
-    path = None
-
-    # Strategy 1: Try as relative path from project root
-    try:
-        candidate = project_ctx.root / identifier
-        if candidate.exists() and candidate.is_file():
-            path = candidate
-    except Exception:
-        pass
-
-    # Strategy 2: Try as filename in tasks dir
-    if path is None:
-        candidate = tasks_dir / identifier
-        if candidate.exists() and candidate.is_file():
-            path = candidate
-
-    # Strategy 3: Try to extract numeric ID and lookup
-    if path is None:
-        # Try to extract numeric ID from identifier
-        # Matches: "001", "1", "TASK-001", etc.
-        id_match = re.search(r"(\d+)", identifier)
-        if id_match:
-            task_id = int(id_match.group(1))
-            path = _get_task_path_by_id(project_ctx, task_id)
-
-    # Strategy 4: Try as slug match
-    if path is None:
-        # Look for files containing the identifier as a slug
-        slug_pattern = identifier.lower().strip()
-        for candidate in tasks_dir.glob("*.md"):
-            if slug_pattern in candidate.stem.lower():
-                path = candidate
-                break
+    path = resolve_task_path(project_ctx, identifier)
 
     if path is None:
         return ToolError(f"Error: Task not found: {identifier}")

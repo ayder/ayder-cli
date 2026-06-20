@@ -855,6 +855,7 @@ class _AgentEntry:
     detail_widget: Static | None  # Full output (added on completion)
     name: str
     completed: bool = False
+    assignment: str | None = None  # short '<prompt> · <task_id>' label for this run
 
 
 class AgentPanel(Container):
@@ -885,13 +886,19 @@ class AgentPanel(Container):
         self.display = self._user_visible
         return self._user_visible
 
-    def add_agent(self, name: str, run_id: int) -> None:
-        """Add a new agent run entry. Never auto-shows the panel."""
+    def add_agent(self, name: str, run_id: int, assignment: str | None = None) -> None:
+        """Add a new agent run entry. Never auto-shows the panel.
+
+        `assignment` is a short '<prompt> · <task_id>' label for the dispatched
+        task; when present it is shown between the agent name and its status.
+        """
         self._prune_if_needed()
 
         text = Text()
         text.append("  ▶ ", style="bold yellow")
         text.append(f"{name}", style="bold magenta")
+        if assignment:
+            text.append(f" — {assignment}", style="cyan")
         text.append(" running...", style="dim")
 
         status_widget = Static(text, classes="agent-status running")
@@ -899,6 +906,7 @@ class AgentPanel(Container):
             status_widget=status_widget,
             detail_widget=None,
             name=name,
+            assignment=assignment,
         )
         self._entries[run_id] = entry
         self.mount(status_widget)
@@ -939,14 +947,17 @@ class AgentPanel(Container):
         self.mount(detail, after=entry.status_widget)
         self.scroll_end(animate=False)
 
-    def update_agent(self, run_id: int, name: str, event: str, data: Any = None) -> None:
+    def update_agent(self, run_id: int, name: str, event: str, data: Any = None,
+                     assignment: str | None = None) -> None:
         """Handle an agent progress event. Lookup by run_id."""
         if run_id not in self._entries:
-            self.add_agent(name, run_id)
+            self.add_agent(name, run_id, assignment)
 
         entry = self._entries.get(run_id)
         if entry is None or entry.completed:
             return
+        if assignment and not entry.assignment:
+            entry.assignment = assignment  # first event that carried it wins
 
         if event == "tool_start" and isinstance(data, dict):
             tool_name = data.get("name", "?")
@@ -961,6 +972,8 @@ class AgentPanel(Container):
         text = Text()
         text.append("  ▶ ", style="bold yellow")
         text.append(f"{entry.name}", style="bold magenta")
+        if entry.assignment:
+            text.append(f" — {entry.assignment}", style="cyan")
         text.append(f" — {status_text}", style="dim")
         entry.status_widget.update(text)
 

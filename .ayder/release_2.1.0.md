@@ -98,3 +98,40 @@ handling, live context gauge, scrollable agents panel).
   the native driver). The example config defaults to the daemon path.
 - The version is sourced from `pyproject.toml`; a reinstall
   (`uv pip install -e .`) refreshes the value reported by `--version`.
+
+---
+
+## Follow-up — agent dispatch & context hardening (2026-06-20)
+
+Refinements to the `--agent` harness that close several orchestrator↔agent
+friction points found in live runs.
+
+### Added
+- **`call_agent(task_id=…, branch_name=…)`** — optional, non-breaking (`name` is
+  now the only required arg). A `task_id` is resolved against `.ayder/tasks/` and
+  **fails fast** if it doesn't exist; when it resolves, the harness **embeds the
+  task file** in the agent's prompt so the agent receives the spec itself instead
+  of the orchestrator pasting it. `branch_name` is folded in as a "work & commit on
+  this branch" directive (advisory — the harness runs no git).
+- **Run ↔ task correlation** — `call_agent` echoes the bound task in its
+  confirmation (`run #N for TASK-010`), and `agent_status` / `read_agent_result`
+  carry `task_id` / `task_preview`, so a wandering agent's result is obvious at a
+  glance. The agents panel shows it on the running line
+  (`▶ senior_coder — <prompt> · TASK-010 — Thinking…`).
+
+### Changed
+- **Agents gather their own context.** Every agent prompt now states it runs in the
+  live working tree and must obtain diffs/source/task files itself (git, read,
+  search) rather than wait for pasted content — fixes reviewers/QA stalling with
+  "I don't see a diff attached". The orchestrator passes **pointers** (branch, base
+  ref, task ids, paths), not pasted diffs (`AGENTIC` golden rules + pipeline steps;
+  `README_AGENT_WORKFLOW` synced).
+- **No redundant orchestrator notes** — the orchestrator is told not to
+  re-summarize agent output into its own notes (agents already auto-save them).
+- **Example config** — per-role model reassignments.
+
+### Fixed
+- **Empty/blank `call_agent` dispatch is rejected** at the boundary with a
+  corrective error — no longer burns a run to have the agent reply "I don't have a
+  task assigned yet".
+- Silenced a `RuntimeWarning` (un-awaited `_drive` coroutine) in the CLI tests.

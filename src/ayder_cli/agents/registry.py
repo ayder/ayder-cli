@@ -17,8 +17,61 @@ from typing import Any, Callable
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.run import AgentRun
 from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
+from ayder_cli.tools.builtins.tasks import list_task_ids, read_task
 
 logger = logging.getLogger(__name__)
+
+_PREVIEW_MAX = 48
+
+
+def _preview(task: str) -> str | None:
+    """First line of the orchestrator's free-text task, truncated for the panel."""
+    if not task or not task.strip():
+        return None
+    first = task.strip().splitlines()[0].strip()
+    return first if len(first) <= _PREVIEW_MAX else first[: _PREVIEW_MAX - 1] + "…"
+
+
+def _compose_agent_prompt(
+    task: str,
+    task_meta: tuple[str, str, str] | None,
+    branch_name: str | None,
+) -> str:
+    """Build the agent's user turn from the orchestrator's inputs.
+
+    The agent sees ONLY this string. When the orchestrator passed a task_id we
+    embed the resolved task file verbatim (the agent "receives the task file
+    itself" instead of relying on the orchestrator to paste it); a branch_name
+    becomes a commit directive; the free-text `task` is folded in as the
+    orchestrator's own instructions. With neither task_id nor branch_name the
+    result is just `task` — byte-identical to the pre-feature behaviour.
+    """
+    directive = (task or "").strip()
+    if task_meta is None and not branch_name:
+        return directive
+
+    parts: list[str] = []
+    if task_meta is not None:
+        canonical_id, rel_path, content = task_meta
+        parts.append(
+            f"You are assigned {canonical_id}. Implement it per your role and its "
+            f"Acceptance Criteria — do not wander outside it."
+        )
+        parts.append(
+            f"## {canonical_id}\n"
+            f"_Authoritative spec (source: `{rel_path}`), reproduced in full below._\n\n"
+            f"{content.strip()}"
+        )
+    if branch_name:
+        parts.append(
+            f"## Branch\nDo ALL of your work on `{branch_name}` and COMMIT it to that "
+            f"branch before you finish. Do not switch to or touch any other branch."
+        )
+    if directive:
+        parts.append(
+            f"## Orchestrator instructions\n{directive}" if task_meta is not None else directive
+        )
+    return "\n\n".join(parts)
 
 
 class AgentRegistry:
@@ -139,10 +192,20 @@ class AgentRegistry:
             "Configured specialized agents may be available. Use `list_agents` to discover "
             "exact names before `call_agent`. Each runs in the background with its own LLM.",
             "",
+            "When the work is a task file under `.ayder/tasks/`, pass its `task_id` (e.g. "
+            "`TASK-003`) and a `branch_name` to `call_agent` — the harness resolves the id, "
+            "fails fast if it doesn't exist, and hands the agent the task file itself, so you "
+            "need not paste the task body into `task`.",
+            "",
             "**You pull results — they are not delivered automatically.** `call_agent` returns "
-            "a run id. Use `agent_status()` to see what is working/done, and "
-            "`read_agent_result(run_id)` to collect a finished one. To wait for an agent, call "
-            "`read_agent_result(run_id, wait=true, timeout_s=…)` instead of polling in a loop.",
+            "a run id (and echoes the task it bound the run to). Use `agent_status()` to see "
+            "what is working/done, and `read_agent_result(run_id)` to collect a finished one. To "
+            "wait for an agent, call `read_agent_result(run_id, wait=true, timeout_s=…)` instead "
+            "of polling in a loop.",
+            "",
+            "Every run's status and result carry the `task_id` / `task_preview` they were "
+            "dispatched with. Check it against what you asked for: if the deliverable discusses "
+            "a different task, the agent wandered — discard it and re-dispatch, don't accept it.",
             "",
             "Each finished run has a best-effort `note_path` to its full saved deliverable; if a "
             "result has scrolled out of context, `read_file` that path instead of re-dispatching.",
@@ -154,9 +217,21 @@ class AgentRegistry:
 
         return "\n".join(lines)
 
-    def create_run(self, name: str, task: str) -> int | str:
+    def create_run(
+        self,
+        name: str,
+        task: str,
+        task_id: str | None = None,
+        branch_name: str | None = None,
+    ) -> int | str:
         """Create an AgentRun and schedule it. MUST run on the event loop.
-        Returns run_id (int) or an error string."""
+
+        Returns run_id (int) or an error string. When task_id is given it is
+        resolved against .ayder/tasks/ and the dispatch FAILS FAST if no such
+        task exists; when it resolves, the task file is embedded in the agent's
+        prompt so the agent receives the spec itself. branch_name (advisory) is
+        folded into the prompt as a commit directive — the harness does not run
+        git. Returns run_id (int) or an error string."""
         if name not in self.agents:
             available = ", ".join(sorted(self.agents))
             return (f"Error: Agent '{name}' not found. Available: {available}. Call list_agents."
@@ -165,8 +240,39 @@ class AgentRegistry:
         if name in self._settled and self._settled[name] in ("error", "timeout"):
             return (f"Error: Agent '{name}' failed in this cycle "
                     f"(status: {self._settled[name]}). Handle the task directly.")
+
+        # Resolve task_id against .ayder/tasks/. Fail fast (no dispatch) if it
+        # doesn't exist — the orchestrator referenced a task that isn't there.
+        task_meta: tuple[str, str, str] | None = None
+        resolved_task_id: str | None = None
+        if task_id and task_id.strip():
+            task_meta = read_task(self._project_ctx, task_id.strip())
+            if task_meta is None:
+                known = ", ".join(list_task_ids(self._project_ctx)) or "(none)"
+                return (
+                    f"Error: task_id '{task_id}' not found in .ayder/tasks/ — '{name}' was "
+                    f"NOT dispatched. Existing tasks: {known}. Create the task file first "
+                    f"(or fix the id), then re-dispatch."
+                )
+            resolved_task_id = task_meta[0]
+
+        # The agent's ENTIRE user turn is the composed prompt — it has no other
+        # context. Require SOME concrete instruction: a non-empty task or a
+        # resolved task_id. A blank dispatch makes the agent reply "I don't have a
+        # task assigned yet" after burning a full run, so reject it here.
+        if task_meta is None and (not task or not task.strip()):
+            return (
+                f"Error: empty task — '{name}' was NOT dispatched. Pass a concrete `task` "
+                "(what to do, which files/branch, the acceptance criteria) and/or a `task_id` "
+                "that resolves to a file in .ayder/tasks/. The agent sees nothing else."
+            )
+
         if self._loop is None:
             return "Error: Agent registry not initialized (event loop not set)"
+
+        branch = branch_name.strip() if branch_name and branch_name.strip() else None
+        prompt = _compose_agent_prompt(task, task_meta, branch)
+        task_preview = _preview(task)
 
         self._run_counter += 1
         run_id = self._run_counter
@@ -177,11 +283,13 @@ class AgentRegistry:
             run_id=run_id, generation=self._current_generation, on_progress=self._on_progress,
         )
         run = AgentRun(run_id=run_id, generation=self._current_generation,
-                       agent_name=name, started_at=time.monotonic())
+                       agent_name=name, started_at=time.monotonic(),
+                       task_id=resolved_task_id, branch_name=branch, task_preview=task_preview)
         self._runs[run_id] = run
         self._active[run_id] = runner
-        logger.debug("agent dispatch: run #%d agent='%s' gen=%d", run_id, name, self._current_generation)
-        asyncio.create_task(self._run_and_queue(run, runner, task))
+        logger.debug("agent dispatch: run #%d agent='%s' gen=%d task_id=%s branch=%s",
+                     run_id, name, self._current_generation, resolved_task_id or "-", branch or "-")
+        asyncio.create_task(self._run_and_queue(run, runner, prompt))
         return run_id
 
     async def _run_and_queue(self, run: AgentRun, runner: AgentRunner, task: str) -> None:
@@ -211,6 +319,11 @@ class AgentRegistry:
                 except Exception:
                     logger.exception("on_complete callback failed")
 
+    def run_label(self, run_id: int) -> str | None:
+        """The '<prompt> · <task_id>' panel label for a run, or None. Loop-owned read."""
+        run = self._runs.get(run_id)
+        return run.panel_label() if run is not None else None
+
     def snapshot(self) -> list[dict]:
         now = time.monotonic()
         runs = [r for r in self._runs.values() if r.generation == self._current_generation]
@@ -223,9 +336,16 @@ class AgentRegistry:
             logger.debug("agent result drained: run #%d agent='%s' status='%s'",
                          run.run_id, run.agent_name, run.status)
         run.drained = True
-        return {"run_id": run.run_id, "name": run.agent_name, "status": run.status,
-                "result": run.result, "note_path": run.note_path,
-                "working_time_s": run.working_time(now=time.monotonic()), "error": run.error}
+        payload = {"run_id": run.run_id, "name": run.agent_name, "status": run.status,
+                   "result": run.result, "note_path": run.note_path,
+                   "working_time_s": run.working_time(now=time.monotonic()), "error": run.error}
+        if run.task_id:
+            payload["task_id"] = run.task_id
+        if run.task_preview:
+            payload["task_preview"] = run.task_preview
+        if run.branch_name:
+            payload["branch_name"] = run.branch_name
+        return payload
 
     def read_result(self, run_id: int) -> dict | None:
         run = self._runs.get(run_id)

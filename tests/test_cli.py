@@ -6,6 +6,15 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from io import StringIO
 
 
+def _close_coro(coro):
+    """asyncio.run replacement: close the coroutine instead of awaiting it.
+
+    _run_loop calls ``asyncio.run(_drive())``; patching asyncio.run with a bare
+    mock leaves _drive() as an un-awaited coroutine that raises a RuntimeWarning
+    when garbage-collected. Closing it here keeps the patch but silences the leak.
+    """
+    coro.close()
+
 
 class TestRunCommand:
     """Test run_command function."""
@@ -74,7 +83,7 @@ class TestRunLoop:
         mock_rt.system_prompt = "system"
 
         with patch('ayder_cli.cli_runner.create_runtime', return_value=mock_rt) as mock_create, \
-             patch('ayder_cli.cli_runner.asyncio.run') as mock_asyncio_run:
+             patch('ayder_cli.cli_runner.asyncio.run', side_effect=_close_coro) as mock_asyncio_run:
             result = _run_loop("hello", permissions={"r"})
 
         assert result == 0
@@ -96,7 +105,7 @@ class TestRunLoop:
 
         with patch('ayder_cli.cli_runner.create_runtime', return_value=mock_rt), \
              patch('ayder_cli.cli_runner.ChatLoop') as MockLoop, \
-             patch('ayder_cli.cli_runner.asyncio.run'):
+             patch('ayder_cli.cli_runner.asyncio.run', side_effect=_close_coro):
             MockLoop.return_value.run = AsyncMock()
             _run_loop("test prompt", permissions={"r"})
 

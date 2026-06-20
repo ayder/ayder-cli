@@ -185,6 +185,13 @@ def create_agent_runtime(
     identity_prefix = (
         f"You are the specialized agent named '{agent_config.name}'.\n"
         "When asked for your agent name, report this configured name exactly.\n\n"
+        "You run INSIDE the project's live working directory and have tools to inspect it: "
+        "run shell commands (`git diff`, `git log`, `git status`, test runners), read files, "
+        "and search. GATHER whatever you need yourself — diffs, source files, the task files "
+        "under `.ayder/tasks/`, test output — by reading the working tree. The orchestrator "
+        "hands you POINTERS (a branch, a base ref, a task id, file paths), not pasted content; "
+        "resolve them from disk. NEVER reply that the diff/code/task is 'missing', 'not "
+        "attached', or 'not provided' before you have tried to obtain it with your tools.\n\n"
     )
     deliverable_directive = (
         "\n\n---\n"

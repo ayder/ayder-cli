@@ -7,7 +7,10 @@ from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.tools.builtins.tasks import (
     create_task,
+    list_task_ids,
     list_tasks,
+    read_task,
+    resolve_task_path,
     show_task,
     update_task_temporal_metadata,
 )
@@ -329,3 +332,45 @@ class TestTemporalMetadata:
         assert "completed" in text
         assert "wf-old" not in text
 
+
+
+class TestTaskResolution:
+    """Tests for the resolvers shared with the agent harness (call_agent task_id)."""
+
+    def _make(self, tasks_dir, name, body="body"):
+        (tasks_dir / name).write_text(
+            f"## Signature\n- **ID:** TASK-001\n- **Status:** pending\n\n{body}\n",
+            encoding="utf-8",
+        )
+
+    def test_resolve_by_numeric_id_forms(self, project_context, tasks_dir):
+        self._make(tasks_dir, "TASK-003-add-auth.md")
+        for ident in ("3", "003", "TASK-003", "TASK-003-add-auth.md"):
+            path = resolve_task_path(project_context, ident)
+            assert path is not None and path.name == "TASK-003-add-auth.md"
+
+    def test_resolve_by_slug(self, project_context, tasks_dir):
+        self._make(tasks_dir, "TASK-007-collect-cli.md")
+        path = resolve_task_path(project_context, "collect-cli")
+        assert path is not None and path.name == "TASK-007-collect-cli.md"
+
+    def test_resolve_missing_returns_none(self, project_context, tasks_dir):
+        assert resolve_task_path(project_context, "TASK-999") is None
+
+    def test_read_task_returns_canonical_id_relpath_and_content(self, project_context, tasks_dir):
+        self._make(tasks_dir, "TASK-003-add-auth.md", body="DO THE AUTH WORK")
+        result = read_task(project_context, "3")
+        assert result is not None
+        canonical_id, rel_path, content = result
+        assert canonical_id == "TASK-003"
+        assert rel_path == ".ayder/tasks/TASK-003-add-auth.md"
+        assert "DO THE AUTH WORK" in content
+
+    def test_read_task_missing_returns_none(self, project_context, tasks_dir):
+        assert read_task(project_context, "TASK-404") is None
+
+    def test_list_task_ids(self, project_context, tasks_dir):
+        self._make(tasks_dir, "TASK-002-b.md")
+        self._make(tasks_dir, "TASK-001-a.md")
+        self._make(tasks_dir, "notes.md")  # non-task file ignored
+        assert list_task_ids(project_context) == ["TASK-001", "TASK-002"]

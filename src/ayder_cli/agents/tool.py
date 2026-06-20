@@ -42,7 +42,9 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
     description=(
         "Delegate a task to a specialized agent that runs in the background. "
         "Returns a run id immediately; poll agent_status and collect with read_agent_result. "
-        "Use list_agents to discover names first."
+        "Use list_agents to discover names first. When the work is a task file under "
+        ".ayder/tasks/, pass its task_id and the harness hands the agent the file itself — "
+        "don't paste the task body into `task`."
     ),
     parameters={
         "type": "object",
@@ -53,10 +55,33 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
             },
             "task": {
                 "type": "string",
-                "description": "Clear task description for the agent to execute",
+                "description": (
+                    "Free-text instructions for the agent — it becomes (part of) the "
+                    "agent's only user message; it has no other context. Optional ONLY "
+                    "when task_id is given (the resolved task file then carries the work). "
+                    "With no task_id this must be concrete and non-empty: what to do, the "
+                    "files and branch to touch, and the acceptance criteria."
+                ),
+            },
+            "task_id": {
+                "type": "string",
+                "description": (
+                    "Optional. The task this dispatch implements, e.g. 'TASK-003' (or '3'). "
+                    "The harness resolves it against .ayder/tasks/ and FAILS FAST if no such "
+                    "task exists; when it resolves, the task file is embedded in the agent's "
+                    "prompt so you need not paste it. Prefer this over copying the task body."
+                ),
+            },
+            "branch_name": {
+                "type": "string",
+                "description": (
+                    "Optional. The git branch the agent must work and COMMIT on, e.g. "
+                    "'agent/add-auth'. Folded into the agent's instructions as a directive. "
+                    "The harness does NOT switch branches — create the branch/worktree first."
+                ),
             },
         },
-        "required": ["name", "task"],
+        "required": ["name"],
     },
     permission="r",
     tags=("core", "agents"),
@@ -81,11 +106,24 @@ def create_call_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
     in the background; the main LLM collects results via the pull tools.
     """
 
-    def handle_call_agent(*, name: str, task: str) -> str:
-        result = registry._on_loop(lambda: registry.create_run(name, task))
+    def handle_call_agent(
+        *,
+        name: str,
+        task: str = "",
+        task_id: str | None = None,
+        branch_name: str | None = None,
+    ) -> str:
+        result = registry._on_loop(
+            lambda: registry.create_run(name, task, task_id=task_id, branch_name=branch_name)
+        )
         if isinstance(result, int):
+            # Echo what the harness actually bound this run to (resolved task_id +
+            # prompt preview) so the orchestrator has an in-context run->task map and
+            # can spot a wandering agent immediately instead of investigating.
+            label = registry._on_loop(lambda: registry.run_label(result))
+            bound = f" for {label}" if label else ""
             return (
-                f"Dispatched '{name}' as run #{result} (working). "
+                f"Dispatched '{name}' as run #{result}{bound} (working). "
                 f"Poll with agent_status; collect with read_agent_result({result})."
             )
         return result  # error string

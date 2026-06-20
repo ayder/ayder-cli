@@ -23,7 +23,11 @@ class TestAgentToolDefinition:
         params = AGENT_TOOL_DEFINITION.parameters
         assert "name" in params["properties"]
         assert "task" in params["properties"]
-        assert params["required"] == ["name", "task"]
+        # task_id / branch_name are optional assignment metadata.
+        assert "task_id" in params["properties"]
+        assert "branch_name" in params["properties"]
+        # Only the agent name is required: task may be supplied via task_id instead.
+        assert params["required"] == ["name"]
 
     def test_definition_permission(self):
         assert AGENT_TOOL_DEFINITION.permission == "r"
@@ -75,13 +79,31 @@ class TestCallAgentHandler:
         mock_registry = MagicMock()
         mock_registry._on_loop = lambda fn: fn()
         mock_registry.create_run.return_value = 1
+        mock_registry.run_label.return_value = None
 
         handler = create_call_agent_handler(mock_registry)
         result = handler(name="reviewer", task="Review auth.py")
 
-        mock_registry.create_run.assert_called_once_with("reviewer", "Review auth.py")
+        mock_registry.create_run.assert_called_once_with(
+            "reviewer", "Review auth.py", task_id=None, branch_name=None
+        )
         assert "run #1" in result
         assert "read_agent_result" in result
+
+    def test_handler_echoes_bound_task_in_confirmation(self):
+        """The dispatch confirmation echoes the task the harness bound the run to,
+        so the orchestrator has an in-context run->task map."""
+        mock_registry = MagicMock()
+        mock_registry._on_loop = lambda fn: fn()
+        mock_registry.create_run.return_value = 5
+        mock_registry.run_label.return_value = "TASK-010"
+
+        handler = create_call_agent_handler(mock_registry)
+        result = handler(name="senior_coder", task_id="TASK-010")
+
+        mock_registry.run_label.assert_called_once_with(5)
+        assert "run #5" in result
+        assert "for TASK-010" in result
 
     def test_handler_returns_error_for_unknown_agent(self):
         mock_registry = MagicMock()
@@ -109,6 +131,7 @@ class TestCallAgentHandler:
         mock_registry = MagicMock()
         mock_registry._on_loop = lambda fn: fn()
         mock_registry.create_run.return_value = 1  # int run_id
+        mock_registry.run_label.return_value = None
 
         handler = create_call_agent_handler(mock_registry)
         result = handler(name="reviewer", task="Review auth.py")

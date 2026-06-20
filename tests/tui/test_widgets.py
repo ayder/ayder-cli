@@ -53,6 +53,32 @@ class TestAgentPanelDataModel:
         assert len(panel._entries) == 2
 
     @patch.object(AgentPanel, "mount")
+    def test_add_agent_stores_assignment_label(self, mock_mount):
+        panel = AgentPanel()
+        panel.add_agent("senior_coder", run_id=1, assignment="refactor auth · TASK-003")
+        assert panel._entries[1].assignment == "refactor auth · TASK-003"
+
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(AgentPanel, "mount")
+    def test_update_agent_first_event_sets_assignment(self, mock_mount, mock_update):
+        # Entry born from a progress event that carries the label (no prior add_agent).
+        panel = AgentPanel()
+        panel.update_agent(2, "senior_coder", "thinking_start", assignment="TASK-009")
+        assert panel._entries[2].assignment == "TASK-009"
+
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(AgentPanel, "mount")
+    def test_running_status_line_includes_assignment(self, mock_mount, mock_update):
+        # The "▶ name — <prompt> · <task_id> — Thinking..." line the user asked for.
+        panel = AgentPanel()
+        panel.add_agent("senior_coder", run_id=1, assignment="refactor auth · TASK-003")
+        panel.update_agent(1, "senior_coder", "thinking_start")
+        rendered = mock_update.call_args[0][0].plain
+        assert "senior_coder" in rendered
+        assert "refactor auth · TASK-003" in rendered
+        assert "Thinking..." in rendered
+
+    @patch.object(AgentPanel, "mount")
     def test_redispatch_creates_second_entry(self, mock_mount):
         panel = AgentPanel()
         panel.add_agent("code_reviewer", run_id=1)

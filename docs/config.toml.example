@@ -25,16 +25,16 @@
 #   pm_spec            glm-5.2:cloud                      strong, token-efficient reasoning + structured writing
 #   pm_review          deepseek-v4-pro:cloud              apex reasoner (~80.6% SWE-bench Verified); diff family from pm_spec
 #   architect          deepseek-v4-pro:cloud              hardest reasoning task: system design
-#   architect_review   gpt-oss:120b:cloud                 independent reviewer, tunable high reasoning effort; diff family
-#   senior_coder       kimi-k2.7-code:cloud               1T coding specialist; best agentic coder
-#   qa_engineer        deepseek-v4-flash:cloud            fast distilled coder for high-throughput test authoring
+#   architect_review   kimi-k2.7-code:cloud               independent reviewer; strong coder, cross-family from the architect (deepseek)
+#   senior_coder       glm-5.2:cloud                      code-strong, token-efficient code generation; strong agentic coder
+#   qa_engineer        minimax-m3:cloud                   long-context coder; holds implementation + criteria while authoring tests
 #   junior_coder       qwen3.6:35b-a3b-coding-nvfp4       LOCAL MoE coder (3B active, nvfp4); only ONE active (memory)
-#   code_reviewer      glm-5.2:cloud                      code-strong reasoner; diff family from the coders
+#   code_reviewer      kimi-k2.7-code:cloud               1T coding specialist; cross-family from the coders (glm)
 #   acceptance_gate    minimax-m3:cloud                   long-context lineage; holds spec + criteria + diff + tests at once
 #
-# Review boundaries deliberately cross model families so a reviewer does not
-# share the author's blind spots (glm↔deepseek, deepseek↔gpt-oss, kimi↔glm,
-# everything↔minimax at the final gate).
+# Review boundaries cross model families so a reviewer does not share the
+# author's blind spots (glm↔deepseek at PM, deepseek↔kimi at architecture,
+# glm↔kimi at code review, everything↔minimax at the final gate).
 #
 # gemma4:31b-cloud is the lightest dense model in your set. It is NOT wired to a
 # frontier gate on purpose (under-powering a gate defeats it); it is provided
@@ -50,7 +50,7 @@
 #
 # NOTE on `think`: value is model/driver-dependent. Recent Ollama accepts
 #       true/false for most models and "low"|"medium"|"high" for reasoning
-#       models like gpt-oss. Adjust per model if a value is rejected.
+#       models like deepseek-v4-pro. Adjust per model if a value is rejected.
 # =============================================================================
 
 config_version = "2.0"
@@ -187,6 +187,7 @@ model = "deepseek-v4-pro:cloud"
 temperature = 0.3
 max_output_tokens = 8192
 think = "high"
+num_ctx = 262144                   # long window: hold the whole spec while splitting it into tasks (delays compaction)
 system_prompt = """
 You are the Architect — you turn an APPROVED spec into an implementation plan.
 
@@ -210,9 +211,9 @@ YAGNI, TDD. Every spec Acceptance Criterion must be covered by at least one task
 
 [agents.architect_review]
 provider = "ollama_cloud"
-model = "gpt-oss:120b:cloud"
+model = "kimi-k2.7-code:cloud"
 temperature = 0.2
-max_output_tokens = 4096
+max_output_tokens = 8192
 think = "high"
 system_prompt = """
 You are the Architecture Reviewer — independent of the Architect.
@@ -240,7 +241,7 @@ Then a numbered findings list, each citing the plan item and the required change
 # Dispatch this agent 2-3 times in parallel, one well-scoped task each.
 [agents.senior_coder]
 provider = "ollama_cloud"
-model = "kimi-k2.7-code:cloud"
+model = "glm-5.2:cloud"
 temperature = 0.2
 max_output_tokens = 8192
 system_prompt = """
@@ -263,7 +264,7 @@ rather than guessing.
 
 [agents.qa_engineer]
 provider = "ollama_cloud"
-model = "deepseek-v4-flash:cloud"
+model = "minimax-m3:cloud"
 temperature = 0.2
 max_output_tokens = 8192
 system_prompt = """
@@ -312,7 +313,7 @@ Rules:
 
 [agents.code_reviewer]
 provider = "ollama_cloud"
-model = "glm-5.2:cloud"
+model = "kimi-k2.7-code:cloud"
 temperature = 0.1
 max_output_tokens = 4096
 think = "high"
