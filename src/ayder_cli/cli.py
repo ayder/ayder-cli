@@ -216,7 +216,12 @@ def main():
 
     # Handle plugin subcommands
     if args.subcommand == "install-plugin":
-        from ayder_cli.tools.plugin_manager import install_plugin, uninstall_plugin, PluginError
+        from ayder_cli.tools.plugin_manager import (
+            install_plugin,
+            install_plugin_dependencies,
+            uninstall_plugin,
+            PluginError,
+        )
         try:
             manifest = install_plugin(
                 args.source,
@@ -235,7 +240,7 @@ def main():
                     confirm = input("Install dependencies? [y/N] ")
                 if confirm.lower() == "y":
                     try:
-                        _install_plugin_deps(manifest.dependencies)
+                        install_plugin_dependencies(manifest.dependencies)
                     except Exception as e:
                         # Rollback: remove the installed plugin
                         uninstall_plugin(
@@ -375,26 +380,6 @@ def main():
         return
 
     sys.exit(run_command(prompt, permissions=granted, agent_mode=args.agent))
-
-
-def _install_plugin_deps(dependencies: dict[str, str]) -> None:
-    """Install plugin pip dependencies via uv pip or pip fallback.
-
-    uv pip is tried first. If uv is not installed (FileNotFoundError), pip is
-    tried. If uv is found but returns a non-zero exit code (CalledProcessError),
-    the error propagates immediately — pip is NOT tried as a fallback for failed
-    installs.
-    """
-    import subprocess
-    pkgs = [f"{name}{ver}" for name, ver in dependencies.items()]
-    for cmd in (["uv", "pip", "install"], ["pip", "install"]):
-        try:
-            subprocess.run([*cmd, *pkgs], check=True)
-            return
-        except FileNotFoundError:
-            # Binary not found — try next fallback
-            continue
-    print("Warning: Could not find uv or pip to install dependencies.")
 
 
 if __name__ == "__main__":

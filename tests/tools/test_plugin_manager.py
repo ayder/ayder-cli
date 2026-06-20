@@ -1,11 +1,19 @@
 """Tests for plugin manager — TOML parsing and validation."""
 
+import logging
+import subprocess
+import sys
+
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from ayder_cli.tools.plugin_manager import (
     parse_plugin_toml,
     PluginError,
+)
+from ayder_cli.tools.plugin_manager import (
+    install_plugin_dependencies,
+    discover_global_plugins,
 )
 from ayder_cli.tools.plugin_manager import (
     install_plugin_from_local,
@@ -230,3 +238,85 @@ def test_update_local_plugin(global_plugins_dir, source_plugin):
     (source_plugin / "new_file.py").write_text("# new")
     update_plugin("test-plugin")
     assert (global_plugins_dir / "test-plugin" / "new_file.py").exists()
+
+
+# --- Dependency installation --------------------------------------------------
+
+
+def test_install_deps_targets_ayder_interpreter():
+    """Deps install into ayder's OWN interpreter (sys.executable), not whatever
+    venv uv/pip would auto-detect from the cwd — the bug that left 'mcp' missing
+    from the uv-tool env."""
+    with patch("subprocess.run") as run:
+        install_plugin_dependencies({"mcp": ">=1.0"})
+    run.assert_called_once()
+    cmd = run.call_args[0][0]
+    assert cmd[:5] == ["uv", "pip", "install", "--python", sys.executable]
+    assert "mcp>=1.0" in cmd
+
+
+def test_install_deps_falls_back_to_pip_when_uv_missing():
+    """When the uv binary is absent, fall back to `<python> -m pip install`,
+    still targeting ayder's interpreter via sys.executable."""
+    def side_effect(cmd, **kwargs):
+        if cmd[0] == "uv":
+            raise FileNotFoundError("uv not found")
+        return MagicMock(returncode=0)
+
+    with patch("subprocess.run", side_effect=side_effect) as run:
+        install_plugin_dependencies({"mcp": ">=1.0"})
+    last_cmd = run.call_args_list[-1][0][0]
+    assert last_cmd[:4] == [sys.executable, "-m", "pip", "install"]
+    assert "mcp>=1.0" in last_cmd
+
+
+def test_install_deps_raises_on_failed_install_without_pip_fallback():
+    """A real install failure (uv ran, non-zero exit) raises PluginError and
+    does NOT silently retry with pip — a failed install is a real failure."""
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, ["uv", "pip", "install"]),
+    ) as run:
+        with pytest.raises(PluginError):
+            install_plugin_dependencies({"mcp": ">=1.0"})
+    run.assert_called_once()
+
+
+def test_install_deps_noop_when_empty():
+    with patch("subprocess.run") as run:
+        install_plugin_dependencies({})
+    run.assert_not_called()
+
+
+def test_discover_reports_missing_dependency_actionably(global_plugins_dir, caplog):
+    """A plugin that fails to import because of a missing dependency yields an
+    actionable warning naming the plugin, the missing module, and how to fix —
+    not a silent generic skip."""
+    plugin = global_plugins_dir / "needsdep"
+    plugin.mkdir()
+    (plugin / "plugin.toml").write_text("""\
+[plugin]
+name = "needsdep"
+version = "1.0.0"
+api_version = 1
+description = "needs a dep"
+author = "test"
+
+[dependencies]
+totally_missing_pkg = ">=1.0"
+
+[tools]
+definitions = "defs.py"
+""")
+    (plugin / "defs.py").write_text(
+        "import totally_missing_pkg\nTOOL_DEFINITIONS = ()\n"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        defs, handlers = discover_global_plugins()
+
+    assert defs == ()
+    msg = caplog.text
+    assert "needsdep" in msg
+    assert "totally_missing_pkg" in msg
+    assert "install" in msg.lower()  # actionable remedy

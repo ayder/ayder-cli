@@ -168,6 +168,61 @@ def install_plugin_from_local(
     return manifest
 
 
+def install_plugin_dependencies(dependencies: dict[str, str]) -> None:
+    """Install a plugin's declared pip dependencies into ayder's OWN environment.
+
+    Targets ``sys.executable`` explicitly so the packages land in the
+    interpreter ayder actually runs from — including a uv-managed tool env
+    (``~/.local/share/uv/tools/...``) — rather than whatever venv ``uv``/``pip``
+    would otherwise auto-detect from the current working directory. That
+    auto-detection is the bug that left the ``mcp`` dependency installed in the
+    wrong place, so the ``mcp-tool`` plugin failed to import at startup.
+
+    Strategy, in order:
+      1. ``uv pip install --python <sys.executable> ...`` — targets the exact
+         interpreter and works even when that env ships no ``pip`` (uv tool
+         envs don't include pip).
+      2. ``<sys.executable> -m pip install ...`` — fallback when the ``uv``
+         binary isn't on PATH.
+
+    A binary that isn't found (``FileNotFoundError``) falls through to the next
+    strategy. A binary that runs and *fails* (non-zero exit) is a real install
+    failure: it raises ``PluginError`` instead of silently retrying with pip.
+    """
+    if not dependencies:
+        return
+
+    import subprocess
+
+    pkgs = [f"{name}{ver}" for name, ver in dependencies.items()]
+    attempts = (
+        ["uv", "pip", "install", "--python", sys.executable, *pkgs],
+        [sys.executable, "-m", "pip", "install", *pkgs],
+    )
+    last_error: Exception | None = None
+    for cmd in attempts:
+        try:
+            subprocess.run(cmd, check=True)
+            return
+        except FileNotFoundError:
+            # Binary (e.g. uv) not on PATH — try the next strategy.
+            continue
+        except subprocess.CalledProcessError as exc:
+            # The installer ran and failed — a genuine failure, not a missing
+            # tool. Do not fall through to pip.
+            last_error = exc
+            break
+
+    if last_error is not None:
+        raise PluginError(
+            f"Failed to install plugin dependencies {pkgs}: {last_error}"
+        )
+    raise PluginError(
+        "Could not install plugin dependencies "
+        f"{pkgs}: neither 'uv' nor 'pip' is available."
+    )
+
+
 def uninstall_plugin(
     name: str,
     project_path: Path | None = None,
@@ -428,6 +483,15 @@ def discover_global_plugins() -> tuple[tuple, dict[str, Callable]]:
             logger.info(
                 f"Loaded global plugin '{plugin_dir.name}' "
                 f"({len(defs)} tools)"
+            )
+        except ModuleNotFoundError as e:
+            # A declared dependency isn't installed in ayder's environment.
+            # Point the user at the fix instead of silently swallowing it.
+            logger.warning(
+                f"Plugin '{plugin_dir.name}' is missing a dependency "
+                f"({e.name!r}: {e}). Reinstall it to install its declared "
+                f"dependencies — e.g. `ayder install-plugin "
+                f"{plugin_dir} --force` — or install the package manually."
             )
         except Exception as e:
             logger.warning(f"Skipping plugin '{plugin_dir.name}': {e}")
