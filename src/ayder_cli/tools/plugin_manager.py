@@ -147,10 +147,15 @@ def install_plugin_from_local(
             "Use --force to overwrite."
         )
 
-    # Copy plugin files
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    shutil.copytree(source_dir, target_dir)
+    # Copy plugin files. When the source IS the install target — e.g. reinstalling
+    # an already-installed plugin from its own directory with --force, which is
+    # exactly what the missing-dependency warning recommends — the files are
+    # already in place. Skip the copy so we don't rmtree the source out from under
+    # ourselves (the dependency reinstall + registry refresh below still run).
+    if source_dir.resolve() != target_dir.resolve():
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        shutil.copytree(source_dir, target_dir)
 
     # Update plugins.json
     data = read_plugins_json(plugins_dir)

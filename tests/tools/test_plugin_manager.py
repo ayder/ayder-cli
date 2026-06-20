@@ -1,6 +1,7 @@
 """Tests for plugin manager — TOML parsing and validation."""
 
 import logging
+import os
 import subprocess
 import sys
 
@@ -164,6 +165,27 @@ def test_install_force_overwrites(global_plugins_dir, source_plugin):
     assert (global_plugins_dir / "test-plugin").exists()
 
 
+def test_install_force_from_own_dir_does_not_self_destruct(
+    global_plugins_dir, source_plugin
+):
+    """Force-reinstalling a plugin from its OWN installed location must not delete
+    it. Pre-fix, --force rmtree'd the target then copytree'd from the same
+    (now-gone) path → FileNotFoundError and the plugin vanished — which is exactly
+    the command ayder's missing-dependency warning tells the user to run."""
+    install_plugin_from_local(source_plugin, project_local=False)
+    installed = global_plugins_dir / "test-plugin"
+    assert installed.exists()
+
+    # source == target: reinstall from the installed directory itself.
+    manifest = install_plugin_from_local(installed, project_local=False, force=True)
+
+    assert manifest.name == "test-plugin"
+    assert installed.exists()
+    assert (installed / "plugin.toml").exists()
+    assert (installed / "test_definitions.py").exists()
+    assert "test-plugin" in read_plugins_json(global_plugins_dir)["plugins"]
+
+
 def test_uninstall_plugin(global_plugins_dir, source_plugin):
     install_plugin_from_local(source_plugin, project_local=False)
     uninstall_plugin("test-plugin")
@@ -320,3 +342,63 @@ definitions = "defs.py"
     assert "needsdep" in msg
     assert "totally_missing_pkg" in msg
     assert "install" in msg.lower()  # actionable remedy
+
+
+def test_plugin_reading_tool_definitions_at_import_still_loads(tmp_path):
+    """A plugin whose definitions module reads
+    ``ayder_cli.tools.definition.TOOL_DEFINITIONS`` at import time must still load.
+
+    Discovery runs inside definition.py's own module body, before TOOL_DEFINITIONS
+    is bound. Without a provisional binding the plugin hits a circular-import
+    AttributeError and is silently skipped — exactly what kept the mcp-tool plugin
+    from exposing any tools whenever a .ayder/mcp.json was present.
+
+    Reproduced in a fresh interpreter with HOME redirected so GLOBAL_PLUGINS_DIR
+    resolves to our temp plugin (the bug only manifests during the very first
+    import of definition.py, which a same-process call cannot recreate).
+    """
+    plugin = tmp_path / ".ayder" / "plugins" / "circ-test"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.toml").write_text("""\
+[plugin]
+name = "circ-test"
+version = "1.0.0"
+api_version = 1
+description = "reads TOOL_DEFINITIONS at import time"
+author = "test"
+
+[tools]
+definitions = "circ_defs.py"
+""")
+    (plugin / "circ_defs.py").write_text(
+        "import ayder_cli.tools.definition as _d\n"
+        "from ayder_cli.tools.definition import ToolDefinition\n"
+        # The line that raises pre-fix: TOOL_DEFINITIONS isn't bound yet.
+        "_existing = {t.name for t in _d.TOOL_DEFINITIONS}\n"
+        "TOOL_DEFINITIONS = (\n"
+        "    ToolDefinition(\n"
+        "        name='circ_marker',\n"
+        "        description='marker',\n"
+        "        parameters={'type': 'object', 'properties': {}},\n"
+        "        func_ref='circ_impl:run',\n"
+        "    ),\n"
+        ")\n"
+    )
+    (plugin / "circ_impl.py").write_text("def run(**kwargs):\n    return None\n")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import ayder_cli.tools.definition as d;"
+            "print('circ_marker' in [t.name for t in d.TOOL_DEFINITIONS])",
+        ],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip().splitlines()[-1] == "True", (
+        proc.stdout,
+        proc.stderr,
+    )

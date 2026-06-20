@@ -168,7 +168,15 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
 
 _BUILTIN_DEFINITIONS: Tuple[ToolDefinition, ...] = _discover_definitions()
 
-# Phase 1: Merge global plugins at import time
+# Phase 1: Merge global plugins at import time.
+#
+# Discovery runs *inside this module's own body*, so a plugin whose definitions
+# module reads ``TOOL_DEFINITIONS`` at import time (e.g. to avoid tool-name
+# collisions, as mcp-tool does) would otherwise hit a circular import — the name
+# isn't bound yet. Bind it provisionally to the builtins first; those are the
+# only definitions that exist during discovery anyway. It is reassigned to the
+# full set (builtins + plugins) immediately after discovery completes.
+TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = _BUILTIN_DEFINITIONS
 _GLOBAL_PLUGIN_DEFS: Tuple[ToolDefinition, ...] = ()
 _PLUGIN_HANDLERS: Dict[str, Any] = {}
 
@@ -179,9 +187,7 @@ try:
 except Exception as e:
     logger.warning(f"Failed to load global plugins: {e}")
 
-TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
-    _BUILTIN_DEFINITIONS + _GLOBAL_PLUGIN_DEFS
-)
+TOOL_DEFINITIONS = _BUILTIN_DEFINITIONS + _GLOBAL_PLUGIN_DEFS
 TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {
     td.name: td for td in TOOL_DEFINITIONS
 }
