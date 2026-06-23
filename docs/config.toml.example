@@ -48,9 +48,29 @@
 #      `export OLLAMA_API_KEY="<key>"`. The api_key config field is INERT on the
 #      native path, so a missing env var ⇒ 401 Unauthorized.
 #
-# NOTE on `think`: value is model/driver-dependent. Recent Ollama accepts
-#       true/false for most models and "low"|"medium"|"high" for reasoning
-#       models like deepseek-v4-pro. Adjust per model if a value is rejected.
+# NOTE on `think`: on the native `ollama` driver, ayder hardcodes thinking ON
+#       (think=True) and does NOT forward the configured level — so a
+#       `think = "high"` below documents intent, but the "low/medium/high"
+#       granularity is not applied. The `openai` driver sends no reasoning-effort
+#       parameter at all.
+#
+# NOTE on tuning knobs — which actually take effect depends on the DRIVER. These
+#       agents run on the native `ollama` driver, which ignores most of them:
+#         • temperature       — forwarded by NO driver yet ⇒ no effect anywhere.
+#         • max_output_tokens — NOT sent on the ollama path (Ollama sizes
+#                               generation itself); honored only by the
+#                               openai-family drivers as max_tokens. Default 4096.
+#         • think             — hardcoded ON for ollama (level ignored); openai
+#                               sends none.
+#         • num_ctx           — on ollama it is provisional only (the real window
+#                               is auto-detected from /api/show); on the openai
+#                               path it sizes the context-manager budget.
+#                               Default 65536.
+#       The per-agent temperature / max_output_tokens / think values below are
+#       therefore largely INERT on this Ollama pipeline — they are kept to
+#       document intent and to carry over if you switch an agent to an `openai`
+#       profile. To actually tune these, use the `openai` driver — see
+#       [llm.openai] below.
 # =============================================================================
 
 config_version = "2.0"
@@ -77,10 +97,16 @@ retention = "7 days"
 
 [context_manager]
 enabled = true
-# On the native Ollama path, OllamaContextManager auto-detects the model's real
-# window from /api/show; max_context_tokens is ignored there and only matters on
-# the openai/non-ollama path. reserve_ratio + compaction_threshold ARE read.
-max_context_tokens = 131072
+# Destructive tool-result compression is OPT-IN and OFF by default. It summarizes
+# old tool results in place (lossy) and thrashes the KV cache, so leave it off
+# unless you specifically want it; eviction will replace it in a later release.
+enable_compression = false
+# max_context_tokens is OPTIONAL. When unset (recommended), the budget is derived
+# from the active model's num_ctx. It is read only on the openai/non-ollama path
+# (DefaultContextManager); the native Ollama path auto-detects the real window
+# from /api/show and ignores it. reserve_ratio + compaction_threshold ARE read on
+# both paths.
+# max_context_tokens = 131072
 reserve_ratio = 0.30
 compaction_threshold = 0.80
 
@@ -117,6 +143,20 @@ num_ctx = 32768                     # keep modest: local VRAM is the constraint
 # base_url = "https://ollama.com"
 # model = "gemma4:31b-cloud"
 # num_ctx = 131072
+
+# OpenAI-compatible driver. Unlike the `ollama` driver above, this one HONORS the
+# tuning knobs (defaults shown). Use it for api.openai.com, Azure, vLLM,
+# llama.cpp, LM Studio, or Ollama's own `/v1` endpoint. Point an agent at it with
+# `provider = "openai"`.
+# [llm.openai]
+# driver = "openai"
+# base_url = "https://api.openai.com/v1"   # OpenAI-compatible endpoint
+# api_key = "sk-..."                        # your key (or "ollama"/"none" for local servers)
+# model = "gpt-5.5"
+# num_ctx = 65536            # sizes the context-manager budget (default 65536); NOT sent to the API
+# max_output_tokens = 8192   # -> max_tokens / max_completion_tokens (default 4096); keep WELL below num_ctx
+# stop_sequences = []        # -> stop (default [])
+# # temperature / think are NOT applied by the openai driver today (no-ops) — omitted on purpose.
 
 # =============================================================================
 # Agents
