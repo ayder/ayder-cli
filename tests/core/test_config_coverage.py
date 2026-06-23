@@ -173,18 +173,22 @@ class TestConfigValidationTemporal:
 
 
 class TestConfigMaxHistoryDefault:
-    """H2: max_history_messages default must be 30 directly, no model_validator magic."""
+    """max_history_messages defaults to 0 (unlimited) directly, no sentinel magic.
 
-    def test_default_is_30_not_minus_one(self):
-        """H2: The field default itself is 30, not -1 converted by a model_validator."""
+    The old fixed 30-message cap predates large-context models and thrashes a
+    small history window on a big context; 0 lets the token budget + compaction
+    be the bound.
+    """
+
+    def test_default_is_zero_not_sentinel(self):
+        """The field default itself is 0 (unlimited), not a sentinel converted later."""
         from ayder_cli.core.config import Config as C
         default_val = C.model_fields["max_history_messages"].default
-        assert default_val == 30, (
-            f"max_history_messages default is {default_val!r}, expected 30 — "
-            "the sentinel -1 pattern should be eliminated"
+        assert default_val == 0, (
+            f"max_history_messages default is {default_val!r}, expected 0 (unlimited)"
         )
 
-    def test_config_default_resolves_to_30(self):
-        """H2: Config() without specifying max_history_messages gives 30."""
+    def test_config_default_resolves_to_zero(self):
+        """Config() without specifying max_history_messages gives 0 (unlimited)."""
         config = Config()
-        assert config.max_history_messages == 30
+        assert config.max_history_messages == 0

@@ -82,7 +82,12 @@ verbose = false
 prompt = "STANDARD"                 # MINIMAL | STANDARD | EXTENDED
 max_background_processes = 5        # cap on concurrent background processes (e.g. test runs)
 max_output_tokens = 8192            # orchestrator response cap
-max_history_messages = 30
+# Max conversation messages kept per turn. 0 = unlimited (default): the context
+# manager's token budget + compaction are the bound, so the model uses its real
+# window. A small fixed cap (the old default was 30) thrashes a tiny history
+# window on a large-context model and wastes most of it. Set a finite number
+# only if you want a hard message cap regardless of window size.
+max_history_messages = 0
 agent_timeout = 1800               # seconds before a background agent is cancelled (30 min; reasoning+coding can be slow)
 # Tools the agents inherit. A coding harness needs file/shell/search (core),
 # tasks/notes (metadata), background process control for test suites

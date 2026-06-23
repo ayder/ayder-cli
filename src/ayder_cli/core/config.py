@@ -288,7 +288,10 @@ class Config(BaseModel):
     logging_retention: str = Field(default="7 days")
     max_background_processes: int = Field(default=5)
     max_output_tokens: int = Field(default=4096)
-    max_history_messages: int = Field(default=30)
+    # 0 = unlimited: let the context manager's token budget + compaction be the
+    # bound. The old fixed 30 predates large-context models and thrashes a tiny
+    # history window on a big context.
+    max_history_messages: int = Field(default=0)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     stop_sequences: list[str] = Field(default_factory=list)

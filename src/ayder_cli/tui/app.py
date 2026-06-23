@@ -352,7 +352,7 @@ class AyderApp(App):
                 stop_sequences=stop_sequences,
                 permissions=self.permissions,
                 tool_tags=tool_tags,
-                max_history=getattr(self.config, 'max_history_messages', 30),
+                max_history=getattr(self.config, 'max_history_messages', 0),
             ),
             callbacks=self._callbacks,
             context_manager=self.context_manager,
