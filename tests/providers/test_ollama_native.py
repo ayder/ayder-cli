@@ -204,6 +204,39 @@ async def test_keep_alive_set_to_infinite():
         assert call_kwargs.kwargs.get("keep_alive") == -1 or call_kwargs[1].get("keep_alive") == -1
 
 
+@pytest.mark.asyncio
+async def test_native_stream_does_not_force_num_ctx():
+    """Provider must let Ollama derive context from the model, not force num_ctx.
+
+    Recent Ollama versions size the context window from the model itself, so the
+    provider should not override it via options.
+    """
+    cfg = make_config()
+
+    async def mock_stream(*args, **kwargs):
+        yield make_chat_response(content="ok", done=True,
+                                prompt_eval_count=1, eval_count=1,
+                                prompt_eval_duration=10, eval_duration=10,
+                                load_duration=0)
+
+    with patch("ayder_cli.providers.impl.ollama.AsyncClient") as MockClient:
+        instance = AsyncMock()
+        instance.chat.return_value = mock_stream()
+        MockClient.return_value = instance
+
+        provider = OllamaProvider(cfg)
+        async for _ in provider.stream_with_tools(
+            messages=[{"role": "user", "content": "test"}],
+            model="test:latest",
+            tools=None,
+            options={"num_ctx": 4096},
+        ):
+            pass
+
+        sent_options = instance.chat.call_args.kwargs.get("options")
+        assert not (sent_options and "num_ctx" in sent_options)
+
+
 # =============================================================================
 # SDK Compliance Regression Tests
 # =============================================================================

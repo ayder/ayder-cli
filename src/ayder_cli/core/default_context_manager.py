@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Fallback context budget used only when neither an explicit max_context_tokens
+# nor a model num_ctx is available (e.g. a bare config section in tests).
+DEFAULT_MAX_CONTEXT_TOKENS = 65536
+
 
 class MessageTier(Enum):
     """Importance tiers for messages."""
@@ -147,10 +151,21 @@ class DefaultContextManager:
         elif isinstance(config, ContextManagerConfigSection):
             self._config = config
         else:
-            max_tokens = getattr(config, "num_ctx", 8192)
-            if max_tokens <= 0:
-                max_tokens = 8192
-            self._config = ContextManagerConfigSection(max_context_tokens=max_tokens)
+            self._config = ContextManagerConfigSection()
+
+        # Resolve the effective context budget. An explicit max_context_tokens
+        # wins; otherwise derive it from the model's num_ctx so the budget tracks
+        # the real window instead of the legacy fixed default.
+        configured = self._config.max_context_tokens
+        if isinstance(configured, int) and configured > 0:
+            self._max_context_tokens = configured
+        else:
+            num_ctx = getattr(config, "num_ctx", None)
+            self._max_context_tokens = (
+                num_ctx
+                if isinstance(num_ctx, int) and num_ctx > 0
+                else DEFAULT_MAX_CONTEXT_TOKENS
+            )
 
         provider = getattr(config, "provider", "openai")
         self._counter = TokenCounter(model=model, provider=provider)
@@ -214,7 +229,7 @@ class DefaultContextManager:
         response arrives. See opus47.md finding #6.
         """
         if self._last_prompt_tokens:
-            ceiling = self._config.max_context_tokens
+            ceiling = self._max_context_tokens
             return self._last_prompt_tokens >= ceiling * self._config.compaction_threshold
         return self.should_trigger_summarization()
 
@@ -227,8 +242,8 @@ class DefaultContextManager:
             return self._stats_cache
 
         total = self._calculate_total_tokens()
-        available = max(0, self._config.max_context_tokens - total)
-        utilization = (total / self._config.max_context_tokens) * 100
+        available = max(0, self._max_context_tokens - total)
+        utilization = (total / self._max_context_tokens) * 100
 
         self._stats_cache = ContextStats(
             total_tokens=total,
@@ -245,7 +260,7 @@ class DefaultContextManager:
 
     @property
     def reserve(self) -> int:
-        return int(self._config.max_context_tokens * self._config.reserve_ratio)
+        return int(self._max_context_tokens * self._config.reserve_ratio)
 
     def count_tokens(self, text: str) -> int:
         """Legacy support."""
@@ -362,18 +377,24 @@ class DefaultContextManager:
             return False
 
         total = self._calculate_total_tokens()
-        utilization = total / self._config.max_context_tokens
+        utilization = total / self._max_context_tokens
         return utilization >= self._config.compaction_threshold
 
     def should_trigger_compression(self) -> bool:
+        if not getattr(self._config, "enable_compression", False):
+            return False
         if not self._config.enabled or not self._config.compress_tool_results:
             return False
 
         total = self._calculate_total_tokens()
-        utilization = total / self._config.max_context_tokens
+        utilization = total / self._max_context_tokens
         return utilization >= self._config.compaction_threshold
 
     def compress_old_results(self, age_threshold: int | None = None) -> int:
+        # Compression is opt-in. Disabled by default because it destructively
+        # summarizes old tool results in place and thrashes the KV cache.
+        if not getattr(self._config, "enable_compression", False):
+            return 0
         threshold = (
             age_threshold
             if age_threshold is not None
@@ -449,10 +470,12 @@ class DefaultContextManager:
         return overhead
 
     def _available_budget(self, overhead: int) -> int:
-        reserve = int(self._config.max_context_tokens * self._config.reserve_ratio)
-        return self._config.max_context_tokens - overhead - reserve
+        reserve = int(self._max_context_tokens * self._config.reserve_ratio)
+        return self._max_context_tokens - overhead - reserve
 
     def _auto_compress(self) -> None:
+        if not getattr(self._config, "enable_compression", False):
+            return
         if not self._config.compress_tool_results:
             return
         if self.should_trigger_compression():

@@ -178,6 +178,105 @@ def test_group_into_units():
     assert units[2] == [messages[3]]
 
 
+def _make_old_long_tool_result_manager(config):
+    """Manager holding one old, long tool result eligible for compression."""
+    mgr = DefaultContextManager(config)
+    long_content = "x" * 5000  # exceeds max_tool_result_length (2048)
+    mgr.add_message({"role": "user", "content": "go"})
+    mgr.add_message(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "1", "function": {"name": "read_file", "arguments": "{}"}}
+            ],
+        }
+    )
+    mgr.add_message(
+        {"role": "tool", "tool_call_id": "1", "name": "read_file", "content": long_content}
+    )
+    # Filler so the tool result is "old" (age > tool_result_compress_age=5).
+    for i in range(10):
+        mgr.add_message({"role": "user", "content": f"m{i}"})
+    return mgr, long_content
+
+
+def test_max_context_tokens_defaults_to_none():
+    """max_context_tokens is now optional — unset means 'derive from num_ctx'."""
+    from ayder_cli.core.config import ContextManagerConfigSection
+
+    assert ContextManagerConfigSection().max_context_tokens is None
+
+
+def test_budget_syncs_from_num_ctx_when_max_context_tokens_unset():
+    """When max_context_tokens is unset, the budget tracks the model's num_ctx."""
+    from types import SimpleNamespace
+    from ayder_cli.core.config import ContextManagerConfigSection
+
+    cfg = SimpleNamespace(
+        context_manager=ContextManagerConfigSection(),  # max_context_tokens=None
+        num_ctx=131072,
+        provider="openai",
+        model="x",
+    )
+    mgr = DefaultContextManager(cfg)
+
+    assert mgr._max_context_tokens == 131072
+    assert mgr.reserve == int(131072 * 0.30)
+
+
+def test_explicit_max_context_tokens_overrides_num_ctx():
+    """An explicit max_context_tokens wins over num_ctx."""
+    from types import SimpleNamespace
+    from ayder_cli.core.config import ContextManagerConfigSection
+
+    cfg = SimpleNamespace(
+        context_manager=ContextManagerConfigSection(max_context_tokens=4096),
+        num_ctx=131072,
+        provider="openai",
+        model="x",
+    )
+    mgr = DefaultContextManager(cfg)
+
+    assert mgr._max_context_tokens == 4096
+
+
+def test_enable_compression_defaults_off():
+    """Compression must be opt-in: the global flag defaults to False."""
+    from ayder_cli.core.config import ContextManagerConfigSection
+
+    assert ContextManagerConfigSection().enable_compression is False
+
+
+def test_compress_old_results_noop_when_compression_disabled():
+    """With the default (disabled) flag, old long tool results are NOT compressed."""
+    from ayder_cli.core.config import ContextManagerConfigSection
+
+    config = ContextManagerConfigSection(max_context_tokens=1000)
+    mgr, original = _make_old_long_tool_result_manager(config)
+
+    compressed = mgr.compress_old_results()
+
+    assert compressed == 0
+    assert mgr._messages[2]["content"] == original  # untouched
+
+
+def test_compress_old_results_runs_when_compression_enabled():
+    """When enable_compression=True, eligible old long tool results are compressed."""
+    from ayder_cli.core.config import ContextManagerConfigSection
+
+    config = ContextManagerConfigSection(
+        max_context_tokens=1000, enable_compression=True
+    )
+    mgr, original = _make_old_long_tool_result_manager(config)
+
+    compressed = mgr.compress_old_results()
+
+    assert compressed == 1
+    assert mgr._messages[2]["content"] != original
+    assert "truncated" in mgr._messages[2]["content"].lower()
+
+
 def test_assign_tier_user_messages_never_old_assistant():
     """_assign_tier must not assign OLD_ASSISTANT to old user messages."""
     from ayder_cli.core.config import ContextManagerConfigSection

@@ -174,12 +174,19 @@ class ContextManagerConfigSection(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = Field(default=True)
-    max_context_tokens: int = Field(default=8192)
+    # Optional: when unset, the context manager derives the budget from the
+    # model's num_ctx. The old fixed 8192 default predates large-context models.
+    max_context_tokens: int | None = Field(default=None)
     reserve_ratio: float = Field(default=0.30)
     compaction_threshold: float = Field(default=0.70)
     tool_result_compress_age: int = Field(default=5)
     max_tool_result_length: int = Field(default=2048)
     compress_tool_results: bool = Field(default=True)
+    # Master switch for destructive tool-result compression. Compression is
+    # known to be too aggressive (it summarizes old tool results in place and
+    # thrashes the KV cache), so it is OPT-IN: disabled unless explicitly set.
+    # Eviction will replace it in a later phase.
+    enable_compression: bool = Field(default=False)
 
     @field_validator("reserve_ratio", "compaction_threshold")
     @classmethod
@@ -190,8 +197,8 @@ class ContextManagerConfigSection(BaseModel):
 
     @field_validator("max_context_tokens")
     @classmethod
-    def validate_positive(cls, v: int) -> int:
-        if v <= 0:
+    def validate_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
             raise ValueError("max_context_tokens must be positive")
         return v
 

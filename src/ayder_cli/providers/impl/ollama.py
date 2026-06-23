@@ -146,8 +146,8 @@ class OllamaProvider(AIProvider):
         tools: list[dict[str, Any]] | None,
         options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
-        opts = options or {}
-        num_ctx = opts.get("num_ctx", 65536)
+        # Let Ollama size the context window from the model itself (recent
+        # versions do this automatically); do not force num_ctx.
         ollama_tools = self._convert_tools(tools) if tools else None
         ollama_messages = self._convert_messages(messages)
 
@@ -155,7 +155,6 @@ class OllamaProvider(AIProvider):
             model=model,
             messages=ollama_messages,
             tools=ollama_tools,
-            options={"num_ctx": num_ctx},
             keep_alive=-1,
             think=True,
             stream=True,
@@ -204,8 +203,8 @@ class OllamaProvider(AIProvider):
         tools: list[dict[str, Any]] | None,
         options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
-        opts = options or {}
-        num_ctx = opts.get("num_ctx", 65536)
+        # Let Ollama size the context window from the model itself; do not
+        # force num_ctx.
         formatted_messages = driver.render_tools_into_messages(messages, tools or [])
         ollama_messages = self._convert_messages(formatted_messages)
 
@@ -213,7 +212,6 @@ class OllamaProvider(AIProvider):
             model=model,
             messages=ollama_messages,
             tools=None,
-            options={"num_ctx": num_ctx},
             keep_alive=-1,
             think=True,
             stream=True,
