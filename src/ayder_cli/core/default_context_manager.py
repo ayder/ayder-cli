@@ -157,14 +157,27 @@ class DefaultContextManager:
         # wins; otherwise derive it from the model's num_ctx so the budget tracks
         # the real window instead of the legacy fixed default.
         configured = self._config.max_context_tokens
+        num_ctx = getattr(config, "num_ctx", None)
         if isinstance(configured, int) and configured > 0:
             self._max_context_tokens = configured
+            logger.info(
+                "Context budget: %d tokens (explicit max_context_tokens; num_ctx=%s)",
+                configured, num_ctx,
+            )
+        elif isinstance(num_ctx, int) and num_ctx > 0:
+            self._max_context_tokens = num_ctx
+            logger.info(
+                "Context budget: %d tokens (derived from num_ctx; "
+                "max_context_tokens unset)",
+                num_ctx,
+            )
         else:
-            num_ctx = getattr(config, "num_ctx", None)
-            self._max_context_tokens = (
-                num_ctx
-                if isinstance(num_ctx, int) and num_ctx > 0
-                else DEFAULT_MAX_CONTEXT_TOKENS
+            self._max_context_tokens = DEFAULT_MAX_CONTEXT_TOKENS
+            logger.warning(
+                "Context budget: could not read num_ctx or max_context_tokens; "
+                "falling back to default %d tokens. Recommend setting num_ctx "
+                "(or [context_manager] max_context_tokens) in your config.",
+                DEFAULT_MAX_CONTEXT_TOKENS,
             )
 
         provider = getattr(config, "provider", "openai")

@@ -1,7 +1,10 @@
+import logging
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Any, Callable, Dict
+
+logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path("~/.ayder").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -316,9 +319,25 @@ class Config(BaseModel):
         if isinstance(llm_section, dict):
             profile = llm_section.get(provider)
             if not isinstance(profile, dict):
+                available = ", ".join(sorted(llm_section)) or "<none>"
                 default_profile = llm_section.get(DEFAULTS["provider"])
                 if isinstance(default_profile, dict):
                     profile = default_profile
+                    logger.error(
+                        "Provider %r has no [llm.%s] profile; falling back to the "
+                        "default [llm.%s] profile. Available profiles: %s. Fix the "
+                        "provider name or add an [llm.%s] section.",
+                        provider, provider, DEFAULTS["provider"], available, provider,
+                    )
+                else:
+                    logger.error(
+                        "Provider %r has no [llm.%s] profile and no default "
+                        "[llm.%s] profile exists; the driver will default to "
+                        "'openai' with built-in endpoint defaults. Available "
+                        "profiles: %s. Fix the provider name or add an [llm.%s] "
+                        "section.",
+                        provider, provider, DEFAULTS["provider"], available, provider,
+                    )
             if isinstance(profile, dict):
                 new_data.update(profile)
             new_data.pop("llm", None)
@@ -366,6 +385,11 @@ class Config(BaseModel):
             "qwen", "dashscope", "glm", "zhipu",
         )
         if v not in valid:
+            logger.error(
+                "Unsupported driver %r; must be one of: %s. Fix the driver in "
+                "your [llm.<provider>] profile.",
+                v, ", ".join(valid),
+            )
             raise ValueError(f"driver must be one of: {', '.join(valid)}")
         return v
 
