@@ -19,6 +19,21 @@ def test_implements_protocol():
     assert isinstance(mgr, ContextManagerProtocol)
 
 
+def test_update_from_response_stamps_model_on_context_log(caplog):
+    """Each per-response Context log line names its model, so interleaved
+    multi-agent logs are attributable to the right LLM."""
+    import logging
+
+    mgr = OllamaContextManager(
+        provisional_context_length=262144, model="kimi-k2.7-code:cloud"
+    )
+    with caplog.at_level(logging.INFO):
+        mgr.update_from_response({"prompt_tokens": 14109, "completion_tokens": 21})
+
+    assert "kimi-k2.7-code:cloud" in caplog.text
+    assert "14109/262144" in caplog.text
+
+
 def test_freeze_system_prompt():
     mgr = make_manager()
     mgr.freeze_system_prompt("You are helpful.", [{"type": "function"}])
