@@ -2,7 +2,7 @@
 
 from unittest.mock import patch, MagicMock
 
-from ayder_cli.tui.widgets import ActivityBar, AgentPanel
+from ayder_cli.tui.widgets import ActivityBar, AgentPanel, ThinkingPanel
 
 
 class TestActivityBarAgents:
@@ -33,6 +33,82 @@ class TestAgentPanelToggle:
         panel.toggle()
         assert panel.toggle() is False
         assert panel._user_visible is False
+
+
+class TestThinkingPanelToggle:
+    def test_starts_not_visible(self):
+        panel = ThinkingPanel()
+        assert panel._user_visible is False
+
+    def test_toggle_returns_new_state(self):
+        panel = ThinkingPanel()
+        assert panel.toggle() is True
+        assert panel._user_visible is True
+
+    def test_toggle_twice_returns_false(self):
+        panel = ThinkingPanel()
+        panel.toggle()
+        assert panel.toggle() is False
+        assert panel._user_visible is False
+
+
+class TestThinkingPanelStreaming:
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_first_delta_mounts_content_widget(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.add_thinking("Let me think")
+        assert panel._widget is not None
+        assert panel._buffer == "Let me think"
+        mock_mount.assert_called_once()
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(ThinkingPanel, "mount")
+    def test_deltas_accumulate_into_buffer(self, mock_mount, mock_update, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.add_thinking("Hello ")
+        panel.add_thinking("world")
+        assert panel._buffer == "Hello world"
+        # Mounted once; subsequent deltas update the same widget.
+        mock_mount.assert_called_once()
+        assert mock_update.call_count == 1
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_empty_delta_is_ignored(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.add_thinking("")
+        assert panel._widget is None
+        mock_mount.assert_not_called()
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_start_phase_inserts_separator_between_phases(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.add_thinking("phase one")
+        panel.start_phase()
+        panel.add_thinking("phase two")
+        assert panel._buffer == "phase one\n\nphase two"
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_start_phase_on_empty_buffer_is_noop(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.start_phase()
+        panel.add_thinking("first")
+        assert panel._buffer == "first"
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_clear_resets_buffer_and_widget(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.add_thinking("some reasoning")
+        panel._widget = MagicMock()  # stand in for a mounted Static
+        panel.clear()
+        assert panel._buffer == ""
+        assert panel._widget is None
+        assert panel._needs_separator is False
 
 
 class TestAgentPanelDataModel:

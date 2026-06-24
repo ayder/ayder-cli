@@ -13,12 +13,12 @@ KEYBINDING_REGISTRY: list[tuple[str, str, str]] = [
     ("Home/End", "Top/Bottom of chat", "Navigation"),
     # Chat
     ("Enter", "Send message", "Chat"),
-    ("Shift+Enter", "New line", "Chat"),
-    ("\u2191/\u2193", "Command history", "Chat"),
+    ("Shift+Enter / Ctrl+J", "New line", "Chat"),
+    ("\u2191/\u2193", "History (at first/last char) / move line", "Chat"),
     ("Tab", "Complete /command", "Chat"),
     # Panels
     ("Ctrl+O", "Toggle Tools panel", "Panels"),
-    ("Ctrl+T", "Toggle Thinking", "Panels"),
+    ("Ctrl+T", "Toggle Thinking panel", "Panels"),
     ("Ctrl+G", "Toggle Agents panel", "Panels"),
     # General
     ("Ctrl+L", "Clear chat", "General"),

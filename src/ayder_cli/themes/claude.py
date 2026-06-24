@@ -633,6 +633,27 @@ AgentPanel .agent-detail {
     padding: 0 0 0 4;
 }
 
+/* ThinkingPanel - Scrollable panel showing the model's reasoning stream.
+   Toggled with Ctrl+T. Taller than the tool/agent panels because reasoning is
+   long-form. Targets 'ThinkingPanel' in widgets.py. */
+ThinkingPanel {
+    layout: vertical;
+    height: auto;
+    max-height: 60%;
+    background: #0a0a18;
+    border-top: solid #333350;
+    padding: 1 1;
+    overflow-y: scroll;
+    display: none;
+}
+
+ThinkingPanel .thinking-content {
+    height: auto;
+    color: #8888aa;
+    text-style: italic;
+    padding: 0 1;
+}
+
 /* AyderApp - The root application screen. */
 Screen {
     layout: vertical;
@@ -666,6 +687,12 @@ Screen:inline {
 #agent-panel {
     min-height: 0;
     max-height: 40%;
+    width: 100%;
+}
+
+#thinking-panel {
+    min-height: 0;
+    max-height: 60%;
     width: 100%;
 }
 

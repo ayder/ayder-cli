@@ -514,6 +514,27 @@ ToolPanel .tool-item.completed {
     color: $success;
 }
 
+/* ThinkingPanel - Scrollable reasoning stream, toggled with Ctrl+T.
+   Taller than the tool/agent panels because reasoning is long-form. */
+ThinkingPanel {
+    layout: vertical;
+    height: auto;
+    min-height: 6;
+    max-height: 24;
+    background: $surface-darken-1;
+    border-top: heavy $primary;
+    padding: 1 1;
+    overflow-y: scroll;
+    display: none;
+}
+
+ThinkingPanel .thinking-content {
+    height: auto;
+    color: $text-muted;
+    text-style: italic;
+    padding: 0 1;
+}
+
 /* AyderApp - Main application */
 Screen {
     layout: vertical;

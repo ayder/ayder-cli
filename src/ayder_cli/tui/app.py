@@ -42,6 +42,7 @@ from ayder_cli.agents.tool import (
 from ayder_cli.tui.widgets import (
     AgentPanel,
     ChatView,
+    ThinkingPanel,
     ToolPanel,
     ActivityBar,
     CLIInputBar,
@@ -77,6 +78,8 @@ class AppCallbacks:
     def on_thinking_start(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_thinking(True)
+        # Separate this reasoning phase from any earlier one in the same turn.
+        self._app.query_one("#thinking-panel", ThinkingPanel).start_phase()
         self._app._start_activity_timer()
 
     def on_thinking_stop(self) -> None:
@@ -90,8 +93,10 @@ class AppCallbacks:
         chat_view.add_assistant_message(text)
 
     def on_thinking_content(self, text: str) -> None:
-        chat_view = self._app.query_one("#chat-view", ChatView)
-        chat_view.add_thinking_message(text)
+        # Reasoning streams silently into the dedicated panel (Ctrl+T to view),
+        # the same way tools stream into the tool panel. The ActivityBar spinner
+        # provides ambient "Thinking..." status in the meantime.
+        self._app.query_one("#thinking-panel", ThinkingPanel).add_thinking(text)
 
     def on_token_usage(self, total_tokens: int) -> None:
         # Show LIVE context-window fill (current / window size), not the
@@ -463,11 +468,19 @@ class AyderApp(App):
         self._active_skill = skill_name
 
     def _animate_activity(self) -> None:
-        """Animate spinners in the activity bar and tool panel."""
+        """Animate spinners in the activity bar and tool panel.
+
+        Both updates are wrapped in a single ``batch_update`` so the 10fps tick
+        produces one repaint instead of two, and the tool panel is skipped when
+        it is empty — under load (streaming + tools + agents) this keeps the
+        per-tick redraw cost (and the flicker that comes with it) down.
+        """
         activity = self.query_one("#activity-bar", ActivityBar)
-        activity.update_spinners()
         tool_panel = self.query_one("#tool-panel", ToolPanel)
-        tool_panel.update_spinners()
+        with self.batch_update():
+            activity.update_spinners()
+            if tool_panel._tools:
+                tool_panel.update_spinners()
 
     def _start_activity_timer(self) -> None:
         """Start the shared activity animation timer if not running."""
@@ -600,6 +613,7 @@ class AyderApp(App):
         """Compose the UI layout - terminal style with scrolling content."""
         yield ChatView(id="chat-view")
         yield ToolPanel(id="tool-panel")
+        yield ThinkingPanel(id="thinking-panel")
         yield AgentPanel(id="agent-panel")
         yield ActivityBar(id="activity-bar")
         yield CLIInputBar(commands=self.commands, id="input-bar")
@@ -746,6 +760,8 @@ class AyderApp(App):
             return
         try:
             self.query_one("#chat-view", ChatView).add_user_message(user_input)  # echo now
+            # Start each turn's reasoning fresh in the thinking panel.
+            self.query_one("#thinking-panel", ThinkingPanel).clear()
         except Exception:
             pass
 
@@ -819,12 +835,13 @@ class AyderApp(App):
         chat_view.add_system_message(f"Tool panel {state} (Ctrl+O to toggle)")
 
     def action_toggle_thinking(self) -> None:
-        """Toggle thinking/reasoning block visibility."""
-        self._show_thinking = not self._show_thinking
+        """Toggle the thinking/reasoning panel (mirrors Ctrl+O / Ctrl+G)."""
+        thinking_panel = self.query_one("#thinking-panel", ThinkingPanel)
+        visible = thinking_panel.toggle()
+        self._show_thinking = visible
         chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.set_thinking_visible(self._show_thinking)
-        state = "visible" if self._show_thinking else "hidden"
-        chat_view.add_system_message(f"Thinking blocks {state} (Ctrl+T to toggle)")
+        state = "visible" if visible else "hidden"
+        chat_view.add_system_message(f"Thinking panel {state} (Ctrl+T to toggle)")
 
     def action_toggle_agents(self) -> None:
         """Toggle the agent panel."""
@@ -839,41 +856,48 @@ class AyderApp(App):
         self.push_screen(CLIHelpScreen())
 
     def action_scroll_chat_up(self) -> None:
-        """PageUp: scroll the agents panel if it is open, else the chat view."""
-        if self._scroll_agent_panel("page_up"):
+        """PageUp: scroll an open panel (agents/thinking) if any, else the chat view."""
+        if self._scroll_open_panel("page_up"):
             return
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.disable_follow_mode()
         chat_view.scroll_page_up(animate=False)
 
     def action_scroll_chat_down(self) -> None:
-        """PageDown: scroll the agents panel if it is open, else the chat view."""
-        if self._scroll_agent_panel("page_down"):
+        """PageDown: scroll an open panel (agents/thinking) if any, else the chat view."""
+        if self._scroll_open_panel("page_down"):
             return
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.scroll_page_down(animate=False)
         if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
             chat_view.enable_follow_mode()
 
-    def _scroll_agent_panel(self, motion: str) -> bool:
-        """Scroll the agents panel when it is visible (Ctrl+G).
+    def _scroll_open_panel(self, motion: str) -> bool:
+        """Scroll a visible scrollable panel — the agents (Ctrl+G) or thinking
+        (Ctrl+T) panel — instead of the chat view.
 
         ``motion`` is a Widget.scroll_* suffix ('page_up', 'page_down', 'up',
-        'down', 'home', 'end'). Returns True when the panel handled the scroll
-        so the caller leaves the chat view alone; False otherwise (hidden/absent).
+        'down', 'home', 'end'). Returns True when a panel handled the scroll so
+        the caller leaves the chat view alone; False otherwise (none open).
         """
-        try:
-            panel = self.query_one("#agent-panel", AgentPanel)
-        except Exception:
-            return False
-        if not panel.display:
-            return False
-        getattr(panel, f"scroll_{motion}")(animate=False)
-        return True
+        for panel_id, panel_cls in (
+            ("#agent-panel", AgentPanel),
+            ("#thinking-panel", ThinkingPanel),
+        ):
+            try:
+                panel = self.query_one(panel_id, panel_cls)
+            except Exception:
+                continue
+            if not panel.display:
+                continue
+            getattr(panel, f"scroll_{motion}")(animate=False)
+            return True
+        return False
 
     def action_clear(self) -> None:
         """Clear chat history."""
         chat_view = self.query_one("#chat-view", ChatView)
+        self.query_one("#thinking-panel", ThinkingPanel).clear()
         do_clear(self, chat_view)
 
     def on_app_focus(self) -> None:

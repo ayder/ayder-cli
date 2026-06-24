@@ -221,15 +221,13 @@ class ToolPanel(Container):
         if tool_call_id in self._tools:
             widget, spinner, _, _, completed = self._tools[tool_call_id]
             if not completed:
-                # spinner update is a bit tricky, recreating text is safer if textual supports it,
-                # actually spinner just has `update` method or we can replace it.
-                # but textual Spinner doesn't support changing text easily dynamically unless via reactive.
-                # Let's just remove the old widget and mount a new one.
-                widget.remove()
+                # Update the existing widget in place. Remounting (remove + mount)
+                # re-runs layout and causes a visible flash under load; a fresh
+                # Spinner pushed via Static.update() refreshes the row without
+                # reflowing the panel.
                 spinner = Spinner("aesthetic", text=tool_text, style="bold yellow")
-                widget = Static(spinner, classes="tool-item running")
+                widget.update(spinner)
                 self._tools[tool_call_id] = (widget, spinner, tool_name, args_str, False)
-                self.mount(widget)
             return
 
         spinner = Spinner("aesthetic", text=tool_text, style="bold yellow")
@@ -284,6 +282,74 @@ class ToolPanel(Container):
             widget, _, _, _, _ = self._tools[tool_id]
             widget.remove()
             del self._tools[tool_id]
+
+
+class ThinkingPanel(Container):
+    """
+    A dedicated panel for the model's reasoning / thinking stream.
+
+    Toggled with Ctrl+T, mirroring ToolPanel (Ctrl+O) and AgentPanel (Ctrl+G):
+    reasoning is streamed in silently while the ActivityBar spinner shows the
+    ambient "Thinking..." status, and the user opens the panel to read the full
+    chain. It is taller than the other panels because reasoning is long-form,
+    and shows the complete accumulated text (scrollable) rather than a tail.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._user_visible: bool = False
+        self._buffer: str = ""
+        self._widget: Static | None = None
+        self._needs_separator: bool = False
+
+    def compose(self) -> ComposeResult:
+        """Compose starts empty; the content widget is mounted on first stream."""
+        return
+        yield
+
+    def on_mount(self) -> None:
+        """Start hidden - user toggles with Ctrl+T."""
+        self.display = False
+
+    def toggle(self) -> bool:
+        """Toggle panel visibility. Returns new visibility state."""
+        self._user_visible = not self._user_visible
+        self.display = self._user_visible
+        return self._user_visible
+
+    def start_phase(self) -> None:
+        """Mark the start of a new reasoning phase within the same turn.
+
+        A blank line is inserted before the next streamed delta so successive
+        phases (think -> tool -> think) stay visually separated.
+        """
+        if self._buffer:
+            self._needs_separator = True
+
+    def add_thinking(self, text: str) -> None:
+        """Append a streamed reasoning delta and re-render. Never auto-shows."""
+        if not text:
+            return
+        if self._needs_separator:
+            self._buffer += "\n\n"
+            self._needs_separator = False
+        self._buffer += text
+
+        content = self._buffer.strip()
+        if self._widget is None:
+            self._widget = Static(content, classes="thinking-content")
+            self.mount(self._widget)
+        else:
+            self._widget.update(content)
+        self.scroll_end(animate=False)
+
+    def clear(self) -> None:
+        """Reset the panel for a new turn (does not change visibility)."""
+        self._buffer = ""
+        self._needs_separator = False
+        if self._widget is not None:
+            self._widget.remove()
+            self._widget = None
 
 
 class ActivityBar(Horizontal):
@@ -540,6 +606,16 @@ class _SubmitTextArea(TextArea):
                 self.clear()
             return
 
+        # Newline insertion. Shift+Enter works in terminals that speak the Kitty
+        # keyboard protocol (e.g. Ghostty); Ctrl+J sends a literal "\n" and is a
+        # universal fallback for terminals that can't distinguish Shift+Enter
+        # from Enter. Both insert a line break without submitting.
+        if event.key in ("shift+enter", "ctrl+j"):
+            event.prevent_default()
+            event.stop()
+            self.insert("\n")
+            return
+
         if event.key == "escape" and self._pastes:
             event.prevent_default()
             event.stop()
@@ -733,19 +809,25 @@ class CLIInputBar(Horizontal):
             self.app.post_message(self.Submitted(value))
 
     def on_key(self, event) -> None:
-        """Handle history navigation with smart multiline cursor support.
+        """Handle history navigation with wrap-aware multiline cursor support.
 
-        Up/Down navigate command history only when input is empty or cursor
-        is at the edge (first line for Up, last line for Down). Otherwise,
-        the TextArea handles cursor movement within multiline text.
+        Up/Down navigate command history only when the input is empty or the
+        cursor sits at the true visual edge — the first character for Up, the
+        last for Down. We detect the edge with the TextArea's own
+        ``get_cursor_up_location``/``get_cursor_down_location``: when the cursor
+        cannot move further (the would-be location equals the current one), we
+        are at the edge. This respects *soft-wrapped* lines, where a long single
+        paragraph spans several visual rows but is still document row 0 — so the
+        cursor walks up/down each visual row before history kicks in.
         """
+        inp = self._input
         if event.key == "up":
-            if not self._input or not self._input.text or self._input.cursor_location[0] == 0:
+            if not inp or not inp.text or inp.get_cursor_up_location() == inp.cursor_location:
                 event.prevent_default()
                 event.stop()
                 self._history_navigate(-1)
         elif event.key == "down":
-            if not self._input or not self._input.text or self._input.cursor_location[0] >= self._input.document.line_count - 1:
+            if not inp or not inp.text or inp.get_cursor_down_location() == inp.cursor_location:
                 event.prevent_default()
                 event.stop()
                 self._history_navigate(1)
