@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "2.1.2"
+version = "2.1.4"
 description = "AI agent for any LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,6 +37,7 @@ google = ["google-genai"]
 qwen = ["dashscope"]
 glm = ["zhipuai"]
 all = ["ayder-cli[anthropic,google,qwen,glm]"]
+mcp = ["mcp"]
 
 [project.urls]
 Homepage = "https://github.com/ayder/ayder-cli"
