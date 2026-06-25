@@ -277,15 +277,19 @@ class TestAgentRegistry:
             run1 = registry.create_run("reviewer", "task 1")
             run2 = registry.create_run("reviewer", "task 2")
 
-        assert isinstance(run1, int)
-        assert isinstance(run2, int)
-        assert run1 != run2
-        # Both scheduled immediately; they may still be queued until the loop advances.
-        assert len(registry._active) == 2
-        assert {registry._runs[run1].status, registry._runs[run2].status} <= {"queued", "working"}
-        # Let scheduled tasks complete so the test loop has no pending work
-        await registry._runs[run1].done_event.wait()
-        await registry._runs[run2].done_event.wait()
+            assert isinstance(run1, int)
+            assert isinstance(run2, int)
+            assert run1 != run2
+            # Just scheduled: the runner is built inside _run_and_queue once a slot
+            # frees, so a freshly-created run is queued with no runner in _active yet.
+            assert run1 not in registry._active and run2 not in registry._active
+            assert {registry._runs[run1].status, registry._runs[run2].status} <= {"queued", "working"}
+            # Let scheduled tasks complete (inside the patch, so the mock runner is used).
+            await registry._runs[run1].done_event.wait()
+            await registry._runs[run2].done_event.wait()
+
+        assert registry._runs[run1].status == "done"
+        assert registry._runs[run2].status == "done"
 
     def test_cancel_all_by_name(self, registry):
         """cancel() cancels all instances with the given name."""

@@ -91,6 +91,27 @@ async def test_read_result_on_queued_does_not_drain(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_queued_run_has_no_runner_until_slot_frees(monkeypatch):
+    # After the refactor, the AgentRunner is built inside _run_and_queue once a
+    # slot frees — so a queued run must NOT yet appear in registry._active.
+    reg = _registry(1)
+    reg.set_loop(asyncio.get_running_loop())
+    ev = {"live": 0, "peak": 0, "ran": [], "gate": asyncio.Event()}
+    monkeypatch.setattr("ayder_cli.agents.registry.AgentRunner", _fake_runner(ev))
+
+    reg.create_run("coder", "first")           # takes the only slot
+    rid2 = reg.create_run("coder", "second")   # queued
+    await asyncio.sleep(0.05)
+    assert reg._runs[rid2].status == "queued"
+    assert rid2 not in reg._active             # no runner while queued
+
+    ev["gate"].set()
+    for rid in list(reg._runs):
+        await reg.await_run(rid, timeout_s=5)
+    assert reg._runs[rid2].status == "done"
+
+
+@pytest.mark.asyncio
 async def test_cancel_queued_run_skips_execution(monkeypatch):
     reg = _registry(1)
     reg.set_loop(asyncio.get_running_loop())

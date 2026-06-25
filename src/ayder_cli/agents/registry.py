@@ -298,31 +298,32 @@ class AgentRegistry:
 
         self._run_counter += 1
         run_id = self._run_counter
-        runner = AgentRunner(
-            agent_config=self.agents[name], parent_config=self._parent_config,
-            project_ctx=self._project_ctx, process_manager=self._process_manager,
-            permissions=self._permissions, timeout=self._agent_timeout,
-            run_id=run_id, generation=self._current_generation, on_progress=self._on_progress,
-        )
         run = AgentRun(run_id=run_id, generation=self._current_generation,
                        agent_name=name, started_at=time.monotonic(), status="queued",
                        task_id=resolved_task_id, branch_name=branch, task_preview=task_preview)
         self._runs[run_id] = run
-        self._active[run_id] = runner
         logger.debug("agent dispatch: run #%d agent='%s' gen=%d task_id=%s branch=%s",
                      run_id, name, self._current_generation, resolved_task_id or "-", branch or "-")
-        asyncio.create_task(self._run_and_queue(run, runner, prompt))
+        asyncio.create_task(self._run_and_queue(run, name, prompt))
         return run_id
 
-    async def _run_and_queue(self, run: AgentRun, runner: AgentRunner, task: str) -> None:
+    async def _run_and_queue(self, run: AgentRun, name: str, task: str) -> None:
         outcome: AgentRunOutcome | None = None
         try:
             async with self._semaphore:
-                if runner.status == "cancelled":
+                if run.status == "cancelled":
                     outcome = AgentRunOutcome(
                         "cancelled", "Run cancelled before it started.", None, None
                     )
                 else:
+                    runner = AgentRunner(
+                        agent_config=self.agents[name], parent_config=self._parent_config,
+                        project_ctx=self._project_ctx, process_manager=self._process_manager,
+                        permissions=self._permissions, timeout=self._agent_timeout,
+                        run_id=run.run_id, generation=run.generation,
+                        on_progress=self._on_progress,
+                    )
+                    self._active[run.run_id] = runner
                     run.status = "working"
                     outcome = await runner.run(task)
         except Exception:
@@ -408,15 +409,27 @@ class AgentRegistry:
             r.nudged = True
 
     def cancel(self, name: str) -> bool:
-        """Cancel all running instances of the named agent. Returns True if any cancelled."""
-        to_cancel = [rid for rid, r in self._active.items() if r.agent_name == name]
-        for rid in to_cancel:
-            self._active[rid].cancel()
-        if to_cancel:
-            logger.debug("cancel: agent='%s' cancelled %d instance(s): %s", name, len(to_cancel), to_cancel)
+        """Cancel running and queued instances of the named agent.
+
+        Working runs are cancelled via their live AgentRunner (in _active);
+        queued runs have no runner yet (it is built in _run_and_queue once a
+        slot frees), so mark the run record cancelled — _run_and_queue skips it
+        when its turn comes."""
+        cancelled: list[int] = []
+        for rid, runner in list(self._active.items()):
+            if runner.agent_name == name:
+                runner.cancel()
+                cancelled.append(rid)
+        for rid, run in self._runs.items():
+            if run.agent_name == name and run.status == "queued" and rid not in cancelled:
+                run.status = "cancelled"
+                cancelled.append(rid)
+        if cancelled:
+            logger.debug("cancel: agent='%s' cancelled %d instance(s): %s",
+                         name, len(cancelled), cancelled)
         else:
-            logger.debug("cancel: agent='%s' — no running instances", name)
-        return len(to_cancel) > 0
+            logger.debug("cancel: agent='%s' — no running/queued instances", name)
+        return len(cancelled) > 0
 
     def reset_settled(self) -> None:
         """Clear the settled tracker. Call on new user message cycle."""
