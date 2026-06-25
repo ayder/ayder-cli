@@ -25,6 +25,11 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "string",
                     "description": "Command to execute.",
                 },
+                "shell": {
+                    "type": "string",
+                    "enum": ["bash", "zsh", "sh", "busybox"],
+                    "description": "Shell to run the command under (default bash).",
+                },
                 "timeout": {
                     "type": "integer",
                     "description": "Max seconds to run (default 120, clamped to 1-600).",

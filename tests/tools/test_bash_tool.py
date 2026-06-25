@@ -1,5 +1,6 @@
 """Tests for the bash tool (spec 07)."""
 
+import shutil
 import subprocess
 from unittest import mock
 
@@ -69,3 +70,56 @@ class TestEnvironment:
             m.return_value = subprocess.CompletedProcess("c", 0, stdout="", stderr="")
             bash(ctx, "echo hi")
             assert m.call_args.kwargs["env"] is None
+
+
+class TestShell:
+    def test_invalid_shell_rejected(self, ctx):
+        result = bash(ctx, "echo hi", shell="fish")
+        assert isinstance(result, ToolError)
+        assert "fish" in result
+
+    def test_sh_runs(self, ctx):
+        result = bash(ctx, "echo from_sh", shell="sh")
+        assert isinstance(result, ToolSuccess)
+        assert "from_sh" in result
+        assert "Exit Code: 0" in result
+
+    def test_default_uses_bash_argv(self, ctx):
+        import subprocess as _sp
+        with mock.patch(
+            "ayder_cli.tools.builtins.shell.subprocess.run"
+        ) as m:
+            m.return_value = _sp.CompletedProcess("c", 0, stdout="", stderr="")
+            bash(ctx, "echo hi")
+            argv = m.call_args.args[0]
+            assert argv[0].endswith("bash") and argv[1] == "-c" and argv[2] == "echo hi"
+
+    def test_busybox_argv_form(self, ctx):
+        import subprocess as _sp
+
+        def fake_which(name):
+            return f"/usr/bin/{name}" if name == "busybox" else None
+
+        with mock.patch("ayder_cli.tools.builtins.shell.shutil.which", side_effect=fake_which), \
+             mock.patch("ayder_cli.tools.builtins.shell.subprocess.run") as m:
+            m.return_value = _sp.CompletedProcess("c", 0, stdout="", stderr="")
+            bash(ctx, "echo hi", shell="busybox")
+            argv = m.call_args.args[0]
+            assert argv == ["/usr/bin/busybox", "sh", "-c", "echo hi"]
+
+    def test_missing_shell_falls_back_with_note(self, ctx):
+        import subprocess as _sp
+
+        def fake_which(name):
+            return "/bin/bash" if name == "bash" else None  # zsh missing
+
+        with mock.patch("ayder_cli.tools.builtins.shell.shutil.which", side_effect=fake_which), \
+             mock.patch("ayder_cli.tools.builtins.shell.subprocess.run") as m:
+            m.return_value = _sp.CompletedProcess("c", 0, stdout="hi\n", stderr="")
+            result = bash(ctx, "echo hi", shell="zsh")
+            assert "[shell 'zsh' not found; ran with 'bash']" in result
+
+    @pytest.mark.skipif(shutil.which("zsh") is None, reason="needs zsh")
+    def test_real_zsh(self, ctx):
+        result = bash(ctx, "echo from_zsh", shell="zsh")
+        assert "from_zsh" in result
