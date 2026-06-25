@@ -35,6 +35,7 @@ from .tasks import (
     _ensure_tasks_dir,
     _extract_id,
     _get_tasks_dir,
+    _ID_LOCK,
     _next_id,
     _parse_status,
     _title_to_slug,
@@ -183,16 +184,20 @@ def _create(
 
     _ensure_tasks_dir(project_ctx)
     last_err: Exception | None = None
-    for _ in range(5):
-        task_id = _next_id(project_ctx)
-        path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}-{slug}.md"
-        try:
-            with open(path, "x", encoding="utf-8") as fh:  # O_EXCL: atomic claim
-                fh.write(_render_task(task_id, title, st, br, deps, clean_body))
-        except FileExistsError as exc:
-            last_err = exc
-            continue
-        return ToolSuccess(f"TASK-{task_id:03d} created · {br} · {st}")
+    # Hold the shared allocation lock across allocate-then-claim so concurrent
+    # creates (worker threads) serialize and each gets a unique id. The per-file
+    # O_EXCL is the second line of defense (leftover same-slug files).
+    with _ID_LOCK:
+        for _ in range(5):
+            task_id = _next_id(project_ctx)
+            path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}-{slug}.md"
+            try:
+                with open(path, "x", encoding="utf-8") as fh:  # O_EXCL: atomic claim
+                    fh.write(_render_task(task_id, title, st, br, deps, clean_body))
+            except FileExistsError as exc:
+                last_err = exc
+                continue
+            return ToolSuccess(f"TASK-{task_id:03d} created · {br} · {st}")
     return ToolError(
         f"Could not allocate a unique task ID after retries ({last_err})",
         "execution",

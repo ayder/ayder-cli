@@ -340,3 +340,36 @@ class TestParseCompat:
         assert canonical_id == "TASK-001"
         assert rel_path == ".ayder/tasks/TASK-001-compat-task.md"
         assert "work" in content
+
+
+def test_concurrent_create_allocates_unique_ids(ctx):
+    """Concurrent action=create calls must each get a UNIQUE TASK id (F2).
+
+    Regression for the allocator race: _next_id returns scan-max+1 and the
+    O_EXCL guard is on the filename (which includes the slug), so two parallel
+    creates with different titles compute the same id and write distinct
+    filenames -> duplicate TASK-001. Allocation must be serialized.
+    """
+    import threading
+
+    n = 16
+    barrier = threading.Barrier(n)
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            barrier.wait(timeout=5)  # release all at once to maximize contention
+            task(ctx, "create", title=f"task number {i}", body="b")
+        except Exception as exc:  # pragma: no cover - surfaced via assert below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"worker errors: {errors}"
+    tasks_dir = ctx.root / ".ayder" / "tasks"
+    ids = sorted(_extract_id(p.name) for p in tasks_dir.glob("*.md"))
+    assert ids == list(range(1, n + 1)), f"expected unique 1..{n}, got {ids}"

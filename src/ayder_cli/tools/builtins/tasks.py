@@ -1,9 +1,19 @@
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+
+# Serializes task-id allocation + file claim across the agent harness's
+# worker threads (tool handlers run in asyncio.to_thread). _next_id is a
+# scan-max+1 read and the on-disk uniqueness guard is per-filename (slug), so
+# two concurrent creates with different titles would otherwise allocate the same
+# id and write distinct filenames -> duplicate TASK-NNN. Hold this across the
+# whole allocate-then-write critical section. Shared by create_task (here) and
+# task_tool._create.
+_ID_LOCK = threading.Lock()
 
 
 def _get_tasks_dir(project_ctx: ProjectContext):
@@ -70,12 +80,13 @@ def create_task(project_ctx: ProjectContext, title: str, description: str = ""):
     """Create a task markdown file in .ayder/tasks/ (current directory)."""
     _ensure_tasks_dir(project_ctx)
 
-    task_id = _next_id(project_ctx)
-    slug = _title_to_slug(title)
-    path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}-{slug}.md"
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _ID_LOCK:
+        task_id = _next_id(project_ctx)
+        slug = _title_to_slug(title)
+        path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}-{slug}.md"
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    content = f"""# {title}
+        content = f"""# {title}
 
 - **ID:** TASK-{task_id:03d}
 - **Status:** pending
@@ -86,7 +97,7 @@ def create_task(project_ctx: ProjectContext, title: str, description: str = ""):
 {description if description else "No description provided."}
 """
 
-    path.write_text(content, encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
 
     return ToolSuccess(f"Task TASK-{task_id:03d} created.")
 
