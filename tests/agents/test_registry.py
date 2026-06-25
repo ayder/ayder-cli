@@ -199,6 +199,14 @@ class TestAgentRegistry:
             "ayder_cli.agents.registry.read_task",
             lambda ctx, ident: ("TASK-003", ".ayder/tasks/TASK-003-add-auth.md", "DO THE AUTH WORK"),
         )
+        # branch_name now triggers the worktree path; stub the git helpers so this
+        # prompt-composition test stays hermetic (worktree behavior is covered in
+        # tests/agents/test_worktree_isolation.py).
+        monkeypatch.setattr("ayder_cli.agents.registry.is_git_repo", lambda root: True)
+        monkeypatch.setattr("ayder_cli.agents.registry.detect_base_branch", lambda root: "main")
+        monkeypatch.setattr("ayder_cli.agents.registry.add_worktree",
+                            lambda repo, wt, br, base: None)
+        monkeypatch.setattr("ayder_cli.agents.registry.remove_worktree", lambda repo, wt: None)
         with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
             mock_runner = MockRunner.return_value
             mock_runner.agent_name = "reviewer"

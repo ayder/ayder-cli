@@ -69,6 +69,13 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
                     "'agent/add-auth'. Folded into the agent's instructions."
                 ),
             },
+            "base_branch": {
+                "type": "string",
+                "description": (
+                    "[call] Optional base ref the worktree branch forks from "
+                    "(default: the repo's detected default branch)."
+                ),
+            },
             "run_id": {
                 "type": "integer",
                 "description": "[read_result] The run id from action=call / action=status.",
@@ -106,6 +113,7 @@ def create_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
         task: str = "",
         task_id: str | None = None,
         branch_name: str | None = None,
+        base_branch: str | None = None,
         run_id: int | None = None,
         wait: bool = False,
         timeout_s: int = 60,
@@ -129,7 +137,10 @@ def create_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
                     '(use agent(action="list") to discover names).'
                 )
             result = registry._on_loop(
-                lambda: registry.create_run(name, task, task_id=task_id, branch_name=branch_name)
+                lambda: registry.create_run(
+                    name, task, task_id=task_id,
+                    branch_name=branch_name, base_branch=base_branch,
+                )
             )
             if isinstance(result, int):
                 label = registry._on_loop(lambda: registry.run_label(result))

@@ -11,12 +11,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any, Callable
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.run import AgentRun
 from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
+from ayder_cli.agents.worktree import (
+    add_worktree,
+    detect_base_branch,
+    is_git_repo,
+    remove_worktree,
+    slugify_branch,
+)
+from ayder_cli.core.context import ProjectContext
 from ayder_cli.tools.builtins.tasks import list_task_ids, read_task
 
 logger = logging.getLogger(__name__)
@@ -115,6 +124,7 @@ class AgentRegistry:
         self._runs: dict[int, AgentRun] = {}
         self._current_generation: int = 0
         self._settled: dict[str, str] = {}
+        self._session_worktrees: set[str] = set()  # worktrees THIS session created
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the event loop for scheduling agent runs.
@@ -234,6 +244,7 @@ class AgentRegistry:
         task: str,
         task_id: str | None = None,
         branch_name: str | None = None,
+        base_branch: str | None = None,
     ) -> int | str:
         """Create an AgentRun and schedule it. MUST run on the event loop.
 
@@ -304,11 +315,14 @@ class AgentRegistry:
         self._runs[run_id] = run
         logger.debug("agent dispatch: run #%d agent='%s' gen=%d task_id=%s branch=%s",
                      run_id, name, self._current_generation, resolved_task_id or "-", branch or "-")
-        asyncio.create_task(self._run_and_queue(run, name, prompt))
+        asyncio.create_task(self._run_and_queue(run, name, prompt, base_branch))
         return run_id
 
-    async def _run_and_queue(self, run: AgentRun, name: str, task: str) -> None:
+    async def _run_and_queue(
+        self, run: AgentRun, name: str, task: str, base_branch: str | None = None
+    ) -> None:
         outcome: AgentRunOutcome | None = None
+        worktree_path: str | None = None
         try:
             async with self._semaphore:
                 if run.status == "cancelled":
@@ -316,21 +330,66 @@ class AgentRegistry:
                         "cancelled", "Run cancelled before it started.", None, None
                     )
                 else:
-                    runner = AgentRunner(
-                        agent_config=self.agents[name], parent_config=self._parent_config,
-                        project_ctx=self._project_ctx, process_manager=self._process_manager,
-                        permissions=self._permissions, timeout=self._agent_timeout,
-                        run_id=run.run_id, generation=run.generation,
-                        on_progress=self._on_progress,
-                    )
-                    self._active[run.run_id] = runner
-                    run.status = "working"
-                    outcome = await runner.run(task)
+                    project_ctx = self._project_ctx
+                    notes_ctx = self._project_ctx
+                    if run.branch_name:
+                        repo_root = str(self._project_ctx.root)
+                        if not is_git_repo(repo_root):
+                            outcome = AgentRunOutcome(
+                                "error",
+                                "Agent not run: worktree isolation needs a git repository, "
+                                f"but '{repo_root}' is not one (or git is unavailable).",
+                                "not a git repository", None,
+                            )
+                        else:
+                            slug = slugify_branch(run.branch_name)
+                            wt_dir = os.path.join(repo_root, ".ayder", "worktrees", slug)
+                            base = base_branch or detect_base_branch(repo_root)
+                            try:
+                                await asyncio.to_thread(
+                                    add_worktree, repo_root, wt_dir, run.branch_name, base
+                                )
+                            except Exception as e:
+                                logger.exception("worktree add failed: run_id=%d", run.run_id)
+                                outcome = AgentRunOutcome(
+                                    "error", f"Worktree creation failed: {e}",
+                                    "worktree add failed", None,
+                                )
+                            else:
+                                worktree_path = wt_dir
+                                self._session_worktrees.add(wt_dir)
+                                run.worktree_path = wt_dir
+                                project_ctx = ProjectContext(wt_dir)
+                                # notes_ctx stays the parent so the note survives removal
+                    if outcome is None:
+                        runner = AgentRunner(
+                            agent_config=self.agents[name], parent_config=self._parent_config,
+                            project_ctx=project_ctx, notes_ctx=notes_ctx,
+                            process_manager=self._process_manager,
+                            permissions=self._permissions, timeout=self._agent_timeout,
+                            run_id=run.run_id, generation=run.generation,
+                            on_progress=self._on_progress,
+                        )
+                        self._active[run.run_id] = runner
+                        run.status = "working"
+                        outcome = await runner.run(task)
         except Exception:
             logger.exception("agent run crashed: run_id=%d", run.run_id)
-            outcome = AgentRunOutcome("error", "Agent encountered an error.", "internal error", None)
+            if outcome is None:
+                outcome = AgentRunOutcome(
+                    "error", "Agent encountered an error.", "internal error", None
+                )
         finally:
             self._active.pop(run.run_id, None)
+            if worktree_path is not None:
+                try:
+                    await asyncio.to_thread(
+                        remove_worktree, str(self._project_ctx.root), worktree_path
+                    )
+                except Exception:
+                    logger.exception("worktree cleanup failed: %s", worktree_path)
+                finally:
+                    self._session_worktrees.discard(worktree_path)
             if outcome is not None:
                 run.status = outcome.status
                 run.result = outcome.content
@@ -375,6 +434,8 @@ class AgentRegistry:
             payload["task_preview"] = run.task_preview
         if run.branch_name:
             payload["branch_name"] = run.branch_name
+        if run.worktree_path:
+            payload["worktree_path"] = run.worktree_path
         return payload
 
     def read_result(self, run_id: int) -> dict | None:
