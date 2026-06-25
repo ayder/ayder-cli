@@ -47,3 +47,18 @@ def test_to_status_dict_includes_assignment_metadata_only_when_set():
     bare = AgentRun(run_id=4, generation=1, agent_name="coder", started_at=0.0)
     assert "task_id" not in bare.to_status_dict(now=0.0)
     assert "branch_name" not in bare.to_status_dict(now=0.0)
+
+
+def test_worktree_path_absent_by_default():
+    from ayder_cli.agents.run import AgentRun
+    run = AgentRun(run_id=1, generation=0, agent_name="coder", started_at=0.0)
+    assert run.worktree_path is None
+    assert "worktree_path" not in run.to_status_dict(now=0.0)
+
+
+def test_worktree_path_surfaced_when_set():
+    from ayder_cli.agents.run import AgentRun
+    run = AgentRun(run_id=1, generation=0, agent_name="coder", started_at=0.0)
+    run.worktree_path = ".ayder/worktrees/add-auth"
+    d = run.to_status_dict(now=0.0)
+    assert d["worktree_path"] == ".ayder/worktrees/add-auth"

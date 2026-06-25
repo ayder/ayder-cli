@@ -18,6 +18,7 @@ class AgentRun:
     note_path: str | None = None
     task_id: str | None = None              # canonical "TASK-NNN" this run implements, if any
     branch_name: str | None = None          # git branch the agent was told to work/commit on
+    worktree_path: str | None = None        # project-relative worktree dir, when isolated
     task_preview: str | None = None         # short preview of the orchestrator's free-text task
     finished_at: float | None = None
     drained: bool = False
@@ -55,4 +56,6 @@ class AgentRun:
             d["task_preview"] = self.task_preview
         if self.branch_name:
             d["branch_name"] = self.branch_name
+        if self.worktree_path:
+            d["worktree_path"] = self.worktree_path
         return d
