@@ -22,7 +22,11 @@ from ayder_cli.tools.builtins.tasks import list_task_ids, read_task
 logger = logging.getLogger(__name__)
 
 _PREVIEW_MAX = 48
-_RUNAWAY_CEILING = 20
+# Hard fail-fast backstop on total in-flight (queued + working) runs per
+# generation. Must stay ABOVE the max_concurrent_agents validator bound (20,
+# core/config.py) so the soft cap queues overflow rather than the ceiling
+# rejecting it at the configured maximum.
+_RUNAWAY_CEILING = 50
 
 
 def _preview(task: str) -> str | None:

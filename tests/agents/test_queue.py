@@ -4,8 +4,13 @@ import asyncio
 
 import pytest
 
-from ayder_cli.agents.registry import AgentRegistry
+from ayder_cli.agents.registry import _RUNAWAY_CEILING, AgentRegistry
 from ayder_cli.agents.runner import AgentRunOutcome
+
+# The pydantic validator caps max_concurrent_agents at 20 (core/config.py); the
+# hard runaway ceiling MUST sit above that so queueing still engages at the
+# configured maximum (review finding #2).
+_CONFIG_MAX_CONCURRENT = 20
 
 
 class _Cfg:
@@ -123,5 +128,56 @@ async def test_runaway_ceiling_rejects_overdispatch(monkeypatch):
             return AgentRunOutcome("done", "ok", None, None)
 
     monkeypatch.setattr("ayder_cli.agents.registry.AgentRunner", _Blocked)
-    results = [reg.create_run("coder", f"t{i}") for i in range(25)]
-    assert any(isinstance(r, str) and "ceiling" in r.lower() for r in results)
+    # Dispatch past the ceiling; exactly _RUNAWAY_CEILING get run ids, the rest
+    # are rejected. Robust to the ceiling value.
+    results = [reg.create_run("coder", f"t{i}") for i in range(_RUNAWAY_CEILING + 5)]
+    ints = [r for r in results if isinstance(r, int)]
+    errs = [r for r in results if isinstance(r, str) and "ceiling" in r.lower()]
+    assert len(ints) == _RUNAWAY_CEILING
+    assert len(errs) == 5
+
+
+@pytest.mark.asyncio
+async def test_queue_engages_at_configured_max(monkeypatch):
+    # With the cap at the config maximum, dispatching one over the cap must QUEUE
+    # the extra (not hit the runaway ceiling) — so the ceiling must exceed the max.
+    assert _RUNAWAY_CEILING > _CONFIG_MAX_CONCURRENT
+    reg = _registry(_CONFIG_MAX_CONCURRENT)
+    reg.set_loop(asyncio.get_running_loop())
+    ev = {"live": 0, "peak": 0, "ran": [], "gate": asyncio.Event()}
+    monkeypatch.setattr("ayder_cli.agents.registry.AgentRunner", _fake_runner(ev))
+
+    ids = [reg.create_run("coder", f"t{i}") for i in range(_CONFIG_MAX_CONCURRENT + 1)]
+    assert all(isinstance(i, int) for i in ids)  # none rejected by the ceiling
+    await asyncio.sleep(0.05)
+    statuses = [r["status"] for r in reg.snapshot()]
+    assert statuses.count("queued") >= 1  # the overflow run is queued behind the cap
+    assert statuses.count("working") <= _CONFIG_MAX_CONCURRENT
+    ev["gate"].set()
+    for rid in ids:
+        await reg.await_run(rid, timeout_s=5)
+
+
+@pytest.mark.asyncio
+async def test_await_run_blocks_through_queue_until_done(monkeypatch):
+    # await_run on a still-QUEUED run must treat it as pending: time out while
+    # queued, then block through the queue to completion once a slot frees
+    # (guards the queued-as-pending fix in await_run).
+    reg = _registry(1)
+    reg.set_loop(asyncio.get_running_loop())
+    ev = {"live": 0, "peak": 0, "ran": [], "gate": asyncio.Event()}
+    monkeypatch.setattr("ayder_cli.agents.registry.AgentRunner", _fake_runner(ev))
+
+    reg.create_run("coder", "first")           # occupies the single slot, blocks on gate
+    rid2 = reg.create_run("coder", "second")   # queued behind it
+    await asyncio.sleep(0.05)
+    assert reg._runs[rid2].status == "queued"
+
+    pending = await reg.await_run(rid2, timeout_s=0.05)  # short wait: still queued
+    assert pending["status"] in ("queued", "working")
+    assert reg._runs[rid2].drained is False
+
+    ev["gate"].set()                            # free the slot
+    done = await reg.await_run(rid2, timeout_s=5)
+    assert done["status"] == "done"
+    assert "second" in ev["ran"]                # it executed only after the slot freed
