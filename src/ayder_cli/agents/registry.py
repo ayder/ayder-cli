@@ -10,6 +10,7 @@ the idle LLM rather than pushing summaries into its context.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import os
 import time
@@ -125,6 +126,7 @@ class AgentRegistry:
         self._current_generation: int = 0
         self._settled: dict[str, str] = {}
         self._session_worktrees: set[str] = set()  # worktrees THIS session created
+        atexit.register(self._prune_session_worktrees)
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the event loop for scheduling agent runs.
@@ -491,6 +493,18 @@ class AgentRegistry:
         else:
             logger.debug("cancel: agent='%s' — no running/queued instances", name)
         return len(cancelled) > 0
+
+    def _prune_session_worktrees(self) -> None:
+        """atexit backstop: force-remove ONLY worktrees this session created.
+
+        Never touches the repo's pre-existing worktrees — only paths recorded in
+        self._session_worktrees (populated in _run_and_queue)."""
+        if not self._session_worktrees or self._project_ctx is None:
+            return
+        repo_root = str(self._project_ctx.root)
+        for wt in list(self._session_worktrees):
+            remove_worktree(repo_root, wt)
+            self._session_worktrees.discard(wt)
 
     def reset_settled(self) -> None:
         """Clear the settled tracker. Call on new user message cycle."""

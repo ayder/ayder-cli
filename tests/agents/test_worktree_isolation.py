@@ -213,6 +213,26 @@ async def test_queued_branch_run_cancelled_creates_no_worktree(tmp_path, monkeyp
     assert "agent/second" not in adds  # cancelled-while-queued never made a worktree
 
 
+@needs_git
+def test_atexit_prunes_only_session_worktrees(tmp_path):
+    repo = _init_repo(tmp_path)
+    # one worktree this "session" made, one pre-existing (NOT tracked)
+    session_wt = os.path.join(repo, ".ayder", "worktrees", "mine")
+    other_wt = os.path.join(repo, ".worktrees", "theirs")
+    subprocess.run(["git", "worktree", "add", session_wt, "-b", "agent/mine", "main"],
+                   cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "worktree", "add", other_wt, "-b", "other/theirs", "main"],
+                   cwd=repo, capture_output=True, check=True)
+
+    reg = _registry(ProjectContext(repo), cap=1)
+    reg._session_worktrees.add(session_wt)  # only this one is "ours"
+    reg._prune_session_worktrees()
+
+    assert not os.path.isdir(session_wt)      # ours: removed
+    assert os.path.isdir(other_wt)            # theirs: untouched
+    assert reg._session_worktrees == set()    # tracking cleared
+
+
 def test_call_threads_base_branch_to_create_run(monkeypatch):
     # tool.py: base_branch flows from the call into create_run.
     from ayder_cli.agents.tool import create_agent_handler
