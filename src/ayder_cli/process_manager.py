@@ -6,6 +6,8 @@ Imports from core/result.py (NOT from tools/) to avoid circular imports.
 """
 
 import atexit
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -15,6 +17,11 @@ from typing import Deque, Dict, Optional
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+
+
+def _has_killpg() -> bool:
+    """POSIX process-group kill available? (Indirect for test override.)"""
+    return hasattr(os, "killpg")
 
 
 @dataclass
@@ -79,6 +86,7 @@ class ProcessManager:
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=cwd,
+                start_new_session=True,
             )
 
             mp = ManagedProcess(
@@ -120,7 +128,7 @@ class ProcessManager:
         return mp
 
     def kill_process(self, process_id: int) -> bool:
-        """Kill a background process. SIGTERM first, SIGKILL after 5s.
+        """Kill a background process and its whole group. SIGTERM, then SIGKILL@5s.
 
         Returns:
             True if process was killed, False if not found or already exited.
@@ -131,19 +139,50 @@ class ProcessManager:
         if mp.status == "exited":
             return False
 
-        try:
-            mp.process.terminate()
-            try:
-                mp.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                mp.process.kill()
-                mp.process.wait(timeout=5)
-        except OSError:
-            pass
-
+        self._terminate_tree(mp.process)
         mp.status = "exited"
         mp.exit_code = mp.process.returncode
         return True
+
+    @staticmethod
+    def _terminate_tree(proc: subprocess.Popen) -> None:
+        """Terminate a process and every child in its group.
+
+        Processes are spawned as session leaders (start_new_session=True), so the
+        process-group id equals the child's pid and killpg reaches forked
+        grandchildren that would otherwise be orphaned holding a port. Falls back to
+        terminate()/kill() where killpg is unavailable (e.g. Windows).
+        """
+        if _has_killpg():
+            try:
+                pgid = os.getpgid(proc.pid)
+            except (ProcessLookupError, OSError):
+                return  # already gone
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        else:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            except OSError:
+                pass
 
     def list_processes(self) -> list:
         """Return all managed processes, refreshing statuses."""
@@ -156,17 +195,13 @@ class ProcessManager:
         return list(self._processes.values())
 
     def _cleanup_all(self):
-        """Terminate all running processes (called at exit)."""
+        """Terminate all running process groups (called at exit)."""
         for mp in self._processes.values():
             if mp.status == "running":
                 try:
-                    mp.process.terminate()
-                    mp.process.wait(timeout=3)
+                    self._terminate_tree(mp.process)
                 except Exception:
-                    try:
-                        mp.process.kill()
-                    except Exception:
-                        pass
+                    pass
 
     @staticmethod
     def _read_stream(mp: ManagedProcess, stream, buffer: Deque[str]):

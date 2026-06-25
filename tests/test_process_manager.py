@@ -1,6 +1,9 @@
 """Tests for background process management."""
 
+import os
 import time
+from unittest import mock
+
 import pytest
 
 from ayder_cli.process_manager import (
@@ -247,3 +250,54 @@ class TestConfigMaxBackgroundProcesses:
         assert cfg_min.max_background_processes == 1
         cfg_max = Config(max_background_processes=20)
         assert cfg_max.max_background_processes == 20
+
+
+class TestGroupLifecycle:
+    """Group spawn + group kill (spec FR3, FR5 / AC2, AC4)."""
+
+    @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX only")
+    def test_start_makes_session_leader(self, pm):
+        mp = pm.start_process("sleep 30", cwd="/tmp")
+        try:
+            # start_new_session=True -> child leads its own group: pgid == pid
+            assert os.getpgid(mp.process.pid) == mp.process.pid
+        finally:
+            pm.kill_process(mp.id)
+
+    @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX only")
+    def test_kill_terminates_forked_child(self, pm):
+        # Parent shell forks `sleep`, prints its pid, then waits — the classic
+        # orphaned-port-holder shape. Group kill must take the child down too.
+        mp = pm.start_process("sh -c 'sleep 300 & echo $! ; wait'", cwd="/tmp")
+        child_pid = None
+        for _ in range(50):
+            if mp.stdout_buffer:
+                child_pid = int(list(mp.stdout_buffer)[0].strip())
+                break
+            time.sleep(0.1)
+        assert child_pid is not None
+        os.kill(child_pid, 0)  # alive now (no exception)
+
+        assert pm.kill_process(mp.id) is True
+
+        # The child is reparented to init and reaped shortly after group SIGKILL.
+        deadline = time.time() + 5
+        gone = False
+        while time.time() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                gone = True
+                break
+            time.sleep(0.1)
+        assert gone, "forked child survived the group kill"
+
+    def test_terminate_tree_fallback_without_killpg(self, monkeypatch):
+        # On platforms without os.killpg, fall back to terminate()/kill().
+        import ayder_cli.process_manager as pmmod
+
+        monkeypatch.setattr(pmmod, "_has_killpg", lambda: False)
+        proc = mock.Mock()
+        proc.wait.return_value = 0
+        pmmod.ProcessManager._terminate_tree(proc)
+        proc.terminate.assert_called_once()
