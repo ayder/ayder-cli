@@ -53,7 +53,7 @@ class TestToolDefinitions:
         builtin_tools = {
             "file_explorer", "read_file", "file_editor",
             "run_shell_command", "search_codebase", "get_project_structure",
-            "create_note", "context",
+            "note", "context",
             "run_background_process", "get_background_output",
             "kill_background_process", "list_background_processes",
             "task",

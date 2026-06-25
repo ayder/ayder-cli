@@ -624,7 +624,7 @@ def handle_notes(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         if not notes_dir.exists():
             chat_view.add_system_message(
                 "No notes directory found (.ayder/notes/). "
-                "Create a note first with the create_note tool."
+                "Create a note first with the note tool."
             )
             return
 
@@ -632,7 +632,7 @@ def handle_notes(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         if not note_files:
             chat_view.add_system_message(
                 "No notes found in .ayder/notes/. "
-                "Create a note first with the create_note tool."
+                "Create a note first with the note tool."
             )
             return
 

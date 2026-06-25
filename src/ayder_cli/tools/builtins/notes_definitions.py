@@ -1,7 +1,7 @@
 """
 Tool definitions for notes operations.
 
-Tools: note (consolidated), create_note (legacy — removed in spec 04 Task 3).
+Tools: note (consolidated).
 
 ``note`` sets ``max_result_chars=0`` to opt out of the chat-loop's generic
 8192-char truncation; its handler self-bounds via offset/max_chars/limit.
@@ -88,26 +88,5 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             },
             "required": ["action"],
         },
-    ),
-    ToolDefinition(
-        name="create_note",
-        description="Create a markdown note in .ayder/notes/ for investigation findings or documentation.",
-        description_template="Note '{title}' will be created",
-        tags=("metadata",),
-        func_ref="ayder_cli.tools.builtins.notes:create_note",
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "The title of the note"},
-                "content": {"type": "string", "description": "The markdown content of the note"},
-                "tags": {
-                    "type": "string",
-                    "description": "Comma-separated tags (e.g., 'bug,security,frontend')",
-                },
-            },
-            "required": ["title", "content"],
-        },
-        permission="w",
-        safe_mode_blocked=False,
     ),
 )
