@@ -1185,7 +1185,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
 
         chat_view.add_system_message(
             f"Agent '{agent_name}' dispatched as run #{run_id} (working).\n"
-            f"Use agent_status / read_agent_result to collect it."
+            'Use agent(action="status") / agent(action="read_result") to collect it.'
         )
     else:
         # Error — error string returned

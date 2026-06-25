@@ -81,6 +81,7 @@ editor = "vim"
 verbose = false
 prompt = "STANDARD"                 # MINIMAL | STANDARD | EXTENDED
 max_background_processes = 5        # cap on concurrent background processes (e.g. test runs)
+max_concurrent_agents = 5           # max agents running at once; extra dispatches queue (1-20)
 max_output_tokens = 8192            # orchestrator response cap
 # Max conversation messages kept per turn. 0 = unlimited (default): the context
 # manager's token budget + compaction are the bound, so the model uses its real

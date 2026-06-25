@@ -12,7 +12,7 @@ class AgentRun:
     generation: int
     agent_name: str
     started_at: float                       # monotonic() at dispatch
-    status: str = "working"                 # "working" | "done" | "error"
+    status: str = "working"                 # "queued" | "working" | "done" | "error" | "cancelled"
     result: str = ""                        # final message; "" until finished
     error: str | None = None
     note_path: str | None = None

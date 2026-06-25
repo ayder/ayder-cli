@@ -31,13 +31,7 @@ from ayder_cli.tui.screens import CLIConfirmScreen, CLIHelpScreen
 from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.tool import (
     AGENT_TOOL_DEFINITION,
-    AGENT_STATUS_TOOL_DEFINITION,
-    LIST_AGENTS_TOOL_DEFINITION,
-    READ_AGENT_RESULT_TOOL_DEFINITION,
-    create_call_agent_handler,
-    create_agent_status_handler,
-    create_list_agents_handler,
-    create_read_agent_result_handler,
+    create_agent_handler,
 )
 from ayder_cli.tui.widgets import (
     AgentPanel,
@@ -321,19 +315,15 @@ class AyderApp(App):
                 process_manager=self._process_manager,
                 permissions=self.permissions,
                 agent_timeout=getattr(self.config, 'agent_timeout', 300),
+                max_concurrent_agents=getattr(self.config, 'max_concurrent_agents', 5),
                 on_progress=_agent_progress,
                 on_complete=_agent_complete,
             )
 
-            # Register agent tools
-            list_handler = create_list_agents_handler(self._agent_registry)
-            self.registry.register_dynamic_tool(LIST_AGENTS_TOOL_DEFINITION, list_handler)
-            handler = create_call_agent_handler(self._agent_registry)
-            self.registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
+            # Register agent tool
             self.registry.register_dynamic_tool(
-                AGENT_STATUS_TOOL_DEFINITION, create_agent_status_handler(self._agent_registry))
-            self.registry.register_dynamic_tool(
-                READ_AGENT_RESULT_TOOL_DEFINITION, create_read_agent_result_handler(self._agent_registry))
+                AGENT_TOOL_DEFINITION, create_agent_handler(self._agent_registry)
+            )
 
             # Append capability prompts to system prompt
             cap_prompts = self._agent_registry.get_capability_prompts()
@@ -802,7 +792,7 @@ class AyderApp(App):
         n = len(pending)
         text = (
             f"[system] {n} agent result(s) are ready and unread. "
-            f"Call agent_status() then read_agent_result(run_id) to collect."
+            'Call agent(action="status") then agent(action="read_result", run_id=...) to collect.'
         )
 
         # Defer the append into the request's prepare so ALL self.messages writes

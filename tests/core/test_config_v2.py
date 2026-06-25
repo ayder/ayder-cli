@@ -150,6 +150,16 @@ def test_validate_driver_rejects_unknown():
         Config(driver="not-a-driver")
 
 
+def test_max_concurrent_agents_default():
+    assert Config().max_concurrent_agents == 5
+
+
+def test_max_concurrent_agents_range_validator():
+    for bad in (0, 21):
+        with pytest.raises(Exception):
+            Config(max_concurrent_agents=bad)
+
+
 def test_provider_profile_infers_driver():
     # A [llm.<name>] profile with no explicit driver infers via _DRIVER_BY_PROVIDER.
     cfg = Config(**{"app": {"provider": "qwen"},

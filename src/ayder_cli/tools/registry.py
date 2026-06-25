@@ -43,7 +43,7 @@ class ToolRegistry:
         self._registry[name] = func
 
     def register_dynamic_tool(self, tool_def: Any, handler: Callable) -> None:
-        """Register a tool dynamically at runtime (e.g., call_agent).
+        """Register a tool dynamically at runtime (e.g., agent).
 
         Adds the ToolDefinition to a per-instance list (included in schema
         queries), the handler to _registry (for execution dispatch), and

@@ -22,6 +22,7 @@ from ayder_cli.tools.builtins.tasks import list_task_ids, read_task
 logger = logging.getLogger(__name__)
 
 _PREVIEW_MAX = 48
+_RUNAWAY_CEILING = 20
 
 
 def _preview(task: str) -> str | None:
@@ -90,6 +91,7 @@ class AgentRegistry:
         process_manager: Any,
         permissions: set[str],
         agent_timeout: int = 300,
+        max_concurrent_agents: int = 5,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
         on_complete: Callable[[int, AgentRun], None] | None = None,
     ) -> None:
@@ -99,6 +101,8 @@ class AgentRegistry:
         self._process_manager = process_manager
         self._permissions = permissions
         self._agent_timeout = agent_timeout
+        self._max_concurrent = max_concurrent_agents
+        self._semaphore = asyncio.Semaphore(max_concurrent_agents)
         self._on_progress = on_progress
         self._on_complete = on_complete
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -189,30 +193,33 @@ class AgentRegistry:
         lines = [
             "\n## Agent Delegation",
             "",
-            "Configured specialized agents may be available. Use `list_agents` to discover "
-            "exact names before `call_agent`. Each runs in the background with its own LLM.",
+            'Configured specialized agents may be available. Use `agent(action="list")` '
+            "to discover exact names before dispatching. Each runs in the background with "
+            "its own LLM.",
             "",
             "When the work is a task file under `.ayder/tasks/`, pass its `task_id` (e.g. "
-            "`TASK-003`) and a `branch_name` to `call_agent` — the harness resolves the id, "
-            "fails fast if it doesn't exist, and hands the agent the task file itself, so you "
-            "need not paste the task body into `task`.",
+            '`TASK-003`) and a `branch_name` to `agent(action="call", ...)` — the harness '
+            "resolves the id, fails fast if it doesn't exist, and hands the agent the task "
+            "file itself, so you need not paste the task body into `task`.",
             "",
-            "**You pull results — they are not delivered automatically.** `call_agent` returns "
-            "a run id (and echoes the task it bound the run to). Use `agent_status()` to see "
-            "what is working/done, and `read_agent_result(run_id)` to collect a finished one. To "
-            "wait for an agent, call `read_agent_result(run_id, wait=true, timeout_s=…)` instead "
-            "of polling in a loop.",
+            "**You pull results — they are not delivered automatically.** "
+            '`agent(action="call", name=…, task=…)` returns a run id (and echoes the task '
+            'it bound the run to). Use `agent(action="status")` to see what is working/done, '
+            'and `agent(action="read_result", run_id=…)` to collect a finished one. To wait '
+            'for an agent, call `agent(action="read_result", run_id=…, wait=true, '
+            'timeout_s=…)` instead of polling in a loop.',
             "",
             "Every run's status and result carry the `task_id` / `task_preview` they were "
             "dispatched with. Check it against what you asked for: if the deliverable discusses "
-            "a different task, the agent wandered — discard it and re-dispatch, don't accept it.",
+            "a different task, the agent wandered — discard it and re-dispatch.",
             "",
-            "Each finished run has a best-effort `note_path` to its full saved deliverable; if a "
-            "result has scrolled out of context, `read_file` that path instead of re-dispatching.",
-            "If you end your turn with results unread, you will be nudged once to collect them.",
+            "Each finished run has a best-effort `note_path` to its full saved deliverable; "
+            "if a result has scrolled out of context, `read_file` that path instead of "
+            "re-dispatching. If you end your turn with results unread, you will be nudged "
+            "once to collect them.",
             "",
-            "**Rules:** dispatch the same agent multiple times if useful; only use an agent whose "
-            "specialty matches; on failure, handle the task yourself — do not re-dispatch a failed agent.",
+            "**Rules:** dispatch the same agent multiple times if useful; only use an agent "
+            "whose specialty matches; on failure, handle the task yourself.",
         ]
 
         return "\n".join(lines)
@@ -234,7 +241,8 @@ class AgentRegistry:
         git. Returns run_id (int) or an error string."""
         if name not in self.agents:
             available = ", ".join(sorted(self.agents))
-            return (f"Error: Agent '{name}' not found. Available: {available}. Call list_agents."
+            return (f"Error: Agent '{name}' not found. Available: {available}. "
+                    'Use agent(action="list").'
                     if available else
                     "Error: Agent '{name}' not found. No agents configured.".format(name=name))
         if name in self._settled and self._settled[name] in ("error", "timeout"):
@@ -267,6 +275,16 @@ class AgentRegistry:
                 "that resolves to a file in .ayder/tasks/. The agent sees nothing else."
             )
 
+        in_flight = sum(
+            1 for r in self._runs.values()
+            if r.generation == self._current_generation and r.status in ("queued", "working")
+        )
+        if in_flight >= _RUNAWAY_CEILING:
+            return (
+                f"Error: agent runaway ceiling ({_RUNAWAY_CEILING}) reached — {in_flight} "
+                "runs already queued/working. Collect results before dispatching more."
+            )
+
         if self._loop is None:
             return "Error: Agent registry not initialized (event loop not set)"
 
@@ -283,7 +301,7 @@ class AgentRegistry:
             run_id=run_id, generation=self._current_generation, on_progress=self._on_progress,
         )
         run = AgentRun(run_id=run_id, generation=self._current_generation,
-                       agent_name=name, started_at=time.monotonic(),
+                       agent_name=name, started_at=time.monotonic(), status="queued",
                        task_id=resolved_task_id, branch_name=branch, task_preview=task_preview)
         self._runs[run_id] = run
         self._active[run_id] = runner
@@ -295,7 +313,14 @@ class AgentRegistry:
     async def _run_and_queue(self, run: AgentRun, runner: AgentRunner, task: str) -> None:
         outcome: AgentRunOutcome | None = None
         try:
-            outcome = await runner.run(task)
+            async with self._semaphore:
+                if runner.status == "cancelled":
+                    outcome = AgentRunOutcome(
+                        "cancelled", "Run cancelled before it started.", None, None
+                    )
+                else:
+                    run.status = "working"
+                    outcome = await runner.run(task)
         except Exception:
             logger.exception("agent run crashed: run_id=%d", run.run_id)
             outcome = AgentRunOutcome("error", "Agent encountered an error.", "internal error", None)
@@ -351,7 +376,7 @@ class AgentRegistry:
         run = self._runs.get(run_id)
         if run is None or run.generation != self._current_generation:
             return None
-        if run.status == "working":
+        if run.status in ("queued", "working"):
             return run.to_status_dict(now=time.monotonic())   # NOT drained (finding 1)
         return self._result_payload(run)                       # terminal -> drains
 
@@ -359,13 +384,13 @@ class AgentRegistry:
         run = self._runs.get(run_id)
         if run is None or run.generation != self._current_generation:
             return None
-        if run.status == "working":
+        if run.status in ("queued", "working"):
             capped = max(0.0, min(float(timeout_s), float(self._agent_timeout)))
             try:
                 await asyncio.wait_for(run.done_event.wait(), timeout=capped)
             except asyncio.TimeoutError:
-                return run.to_status_dict(now=time.monotonic())  # still working, NOT drained
-        if run.status == "working":
+                return run.to_status_dict(now=time.monotonic())  # still pending, NOT drained
+        if run.status in ("queued", "working"):
             return run.to_status_dict(now=time.monotonic())      # spurious wake; NOT drained
         return self._result_payload(run)                          # terminal -> drains
 

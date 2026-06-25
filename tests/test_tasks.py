@@ -335,7 +335,7 @@ class TestTemporalMetadata:
 
 
 class TestTaskResolution:
-    """Tests for the resolvers shared with the agent harness (call_agent task_id)."""
+    """Tests for the resolvers shared with the agent harness (agent task_id)."""
 
     def _make(self, tasks_dir, name, body="body"):
         (tasks_dir / name).write_text(

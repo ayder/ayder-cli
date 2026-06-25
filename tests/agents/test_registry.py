@@ -73,14 +73,14 @@ class TestAgentRegistry:
 
     def test_get_capability_prompts(self, registry):
         prompts = registry.get_capability_prompts()
-        assert "list_agents" in prompts
-        assert "call_agent" in prompts
+        assert 'agent(action="list")' in prompts
+        assert 'agent(action="call"' in prompts
         assert "reviewer" not in prompts
         assert "writer" not in prompts
 
     def test_capability_prompt_is_pull(self, registry):
         p = registry.get_capability_prompts()
-        assert "agent_status" in p and "read_agent_result" in p
+        assert 'action="status"' in p and 'action="read_result"' in p
         assert "after all agents complete" not in p
         assert "Batch behavior" not in p
         assert "pull" in p.lower()
@@ -162,7 +162,7 @@ class TestAgentRegistry:
         assert "not found" in result.lower()
         assert "reviewer" in result
         assert "writer" in result
-        assert "list_agents" in result
+        assert 'action="list"' in result
 
     @pytest.mark.parametrize("task", ["", "   ", "\n\t  \n"])
     def test_create_run_rejects_empty_task(self, registry, task):
@@ -280,8 +280,9 @@ class TestAgentRegistry:
         assert isinstance(run1, int)
         assert isinstance(run2, int)
         assert run1 != run2
-        # Both scheduled and still working until their tasks run
-        assert registry.active_count == 2
+        # Both scheduled immediately; they may still be queued until the loop advances.
+        assert len(registry._active) == 2
+        assert {registry._runs[run1].status, registry._runs[run2].status} <= {"queued", "working"}
         # Let scheduled tasks complete so the test loop has no pending work
         await registry._runs[run1].done_event.wait()
         await registry._runs[run2].done_event.wait()

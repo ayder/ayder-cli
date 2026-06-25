@@ -197,7 +197,7 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
 
     Tries, in order: relative path from project root, filename in the tasks dir,
     numeric ID lookup ("001"/"1"/"TASK-001"), then slug substring match. Shared
-    by the `task` tool and the agent harness (which resolves call_agent's
+    by the `task` tool and the agent harness (which resolves the agent tool's
     task_id), so both accept identifiers in the same flexible forms.
     """
     tasks_dir = _get_tasks_dir(project_ctx)

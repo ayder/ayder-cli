@@ -16,13 +16,7 @@ from pathlib import Path
 from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.tool import (
     AGENT_TOOL_DEFINITION,
-    AGENT_STATUS_TOOL_DEFINITION,
-    LIST_AGENTS_TOOL_DEFINITION,
-    READ_AGENT_RESULT_TOOL_DEFINITION,
-    create_call_agent_handler,
-    create_agent_status_handler,
-    create_list_agents_handler,
-    create_read_agent_result_handler,
+    create_agent_handler,
 )
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.providers import ProviderUnavailableError
@@ -73,15 +67,11 @@ def _run_loop(
             process_manager=rt.process_manager,
             permissions=set(permissions or {"r"}),
             agent_timeout=getattr(rt.config, "agent_timeout", 300),
+            max_concurrent_agents=getattr(rt.config, "max_concurrent_agents", 5),
         )
-        list_handler = create_list_agents_handler(agent_registry)
-        rt.tool_registry.register_dynamic_tool(LIST_AGENTS_TOOL_DEFINITION, list_handler)
-        handler = create_call_agent_handler(agent_registry)
-        rt.tool_registry.register_dynamic_tool(AGENT_TOOL_DEFINITION, handler)
         rt.tool_registry.register_dynamic_tool(
-            AGENT_STATUS_TOOL_DEFINITION, create_agent_status_handler(agent_registry))
-        rt.tool_registry.register_dynamic_tool(
-            READ_AGENT_RESULT_TOOL_DEFINITION, create_read_agent_result_handler(agent_registry))
+            AGENT_TOOL_DEFINITION, create_agent_handler(agent_registry)
+        )
 
         cap_prompts = agent_registry.get_capability_prompts()
         if cap_prompts and messages[0].get("role") == "system":
@@ -112,7 +102,7 @@ def _run_loop(
     async def _drive() -> None:
         # AgentRegistry.dispatch needs a running loop to schedule agent runs
         # via run_coroutine_threadsafe. Wire it before entering the chat loop
-        # so call_agent works in single-shot CLI mode too.
+        # so agent(action="call") works in single-shot CLI mode too.
         if agent_registry is not None:
             agent_registry.set_loop(asyncio.get_running_loop())
         await loop.run()

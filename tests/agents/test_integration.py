@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.registry import AgentRegistry
 from ayder_cli.agents.runner import AgentRunOutcome
-from ayder_cli.agents.tool import create_call_agent_handler
+from ayder_cli.agents.tool import create_agent_handler
 from ayder_cli.core.config import Config
 
 
@@ -39,8 +39,8 @@ class TestAgentIntegration:
 
         # 3. Verify generic capability prompts and structured discovery
         prompts = registry.get_capability_prompts()
-        assert "list_agents" in prompts
-        assert "call_agent" in prompts
+        assert 'agent(action="list")' in prompts
+        assert 'agent(action="call"' in prompts
         assert "reviewer" not in prompts
         agents = registry.list_agents()
         assert agents[0]["name"] == "reviewer"
@@ -55,11 +55,11 @@ class TestAgentIntegration:
                 "done", "Found 2 issues.", None, None,
             ))
 
-            handler = create_call_agent_handler(registry)
+            handler = create_agent_handler(registry)
             # _on_loop requires marshaling; the handler runs on the loop in this test,
             # so route synchronously.
             registry._on_loop = lambda fn: fn()
-            result = handler(name="reviewer", task="Review auth.py")
+            result = handler(action="call", name="reviewer", task="Review auth.py")
 
         # create_run returns a run-id-bearing status message
         assert "run #" in result

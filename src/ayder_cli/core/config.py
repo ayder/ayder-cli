@@ -52,6 +52,7 @@ DEFAULTS: Dict[str, Any] = {
         "retention": "7 days",
     },
     "max_background_processes": 5,
+    "max_concurrent_agents": 5,
     "temporal": {
         "enabled": False,
         "host": "localhost:7233",
@@ -93,6 +94,7 @@ provider = "{provider}"
 editor = "{editor}"
 verbose = {verbose_str}
 max_background_processes = {max_background_processes}
+max_concurrent_agents = {max_concurrent_agents}
 
 [logging]
 file_enabled = {logging_file_enabled}
@@ -312,6 +314,7 @@ class Config(BaseModel):
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
     retry: RetryConfigSection = Field(default_factory=RetryConfigSection)
     agent_timeout: int = Field(default=300)
+    max_concurrent_agents: int = Field(default=5)
     agents: dict[str, Any] = Field(default_factory=dict)  # dict[str, AgentConfig] — Any to avoid circular import
 
     @model_validator(mode="before")
@@ -441,6 +444,13 @@ class Config(BaseModel):
     def validate_agent_timeout(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("agent_timeout must be positive")
+        return v
+
+    @field_validator("max_concurrent_agents")
+    @classmethod
+    def validate_max_concurrent_agents(cls, v: int) -> int:
+        if v < 1 or v > 20:
+            raise ValueError("max_concurrent_agents must be between 1 and 20")
         return v
 
     @field_validator("base_url")

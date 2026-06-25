@@ -1,9 +1,8 @@
-"""Agent tools — discover and delegate to specialized agents.
+"""Agent tool — discover and delegate to specialized agents.
 
-Provides dynamic ToolDefinitions for registration and factories for sync handlers.
-Handlers are sync because they run inside asyncio.to_thread() in the tool
-execution pipeline. call_agent schedules work via AgentRegistry.create_run(),
-routed onto the event loop through registry._on_loop().
+Provides the dynamic ToolDefinition and sync handler factory for the consolidated
+agent(action=...) tool. Handlers are sync because they run inside
+asyncio.to_thread() in the tool execution pipeline.
 """
 
 from __future__ import annotations
@@ -20,164 +19,147 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-LIST_AGENTS_TOOL_DEFINITION = ToolDefinition(
-    name="list_agents",
-    description=(
-        "List configured specialized agents with exact names, descriptions, "
-        "status, and running counts. Use this before call_agent when you need "
-        "to discover available agent names."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-    permission="r",
-    tags=("core", "agents"),
-    system_prompt="",
-)
-
 AGENT_TOOL_DEFINITION = ToolDefinition(
-    name="call_agent",
+    name="agent",
     description=(
-        "Delegate a task to a specialized agent that runs in the background. "
-        "Returns a run id immediately; poll agent_status and collect with read_agent_result. "
-        "Use list_agents to discover names first. When the work is a task file under "
-        ".ayder/tasks/, pass its task_id and the harness hands the agent the file itself — "
-        "don't paste the task body into `task`."
+        "Discover and delegate to specialized background agents. Single tool, "
+        "dispatched on `action`: list (configured agents), call (dispatch one; "
+        "returns a run id immediately), status (your runs this turn), read_result "
+        "(collect a finished run by run_id; set wait=true to block up to timeout_s). "
+        "You PULL results — they are not pushed. When the work is a task file under "
+        ".ayder/tasks/, pass its task_id and the harness hands the agent the file itself."
     ),
+    description_template="agent `{action}`",
     parameters={
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["call", "list", "status", "read_result"],
+                "description": (
+                    "list: enumerate configured agents. call: dispatch `name` with "
+                    "`task` (+ optional task_id/branch_name). status: list your runs. "
+                    "read_result: collect `run_id` (optionally wait)."
+                ),
+            },
             "name": {
                 "type": "string",
-                "description": "Exact agent name returned by list_agents",
+                "description": "[call] Exact agent name from action=list.",
             },
             "task": {
                 "type": "string",
                 "description": (
-                    "Free-text instructions for the agent — it becomes (part of) the "
-                    "agent's only user message; it has no other context. Optional ONLY "
-                    "when task_id is given (the resolved task file then carries the work). "
-                    "With no task_id this must be concrete and non-empty: what to do, the "
-                    "files and branch to touch, and the acceptance criteria."
+                    "[call] The agent's entire user turn — it has no other context. Optional "
+                    "ONLY when task_id is given; otherwise concrete and non-empty: what to do, "
+                    "the files/branch, the acceptance criteria."
                 ),
             },
             "task_id": {
                 "type": "string",
                 "description": (
-                    "Optional. The task this dispatch implements, e.g. 'TASK-003' (or '3'). "
-                    "The harness resolves it against .ayder/tasks/ and FAILS FAST if no such "
-                    "task exists; when it resolves, the task file is embedded in the agent's "
-                    "prompt so you need not paste it. Prefer this over copying the task body."
+                    "[call] Optional task this implements, e.g. 'TASK-003' (or '3'). Resolved "
+                    "against .ayder/tasks/ and FAILS FAST if missing; on resolution the file is "
+                    "embedded in the agent's prompt."
                 ),
             },
             "branch_name": {
                 "type": "string",
                 "description": (
-                    "Optional. The git branch the agent must work and COMMIT on, e.g. "
-                    "'agent/add-auth'. Folded into the agent's instructions as a directive. "
-                    "The harness does NOT switch branches — create the branch/worktree first."
+                    "[call] Optional git branch the agent must work and COMMIT on, e.g. "
+                    "'agent/add-auth'. Folded into the agent's instructions."
                 ),
             },
+            "run_id": {
+                "type": "integer",
+                "description": "[read_result] The run id from action=call / action=status.",
+            },
+            "wait": {
+                "type": "boolean",
+                "description": "[read_result] Block until the agent finishes (default false).",
+            },
+            "timeout_s": {
+                "type": "integer",
+                "description": "[read_result] Max seconds to block when wait=true (default 60).",
+            },
         },
-        "required": ["name"],
+        "required": ["action"],
     },
     permission="r",
     tags=("core", "agents"),
+    max_result_chars=0,
     system_prompt="",
 )
 
 
-def create_list_agents_handler(registry: AgentRegistry) -> Callable[..., str]:
-    """Create a sync handler for the list_agents tool."""
+def create_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
+    """Sync dispatcher for the consolidated `agent` tool.
 
-    def handle_list_agents() -> str:
-        return json.dumps({"agents": registry._on_loop(lambda: registry.list_agents())}, indent=2)
-
-    return handle_list_agents
-
-
-def create_call_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
-    """Create a sync handler for the call_agent tool.
-
-    The handler routes registry.create_run() onto the event loop via
-    registry._on_loop() (the handler runs in a worker thread). The agent runs
-    in the background; the main LLM collects results via the pull tools.
+    Routes `action` to the existing registry entry points. Runs in a worker
+    thread: loop-owned reads go through registry._on_loop(); the read_result
+    wait path uses run_coroutine_threadsafe so the loop keeps running.
     """
 
-    def handle_call_agent(
+    def handle_agent(
         *,
-        name: str,
+        action: str,
+        name: str | None = None,
         task: str = "",
         task_id: str | None = None,
         branch_name: str | None = None,
+        run_id: int | None = None,
+        wait: bool = False,
+        timeout_s: int = 60,
     ) -> str:
-        result = registry._on_loop(
-            lambda: registry.create_run(name, task, task_id=task_id, branch_name=branch_name)
-        )
-        if isinstance(result, int):
-            # Echo what the harness actually bound this run to (resolved task_id +
-            # prompt preview) so the orchestrator has an in-context run->task map and
-            # can spot a wandering agent immediately instead of investigating.
-            label = registry._on_loop(lambda: registry.run_label(result))
-            bound = f" for {label}" if label else ""
-            return (
-                f"Dispatched '{name}' as run #{result}{bound} (working). "
-                f"Poll with agent_status; collect with read_agent_result({result})."
+        act = (action or "").strip().lower()
+
+        if act == "list":
+            return json.dumps(
+                {"agents": registry._on_loop(lambda: registry.list_agents())}, indent=2
             )
-        return result  # error string
 
-    return handle_call_agent
+        if act == "status":
+            return json.dumps(
+                {"agents": registry._on_loop(lambda: registry.snapshot())}, indent=2
+            )
 
+        if act == "call":
+            if not name:
+                return (
+                    "Error: action=call requires `name` "
+                    '(use agent(action="list") to discover names).'
+                )
+            result = registry._on_loop(
+                lambda: registry.create_run(name, task, task_id=task_id, branch_name=branch_name)
+            )
+            if isinstance(result, int):
+                label = registry._on_loop(lambda: registry.run_label(result))
+                bound = f" for {label}" if label else ""
+                return (
+                    f"Dispatched '{name}' as run #{result}{bound}. "
+                    f'Poll with agent(action="status"); collect with '
+                    f'agent(action="read_result", run_id={result}).'
+                )
+            return result
 
-AGENT_STATUS_TOOL_DEFINITION = ToolDefinition(
-    name="agent_status",
-    description=("Show all agent runs you dispatched this conversation with their status "
-                 "(working/done/error), elapsed seconds, and whether a result is unread. "
-                 "Use read_agent_result(run_id) to collect a finished one."),
-    parameters={"type": "object", "properties": {}, "required": []},
-    permission="r", tags=("core", "agents"), system_prompt="",
-)
+        if act == "read_result":
+            if run_id is None:
+                return json.dumps({"error": "action=read_result requires run_id."})
+            if wait:
+                payload = (
+                    asyncio.run_coroutine_threadsafe(
+                        registry.await_run(run_id, timeout_s), registry._loop
+                    ).result()
+                    if registry._loop is not None
+                    else None
+                )
+            else:
+                payload = registry._on_loop(lambda: registry.read_result(run_id))
+            if payload is None:
+                return json.dumps({"error": f"No agent run #{run_id} in this conversation."})
+            return json.dumps(payload, indent=2)
 
-READ_AGENT_RESULT_TOOL_DEFINITION = ToolDefinition(
-    name="read_agent_result",
-    description=("Collect a dispatched agent's deliverable by run id. Marks it read. "
-                 "Set wait=true to block until it finishes (up to timeout_s seconds)."),
-    parameters={"type": "object", "properties": {
-        "run_id": {"type": "integer", "description": "The run id from call_agent / agent_status"},
-        "wait": {"type": "boolean", "description": "Block until the agent finishes (default false)"},
-        "timeout_s": {"type": "integer", "description": "Max seconds to block when wait=true (default 60)"},
-    }, "required": ["run_id"]},
-    permission="r", tags=("core", "agents"), system_prompt="",
-)
+        return json.dumps(
+            {"error": f"Unknown action '{action}'. Valid: call, list, status, read_result."}
+        )
 
-
-def create_agent_status_handler(registry: AgentRegistry) -> Callable[..., str]:
-    """Create a sync handler for the agent_status tool."""
-
-    def handle_agent_status() -> str:
-        return json.dumps({"agents": registry._on_loop(lambda: registry.snapshot())}, indent=2)
-
-    return handle_agent_status
-
-
-def create_read_agent_result_handler(registry: AgentRegistry) -> Callable[..., str]:
-    """Create a sync handler for the read_agent_result tool.
-
-    When wait=True, blocks the calling thread using run_coroutine_threadsafe
-    so the event loop can keep running (await_run is a coroutine).
-    """
-
-    def handle_read_agent_result(*, run_id: int, wait: bool = False, timeout_s: int = 60) -> str:
-        if wait:
-            payload = asyncio.run_coroutine_threadsafe(
-                registry.await_run(run_id, timeout_s), registry._loop
-            ).result() if registry._loop is not None else None
-        else:
-            payload = registry._on_loop(lambda: registry.read_result(run_id))
-        if payload is None:
-            return json.dumps({"error": f"No agent run #{run_id} in this conversation."})
-        return json.dumps(payload, indent=2)
-
-    return handle_read_agent_result
+    return handle_agent
