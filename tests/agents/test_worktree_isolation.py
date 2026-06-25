@@ -73,6 +73,45 @@ def _committing_runner():
     return _R
 
 
+def _noncommitting_runner():
+    """Fake coder that writes a file but never commits — its work would be lost
+    when the worktree is reaped. Returns a 'done' outcome to prove the registry
+    (not the runner) catches the missing commit."""
+    class _R:
+        def __init__(self, *a, **k):
+            self.agent_name = "coder"
+            self.status = "idle"
+            self._project_ctx = k["project_ctx"]
+            self.run_id = k["run_id"]
+
+        def cancel(self):
+            return True
+
+        async def run(self, task):
+            root = str(self._project_ctx.root)
+            with open(os.path.join(root, "wip.txt"), "w") as f:
+                f.write("started but did not commit")
+            return AgentRunOutcome("done", "I started the work", None, None)
+    return _R
+
+
+@needs_git
+@pytest.mark.asyncio
+async def test_branch_run_without_commit_settles_error(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    reg = _registry(ProjectContext(repo), cap=1)
+    reg.set_loop(asyncio.get_running_loop())
+    monkeypatch.setattr("ayder_cli.agents.registry.AgentRunner", _noncommitting_runner())
+
+    rid = reg.create_run("coder", "x", branch_name="agent/nocommit")
+    await reg.await_run(rid, timeout_s=10)
+
+    assert reg._runs[rid].status == "error"
+    assert "commit" in (reg._runs[rid].error or "").lower()
+    # worktree still cleaned up despite the override
+    assert not os.path.isdir(os.path.join(repo, ".ayder", "worktrees", "nocommit"))
+
+
 @needs_git
 @pytest.mark.asyncio
 async def test_two_coders_isolated_committed_and_cleaned(tmp_path, monkeypatch):

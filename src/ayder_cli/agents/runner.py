@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -18,6 +19,13 @@ from ayder_cli.application.runtime_factory import create_agent_runtime
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
 logger = logging.getLogger(__name__)
+
+# Lines an agent is REQUIRED to emit (the task_id/task_preview echo) or that
+# carry no deliverable content (the verdict tag). A response that is only these
+# lines is vacuous — the agent did no real work (seen in real runs as empty or
+# echo-only deliverables that were nonetheless reported "done").
+_ECHO_LINE = re.compile(r"^\s*(task_id|task_preview)\s*:", re.IGNORECASE)
+_VERDICT_LINE = re.compile(r"^\s*VERDICT\s*:", re.IGNORECASE)
 
 
 @dataclass
@@ -85,6 +93,17 @@ class AgentRunner:
                 continue
             return msg.get("content") or ""
         return ""
+
+    @staticmethod
+    def _is_vacuous(content: str) -> bool:
+        """True if the deliverable has no substance beyond the mandated
+        task_id/task_preview echo and a VERDICT tag (empty, echo-only, or
+        verdict-only). Such a run did no real work and must settle 'error'."""
+        body = "\n".join(
+            ln for ln in (content or "").splitlines()
+            if not _ECHO_LINE.match(ln) and not _VERDICT_LINE.match(ln)
+        ).strip()
+        return not body
 
     def _persist_note(self, task: str, status: str, content: str, error: str | None) -> str | None:
         from ayder_cli.tools.builtins.notes import write_agent_note
@@ -175,9 +194,23 @@ class AgentRunner:
                 err = callbacks.last_system_error
                 return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
 
+            # Loop returned. A vacuous deliverable (empty / echo-only / verdict-
+            # only) means the agent did no real work — settle 'error' so the
+            # orchestrator re-dispatches instead of accepting a hollow "done".
+            content = self._final_message(messages)
+            if self._is_vacuous(content):
+                self.status = "error"
+                err = "Agent produced no deliverable (empty or echo-only response)."
+                logger.debug(
+                    "run vacuous: agent='%s' run_id=%d", self.agent_name, self.run_id,
+                )
+                body = content or err
+                return AgentRunOutcome(
+                    "error", body, err, self._persist_note(task, "error", body, err)
+                )
+
             # Completed successfully
             self.status = "completed"
-            content = self._final_message(messages) or "Agent completed without producing output."
             logger.debug(
                 "run completed: agent='%s' run_id=%d",
                 self.agent_name, self.run_id,

@@ -72,11 +72,11 @@ class TestAgentRunner:
         assert messages[0] == {"role": "system", "content": mock_rt.system_prompt}
         assert "specialized agent named 'file_lister'" in messages[0]["content"]
         assert messages[1] == {"role": "user", "content": "What is your configured agent name?"}
-        # No assistant message was produced by the mocked loop, so run() takes the
-        # success path and _final_message falls back to the default deliverable.
+        # The mocked loop produced no assistant message, so the deliverable is
+        # vacuous -> run() settles 'error' (F1b) rather than a hollow "done".
         assert isinstance(result, AgentRunOutcome)
-        assert result.status == "done"
-        assert result.content == "Agent completed without producing output."
+        assert result.status == "error"
+        assert "deliverable" in (result.error or "").lower()
 
     @pytest.mark.anyio
     async def test_run_timeout(self):
@@ -225,3 +225,45 @@ def test_final_message_empty_when_no_real_assistant_text():
         {"role": "tool", "content": "tool output"},
     ]
     assert AgentRunner._final_message(msgs) == ""
+
+
+def test_is_vacuous_detects_empty_and_echo_only():
+    # empty / whitespace
+    assert AgentRunner._is_vacuous("") is True
+    assert AgentRunner._is_vacuous("   \n\t ") is True
+    # echo-only (the mandated task_id/task_preview lines and a lone verdict)
+    assert AgentRunner._is_vacuous("task_id: none") is True
+    assert AgentRunner._is_vacuous("task_id: TASK-1\nVERDICT: APPROVED") is True
+    assert AgentRunner._is_vacuous("task_preview: x\ntask_id: none") is True
+    # real deliverable -> not vacuous
+    assert AgentRunner._is_vacuous("task_id: TASK-1\nLGTM, ships.\nVERDICT: APPROVED") is False
+    assert AgentRunner._is_vacuous("# Plan\n1. do the thing") is False
+
+
+@pytest.mark.anyio
+async def test_run_flags_echo_only_deliverable_as_error(tmp_path):
+    """F1b: an agent that only echoes the task_id (no real deliverable) must
+    settle 'error', not 'done' with a placeholder."""
+    from ayder_cli.core.context import ProjectContext
+    cfg = AgentConfig(name="coder", system_prompt="x")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(),
+        project_ctx=ProjectContext(str(tmp_path)), process_manager=MagicMock(),
+        permissions=set(), timeout=5, run_id=1, generation=0,
+    )
+
+    def loop_ctor(**kwargs):
+        msgs = kwargs["messages"]
+        m = MagicMock()
+        async def _run(*a, **k):
+            msgs.append({"role": "assistant", "content": "task_id: none"})
+        m.run = _run
+        return m
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=_fake_rt()), \
+         patch.object(rm, "ChatLoop", side_effect=loop_ctor):
+        out = await runner.run("do it")
+
+    assert out.status == "error"
+    assert "deliverable" in (out.error or "").lower()

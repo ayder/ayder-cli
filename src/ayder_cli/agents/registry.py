@@ -21,6 +21,7 @@ from ayder_cli.agents.run import AgentRun
 from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
 from ayder_cli.agents.worktree import (
     add_worktree,
+    branch_head,
     detect_base_branch,
     is_git_repo,
     remove_worktree,
@@ -325,6 +326,7 @@ class AgentRegistry:
     ) -> None:
         outcome: AgentRunOutcome | None = None
         worktree_path: str | None = None
+        head_before: str | None = None  # branch tip before the run (commit check)
         try:
             async with self._semaphore:
                 if run.status == "cancelled":
@@ -362,6 +364,9 @@ class AgentRegistry:
                                 self._session_worktrees.add(wt_dir)
                                 run.worktree_path = wt_dir
                                 project_ctx = ProjectContext(wt_dir)
+                                head_before = await asyncio.to_thread(
+                                    branch_head, repo_root, run.branch_name
+                                )
                                 # notes_ctx stays the parent so the note survives removal
                     if outcome is None:
                         runner = AgentRunner(
@@ -375,6 +380,28 @@ class AgentRegistry:
                         self._active[run.run_id] = runner
                         run.status = "working"
                         outcome = await runner.run(task)
+                        # A branch-carrying run whose branch tip did not move made
+                        # no commit; its worktree is reaped, so the work is lost.
+                        # Settle 'error' so the orchestrator re-dispatches instead
+                        # of accepting an empty branch as success (F1b).
+                        if (
+                            worktree_path is not None
+                            and run.branch_name
+                            and outcome is not None
+                            and outcome.status != "error"
+                        ):
+                            head_after = await asyncio.to_thread(
+                                branch_head, str(self._project_ctx.root), run.branch_name
+                            )
+                            if head_after is None or head_after == head_before:
+                                outcome = AgentRunOutcome(
+                                    "error",
+                                    f"Agent made no commit on '{run.branch_name}'. Its "
+                                    "isolated worktree is discarded at run end, so any "
+                                    "uncommitted work is lost. Re-dispatch.",
+                                    "no commit on branch",
+                                    outcome.note_path,
+                                )
         except Exception:
             logger.exception("agent run crashed: run_id=%d", run.run_id)
             if outcome is None:

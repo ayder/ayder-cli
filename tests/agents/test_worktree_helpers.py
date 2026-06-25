@@ -8,6 +8,7 @@ import pytest
 
 from ayder_cli.agents.worktree import (
     add_worktree,
+    branch_head,
     detect_base_branch,
     is_git_repo,
     remove_worktree,
@@ -90,3 +91,15 @@ def test_add_worktree_raises_on_bad_base(tmp_path):
     wt = os.path.join(root, ".ayder", "worktrees", "bad")
     with pytest.raises(RuntimeError):
         add_worktree(root, wt, "agent/bad", "no-such-base-ref")
+
+
+@needs_git
+def test_branch_head_resolves_and_misses(tmp_path):
+    root = _init_repo(tmp_path)
+    head = branch_head(root, "main")
+    assert head is not None and len(head) >= 7
+    assert branch_head(root, "no-such-branch") is None
+
+
+def test_branch_head_none_for_non_git(tmp_path):
+    assert branch_head(str(tmp_path), "main") is None

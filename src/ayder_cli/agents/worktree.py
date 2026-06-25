@@ -114,3 +114,17 @@ def remove_worktree(repo_root: str, worktree_path: str) -> None:
         )
     except (OSError, subprocess.SubprocessError) as e:
         logger.warning("worktree remove/prune failed for %s: %s", worktree_path, e)
+
+
+def branch_head(repo_root: str, branch: str) -> str | None:
+    """Return the commit sha at the tip of ``branch``, or None if it cannot be
+    resolved. Used to detect whether an agent actually committed (head moved)."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", branch],
+            cwd=repo_root, capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sha = r.stdout.strip()
+    return sha if r.returncode == 0 and sha else None
