@@ -43,10 +43,12 @@ class AgentRunner:
         run_id: int = 0,
         generation: int = 0,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
+        notes_ctx: Any = None,
     ) -> None:
         self._agent_config = agent_config
         self._parent_config = parent_config
         self._project_ctx = project_ctx
+        self._notes_ctx = notes_ctx if notes_ctx is not None else project_ctx
         self._process_manager = process_manager
         self._permissions = permissions
         self._timeout = timeout
@@ -87,7 +89,7 @@ class AgentRunner:
     def _persist_note(self, task: str, status: str, content: str, error: str | None) -> str | None:
         from ayder_cli.tools.builtins.notes import write_agent_note
         return write_agent_note(
-            self._project_ctx, agent_name=self.agent_name, run_id=self.run_id,
+            self._notes_ctx, agent_name=self.agent_name, run_id=self.run_id,
             generation=self._generation, status=status, task=task, content=content,
             timestamp=datetime.now().strftime("%Y%m%d-%H%M%S"), error=error,
         )

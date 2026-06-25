@@ -172,6 +172,36 @@ async def test_run_reports_error_when_stream_fails_after_text():
     assert out.error == "Error: stream failed"
 
 
+def test_persist_note_uses_notes_ctx_not_project_ctx(tmp_path):
+    """When notes_ctx differs from project_ctx (worktree case), the note is
+    written under notes_ctx (the parent), not the worktree project_ctx."""
+    from ayder_cli.agents.runner import AgentRunner
+    from ayder_cli.core.context import ProjectContext
+
+    parent = tmp_path / "parent"
+    worktree = tmp_path / "parent" / ".ayder" / "worktrees" / "x"
+    parent.mkdir(parents=True)
+    worktree.mkdir(parents=True)
+
+    class _Cfg:
+        name = "coder"
+        system_prompt = "x"
+
+    runner = AgentRunner(
+        agent_config=_Cfg(), parent_config=_Cfg(),
+        project_ctx=ProjectContext(str(worktree)),
+        notes_ctx=ProjectContext(str(parent)),
+        process_manager=None, permissions={"r"}, run_id=7, generation=0,
+    )
+    rel = runner._persist_note(task="do x", status="done", content="did x", error=None)
+    assert rel is not None
+    # Note exists under the PARENT notes dir, not the worktree's.
+    parent_notes = parent / ".ayder" / "notes"
+    assert parent_notes.is_dir() and any(parent_notes.iterdir())
+    worktree_notes = worktree / ".ayder" / "notes"
+    assert not worktree_notes.exists()
+
+
 def test_final_message_skips_think_blocks():
     msgs = [
         {"role": "assistant", "content": "<think>reasoning</think>"},
