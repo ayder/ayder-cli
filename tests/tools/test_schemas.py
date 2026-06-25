@@ -49,13 +49,12 @@ class TestToolDefinitions:
         expected_tools = {td.name for td in TOOL_DEFINITIONS}
         names = {s["function"]["name"] for s in schemas.tools_schema}
         assert names == expected_tools
-        # Verify all 15 builtin tools are always present
+        # Verify all 12 builtin tools are always present
         builtin_tools = {
             "file_explorer", "read_file", "file_editor",
             "run_shell_command", "search_codebase", "get_project_structure",
             "note", "context",
-            "run_background_process", "get_background_output",
-            "kill_background_process", "list_background_processes",
+            "background_process",
             "task",
             "manage_environment_vars",
             "fetch_web",

@@ -300,7 +300,7 @@ the design rationale.
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `process_manager.py` | Background processes | `ProcessManager`, `run_background_process()` |
+| `process_manager.py` | Background processes | `ProcessManager`, `background_process()` |
 | `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()`, `PROJECT_STRUCTURE_MACRO_TEMPLATE` |
 | `parser.py` | XML tool-call parsing | `parse_custom_tool_calls()` |
 
@@ -648,7 +648,7 @@ Schema-driven tool definitions with auto-discovery:
 - Shell (1): `run_shell_command`
 - Context (1): `context`
 - Notes (1): `create_note`
-- Background Processes (4): `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes`
+- Background Process (1): `background_process` (action=start|logs|stop|list|info)
 - Tasks (2): `list_tasks`, `show_task`
 - Environment (1): `manage_environment_vars`
 - Web (1): `fetch_web`

@@ -1,9 +1,7 @@
 """
 Tool definitions for background process operations.
 
-Tools: background_process (consolidated), plus legacy run_background_process /
-get_background_output / kill_background_process / list_background_processes
-(removed in spec 06 Task 4).
+Tools: background_process (consolidated).
 
 ``background_process`` sets ``max_result_chars=0`` to opt out of the chat-loop's
 generic 8192-char truncation; its handler self-bounds ``logs`` via offset/max_chars.
@@ -65,77 +63,5 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             },
             "required": ["action"],
         },
-    ),
-    ToolDefinition(
-        name="run_background_process",
-        description="Start a long-running command in the background (servers, watchers, builds).",
-        description_template="Background command `{command}` will be started",
-        tags=("background",),
-        func_ref="ayder_cli.process_manager:run_background_process",
-        permission="x",
-        safe_mode_blocked=True,
-        parameters={
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "Command to run in background.",
-                },
-            },
-            "required": ["command"],
-        },
-    ),
-    ToolDefinition(
-        name="get_background_output",
-        description="Get recent stdout/stderr output from a background process.",
-        description_template="Output for background process {process_id} will be retrieved",
-        tags=("background",),
-        func_ref="ayder_cli.process_manager:get_background_output",
-        permission="r",
-        parameters={
-            "type": "object",
-            "properties": {
-                "process_id": {
-                    "type": "integer",
-                    "description": "The ID of the background process",
-                },
-                "tail": {
-                    "type": "integer",
-                    "description": "Number of recent lines to return (default: 50)",
-                },
-            },
-            "required": ["process_id"],
-        },
-    ),
-    ToolDefinition(
-        name="kill_background_process",
-        description="Kill a running background process.",
-        description_template="Background process {process_id} will be killed",
-        tags=("background",),
-        func_ref="ayder_cli.process_manager:kill_background_process",
-        permission="x",
-        safe_mode_blocked=True,
-        parameters={
-            "type": "object",
-            "properties": {
-                "process_id": {
-                    "type": "integer",
-                    "description": "The ID of the background process to kill",
-                },
-            },
-            "required": ["process_id"],
-        },
-    ),
-    ToolDefinition(
-        name="list_background_processes",
-        description="List all background processes and their status.",
-        description_template="Background processes will be listed",
-        tags=("background",),
-        func_ref="ayder_cli.process_manager:list_background_processes",
-        parameters={
-            "type": "object",
-            "properties": {},
-        },
-        permission="r",
     ),
 )
