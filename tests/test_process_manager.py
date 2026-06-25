@@ -1,6 +1,7 @@
 """Tests for background process management."""
 
 import os
+import shutil
 import time
 from unittest import mock
 
@@ -13,6 +14,7 @@ from ayder_cli.process_manager import (
     get_background_output,
     kill_background_process,
     list_background_processes,
+    info_background_process,
 )
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -301,3 +303,65 @@ class TestGroupLifecycle:
         proc.wait.return_value = 0
         pmmod.ProcessManager._terminate_tree(proc)
         proc.terminate.assert_called_once()
+
+
+class TestListPid:
+    """list shows the OS pid (spec FR6 / AC5)."""
+
+    def test_list_includes_os_pid(self, pm):
+        mp = pm.start_process("sleep 30", cwd="/tmp")
+        try:
+            result = list_background_processes(pm)
+            assert str(mp.process.pid) in result
+            assert "PID" in result
+            assert "ID" in result  # header unchanged enough for legacy assertions
+        finally:
+            pm.kill_process(mp.id)
+
+
+class TestInfo:
+    """info action handler (spec FR7 / AC6)."""
+
+    def test_info_unknown_id(self, pm):
+        result = info_background_process(pm, 999)
+        assert isinstance(result, ToolError)
+        assert "No process with ID 999" in result
+
+    def test_info_reports_pid_and_command(self, pm):
+        mp = pm.start_process("sleep 30", cwd="/tmp")
+        try:
+            result = info_background_process(pm, mp.id)
+            assert isinstance(result, ToolSuccess)
+            assert str(mp.process.pid) in result
+            assert "sleep 30" in result
+        finally:
+            pm.kill_process(mp.id)
+
+    def test_info_degrades_to_unknown_when_tools_missing(self, pm, monkeypatch):
+        import ayder_cli.process_manager as pmmod
+
+        monkeypatch.setattr(pmmod, "_child_pids", lambda pid: None)
+        monkeypatch.setattr(pmmod, "_listening_ports", lambda pids: None)
+        mp = pm.start_process("sleep 30", cwd="/tmp")
+        try:
+            result = info_background_process(pm, mp.id)
+            assert isinstance(result, ToolSuccess)
+            assert "unknown" in result  # ports + children degraded, call still ok
+        finally:
+            pm.kill_process(mp.id)
+
+    @pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
+    def test_info_reports_forked_child(self, pm):
+        mp = pm.start_process("sh -c 'sleep 300 & echo $! ; wait'", cwd="/tmp")
+        child_pid = None
+        for _ in range(50):
+            if mp.stdout_buffer:
+                child_pid = list(mp.stdout_buffer)[0].strip()
+                break
+            time.sleep(0.1)
+        try:
+            assert child_pid is not None
+            result = info_background_process(pm, mp.id)
+            assert child_pid in result  # child surfaced via pgrep tree
+        finally:
+            pm.kill_process(mp.id)

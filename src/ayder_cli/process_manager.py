@@ -7,8 +7,10 @@ Imports from core/result.py (NOT from tools/) to avoid circular imports.
 
 import atexit
 import os
+import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -321,20 +323,173 @@ def list_background_processes(
         process_manager: The ProcessManager instance (injected).
 
     Returns:
-        ToolSuccess with formatted process list.
+        ToolSuccess with formatted process list (incl. OS pid).
     """
     processes = process_manager.list_processes()
     if not processes:
         return ToolSuccess("No background processes")
 
-    lines = ["ID  | Status  | Exit | Command"]
-    lines.append("----|---------|------|--------")
+    lines = ["ID  | PID    | Status       | Exit | Command"]
+    lines.append("----|--------|--------------|------|--------")
     for mp in processes:
         elapsed = time.time() - mp.start_time
         exit_str = str(mp.exit_code) if mp.exit_code is not None else "-"
         status = mp.status
         if mp.status == "running":
             status = f"running ({elapsed:.0f}s)"
-        lines.append(f"{mp.id:<3} | {status:<7} | {exit_str:<4} | {mp.command}")
+        lines.append(
+            f"{mp.id:<3} | {mp.process.pid:<6} | {status:<12} | {exit_str:<4} | {mp.command}"
+        )
 
+    return ToolSuccess("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Best-effort process-tree introspection (no hard dependency; degrades to None)
+# ---------------------------------------------------------------------------
+
+
+def _child_pids(pid: int) -> "list[int] | None":
+    """Recursive child pids via ``pgrep -P``. None if pgrep is unavailable.
+
+    Empty list means "no children"; None means "could not determine".
+    """
+    try:
+        found: list[int] = []
+        seen: set[int] = set()
+        frontier = [pid]
+        while frontier:
+            current = frontier.pop()
+            out = subprocess.run(
+                ["pgrep", "-P", str(current)],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            for tok in out.stdout.split():
+                child = int(tok)
+                if child not in seen:
+                    seen.add(child)
+                    found.append(child)
+                    frontier.append(child)
+        return sorted(found)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _ports_via_lsof(pids: "list[int]") -> "list[int] | None":
+    """Listening TCP ports for pids via lsof. None if lsof unavailable."""
+    try:
+        out = subprocess.run(
+            ["lsof", "-nP", "-p", ",".join(str(p) for p in pids),
+             "-iTCP", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    ports: set[int] = set()
+    for line in out.stdout.splitlines():
+        m = re.search(r":(\d+)\s+\(LISTEN\)", line)
+        if m:
+            ports.add(int(m.group(1)))
+    return sorted(ports)
+
+
+def _ports_via_ss(pids: "list[int]") -> "list[int] | None":
+    """Listening TCP ports for pids via ss. None if ss unavailable."""
+    try:
+        out = subprocess.run(
+            ["ss", "-tlnp"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pidset = {str(p) for p in pids}
+    ports: set[int] = set()
+    for line in out.stdout.splitlines():
+        if "pid=" not in line:
+            continue
+        if not (set(re.findall(r"pid=(\d+)", line)) & pidset):
+            continue
+        parts = line.split()
+        if len(parts) >= 4:
+            port = parts[3].rsplit(":", 1)[-1]
+            if port.isdigit():
+                ports.add(int(port))
+    return sorted(ports)
+
+
+def _listening_ports(pids: "list[int]") -> "list[int] | None":
+    """Best-effort listening ports for a pid set. None if no tool worked."""
+    if not pids:
+        return []
+    if sys.platform == "darwin":
+        return _ports_via_lsof(pids)
+    ports = _ports_via_ss(pids)
+    if ports is None:
+        ports = _ports_via_lsof(pids)
+    return ports
+
+
+def _fmt_pids(pids: "list[int] | None") -> str:
+    if pids is None:
+        return "unknown"
+    if not pids:
+        return "none"
+    return ", ".join(str(p) for p in pids)
+
+
+def _fmt_ports(ports: "list[int] | None") -> str:
+    if ports is None:
+        return "unknown"
+    if not ports:
+        return "none"
+    return ", ".join(str(p) for p in ports)
+
+
+def info_background_process(
+    process_manager: "ProcessManager",
+    process_id: int,
+) -> str:
+    """Deep, best-effort report for one background process.
+
+    Surfaces the OS pid, child pids (pgrep tree), listening ports (lsof/ss),
+    status, exit code, full command, and elapsed time. Introspection fields
+    degrade to "unknown" rather than failing the call.
+    """
+    mp = process_manager.get_process(process_id)
+    if mp is None:
+        return ToolError(f"No process with ID {process_id}", "validation")
+
+    pid = mp.process.pid
+    children = _child_pids(pid)
+    tree = [pid] + (children or [])
+    ports = _listening_ports(tree)
+    elapsed = time.time() - mp.start_time
+
+    if mp.exit_code is not None:
+        status_line = f"{mp.status} (exit {mp.exit_code})"
+    elif mp.status == "running":
+        status_line = f"running ({elapsed:.0f}s)"
+    else:
+        status_line = mp.status
+
+    lines = [
+        f"Process {mp.id} (manager id)",
+        f"  os pid:   {pid}",
+        f"  status:   {status_line}",
+        f"  command:  {mp.command}",
+        f"  children: {_fmt_pids(children)}",
+        f"  ports:    {_fmt_ports(ports)}",
+    ]
     return ToolSuccess("\n".join(lines))
