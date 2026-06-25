@@ -155,3 +155,110 @@ def create_note(
 
     except Exception as e:
         return ToolError(f"Error creating note: {str(e)}", "execution")
+
+
+def _render_note(slug: str, content: str, tags: str | None) -> str:
+    """Frontmatter + body, matching the /notes viewer's expectations."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fm = [f"title: {_yaml_scalar(slug)}", f"date: {_yaml_scalar(now)}"]
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    if tag_list:
+        fm.append(f"tags: [{', '.join(tag_list)}]")
+    return "---\n" + "\n".join(fm) + "\n---\n\n" + content.strip("\n") + "\n"
+
+
+def _split_frontmatter(text: str) -> tuple[str, str]:
+    """Return (frontmatter-block-incl-fences, body). ('', text) if no frontmatter."""
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return "\n".join(lines[: i + 1]), "\n".join(lines[i + 1 :]).strip("\n")
+    return "", text.strip("\n")
+
+
+def write_note_file(
+    project_ctx: ProjectContext,
+    note_id: str,
+    content: str,
+    *,
+    tags: str | None = None,
+    exclusive: bool = True,
+) -> str:
+    """Write a caller-named note. Returns the canonical slug id written.
+
+    exclusive=True: O_EXCL, raises FileExistsError on collision (backs LLM create).
+    exclusive=False: suffix-resolves (slug, slug-2, …), never raises (backs mint).
+    """
+    notes_dir = _get_notes_dir(project_ctx)
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    slug = _title_to_slug(note_id)
+    rendered = _render_note(slug, content, tags)
+    if exclusive:
+        path = notes_dir / f"{slug}.md"
+        with open(path, "x", encoding="utf-8") as fh:  # raises FileExistsError
+            fh.write(rendered)
+        return slug
+    candidate, n = notes_dir / f"{slug}.md", 2
+    while True:
+        try:
+            with open(candidate, "x", encoding="utf-8") as fh:
+                fh.write(rendered)
+            return candidate.stem
+        except FileExistsError:
+            candidate = notes_dir / f"{slug}-{n}.md"
+            n += 1
+
+
+def read_note_file(project_ctx: ProjectContext, note_id: str) -> str | None:
+    """Return the note body (frontmatter stripped), or None if absent."""
+    path = _get_notes_dir(project_ctx) / f"{_title_to_slug(note_id)}.md"
+    if not path.exists():
+        return None
+    return _split_frontmatter(path.read_text(encoding="utf-8"))[1]
+
+
+def update_note_file(
+    project_ctx: ProjectContext, note_id: str, content: str, *, mode: str = "append"
+) -> bool:
+    """Append a dated entry (default) or replace the body. False if absent."""
+    path = _get_notes_dir(project_ctx) / f"{_title_to_slug(note_id)}.md"
+    if not path.exists():
+        return False
+    fm, body = _split_frontmatter(path.read_text(encoding="utf-8"))
+    if mode == "replace":
+        new_body = content.strip("\n")
+    else:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_body = body.rstrip("\n") + f"\n\n## {now}\n\n" + content.strip("\n")
+    prefix = fm + "\n\n" if fm else ""
+    path.write_text(prefix + new_body + "\n", encoding="utf-8")
+    return True
+
+
+def list_note_ids(project_ctx: ProjectContext, prefix: str | None = None) -> list[str]:
+    """Sorted note slug ids, optionally filtered by normalized prefix."""
+    notes_dir = _get_notes_dir(project_ctx)
+    if not notes_dir.exists():
+        return []
+    ids = sorted(p.stem for p in notes_dir.glob("*.md"))
+    if prefix:
+        norm = _title_to_slug(prefix)
+        ids = [i for i in ids if i.startswith(norm)]
+    return ids
+
+
+def delete_note_file(project_ctx: ProjectContext, note_id: str) -> bool:
+    """Delete a note. False if absent."""
+    path = _get_notes_dir(project_ctx) / f"{_title_to_slug(note_id)}.md"
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
+def mint_note(
+    project_ctx: ProjectContext, base_id: str, content: str, *, tags: str | None = None
+) -> str:
+    """Harness-facing: write a deliverable note that never collides. Returns its id."""
+    return write_note_file(project_ctx, base_id, content, tags=tags, exclusive=False)
