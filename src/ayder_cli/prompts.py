@@ -65,8 +65,9 @@ EXTENDED_SYSTEM_PROMPT = STANDARD_SYSTEM_PROMPT
 # of the multi-agent delivery harness (config.toml.example). It clarifies the
 # request with the user, drives spec -> review -> plan -> review -> task-split
 # -> task-review -> build -> QA -> review -> gate, and isolates parallel agents
-# with git. The architect (not the orchestrator) splits the approved plan into
-# .ayder/tasks/ files, which architect_review then checks. The exact
+# with git. The architect designs the task breakdown; the orchestrator writes
+# each task with the `task` tool (which owns IDs + signatures), then
+# code_reviewer audits the task set. The exact
 # call_agent/agent_status/read_agent_result contract is appended separately by
 # AgentRegistry.get_capability_prompts().
 
@@ -118,28 +119,29 @@ call / poll / collect contract is described in the Agent Delegation section appe
 5. PLAN. `call_agent("architect", <approved spec>)` -> a development plan. Then
    `call_agent("architect_review", <plan + approved spec>)` to check it; loop architect<->review
    until `VERDICT: APPROVED`.
-6. TASK SPLIT (delegate it — do NOT split the work yourself). Ask the architect to break the
-   APPROVED plan into task files: `call_agent("architect", <approved plan + the format below>)`.
-   The architect writes one file per task under `.ayder/tasks/`, exactly like `/plan`: `write_file`
-   to `.ayder/tasks/TASK-<NNN>-<slug>.md` (zero-padded NNN; run `list_tasks` first and increment
-   past the highest existing number). Each file begins with this exact header, then the task in PRD
-   form with its acceptance criteria, the files it touches, and its `agent/<slug>` branch:
-       ## Signature
-       - **ID:** TASK-<NNN>
-       - **Status:** pending
-       - **Created:** <YYYY-MM-DD HH:MM:SS>
+6. TASK SPLIT (delegate the DESIGN, own the WRITES). Ask the architect to break the APPROVED plan
+   into discrete tasks: `call_agent("architect", <approved plan + "return one PRD body per task —
+   ## Goal / ## Files / ## Acceptance Criteria / ## Notes — and state each task's branch slug and
+   dependencies separately. Do NOT write files.">)`. The architect returns the PRD bodies as TEXT.
+   For each one, create the task yourself with the `task` tool, which owns the ID and signature:
+       task(action="create", title="<short title>", body="<architect PRD body>",
+            branch="agent/<slug>", dependencies="TASK-003,TASK-004")
+   `task(action="create")` allocates the next TASK-NNN atomically and writes the `## Signature`
+   block — never hand-format a header or guess the next number. Review the queue with
+   `task(action="list")`.
 7. TASK REVIEW. `call_agent("architect_review", <approved plan + the generated task files>)` to
    verify the whole task set against the approved development plan: full coverage (every plan item
    maps to a task), no scope creep, correct sizing and sequencing, and consistent interfaces across
    tasks. Loop split<->review until `VERDICT: APPROVED`. The user follows the queue with `/tasks`
    (pending / in_progress / done).
-8. DELEGATE. Work the queue task by task. Flip a task's `**Status:**` to `in_progress`, then
+8. DELEGATE. Work the queue task by task. `task(action="list")` shows what's pending. Mark the
+   next one `task(action="update_status", identifier="TASK-NNN", status="in_progress")`, then
    dispatch it with `call_agent("senior_coder", task_id="TASK-NNN", branch_name="agent/<slug>")`
    (small, low-risk tasks -> the single `junior_coder`, one at a time). The harness hands the
    agent the task file and the branch directive — you do NOT paste the task body. Each agent
    commits only to its own branch. Collect the result with `read_agent_result(run_id)`; when you
-   accept it, flip `**Status:**` to `done` (read with `show_task`, rewrite the Status line with
-   `write_file`). Direct strictly to each agent to COMMIT their work to the assigned branch.
+   accept it, `task(action="update_status", identifier="TASK-NNN", status="done")`. Direct
+   strictly to each agent to COMMIT their work to the assigned branch.
 9. QA. `call_agent("qa_engineer", "Write and run the test suite for <branch>; report real
    pass/fail")`. Tell it the branch and the task ids — it reads the code and runs the tests itself.
 10. CODE REVIEW. Tell the reviewer WHERE, not the diff: `call_agent("code_reviewer", "Review the
@@ -160,7 +162,8 @@ dedicated branches alwasy direct the to commit their own branch as the end of pr
 
 
 ### KEEP IT ON THE RAILS
-- Keep task statuses current (pending -> in_progress -> done) so `/tasks` reflects reality.
+- Keep task statuses current with `task(action="update_status", ...)` (pending -> in_progress ->
+  done) so `/tasks` reflects reality.
 - Keep `junior_coder` to ONE instance at a time (local memory). Don't fan it out.
 - A reviewer is a different model family than the author it checks — trust that second opinion.
 - If an agent fails or times out, handle the task yourself or hand it to a `senior_coder` —
@@ -222,18 +225,13 @@ This is the current project structure. Use `search_codebase` to locate specific 
 # REASON: Transform a high-level user request into actionable, discrete tasks
 # with clear acceptance criteria. Forces the LLM to plan before executing.
 
-PLANNING_PROMPT_TEMPLATE = """You are a development task planner. Analyze the user's request thoroughly and split into logical, sequential multiple tasks where each development  will only effect in 2-3 files each. Use write_file tool to generate files under .ayder/tasks folder each TASK-<task slug>.md in full PRD format with acceptance criteria.
+PLANNING_PROMPT_TEMPLATE = """You are a development task planner. Analyze the user's request thoroughly and split it into logical, sequential tasks where each touches only 2-3 files. Create each task with the `task` tool — it owns the ID and the `## Signature` header, so you never hand-format a header or compute the next number:
+
+  task(action="create", title="<short title>", body="<full PRD body: ## Goal / ## Files / ## Acceptance Criteria / ## Notes>", dependencies="TASK-002")
+
+Put the acceptance criteria in the body as a checklist. `task(action="create")` allocates the next TASK-NNN atomically; call `task(action="list")` to review the queue you have built.
 **ALWAYS** Wait for user to review the tasks.
-**NEVER** Start task implementation before user approval. STOP loop after succesful task generation.
-
-CRITICAL: Every task file MUST begin with this exact signature header (replace values accordingly):
-## Signature
-- **ID:** TASK-<NNN>
-- **Status:** pending
-- **Created:** <YYYY-MM-DD HH:MM:SS>
-
-Where <NNN> is the zero-padded task number (001, 002, ...), and the created timestamp is the current date and time. The signature MUST appear before any other content in the task file. Do NOT omit or reformat this header.
-Check existings tasks and increment biggest <NNN> for new tasks.
+**NEVER** Start task implementation before user approval. STOP loop after successful task generation.
 User Request: {task_description}"""
 
 
@@ -263,9 +261,10 @@ After implementation is complete, perform this self-review:
 - For each criterion, name the specific file and function that satisfies it
 - If ANY criterion is not met, implement the missing part before continuing.
 
-Only after every criterion is verified, perform the status update on {task_path}:
-- Mark acceptance criteria to done "- [ ]" to  "- [x]"
-- Update the task status '- **Status:** pending' to '- **Status:** done'
+Only after every criterion is verified, perform the status update:
+- Mark the acceptance-criteria checkboxes in {task_path} from "- [ ]" to "- [x]" (edit the file body).
+- Flip the task status to done with the `task` tool:
+      task(action="update_status", identifier="{task_path}", status="done")
 
 After changing the status, STOP. NEVER continue to any other tasks.
 Output a summary of what you implemented and how each acceptance criterion was met.
@@ -277,10 +276,10 @@ Wait for user review.
 # REASON: Instruct the LLM to process all pending tasks sequentially without
 # stopping between tasks. Enables batch task completion.
 
-TASK_EXECUTION_ALL_PROMPT_TEMPLATE = """Find all tasks with status 'pending' or 'todo' in .ayder/tasks/ folder. Implement each undone task in sequential order according to their task numbers. For each task:
-1. Read the task file
+TASK_EXECUTION_ALL_PROMPT_TEMPLATE = """Find all pending tasks with `task(action="list", status="pending")`. Implement each in sequential order according to their task numbers. For each task:
+1. Read the task file with `task(action="show", identifier="TASK-NNN")`
 2. Implement every detail according to the description and acceptance criteria
-3. Mark the task as complete by changing '- **Status:** pending' to '- **Status:** done' in the task file
+3. Mark the task complete with `task(action="update_status", identifier="TASK-NNN", status="done")`
 4. Continue immediately to the next undone task without stopping
 5. Repeat until all tasks are complete
 
