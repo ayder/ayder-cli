@@ -93,7 +93,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Auto-approve write tools (write_file, replace_string, create_task, etc.)",
     )
     parser.add_argument(
-        "-x", action="store_true", help="Auto-approve execute tools (run_shell_command)"
+        "-x", action="store_true", help="Auto-approve execute tools (bash)"
     )
     parser.add_argument(
         "--http",

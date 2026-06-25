@@ -39,7 +39,7 @@ class TestPermissionDeniedParity:
         )
 
         policy = ExecutionPolicy(granted_permissions={"r"})
-        error = policy.check_permission("run_shell_command")
+        error = policy.check_permission("bash")
         
         # Error message includes grant hint
         error_str = str(error)
@@ -153,7 +153,7 @@ class TestErrorPropagationParity:
         policy = ExecutionPolicy()
         
         error = ToolExecutionError(
-            tool_name="run_shell_command",
+            tool_name="bash",
             message="Command failed: exit code 1",
             exit_code=1,
         )
@@ -163,7 +163,7 @@ class TestErrorPropagationParity:
         
         assert llm_message["role"] == "tool"
         assert "error" in llm_message["content"].lower()
-        assert "run_shell_command" in llm_message["content"]
+        assert "bash" in llm_message["content"]
 
 
 class TestExecutionPolicyContract:

@@ -42,7 +42,7 @@ class TestAgentCallbacks:
     async def test_request_confirmation_auto_approves(self):
         cancel_event = asyncio.Event()
         cb = AgentCallbacks(agent_name="test", run_id=0, cancel_event=cancel_event)
-        result = await cb.request_confirmation("run_shell_command", {"command": "ls"})
+        result = await cb.request_confirmation("bash", {"command": "ls"})
         assert result is not None
         assert getattr(result, "action", None) == "approve"
 

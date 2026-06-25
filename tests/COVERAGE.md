@@ -162,7 +162,7 @@ tests/
 
 | Category | Test Count | Description |
 |----------|-----------|-------------|
-| **File System Tools** | 80+ | `list_files`, `read_file`, `write_file`, `replace_string`, `run_shell_command` |
+| **File System Tools** | 80+ | `list_files`, `read_file`, `write_file`, `replace_string`, `bash` |
 | **Configuration** | 30+ | Config loading, defaults, merging, validation |
 | **Task Management** | 70+ | Task creation, listing, implementation, `/implement` |
 | **Memory Management** | 15+ | `/summary`, `/load`, `/compact` commands |
@@ -205,7 +205,7 @@ tests/
 <summary><b>tui_helpers.py — 100% (7/7)</b></summary>
 
 - ✅ `is_tool_blocked_in_safe_mode()` with `safe_mode=False`
-- ✅ Blocked tools in safe mode (`write_file`, `replace_string`, `run_shell_command`)
+- ✅ Blocked tools in safe mode (`write_file`, `replace_string`, `bash`)
 - ✅ Allowed tools in safe mode (`read_file`, `list_files`, `search_codebase`)
 - ✅ Unknown tool handling
 

@@ -52,7 +52,7 @@ class TestToolDefinitions:
         # Verify all 12 builtin tools are always present
         builtin_tools = {
             "file_explorer", "read_file", "file_editor",
-            "run_shell_command", "search_codebase", "get_project_structure",
+            "bash", "search_codebase", "get_project_structure",
             "note", "context",
             "background_process",
             "task",

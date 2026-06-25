@@ -78,13 +78,13 @@ class TestParseCustomToolCallsStandardFormat:
 class TestParseCustomToolCallsLazyFormat:
     """Tests for lazy format parsing (single parameter without tags)."""
 
-    def test_run_shell_command_lazy(self):
-        """Test lazy parsing for run_shell_command."""
-        content = '<function=run_shell_command>ls -la</function>'
+    def test_bash_lazy(self):
+        """Test lazy parsing for bash."""
+        content = '<function=bash>ls -la</function>'
         result = content_processor.parse_tool_calls(content)
         
         assert len(result) == 1
-        assert result[0]["name"] == "run_shell_command"
+        assert result[0]["name"] == "bash"
         assert result[0]["arguments"] == {"command": "ls -la"}
 
     def test_unknown_tool_lazy_no_infer(self):
@@ -153,20 +153,20 @@ class TestToolCallWrapperFormat:
 
     def test_tool_call_wrapper_without_function_close(self):
         """Test <tool_call> wrapper where </function> is missing (closed by </tool_call>)."""
-        content = '<tool_call> <function=run_shell_command> <parameter=command>echo "hello"  </tool_call>'
+        content = '<tool_call> <function=bash> <parameter=command>echo "hello"  </tool_call>'
         result = content_processor.parse_tool_calls(content)
 
         assert len(result) == 1
-        assert result[0]["name"] == "run_shell_command"
+        assert result[0]["name"] == "bash"
         assert result[0]["arguments"]["command"] == 'echo "hello"'
 
     def test_tool_call_wrapper_lazy_format(self):
         """Test <tool_call> wrapper with lazy format (no parameter tags)."""
-        content = '<tool_call> <function=run_shell_command>ls -la </tool_call>'
+        content = '<tool_call> <function=bash>ls -la </tool_call>'
         result = content_processor.parse_tool_calls(content)
 
         assert len(result) == 1
-        assert result[0]["name"] == "run_shell_command"
+        assert result[0]["name"] == "bash"
         assert result[0]["arguments"] == {"command": "ls -la"}
 
     def test_multiple_tool_call_wrappers(self):
@@ -267,11 +267,11 @@ class TestContentProcessorUnified:
         """<tool_call> wrapper format is handled by parse_tool_calls."""
         from ayder_cli.parser import content_processor
 
-        content = "<tool_call><function=run_shell_command><parameter=command>ls</parameter></function></tool_call>"
+        content = "<tool_call><function=bash><parameter=command>ls</parameter></function></tool_call>"
         result = content_processor.parse_tool_calls(content)
 
         assert len(result) == 1
-        assert result[0]["name"] == "run_shell_command"
+        assert result[0]["name"] == "bash"
         assert result[0]["arguments"]["command"] == "ls"
 
     def test_parse_tool_calls_deepseek(self):
@@ -334,7 +334,7 @@ class TestContentProcessorUnified:
         """Lazy format (no parameter tags) inferred for single-param tools."""
         from ayder_cli.parser import content_processor
 
-        content = "<function=run_shell_command>echo hello</function>"
+        content = "<function=bash>echo hello</function>"
         result = content_processor.parse_tool_calls(content)
 
         assert len(result) == 1

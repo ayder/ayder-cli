@@ -120,7 +120,7 @@ class TestDiscoveryValidationLogic:
                 parameters={"type": "object", "properties": {}},
             ),
             ToolDefinition(
-                name="run_shell_command",
+                name="bash",
                 description="Run shell command",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -165,7 +165,7 @@ class TestDiscoveryErrorHandling:
                 parameters={"type": "object", "properties": {}},
             ),
             ToolDefinition(
-                name="run_shell_command",
+                name="bash",
                 description="Run shell command",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -212,7 +212,7 @@ class TestDiscoveryErrorHandling:
                 parameters={"type": "object", "properties": {}},
             ),
             ToolDefinition(
-                name="run_shell_command",
+                name="bash",
                 description="Run shell command",
                 parameters={"type": "object", "properties": {}},
             ),
@@ -269,7 +269,7 @@ class TestBackwardCompatibility:
         assert 'get_project_structure' in tool_names
         
         # Shell tools
-        assert 'run_shell_command' in tool_names
+        assert 'bash' in tool_names
         assert 'fetch_web' in tool_names
 
         # Context tool

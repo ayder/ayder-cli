@@ -71,9 +71,9 @@ class TestDescribeToolAction:
         result = ui.describe_tool_action("file_explorer", {"path": "."})
         assert "." in result
 
-    def test_run_shell_command(self):
-        """Test description for run_shell_command tool."""
-        result = ui.describe_tool_action("run_shell_command", {"command": "ls -la"})
+    def test_bash(self):
+        """Test description for bash tool."""
+        result = ui.describe_tool_action("bash", {"command": "ls -la"})
         assert "ls -la" in result
         assert "will be executed" in result
 

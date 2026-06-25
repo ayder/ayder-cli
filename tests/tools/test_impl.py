@@ -27,7 +27,7 @@ impl._format_grep_results = search._format_grep_results
 impl._format_files_only = search._format_files_only
 impl._format_count_results = search._format_count_results
 
-impl.run_shell_command = shell.run_shell_command
+impl.bash = shell.bash
 
 impl.get_project_structure = utils_tools.get_project_structure
 impl.manage_environment_vars = utils_tools.manage_environment_vars
@@ -308,46 +308,46 @@ class TestFileEditorReplace:
 
 
 class TestRunShellCommand:
-    """Test run_shell_command() function."""
+    """Test bash() function."""
 
     def test_successful_command_execution(self, project_context):
         """Test successful command execution."""
-        result = impl.run_shell_command(project_context, "echo hello")
+        result = impl.bash(project_context, "echo hello")
         assert isinstance(result, ToolSuccess)
         assert "Exit Code: 0" in result
 
     def test_command_with_stdout_output(self, project_context):
         """Test command with stdout output."""
-        result = impl.run_shell_command(project_context, "echo test output")
+        result = impl.bash(project_context, "echo test output")
         assert "STDOUT:" in result
         assert "test output" in result
 
     def test_command_with_stderr_output(self, project_context):
         """Test command with stderr output."""
         # Use a command that writes to stderr
-        result = impl.run_shell_command(project_context, "ls /nonexistent_path_12345 2>&1 || echo 'error occurred' >&2")
+        result = impl.bash(project_context, "ls /nonexistent_path_12345 2>&1 || echo 'error occurred' >&2")
         # Command may have stderr depending on shell behavior
         assert "Exit Code:" in result
 
     def test_command_with_non_zero_exit_code(self, project_context):
         """Test command with non-zero exit code."""
-        result = impl.run_shell_command(project_context, "exit 1")
+        result = impl.bash(project_context, "exit 1")
         assert "Exit Code: 1" in result
 
     def test_error_handling_invalid_command(self, project_context):
         """Test error handling for invalid commands."""
-        result = impl.run_shell_command(project_context, "invalid_command_xyz_12345")
+        result = impl.bash(project_context, "invalid_command_xyz_12345")
         # Should return error output or error message
         assert "Exit Code:" in result or "Error executing command" in result
 
 
 class TestRunShellCommandExceptions:
-    """Test exception handling in run_shell_command - Lines 205-206."""
+    """Test exception handling in bash - Lines 205-206."""
 
     def test_exception_handling_general_error(self, project_context):
         """Test general exception handling - Lines 205-206."""
         with patch('subprocess.run', side_effect=OSError("Mocked OS error")):
-            result = impl.run_shell_command(project_context, "echo test")
+            result = impl.bash(project_context, "echo test")
             assert isinstance(result, ToolError)
             assert result.category == "execution"
             assert "Error executing command" in result

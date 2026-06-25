@@ -12,16 +12,16 @@ class TestIsToolBlockedInSafeMode:
     def test_safe_mode_disabled_returns_false(self):
         """When safe_mode=False, no tool is blocked."""
         assert is_tool_blocked_in_safe_mode("file_editor", False) is False
-        assert is_tool_blocked_in_safe_mode("run_shell_command", False) is False
+        assert is_tool_blocked_in_safe_mode("bash", False) is False
         assert is_tool_blocked_in_safe_mode("read_file", False) is False
 
     def test_file_editor_blocked_in_safe_mode(self):
         """file_editor should be blocked in safe mode."""
         assert is_tool_blocked_in_safe_mode("file_editor", True) is True
 
-    def test_run_shell_command_blocked_in_safe_mode(self):
-        """run_shell_command should be blocked in safe mode."""
-        assert is_tool_blocked_in_safe_mode("run_shell_command", True) is True
+    def test_bash_blocked_in_safe_mode(self):
+        """bash should be blocked in safe mode."""
+        assert is_tool_blocked_in_safe_mode("bash", True) is True
 
     def test_read_file_not_blocked_in_safe_mode(self):
         """read_file should not be blocked in safe mode."""

@@ -62,9 +62,9 @@ class TestExecuteToolCall:
         )
         assert "Successfully replaced" in result
 
-    def test_dispatch_run_shell_command(self, tool_registry):
-        """Test dispatch to run_shell_command."""
-        result = tool_registry.execute("run_shell_command", {"command": "echo hi"})
+    def test_dispatch_bash(self, tool_registry):
+        """Test dispatch to bash."""
+        result = tool_registry.execute("bash", {"command": "echo hi"})
         assert "Exit Code: 0" in result
 
     def test_with_json_string_arguments(self, tmp_path, tool_registry):

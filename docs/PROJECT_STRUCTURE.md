@@ -288,7 +288,7 @@ the design rationale.
 | `tools/plugin_github.py` | GitHub-sourced plugin fetcher | remote-plugin loader |
 | `tools/builtins/filesystem.py` | File system tool impls | `file_explorer()`, `read_file()`, `file_editor()` |
 | `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
-| `tools/builtins/shell.py` | Shell execution impl | `run_shell_command()` |
+| `tools/builtins/shell.py` | Shell execution impl | `bash()` |
 | `tools/builtins/context.py` | Session context snapshots | `context` |
 | `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
 | `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
@@ -634,7 +634,7 @@ Supports both synchronous tool execution and integrated with asyncio for TUI.
 Schema-driven tool definitions with auto-discovery:
 - **Auto-discovery**: `_discover_definitions()` scans all `*_definitions.py` files in `tools/builtins/` at import time — no manual registration
 - **Duplicate detection**: Tracks `(definition, source_module)` pairs; raises `ValueError` with accurate module names if a tool name appears twice
-- **Required-tool validation**: Raises `ImportError` if core tools (`file_explorer`, `read_file`, `file_editor`, `run_shell_command`) are absent
+- **Required-tool validation**: Raises `ImportError` if core tools (`file_explorer`, `read_file`, `file_editor`, `bash`) are absent
 - **Permissions**: `"r"` (read), `"w"` (write), `"x"` (execute), `"http"` (network)
 - **Safety flags**: `safe_mode_blocked`, `is_terminal` per definition
 - **Path parameters**: Names listed in `path_parameters` are automatically resolved via `ProjectContext`
@@ -645,7 +645,7 @@ Schema-driven tool definitions with auto-discovery:
 16 built-in tools across 9 definition files:
 - Filesystem (3): `file_explorer`, `read_file`, `file_editor`
 - Search (2): `search_codebase`, `get_project_structure`
-- Shell (1): `run_shell_command`
+- Shell (1): `bash`
 - Context (1): `context`
 - Notes (1): `create_note`
 - Background Process (1): `background_process` (action=start|logs|stop|list|info)

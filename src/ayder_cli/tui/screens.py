@@ -179,7 +179,7 @@ class CLIPermissionScreen(ModalScreen[set | None]):
                 "Write",
                 "Auto-approve write tools (write_file, replace_string, ...)",
             ),
-            ("x", "Execute", "Auto-approve execute tools (run_shell_command, ...)"),
+            ("x", "Execute", "Auto-approve execute tools (bash, ...)"),
             ("http", "HTTP", "Auto-approve web tools (fetch_web)"),
         ]
 

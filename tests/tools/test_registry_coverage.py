@@ -122,7 +122,7 @@ class TestCreateDefaultRegistry:
         tools = reg.get_registered_tools()
         expected_tools = [
             "file_explorer", "read_file", "file_editor",
-            "run_shell_command", "get_project_structure", "search_codebase"
+            "bash", "get_project_structure", "search_codebase"
         ]
 
         for tool in expected_tools:

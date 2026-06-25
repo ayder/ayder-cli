@@ -8,7 +8,7 @@ from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 
 
-def run_shell_command(project_ctx: ProjectContext, command: str) -> str:
+def bash(project_ctx: ProjectContext, command: str) -> str:
     """Executes a shell command and returns the output.
     Executes with cwd=project.root to sandbox execution to the project."""
     try:

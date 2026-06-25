@@ -30,7 +30,7 @@ impl.file_editor = filesystem.file_editor
 impl.file_explorer = filesystem.file_explorer
 impl.MAX_FILE_SIZE = filesystem.MAX_FILE_SIZE
 
-impl.run_shell_command = shell.run_shell_command
+impl.bash = shell.bash
 
 
 class TestSearchCodebaseNoMatches:
@@ -496,16 +496,16 @@ class TestListFilesSymlinks:
 
 
 class TestRunShellCommandTimeout:
-    """Test run_shell_command() timeout handling."""
+    """Test bash() timeout handling."""
 
     @patch("ayder_cli.tools.builtins.shell.subprocess.run")
-    def test_run_shell_command_timeout(self, mock_run, tmp_path):
-        """Test run_shell_command timeout handling."""
+    def test_bash_timeout(self, mock_run, tmp_path):
+        """Test bash timeout handling."""
         import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 100", timeout=60)
 
         ctx = ProjectContext(str(tmp_path))
-        result = impl.run_shell_command(ctx, "sleep 100")
+        result = impl.bash(ctx, "sleep 100")
 
         assert isinstance(result, ToolError)
         assert result.category == "execution"

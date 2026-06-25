@@ -1,7 +1,7 @@
 """
 Tool definitions for shell command operations.
 
-Tools: run_shell_command
+Tools: bash
 """
 
 from typing import Tuple
@@ -10,11 +10,14 @@ from ..definition import ToolDefinition
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
-        name="run_shell_command",
-        description="Execute a shell command.",
+        name="bash",
+        description=(
+            "Run a shell command and return its exit code, stdout, and stderr. "
+            "Use for builds, tests, git, file inspection, and other terminal tasks."
+        ),
         description_template="Command `{command}` will be executed",
         tags=("core",),
-        func_ref="ayder_cli.tools.builtins.shell:run_shell_command",
+        func_ref="ayder_cli.tools.builtins.shell:bash",
         parameters={
             "type": "object",
             "properties": {

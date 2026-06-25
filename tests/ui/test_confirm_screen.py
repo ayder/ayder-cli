@@ -190,7 +190,7 @@ class TestToolNeedsConfirmation:
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r"})
-        assert loop._tool_needs_confirmation("run_shell_command")
+        assert loop._tool_needs_confirmation("bash")
 
     def test_write_tool_auto_approved_with_w_permission(self):
         """Test that write tools are auto-approved with w permission."""
@@ -207,7 +207,7 @@ class TestToolNeedsConfirmation:
 
         loop = TuiChatLoop.__new__(TuiChatLoop)
         loop.config = TuiLoopConfig(permissions={"r", "x"})
-        assert not loop._tool_needs_confirmation("run_shell_command")
+        assert not loop._tool_needs_confirmation("bash")
 
     def test_http_tool_needs_confirmation_without_http_permission(self):
         """Test that fetch_web needs confirmation without http permission."""
@@ -233,7 +233,7 @@ class TestToolNeedsConfirmation:
         loop.config = TuiLoopConfig(permissions={"r", "w", "x"})
         assert not loop._tool_needs_confirmation("read_file")
         assert not loop._tool_needs_confirmation("file_editor")
-        assert not loop._tool_needs_confirmation("run_shell_command")
+        assert not loop._tool_needs_confirmation("bash")
 
     def test_unknown_tool_auto_approved(self):
         """Test that unknown tools default to 'r' permission and are auto-approved."""
@@ -253,7 +253,7 @@ class TestGenerateDiff:
 
         app = AyderApp.__new__(AyderApp)
         assert app._generate_diff("read_file", {"file_path": "test.py"}) is None
-        assert app._generate_diff("run_shell_command", {"command": "ls"}) is None
+        assert app._generate_diff("bash", {"command": "ls"}) is None
 
     def test_file_editor_new_file(self, tmp_path):
         """Test diff for writing a new file."""

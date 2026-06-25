@@ -104,7 +104,7 @@ async def test_generic_tool_result_truncated_in_message_history():
     huge = "x" * 50_000  # far exceeds truncate_tool_result default of 8192 chars
 
     messages, loop = _run_loop(
-        "run_shell_command", huge, arguments='{"command": "echo hi"}'
+        "search_codebase", huge, arguments='{"pattern": "x"}'
     )
     await loop.run()
 
