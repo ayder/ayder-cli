@@ -15,7 +15,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="note",
         description=(
-            "Manage .ayder/notes/ note files. Single tool dispatched on `action`: "
+            "Notes must be created via this tool. Single tool dispatched on `action`: "
             "create | read | update | list | delete. Notes are caller-named (you "
             "choose `note_id`); create fails if the id already exists (then use "
             "read/update). Output is bounded plain text (use offset/max_chars/limit "
@@ -42,9 +42,14 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 "note_id": {
                     "type": "string",
                     "description": (
-                        "[create/read/update/delete] Caller-chosen id/name, e.g. "
-                        "'plan-add-auth' or 'agent-wander-task-003'. Normalized to a "
-                        "slug, so 'Agent Wander TASK-003' maps to the same note."
+                        "[create/read/update/delete] The note's stable id. Choose a "
+                        "short kebab-case '<type>-<slug>' id where <type> is a reusable "
+                        "purpose prefix that groups related notes for list(prefix=...): "
+                        "e.g. 'plan-add-auth', 'spec-add-auth', 'bug-login-race', "
+                        "'review-pr-42'. Reuse the SAME id to append to an existing note "
+                        "(create fails if it exists -> then update); do not mint a new "
+                        "variant for the same concern. Ids normalize to a slug, so "
+                        "'Plan Add Auth' maps to the same note as 'plan-add-auth'."
                     ),
                 },
                 "content": {
