@@ -9,6 +9,18 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path("~/.ayder").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
+
+def set_config_path(path: "str | Path") -> None:
+    """Redirect the global config file location (used by the ``-c/--config`` flag).
+
+    Updates CONFIG_PATH and CONFIG_DIR so every subsequent ``load_config`` (and the
+    provider/profile loaders, which read these module globals at call time) use
+    *path* instead of the default ``~/.ayder/config.toml``.
+    """
+    global CONFIG_PATH, CONFIG_DIR
+    CONFIG_PATH = Path(path).expanduser().resolve()
+    CONFIG_DIR = CONFIG_PATH.parent
+
 # Maintained for test compatibility and initial file generation
 DEFAULTS: Dict[str, Any] = {
     "provider": "openai",

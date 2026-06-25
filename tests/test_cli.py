@@ -28,7 +28,8 @@ class TestRunCommand:
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "test prompt", permissions={"r"}, agent_mode=False
+            "test prompt", permissions={"r"}, agent_mode=False,
+            system_prompt_override=None,
         )
 
     @patch('ayder_cli.cli_runner._run_loop', side_effect=Exception("Loop error"))
@@ -50,7 +51,8 @@ class TestRunCommand:
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "test prompt", permissions={"r", "w"}, agent_mode=False
+            "test prompt", permissions={"r", "w"}, agent_mode=False,
+            system_prompt_override=None,
         )
 
     @patch('ayder_cli.cli_runner._run_loop', return_value=0)
@@ -62,7 +64,8 @@ class TestRunCommand:
 
         assert result == 0
         mock_run_loop.assert_called_once_with(
-            "build X", permissions={"r"}, agent_mode=True
+            "build X", permissions={"r"}, agent_mode=True,
+            system_prompt_override=None,
         )
 
 
@@ -444,6 +447,108 @@ class TestMainPermissionHandling:
             assert call_kwargs['permissions'] == {'r'}
 
 
+class TestMainConfigFlag:
+    """Test main() handling of the -c/--config flag."""
+
+    def test_main_config_flag_missing_file_errors(self):
+        """-c pointing at a missing file exits 1 with a clear error message."""
+        from ayder_cli.cli import main
+
+        with patch.object(sys, 'argv', ['ayder', '-c', '/no/such/config.toml', 'hello']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('sys.stderr', new=StringIO()) as mock_stderr:
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+            assert "Config file not found" in mock_stderr.getvalue()
+
+    def test_main_config_flag_applies_override(self, tmp_path):
+        """-c with an existing file calls set_config_path before loading config."""
+        from pathlib import Path
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+
+        cfg_file = tmp_path / "custom.toml"
+        cfg_file.write_text('config_version = "2.0"\n', encoding="utf-8")
+
+        mock_config = Config(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+        )
+
+        with patch.object(sys, 'argv', ['ayder', '-c', str(cfg_file), 'hello']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.set_config_path') as mock_set, \
+             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
+             patch('ayder_cli.cli_runner.run_command', return_value=0):
+            with pytest.raises(SystemExit):
+                main()
+
+            mock_set.assert_called_once()
+            called_arg = mock_set.call_args[0][0]
+            assert Path(called_arg) == cfg_file
+
+
+class TestMainSystemPromptFlag:
+    """Test main() handling of the --system-prompt flag."""
+
+    def test_main_system_prompt_missing_file_errors(self):
+        """--system-prompt pointing at a missing file exits 1 with a clear message."""
+        from ayder_cli.cli import main
+
+        with patch.object(sys, 'argv', ['ayder', '--system-prompt', '/no/such/sp.md', 'hi']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('sys.stderr', new=StringIO()) as mock_stderr:
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+            assert "System prompt file not found" in mock_stderr.getvalue()
+
+    def test_main_system_prompt_passed_to_run_command(self, tmp_path):
+        """--system-prompt file contents flow to run_command as system_prompt_override."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+
+        sp_file = tmp_path / "sp.md"
+        sp_file.write_text("CUSTOM SYSTEM PROMPT", encoding="utf-8")
+
+        mock_config = Config(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+        )
+
+        with patch.object(sys, 'argv', ['ayder', '--system-prompt', str(sp_file), 'hello']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=mock_config), \
+             patch('ayder_cli.cli_runner.run_command', return_value=0) as mock_run:
+            with pytest.raises(SystemExit):
+                main()
+
+            call_kwargs = mock_run.call_args[1]
+            assert call_kwargs['system_prompt_override'] == "CUSTOM SYSTEM PROMPT"
+
+    def test_main_system_prompt_passed_to_run_tui(self, tmp_path):
+        """--system-prompt with no command flows to run_tui as system_prompt_override."""
+        from ayder_cli.cli import main
+
+        sp_file = tmp_path / "sp.md"
+        sp_file.write_text("TUI CUSTOM PROMPT", encoding="utf-8")
+
+        with patch.object(sys, 'argv', ['ayder', '--system-prompt', str(sp_file)]), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            main()
+
+            call_kwargs = mock_run_tui.call_args[1]
+            assert call_kwargs['system_prompt_override'] == "TUI CUSTOM PROMPT"
+
+
 class TestMainTaskOptions:
     """Test main() function task-related CLI options."""
 
@@ -598,29 +703,64 @@ class TestCreateParser:
         assert args.x is True
         assert args.http is True
 
-    def test_parser_prompt_flag(self):
-        """Test --prompt flag."""
+    def test_parser_temporal_prompt_flag(self):
+        """--prompt was renamed to --temporal-prompt (temporal worker only)."""
         from ayder_cli.cli import create_parser
 
         parser = create_parser()
 
-        args = parser.parse_args(["--prompt", "prompts/dev.md"])
-        assert args.prompt == "prompts/dev.md"
+        args = parser.parse_args([])
+        assert args.temporal_prompt is None
+
+        args = parser.parse_args(["--temporal-prompt", "prompts/dev.md"])
+        assert args.temporal_prompt == "prompts/dev.md"
+
+    def test_parser_prompt_flag_removed(self):
+        """The old --prompt flag no longer exists after the rename."""
+        from ayder_cli.cli import create_parser
+
+        parser = create_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--prompt", "prompts/dev.md"])
+
+    def test_parser_system_prompt_flag(self):
+        """--system-prompt accepts a file path and defaults to None."""
+        from ayder_cli.cli import create_parser
+
+        parser = create_parser()
+
+        args = parser.parse_args([])
+        assert args.system_prompt is None
+
+        args = parser.parse_args(["--system-prompt", "sp.md"])
+        assert args.system_prompt == "sp.md"
+
+    def test_parser_config_flag(self):
+        """Test -c/--config flag is configured and defaults to None."""
+        from ayder_cli.cli import create_parser
+
+        parser = create_parser()
+
+        args = parser.parse_args([])
+        assert args.config is None
+
+        args = parser.parse_args(["-c", "custom.toml"])
+        assert args.config == "custom.toml"
+
+        args = parser.parse_args(["--config", "other.toml"])
+        assert args.config == "other.toml"
 
     def test_parser_verbose_flag(self):
-        """Test --verbose flag with optional level."""
+        """--verbose is a boolean console toggle (it no longer takes a level)."""
         from ayder_cli.cli import create_parser
 
         parser = create_parser()
 
+        args = parser.parse_args([])
+        assert args.verbose is False
+
         args = parser.parse_args(["--verbose"])
-        assert args.verbose == "INFO"
-
-        args = parser.parse_args(["--verbose", "debug"])
-        assert args.verbose == "DEBUG"
-
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--verbose", "trace"])
+        assert args.verbose is True
 
     def test_parser_command_argument(self):
         """Test positional command argument via the base (non-subcommand) parser."""
@@ -634,27 +774,69 @@ class TestCreateParser:
         args = parser.parse_args([])
         assert args.command is None
 
-    def test_main_verbose_calls_setup_logging_stdout(self):
-        """Test --verbose LEVEL configures logging to stdout."""
+    def _run_main_for_logging(self, argv, mock_config):
+        """Helper: run main() with logging patched, return the setup_logging mock."""
         from ayder_cli.cli import main
-        from ayder_cli.core.config import Config
 
-        mock_config = Config(
-            base_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="test-model",
-            num_ctx=4096,
-            verbose=False,
-        )
-
-        with patch.object(sys, "argv", ["ayder", "--verbose", "debug", "--tasks"]), patch(
+        with patch.object(sys, "argv", argv), patch(
             "ayder_cli.core.config.load_config", return_value=mock_config
         ), patch("ayder_cli.cli.setup_logging") as mock_setup_logging, patch(
             "ayder_cli.cli_runner._run_tasks_cli", return_value=0
         ):
             with pytest.raises(SystemExit):
                 main()
+        return mock_setup_logging
 
+    def _mock_config(self, **overrides):
+        from ayder_cli.core.config import Config
+
+        base = dict(
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="test-model",
+            num_ctx=4096,
+            verbose=False,
+        )
+        base.update(overrides)
+        return Config(**base)
+
+    def test_main_verbose_and_logging_level_decoupled(self):
+        """--verbose enables console; --logging-level sets the level (verbose no longer wins)."""
+        mock_config = self._mock_config()
+        mock_setup_logging = self._run_main_for_logging(
+            ["ayder", "--verbose", "--logging-level", "debug", "--tasks"], mock_config
+        )
         mock_setup_logging.assert_called_once_with(
             mock_config, level_override="DEBUG", console_stream=sys.stdout
+        )
+
+    def test_main_verbose_alone_defaults_to_info_console(self):
+        """--verbose with no level anywhere defaults the console to INFO."""
+        mock_config = self._mock_config()  # logging_level defaults to None
+        mock_setup_logging = self._run_main_for_logging(
+            ["ayder", "--verbose", "--tasks"], mock_config
+        )
+        mock_setup_logging.assert_called_once_with(
+            mock_config, level_override="INFO", console_stream=sys.stdout
+        )
+
+    def test_main_verbose_respects_config_level(self):
+        """--verbose with a config level shows that level on the console (no INFO fallback)."""
+        mock_config = self._mock_config(logging_level="WARNING")
+        mock_setup_logging = self._run_main_for_logging(
+            ["ayder", "--verbose", "--tasks"], mock_config
+        )
+        # level_override left None so setup_logging uses config.logging_level; console on.
+        mock_setup_logging.assert_called_once_with(
+            mock_config, level_override=None, console_stream=sys.stdout
+        )
+
+    def test_main_logging_level_without_verbose_is_file_only(self):
+        """--logging-level without --verbose sets the level but keeps the console off."""
+        mock_config = self._mock_config()
+        mock_setup_logging = self._run_main_for_logging(
+            ["ayder", "--logging-level", "debug", "--tasks"], mock_config
+        )
+        mock_setup_logging.assert_called_once_with(
+            mock_config, level_override="DEBUG", console_stream=None
         )

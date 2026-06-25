@@ -56,11 +56,28 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--stdin", action="store_true", help="Read prompt from stdin"
     )
     parser.add_argument(
-        "--prompt",
+        "--temporal-prompt",
         type=str,
         default=None,
         metavar="FILE",
-        help="Inject custom system prompt from file",
+        help="Prompt file for the Temporal worker (only used with --temporal-task-queue)",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Use FILE's contents as the main LLM system prompt, overriding the "
+        "built-in prompt from prompts.py (tool instructions and project structure "
+        "are still appended)",
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Path to a config.toml to use instead of ~/.ayder/config.toml",
     )
 
     # Permission flags: r=read, w=write, x=execute, http=web/network
@@ -93,13 +110,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument(
         "--verbose",
-        nargs="?",
-        const="INFO",
-        default=None,
-        type=str.upper,
-        choices=LOG_LEVELS,
-        metavar="LEVEL",
-        help="Enable verbose console output and logging; default level is INFO",
+        action="store_true",
+        help="Show logs on the console. The level comes from --logging-level (or "
+        "config); if neither is set, defaults to INFO. Does not otherwise change "
+        "the log level.",
     )
     parser.add_argument(
         "--logging-level",
@@ -214,6 +228,16 @@ def main():
         args = parser.parse_args()
         args.subcommand = None
 
+    # Apply the -c/--config override before anything reads the config file.
+    if getattr(args, "config", None):
+        from ayder_cli.core.config import set_config_path
+
+        config_file = Path(args.config).expanduser()
+        if not config_file.is_file():
+            print(f"Error: Config file not found: {args.config}", file=sys.stderr)
+            sys.exit(1)
+        set_config_path(config_file)
+
     # Handle plugin subcommands
     if args.subcommand == "install-plugin":
         from ayder_cli.tools.plugin_manager import (
@@ -310,13 +334,17 @@ def main():
 
     cfg = load_config(notify_migration=True, output=print)
     
-    # Priority: 1. --verbose level, 2. --logging-level, 3. config.logging_level
-    effective_log_level = args.verbose or args.logging_level
-    
+    # --verbose only enables console output; the level comes from --logging-level
+    # (or config.logging_level). When --verbose is used with no level configured
+    # anywhere, default the console to INFO so it isn't empty.
+    effective_log_level = args.logging_level
+    if args.verbose and effective_log_level is None and cfg.logging_level is None:
+        effective_log_level = "INFO"
+
     setup_logging(
         cfg,
         level_override=effective_log_level,
-        console_stream=sys.stdout if args.verbose is not None else None,
+        console_stream=sys.stdout if args.verbose else None,
     )
 
     # --agent: warn early if the harness has nothing to orchestrate.
@@ -342,10 +370,29 @@ def main():
         sys.exit(
             _run_temporal_queue_cli(
                 queue_name=args.temporal_task_queue,
-                prompt_path=args.prompt,
+                prompt_path=args.temporal_prompt,
                 permissions=granted,
             )
         )
+
+    # Read the --system-prompt override file (overrides prompts.py base prompt).
+    system_prompt_override = None
+    if args.system_prompt:
+        sp_file = Path(args.system_prompt).expanduser()
+        try:
+            system_prompt_override = sp_file.read_text()
+        except FileNotFoundError:
+            print(
+                f"Error: System prompt file not found: {args.system_prompt}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except Exception as e:
+            print(
+                f"Error reading system prompt file {args.system_prompt}: {e}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Handle file/stdin input
     context = None
@@ -376,10 +423,21 @@ def main():
         # Default: TUI mode
         from ayder_cli.tui import run_tui
 
-        run_tui(permissions=granted, agent_mode=args.agent)
+        run_tui(
+            permissions=granted,
+            agent_mode=args.agent,
+            system_prompt_override=system_prompt_override,
+        )
         return
 
-    sys.exit(run_command(prompt, permissions=granted, agent_mode=args.agent))
+    sys.exit(
+        run_command(
+            prompt,
+            permissions=granted,
+            agent_mode=args.agent,
+            system_prompt_override=system_prompt_override,
+        )
+    )
 
 
 if __name__ == "__main__":

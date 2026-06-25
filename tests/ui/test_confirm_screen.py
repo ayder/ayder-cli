@@ -321,6 +321,7 @@ class TestRunTuiPermissions:
                 safe_mode=False,
                 permissions={"r", "w"},
                 agent_mode=False,
+                system_prompt_override=None,
             )
 
     def test_run_tui_default_permissions(self):
@@ -336,6 +337,7 @@ class TestRunTuiPermissions:
                 safe_mode=False,
                 permissions=None,
                 agent_mode=False,
+                system_prompt_override=None,
             )
 
 

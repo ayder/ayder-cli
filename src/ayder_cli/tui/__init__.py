@@ -32,6 +32,7 @@ def run_tui(
     safe_mode: bool = False,
     permissions: set | None = None,
     agent_mode: bool = False,
+    system_prompt_override: str | None = None,
 ) -> None:
     """
     Run the CLI-style TUI application.
@@ -42,6 +43,8 @@ def run_tui(
         permissions: Set of granted permission levels ("r", "w", "x")
         agent_mode: When True, inject the AGENTIC orchestrator system prompt
             so the main LLM drives the multi-agent harness (ayder-cli --agent).
+        system_prompt_override: When set, use this text as the system-prompt base
+            instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
     """
     import sys
     from ayder_cli.providers import ProviderUnavailableError
@@ -49,7 +52,7 @@ def run_tui(
     try:
         app = AyderApp(
             model=model, safe_mode=safe_mode, permissions=permissions,
-            agent_mode=agent_mode,
+            agent_mode=agent_mode, system_prompt_override=system_prompt_override,
         )
     except ProviderUnavailableError as e:
         print(str(e), file=sys.stderr)

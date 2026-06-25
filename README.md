@@ -246,8 +246,9 @@ ayder -f instructions.txt
 # Explicit stdin mode
 ayder --stdin < prompt.txt
 
-# Use a custom system prompt file
-ayder --prompt prompt-file.md "refactor this code"
+# Override the main LLM system prompt with a file
+# (tool instructions + project structure are still appended)
+ayder --system-prompt prompt-file.md "refactor this code"
 ```
 
 ### Task Commands (CLI Mode)

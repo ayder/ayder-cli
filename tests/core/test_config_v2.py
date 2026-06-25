@@ -101,6 +101,44 @@ num_ctx = 8192
     assert cfg.model == "claude-sonnet-4-5-20250929"
 
 
+def test_set_config_path_redirects_load_config(tmp_path, monkeypatch):
+    """set_config_path() makes load_config() read from a custom path (the -c flag)."""
+    import ayder_cli.core.config as config_mod
+
+    # Snapshot the module globals so they are restored at teardown even though
+    # set_config_path mutates them directly via `global`.
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", config_mod.CONFIG_PATH)
+    monkeypatch.setattr(config_mod, "CONFIG_DIR", config_mod.CONFIG_DIR)
+
+    custom = tmp_path / "custom-config" / "ayder.toml"
+    custom.parent.mkdir()
+    custom.write_text(
+        """config_version = "2.0"
+
+[app]
+provider = "deepseek"
+
+[llm.deepseek]
+driver = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-custom"
+model = "deepseek-custom"
+num_ctx = 4096
+""",
+        encoding="utf-8",
+    )
+
+    config_mod.set_config_path(custom)
+
+    assert config_mod.CONFIG_PATH == custom.resolve()
+    assert config_mod.CONFIG_DIR == custom.resolve().parent
+
+    cfg = config_mod.load_config()
+    assert cfg.provider == "deepseek"
+    assert cfg.model == "deepseek-custom"
+    assert cfg.api_key == "sk-custom"
+
+
 @pytest.mark.parametrize("drv", ["openai", "ollama", "deepseek", "anthropic",
                                  "google", "qwen", "dashscope", "glm", "zhipu"])
 def test_validate_driver_accepts_all_supported(drv):

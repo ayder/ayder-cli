@@ -44,6 +44,7 @@ def create_runtime(
     project_root: str = ".",
     model_name: str | None = None,
     prompt_tier: str | None = None,
+    system_prompt_override: str | None = None,
 ) -> RuntimeComponents:
     """Assemble and return all shared runtime components.
 
@@ -53,6 +54,9 @@ def create_runtime(
         model_name: Override model name from config when provided.
         prompt_tier: Override the system-prompt tier from config when provided
             (e.g. "AGENTIC" for `ayder-cli --agent`). See prompts.get_system_prompt.
+        system_prompt_override: When set, use this text as the system-prompt base
+            instead of prompts.get_system_prompt (ayder --system-prompt FILE). Tool
+            prompts and the project-structure macro are still appended.
 
     Returns:
         RuntimeComponents with all dependencies wired.
@@ -84,7 +88,10 @@ def create_runtime(
         macro = ""
 
     # Format the final prompt (protocol injection now handled dynamically by chat_loop and protocols)
-    base_prompt = get_system_prompt(cfg.prompt)
+    if system_prompt_override is not None:
+        base_prompt = system_prompt_override
+    else:
+        base_prompt = get_system_prompt(cfg.prompt)
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = base_prompt + tool_prompts + macro

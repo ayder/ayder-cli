@@ -210,6 +210,7 @@ class AyderApp(App):
         safe_mode: bool = False,
         permissions: set | None = None,
         agent_mode: bool = False,
+        system_prompt_override: str | None = None,
         **kwargs,
     ):
         """
@@ -221,10 +222,13 @@ class AyderApp(App):
             permissions: Set of granted permission levels ("r", "w", "x")
             agent_mode: When True, drive the multi-agent harness — inject the
                 AGENTIC orchestrator system prompt (ayder-cli --agent).
+            system_prompt_override: When set, use this text as the system-prompt base
+                instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
         """
         super().__init__(**kwargs)
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
+        self._system_prompt_override = system_prompt_override
 
         self._requests: asyncio.Queue[TurnRequest] = asyncio.Queue()
         self._run_task: asyncio.Task | None = None
@@ -418,7 +422,10 @@ class AyderApp(App):
         except Exception:
             macro = ""
 
-        base_prompt = get_system_prompt(self.config.prompt)
+        if self._system_prompt_override is not None:
+            base_prompt = self._system_prompt_override
+        else:
+            base_prompt = get_system_prompt(self.config.prompt)
         raw_tags = getattr(self.config, "tool_tags", None) if not isinstance(self.config, dict) else self.config.get("tool_tags")
         tags = frozenset(raw_tags) if raw_tags else None
         tool_prompts = self.registry.get_system_prompts(tags=tags)
@@ -444,9 +451,11 @@ class AyderApp(App):
                 macro = ""
             tags = self.chat_loop.config.tool_tags
             tool_prompts = self.registry.get_system_prompts(tags=tags)
-            self.messages[0]["content"] = (
-                get_system_prompt(self.config.prompt) + tool_prompts + macro
-            )
+            if self._system_prompt_override is not None:
+                base_prompt = self._system_prompt_override
+            else:
+                base_prompt = get_system_prompt(self.config.prompt)
+            self.messages[0]["content"] = base_prompt + tool_prompts + macro
 
     def inject_skill(self, skill_name: str, skill_content: str) -> None:
         """Inject or replace the active skill system message."""

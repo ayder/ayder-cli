@@ -83,6 +83,38 @@ class TestRuntimeFactoryAssembly:
         assert components.config.model == "qwen3-coder:latest"
 
 
+class TestFactorySystemPromptOverride:
+    """Test the --system-prompt override path in create_runtime."""
+
+    def test_system_prompt_override_replaces_base_keeps_tools_and_macro(self):
+        """Override replaces the prompts.py base but tool prompts + project macro remain."""
+        with patch('ayder_cli.application.runtime_factory.create_default_registry') as mock_create, \
+             patch('ayder_cli.application.runtime_factory.get_system_prompt') as mock_get_prompt:
+            mock_registry = Mock()
+            mock_registry.execute.return_value = "src/\n  main.py"
+            mock_registry.get_system_prompts.return_value = "[TOOLS]"
+            mock_registry.get_schemas.return_value = []
+            mock_create.return_value = mock_registry
+
+            components = create_runtime(system_prompt_override="CUSTOM_BASE")
+
+            # prompts.py base prompt is NOT consulted when an override is given
+            mock_get_prompt.assert_not_called()
+            # override is the base; tool prompts + project structure macro still appended
+            assert components.system_prompt.startswith("CUSTOM_BASE")
+            assert "[TOOLS]" in components.system_prompt
+            assert "PROJECT STRUCTURE" in components.system_prompt
+
+    def test_no_override_uses_prompts_py_base(self):
+        """Without an override, the base prompt comes from prompts.py.get_system_prompt."""
+        with patch('ayder_cli.application.runtime_factory.get_system_prompt',
+                   return_value="DEFAULT_BASE") as mock_get_prompt:
+            components = create_runtime()
+
+        mock_get_prompt.assert_called_once()
+        assert components.system_prompt.startswith("DEFAULT_BASE")
+
+
 class TestFactoryTUIIntegration:
     """Test TUI uses factory-built dependencies."""
 
@@ -121,6 +153,36 @@ class TestFactoryTUIIntegration:
             assert app.llm is not None
             assert app.registry is not None
             assert app.chat_loop is not None
+
+    def test_tui_system_prompt_override(self):
+        """AyderApp(system_prompt_override=...) uses it as the base, skipping prompts.py."""
+        with patch('ayder_cli.tui.app.create_runtime') as mock_create_runtime, \
+             patch('ayder_cli.prompts.get_system_prompt') as mock_get_prompt:
+            mock_components = Mock()
+            mock_components.config = Mock()
+            mock_components.config.model = "test-model"
+            mock_components.config.num_ctx = 65536
+            mock_components.config.max_iterations = 50
+            mock_components.config.max_background_processes = 5
+            mock_components.config.max_output_tokens = 4096
+            mock_components.config.stop_sequences = []
+            mock_components.config.tool_tags = ["core", "metadata"]
+            mock_components.config.driver = "openai"
+            mock_components.config.agents = {}
+            mock_components.llm_provider = Mock()
+            mock_components.tool_registry = Mock()
+            mock_components.tool_registry.execute.return_value = "src/\n  main.py"
+            mock_components.tool_registry.get_system_prompts.return_value = "[TOOLS]"
+            mock_create_runtime.return_value = mock_components
+
+            app = AyderApp(system_prompt_override="TUI_CUSTOM")
+
+            # prompts.py base prompt is not consulted
+            mock_get_prompt.assert_not_called()
+            sys_msg = app.messages[0]
+            assert sys_msg["role"] == "system"
+            assert sys_msg["content"].startswith("TUI_CUSTOM")
+            assert "[TOOLS]" in sys_msg["content"]
 
 
 class TestFactoryCompositionParity:

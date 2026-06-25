@@ -36,6 +36,7 @@ def _run_loop(
     prompt: str,
     permissions: set | None = None,
     agent_mode: bool = False,
+    system_prompt_override: str | None = None,
 ) -> int:
     """Create a ChatLoop with CliCallbacks and run it.
 
@@ -47,11 +48,16 @@ def _run_loop(
         permissions: Granted permission categories.
         agent_mode: When True, inject the AGENTIC orchestrator system prompt
             (ayder-cli --agent) so the main LLM drives the multi-agent harness.
+        system_prompt_override: When set, use this text as the system prompt base
+            instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
 
     Returns:
         Exit code (0 for success, 1 for error).
     """
-    rt = create_runtime(prompt_tier="AGENTIC" if agent_mode else None)
+    rt = create_runtime(
+        prompt_tier="AGENTIC" if agent_mode else None,
+        system_prompt_override=system_prompt_override,
+    )
 
     messages: list[dict] = [
         {"role": "system", "content": rt.system_prompt},
@@ -119,10 +125,12 @@ def _run_loop(
 class CommandRunner:
     """Runner for single command execution mode."""
 
-    def __init__(self, prompt: str, permissions=None, agent_mode: bool = False):
+    def __init__(self, prompt: str, permissions=None, agent_mode: bool = False,
+                 system_prompt_override: str | None = None):
         self.prompt = prompt
         self.permissions = permissions
         self.agent_mode = agent_mode
+        self.system_prompt_override = system_prompt_override
 
     def run(self) -> int:
         """Execute the command and return exit code.
@@ -135,6 +143,7 @@ class CommandRunner:
                 self.prompt,
                 permissions=self.permissions,
                 agent_mode=self.agent_mode,
+                system_prompt_override=self.system_prompt_override,
             )
         except ProviderUnavailableError as e:
             print(str(e), file=sys.stderr)   # message already starts with "Error:"
@@ -144,18 +153,24 @@ class CommandRunner:
             return 1
 
 
-def run_command(prompt: str, permissions=None, agent_mode: bool = False) -> int:
+def run_command(prompt: str, permissions=None, agent_mode: bool = False,
+                system_prompt_override: str | None = None) -> int:
     """Execute a single command and return exit code.
 
     Args:
         prompt: The command/prompt to execute
         permissions: Set of granted permission categories (e.g. {"r", "w", "x", "http"})
         agent_mode: When True, inject the AGENTIC orchestrator system prompt (ayder-cli --agent).
+        system_prompt_override: When set, use this text as the system prompt base
+            instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
 
     Returns:
         Exit code (0 for success, 1 for error)
     """
-    runner = CommandRunner(prompt, permissions=permissions, agent_mode=agent_mode)
+    runner = CommandRunner(
+        prompt, permissions=permissions, agent_mode=agent_mode,
+        system_prompt_override=system_prompt_override,
+    )
     return runner.run()
 
 
