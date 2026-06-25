@@ -34,12 +34,29 @@ def _resolve_shell(shell: str) -> tuple[list[str] | None, str | None]:
     return None, f"[shell '{shell}' not found; ran with '/bin/sh']"
 
 
+_TRUNCATION_MARKER = "\n… [{} chars omitted] …\n"
+
+
+def _bound_output(text: str, cap: int) -> str:
+    """Middle-truncate to <= max(256, cap) chars, keeping head + tail."""
+    cap = max(256, cap)
+    if len(text) <= cap:
+        return text
+    reserve = len(_TRUNCATION_MARKER.format(len(text)))
+    body = max(0, cap - reserve)
+    head = body // 2
+    tail = body - head
+    omitted = len(text) - head - tail
+    return text[:head] + _TRUNCATION_MARKER.format(omitted) + (text[-tail:] if tail else "")
+
+
 def bash(
     project_ctx: ProjectContext,
     command: str,
     shell: str = "bash",
     timeout: int | None = None,
     environment: dict[str, str] | None = None,
+    max_result_chars: int | None = None,
 ) -> str:
     """Executes a shell command and returns exit code + output.
     Executes with cwd=project.root to sandbox execution to the project."""
@@ -81,7 +98,8 @@ def bash(
         if result.stderr:
             output += f"STDERR:\n{result.stderr}\n"
 
-        return ToolSuccess(output)
+        cap = 8192 if max_result_chars is None else int(max_result_chars)
+        return ToolSuccess(_bound_output(output, cap))
     except subprocess.TimeoutExpired:
         return ToolError(f"Error: Command timed out after {eff_timeout}s.", "execution")
     except Exception as e:

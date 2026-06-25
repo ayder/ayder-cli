@@ -39,10 +39,15 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "description": "Env vars overlaid on the inherited environment.",
                     "additionalProperties": {"type": "string"},
                 },
+                "max_result_chars": {
+                    "type": "integer",
+                    "description": "Max characters of output to return (default 8192, floor 256).",
+                },
             },
             "required": ["command"],
         },
         permission="x",
         safe_mode_blocked=True,
+        max_result_chars=0,
     ),
 )

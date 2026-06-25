@@ -123,3 +123,61 @@ class TestShell:
     def test_real_zsh(self, ctx):
         result = bash(ctx, "echo from_zsh", shell="zsh")
         assert "from_zsh" in result
+
+
+class TestBounding:
+    def test_under_cap_unchanged(self, ctx):
+        result = bash(ctx, "echo hi", max_result_chars=8192)
+        assert "hi" in result
+        assert "chars omitted" not in result
+
+    def test_over_cap_middle_truncated(self, ctx):
+        from ayder_cli.tools.builtins.shell import _bound_output
+
+        text = "HEAD" + ("x" * 5000) + "TAIL"
+        out = _bound_output(text, 512)
+        assert len(out) <= 512
+        assert "chars omitted" in out
+        assert out.startswith("HEAD")
+        assert out.endswith("TAIL")
+
+    def test_floor_256(self, ctx):
+        from ayder_cli.tools.builtins.shell import _bound_output
+
+        out = _bound_output("y" * 10000, 10)  # below floor -> 256
+        assert len(out) <= 256
+        assert "chars omitted" in out
+
+    def test_default_cap_8192_applied(self, ctx):
+        # 50k of output from the command body; default cap bounds it.
+        result = bash(ctx, "for i in $(seq 1 6000); do echo yyyyyyyy; done")
+        assert len(result) <= 8192 + 64  # cap + marker slack
+        assert "chars omitted" in result
+        assert result.startswith("Exit Code: 0")
+
+
+class TestRegistration:
+    def test_definition(self):
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+        td = TOOL_DEFINITIONS_BY_NAME["bash"]
+        assert td.func_ref == "ayder_cli.tools.builtins.shell:bash"
+        assert td.permission == "x"
+        assert td.safe_mode_blocked is True
+        assert td.max_result_chars == 0
+        assert td.parameters["required"] == ["command"]
+        props = td.parameters["properties"]
+        assert set(props) == {"command", "shell", "timeout", "environment", "max_result_chars"}
+        assert props["shell"]["enum"] == ["bash", "zsh", "sh", "busybox"]
+
+
+def test_execute_tool_debug_logs(tmp_path, caplog):
+    import logging
+
+    from ayder_cli.tools.execution import execute_tool
+    from ayder_cli.tools.hooks import HookManager
+
+    ctx = ProjectContext(str(tmp_path))
+    with caplog.at_level(logging.DEBUG, logger="ayder_cli.tools.execution"):
+        execute_tool("bash", {"command": "echo hi"}, bash, HookManager(), ctx)
+    assert any("bash" in r.getMessage() for r in caplog.records)
