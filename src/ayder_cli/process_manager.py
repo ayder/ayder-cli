@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Deque, Dict, Optional
 
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.core.result import ToolResult, ToolSuccess, ToolError
 
 
 def _has_killpg() -> bool:
@@ -224,7 +224,7 @@ def run_background_process(
     process_manager: "ProcessManager",
     project_ctx: ProjectContext,
     command: str,
-) -> str:
+) -> ToolResult:
     """Start a long-running command in the background.
 
     Args:
@@ -250,7 +250,7 @@ def get_background_output(
     process_manager: "ProcessManager",
     process_id: int,
     tail: int = 50,
-) -> str:
+) -> ToolResult:
     """Get recent output from a background process.
 
     Args:
@@ -289,7 +289,7 @@ def get_background_output(
 def kill_background_process(
     process_manager: "ProcessManager",
     process_id: int,
-) -> str:
+) -> ToolResult:
     """Kill a running background process.
 
     Args:
@@ -316,7 +316,7 @@ def kill_background_process(
 
 def list_background_processes(
     process_manager: "ProcessManager",
-) -> str:
+) -> ToolResult:
     """List all background processes and their status.
 
     Args:
@@ -460,7 +460,7 @@ def _fmt_ports(ports: "list[int] | None") -> str:
 def info_background_process(
     process_manager: "ProcessManager",
     process_id: int,
-) -> str:
+) -> ToolResult:
     """Deep, best-effort report for one background process.
 
     Surfaces the OS pid, child pids (pgrep tree), listening ports (lsof/ss),
