@@ -25,6 +25,15 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "string",
                     "description": "Command to execute.",
                 },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Max seconds to run (default 120, clamped to 1-600).",
+                },
+                "environment": {
+                    "type": "object",
+                    "description": "Env vars overlaid on the inherited environment.",
+                    "additionalProperties": {"type": "string"},
+                },
             },
             "required": ["command"],
         },
