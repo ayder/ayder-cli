@@ -58,7 +58,13 @@ class ContextManagerProtocol(Protocol):
         ...
 
 
-def truncate_tool_result(content: str, max_chars: int = 8192) -> str:
+# Generic hard cap for tool results that do not declare their own
+# ``max_result_chars`` override. Sized to fit a full search/grep page or a
+# moderate file dump without truncation while still bounding pathological output.
+DEFAULT_TOOL_RESULT_MAX_CHARS = 65535
+
+
+def truncate_tool_result(content: str, max_chars: int = DEFAULT_TOOL_RESULT_MAX_CHARS) -> str:
     """Truncate a tool result at insertion time. Shared by all implementations.
 
     ``max_chars=0`` is the explicit "exempt" sentinel — used by tools whose
@@ -138,4 +144,5 @@ __all__ = [
     "ContextManagerProtocol",
     "ContextManager",
     "truncate_tool_result",
+    "DEFAULT_TOOL_RESULT_MAX_CHARS",
 ]

@@ -2,7 +2,7 @@
 
 One tool covers ``start | logs | stop | list | info`` for background processes,
 delegating to the lifecycle handlers in ``process_manager.py`` and self-bounding
-``logs`` so the chat-loop's 8192-char tool-result truncation is never triggered
+``logs`` so the chat-loop's generic tool-result truncation is never triggered
 (the definition sets ``max_result_chars=0``).
 """
 

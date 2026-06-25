@@ -100,8 +100,8 @@ def _run_loop(tool_name: str, fake_result: str, arguments: str = '{}') -> tuple[
 @pytest.mark.anyio
 async def test_generic_tool_result_truncated_in_message_history():
     """Tools without ``max_result_chars`` go through the loop's default
-    truncation. Guards against Opus47 finding #1."""
-    huge = "x" * 50_000  # far exceeds truncate_tool_result default of 8192 chars
+    truncation once they exceed the cap. Guards against Opus47 finding #1."""
+    huge = "x" * 100_000  # exceeds the 65535-char default cap
 
     messages, loop = _run_loop(
         "search_codebase", huge, arguments='{"pattern": "x"}'
@@ -119,6 +119,27 @@ async def test_generic_tool_result_truncated_in_message_history():
         f"raw length={len(huge)}."
     )
     assert len(stored) < len(huge)
+
+
+@pytest.mark.anyio
+async def test_generic_tool_result_under_new_cap_passes_through():
+    """The default cap is 65535: a generic result under it reaches history
+    untruncated (the bump from the old 8192 cap)."""
+    payload = "x" * 50_000  # > old 8192 cap, < new 65535 cap
+
+    messages, loop = _run_loop(
+        "search_codebase", payload, arguments='{"pattern": "x"}'
+    )
+    await loop.run()
+
+    tool_msgs = [m for m in messages if m.get("role") == "tool"]
+    assert tool_msgs, "expected at least one tool message in history"
+
+    stored = tool_msgs[0]["content"]
+    assert stored == payload, (
+        f"a {len(payload)}-char result must pass through under the 65535 cap; "
+        f"got {len(stored)} chars."
+    )
 
 
 @pytest.mark.anyio

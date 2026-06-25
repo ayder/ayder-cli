@@ -4,7 +4,7 @@ Tool definitions for notes operations.
 Tools: note (consolidated).
 
 ``note`` sets ``max_result_chars=0`` to opt out of the chat-loop's generic
-8192-char truncation; its handler self-bounds via offset/max_chars/limit.
+tool-result truncation; its handler self-bounds via offset/max_chars/limit.
 """
 
 from typing import Tuple

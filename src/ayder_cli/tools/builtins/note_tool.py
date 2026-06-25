@@ -3,7 +3,7 @@
 The task tool's lightweight, caller-named sibling: a flat note (title + body),
 no Signature header, no status enum. One tool covers
 ``create | read | update | list | delete``. Every action returns short plain
-text bounded by construction, so the chat-loop's 8192-char tool-result
+text bounded by construction, so the chat-loop's generic tool-result
 truncation is never triggered (the definition sets ``max_result_chars=0``).
 
 File-I/O lives in ``notes.py``; this module owns dispatch, per-action

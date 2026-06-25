@@ -3,8 +3,8 @@
 Auto-discovered by ``tools/definition.py:_discover_definitions`` — dropping this
 file in ``tools/builtins/`` is sufficient to register the tool; no core edit.
 
-``max_result_chars=0`` exempts the tool from the chat-loop's generic 8192-char
-truncation (which would otherwise *replace* over-budget output with a useless
+``max_result_chars=0`` exempts the tool from the chat-loop's generic
+tool-result truncation (which would otherwise *replace* over-budget output with a useless
 structural summary). The handler self-bounds every action's output via
 ``limit`` / ``offset`` / ``section`` / ``max_chars`` instead.
 """

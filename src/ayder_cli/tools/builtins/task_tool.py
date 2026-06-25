@@ -2,7 +2,7 @@
 
 One tool covers ``create | list | show | status | update_status | update``.
 Every action returns short **plain text** bounded by construction, so the
-chat-loop's 8192-char tool-result truncation (which *replaces* over-budget JSON
+chat-loop's generic tool-result truncation (which *replaces* over-budget JSON
 with a useless structural summary) is never triggered. The tool definition sets
 ``max_result_chars=0`` to opt out of generic truncation; this module owns the
 bounding via ``limit`` / ``offset`` / ``section`` / ``max_chars`` clamps.
@@ -45,7 +45,7 @@ from .tasks import (
 # an off-enum value is the "illegal transition".
 VALID_STATUSES: tuple[str, ...] = ("pending", "in_progress", "done", "blocked")
 
-# Output-budget clamps. The 8192 default budget is never approached: show is
+# Output-budget clamps. The generic loop cap is never approached: show is
 # capped well under it and list rows are short with a bounded count.
 _DEFAULT_SHOW_CHARS = 4000
 _MAX_SHOW_CHARS = 8000

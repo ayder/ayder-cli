@@ -4,7 +4,7 @@ Tool definitions for background process operations.
 Tools: background_process (consolidated).
 
 ``background_process`` sets ``max_result_chars=0`` to opt out of the chat-loop's
-generic 8192-char truncation; its handler self-bounds ``logs`` via offset/max_chars.
+generic tool-result truncation; its handler self-bounds ``logs`` via offset/max_chars.
 """
 
 from typing import Tuple
