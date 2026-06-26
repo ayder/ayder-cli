@@ -86,3 +86,70 @@ def test_resave_preserves_created_at(tmp_path):
     reread = json.loads((sessions_dir(tmp_path) / f"{sid}.json").read_text())
     assert reread["created_at"] == created
     assert reread["message_count"] == 5
+
+
+from ayder_cli.core.session import (
+    messages_to_replay_items,
+    persist_and_announce,
+    resume_hint,
+    should_save_session,
+)
+
+
+def test_should_save_session():
+    assert should_save_session([{"role": "system", "content": "s"}]) is False
+    assert should_save_session(
+        [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
+    ) is True
+
+
+def test_resume_hint_mentions_id_and_command():
+    text = resume_hint("a1b2-c3d4")
+    assert "a1b2-c3d4" in text
+    assert "ayder --resume a1b2-c3d4" in text
+
+
+def test_persist_and_announce_skips_without_user(tmp_path):
+    printed = []
+    result = persist_and_announce(
+        [{"role": "system", "content": "s"}], root=tmp_path, out=printed.append
+    )
+    assert result is None
+    assert printed == []
+    assert list((tmp_path / ".ayder" / "sessions").glob("*.json")) == []
+
+
+def test_persist_and_announce_saves_and_prints(tmp_path):
+    printed = []
+    result = persist_and_announce(
+        [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}],
+        root=tmp_path, out=printed.append,
+    )
+    assert result is not None
+    assert (tmp_path / ".ayder" / "sessions" / f"{result}.json").exists()
+    assert any("ayder --resume" in line for line in printed)
+
+
+def test_persist_and_announce_reuses_id(tmp_path):
+    result = persist_and_announce(
+        [{"role": "user", "content": "hi"}],
+        root=tmp_path, session_id="a1b2-c3d4", out=lambda _x: None,
+    )
+    assert result == "a1b2-c3d4"
+    assert (tmp_path / ".ayder" / "sessions" / "a1b2-c3d4.json").exists()
+
+
+def test_messages_to_replay_items():
+    msgs = [
+        {"role": "system", "content": "SYS"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "result"},
+        {"role": "user", "content": "thanks"},
+    ]
+    assert messages_to_replay_items(msgs) == [
+        ("user", "hi"),
+        ("assistant", "hello"),
+        ("user", "thanks"),
+    ]

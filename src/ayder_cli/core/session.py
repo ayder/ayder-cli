@@ -155,3 +155,59 @@ def load_session(token: str, root: Path | None = None) -> SessionData:
         updated_at=data.get("updated_at", ""),
         path=path,
     )
+
+
+def should_save_session(messages: list[dict]) -> bool:
+    """True if the conversation has at least one user turn worth saving."""
+    return any(m.get("role") == "user" for m in messages)
+
+
+def resume_hint(session_id: str) -> str:
+    """The exit message telling the user how to resume the saved session."""
+    return f"Session saved. Resume with:\n  ayder --resume {session_id}"
+
+
+def persist_and_announce(
+    messages: list[dict],
+    *,
+    root: Path | None = None,
+    session_id: str | None = None,
+    model: str | None = None,
+    agent_mode: bool = False,
+    safe_mode: bool = False,
+    permissions: set[str] | None = None,
+    out=print,
+) -> str | None:
+    """Save the session on exit and print the resume hint.
+
+    Returns the session id, or None when there is nothing worth saving.
+    """
+    if not should_save_session(messages):
+        return None
+    sid = save_session(
+        messages,
+        root=root,
+        session_id=session_id,
+        model=model,
+        agent_mode=agent_mode,
+        safe_mode=safe_mode,
+        permissions=permissions,
+    )
+    out(resume_hint(sid))
+    return sid
+
+
+def messages_to_replay_items(messages: list[dict]) -> list[tuple[str, str]]:
+    """Map saved messages to ('user'|'assistant', text) pairs for replay.
+
+    Skips the system prompt, tool messages, and empty (tool-call-only) turns.
+    """
+    items: list[tuple[str, str]] = []
+    for m in messages:
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = m.get("content")
+        if isinstance(content, str) and content.strip():
+            items.append((role, content))
+    return items
