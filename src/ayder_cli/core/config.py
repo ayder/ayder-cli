@@ -313,7 +313,7 @@ class Config(BaseModel):
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
     retry: RetryConfigSection = Field(default_factory=RetryConfigSection)
-    agent_timeout: int = Field(default=300)
+    agent_timeout: int = Field(default=600)
     max_concurrent_agents: int = Field(default=5)
     agents: dict[str, Any] = Field(default_factory=dict)  # dict[str, AgentConfig] — Any to avoid circular import
 

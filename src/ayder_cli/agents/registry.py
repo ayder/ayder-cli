@@ -105,7 +105,7 @@ class AgentRegistry:
         project_ctx: Any,
         process_manager: Any,
         permissions: set[str],
-        agent_timeout: int = 300,
+        agent_timeout: int = 600,
         max_concurrent_agents: int = 5,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
         on_complete: Callable[[int, AgentRun], None] | None = None,

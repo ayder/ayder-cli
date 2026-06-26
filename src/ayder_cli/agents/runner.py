@@ -47,7 +47,7 @@ class AgentRunner:
         project_ctx: Any,
         process_manager: Any,
         permissions: set[str],
-        timeout: int = 300,
+        timeout: int = 600,
         run_id: int = 0,
         generation: int = 0,
         on_progress: Callable[[int, str, str, Any], None] | None = None,

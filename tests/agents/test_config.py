@@ -43,7 +43,7 @@ class TestConfigAgentParsing:
         """Config has empty agents dict by default."""
         cfg = Config()
         assert cfg.agents == {}
-        assert cfg.agent_timeout == 300
+        assert cfg.agent_timeout == 600
 
     def test_config_agent_timeout_custom(self):
         """agent_timeout can be set via app section."""

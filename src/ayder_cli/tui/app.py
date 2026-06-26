@@ -314,7 +314,7 @@ class AyderApp(App):
                 project_ctx=rt.project_ctx,
                 process_manager=self._process_manager,
                 permissions=self.permissions,
-                agent_timeout=getattr(self.config, 'agent_timeout', 300),
+                agent_timeout=getattr(self.config, 'agent_timeout', 600),
                 max_concurrent_agents=getattr(self.config, 'max_concurrent_agents', 5),
                 on_progress=_agent_progress,
                 on_complete=_agent_complete,

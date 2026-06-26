@@ -66,7 +66,7 @@ def _run_loop(
             project_ctx=rt.project_ctx,
             process_manager=rt.process_manager,
             permissions=set(permissions or {"r"}),
-            agent_timeout=getattr(rt.config, "agent_timeout", 300),
+            agent_timeout=getattr(rt.config, "agent_timeout", 600),
             max_concurrent_agents=getattr(rt.config, "max_concurrent_agents", 5),
         )
         rt.tool_registry.register_dynamic_tool(
