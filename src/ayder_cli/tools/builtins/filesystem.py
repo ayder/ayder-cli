@@ -172,6 +172,7 @@ def file_editor(
     old_string: str | None = None,
     new_string: str | None = None,
     line_number: int | None = None,
+    replace_all: bool = False,
 ) -> str:
     """Modify files with specific operations."""
     try:
@@ -189,19 +190,30 @@ def file_editor(
         elif operation == "replace":
             if old_string is None or new_string is None:
                 return ToolError("Error: 'old_string' and 'new_string' are required for 'replace' operation.", "validation")
+            rel_path = project_ctx.to_relative(abs_path)
             if not abs_path.exists():
-                rel_path = project_ctx.to_relative(abs_path)
                 return ToolError(f"Error: File '{rel_path}' does not exist.")
             with open(abs_path, "r", encoding="utf-8") as f:
                 file_content = f.read()
-            if old_string not in file_content:
-                rel_path = project_ctx.to_relative(abs_path)
+            count = file_content.count(old_string)
+            if count == 0:
                 return ToolError(f"Error: 'old_string' not found in {rel_path}. No changes made.")
-            new_content = file_content.replace(old_string, new_string)
+            if count > 1 and not replace_all:
+                return ToolError(
+                    f"Error: 'old_string' is not unique (found {count} matches) in {rel_path}. "
+                    f"Pass replace_all=true to replace all occurrences, or add surrounding "
+                    f"context to make it unique. No changes made.",
+                    "validation",
+                )
+            new_content = (
+                file_content.replace(old_string, new_string)
+                if replace_all
+                else file_content.replace(old_string, new_string, 1)
+            )
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
-            rel_path = project_ctx.to_relative(abs_path)
-            return ToolSuccess(f"Successfully replaced text in {rel_path}")
+            noun = "occurrence" if count == 1 else "occurrences"
+            return ToolSuccess(f"Successfully replaced {count} {noun} in {rel_path}")
             
         elif operation == "insert":
             if line_number is None or content is None:

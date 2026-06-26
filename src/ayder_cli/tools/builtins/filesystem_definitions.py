@@ -117,6 +117,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "integer",
                     "description": "Line number (1-based) for 'insert' or 'delete' operations",
                 },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "For 'replace': replace every match. Default false — a non-unique old_string is an error.",
+                },
             },
             "required": ["file_path", "operation"],
         },

@@ -39,6 +39,12 @@ def project_context(tmp_path):
     return ProjectContext(str(tmp_path))
 
 
+def _file_editor_def():
+    """Return the file_editor ToolDefinition for schema assertions."""
+    from ayder_cli.tools.builtins.filesystem_definitions import TOOL_DEFINITIONS
+    return next(d for d in TOOL_DEFINITIONS if d.name == "file_editor")
+
+
 class TestFileExplorerDirectory:
     """Test list_files() function."""
 
@@ -291,15 +297,52 @@ class TestFileEditorReplace:
         # Verify file wasn't changed
         assert test_file.read_text() == "Hello world!"
 
-    def test_multiple_occurrences_replacement(self, tmp_path, project_context):
-        """Test multiple occurrences replacement."""
+    def test_multiple_occurrences_without_replace_all_errors(self, tmp_path, project_context):
+        """Non-unique old_string is an error unless replace_all is set."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello world! Hello world! Hello world!")
 
-        result = impl.file_editor(project_context, str(test_file), "replace", old_string="world", new_string="Python")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string="world", new_string="Python",
+        )
+        assert isinstance(result, ToolError)
+        assert result.category == "validation"
+        assert "not unique" in result
+        assert "found 3 matches" in result
+        assert test_file.read_text() == "Hello world! Hello world! Hello world!"
 
-        assert "Successfully replaced" in result
+    def test_replace_all_replaces_every_match(self, tmp_path, project_context):
+        """replace_all=True rewrites all matches and reports the count."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Hello world! Hello world! Hello world!")
+
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string="world", new_string="Python", replace_all=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "3 occurrences" in result
         assert test_file.read_text() == "Hello Python! Hello Python! Hello Python!"
+
+    def test_replace_unique_reports_single_count(self, tmp_path, project_context):
+        """A unique match replaces exactly once and says '1 occurrence'."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Hello world!")
+
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string="world", new_string="universe",
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "1 occurrence" in result
+        assert test_file.read_text() == "Hello universe!"
+
+    def test_replace_all_param_in_schema(self):
+        """The schema exposes replace_all so the orchestrator can pass it."""
+        props = _file_editor_def().parameters["properties"]
+        assert "replace_all" in props
+        assert props["replace_all"]["type"] == "boolean"
 
     def test_replace_string_nonexistent_file(self, tmp_path, project_context):
         """Test error handling for non-existent file."""
