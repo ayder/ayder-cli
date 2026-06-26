@@ -205,6 +205,8 @@ class AyderApp(App):
         permissions: set | None = None,
         agent_mode: bool = False,
         system_prompt_override: str | None = None,
+        initial_messages: list[dict] | None = None,
+        resume_session_id: str | None = None,
         **kwargs,
     ):
         """
@@ -223,6 +225,10 @@ class AyderApp(App):
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
         self._system_prompt_override = system_prompt_override
+        self.resume_session_id = resume_session_id
+        self._resuming = bool(
+            initial_messages and initial_messages[0].get("role") == "system"
+        )
 
         self._requests: asyncio.Queue[TurnRequest] = asyncio.Queue()
         self._run_task: asyncio.Task | None = None
@@ -270,8 +276,9 @@ class AyderApp(App):
         self._setup_registry_callbacks()
         self._setup_registry_middleware()
 
-        self.messages: list[dict] = []
-        self._init_system_prompt()
+        self.messages: list[dict] = list(initial_messages) if initial_messages else []
+        if not self._resuming:
+            self._init_system_prompt()
 
         # Initialize agent registry if agents are configured (Part 1)
         self._agent_registry: AgentRegistry | None = None
@@ -327,7 +334,12 @@ class AyderApp(App):
 
             # Append capability prompts to system prompt
             cap_prompts = self._agent_registry.get_capability_prompts()
-            if cap_prompts and self.messages and self.messages[0].get("role") == "system":
+            if (
+                not self._resuming
+                and cap_prompts
+                and self.messages
+                and self.messages[0].get("role") == "system"
+            ):
                 self.messages[0]["content"] += cap_prompts
 
         # Initialize command list from tui.commands
@@ -421,6 +433,16 @@ class AyderApp(App):
         tool_prompts = self.registry.get_system_prompts(tags=tags)
         system_prompt = base_prompt + tool_prompts + macro
         self.messages.append({"role": "system", "content": system_prompt})
+
+    def _replay_history(self, chat_view) -> None:
+        """Render restored user/assistant turns into the chat view on resume."""
+        from ayder_cli.core.session import messages_to_replay_items
+
+        for role, content in messages_to_replay_items(self.messages):
+            if role == "user":
+                chat_view.add_user_message(content)
+            else:
+                chat_view.add_assistant_message(content)
 
     def update_system_prompt_model(self) -> None:
         """Update the model name in the system prompt after /model switch."""
@@ -636,6 +658,10 @@ class AyderApp(App):
         self._banner_spacer = Static("", id="banner-spacer")
         chat_view.mount(self._banner_spacer)
         chat_view.mount(Static(banner, classes="banner-content"))
+
+        if self._resuming:
+            chat_view.add_system_message(f"↻ Resumed session {self.resume_session_id}")
+            self._replay_history(chat_view)
 
         # After layout is computed, size the spacer to push the banner near the input
         self.call_after_refresh(self._position_banner)
