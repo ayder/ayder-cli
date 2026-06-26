@@ -121,6 +121,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "boolean",
                     "description": "For 'replace': replace every match. Default false — a non-unique old_string is an error.",
                 },
+                "regex": {
+                    "type": "boolean",
+                    "description": "For 'replace': treat old_string as a Python regex; new_string supports backreferences like \\1.",
+                },
             },
             "required": ["file_path", "operation"],
         },

@@ -5,6 +5,7 @@ Filesystem tools for ayder-cli.
 import json
 import logging
 import os
+import re
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -173,6 +174,7 @@ def file_editor(
     new_string: str | None = None,
     line_number: int | None = None,
     replace_all: bool = False,
+    regex: bool = False,
 ) -> str:
     """Modify files with specific operations."""
     try:
@@ -195,7 +197,14 @@ def file_editor(
                 return ToolError(f"Error: File '{rel_path}' does not exist.")
             with open(abs_path, "r", encoding="utf-8") as f:
                 file_content = f.read()
-            count = file_content.count(old_string)
+            if regex:
+                try:
+                    pattern = re.compile(old_string)
+                except re.error as e:
+                    return ToolError(f"Invalid regex pattern: {e}", "validation")
+                count = sum(1 for _ in pattern.finditer(file_content))
+            else:
+                count = file_content.count(old_string)
             if count == 0:
                 return ToolError(f"Error: 'old_string' not found in {rel_path}. No changes made.")
             if count > 1 and not replace_all:
@@ -205,11 +214,14 @@ def file_editor(
                     f"context to make it unique. No changes made.",
                     "validation",
                 )
-            new_content = (
-                file_content.replace(old_string, new_string)
-                if replace_all
-                else file_content.replace(old_string, new_string, 1)
-            )
+            if regex:
+                new_content = pattern.sub(new_string, file_content, count=0 if replace_all else 1)
+            else:
+                new_content = (
+                    file_content.replace(old_string, new_string)
+                    if replace_all
+                    else file_content.replace(old_string, new_string, 1)
+                )
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             noun = "occurrence" if count == 1 else "occurrences"

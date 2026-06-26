@@ -344,6 +344,64 @@ class TestFileEditorReplace:
         assert "replace_all" in props
         assert props["replace_all"]["type"] == "boolean"
 
+    def test_replace_regex_basic(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("foo123bar")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string=r"\d+", new_string="NUM", regex=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "fooNUMbar"
+
+    def test_replace_regex_backreference(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("name: Alice")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string=r"name: (\w+)", new_string=r"user=\1", regex=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "user=Alice"
+
+    def test_replace_regex_non_unique_without_replace_all_errors(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("a1 b2 c3")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string=r"\d", new_string="#", regex=True,
+        )
+        assert isinstance(result, ToolError)
+        assert "not unique" in result
+        assert test_file.read_text() == "a1 b2 c3"
+
+    def test_replace_regex_replace_all(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("a1 b2 c3")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string=r"\d", new_string="#", regex=True, replace_all=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert test_file.read_text() == "a# b# c#"
+
+    def test_replace_regex_invalid_pattern(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string="[unterminated", new_string="x", regex=True,
+        )
+        assert isinstance(result, ToolError)
+        assert result.category == "validation"
+        assert "Invalid regex" in result
+        assert test_file.read_text() == "hello"
+
+    def test_regex_param_in_schema(self):
+        props = _file_editor_def().parameters["properties"]
+        assert "regex" in props
+        assert props["regex"]["type"] == "boolean"
+
     def test_replace_string_nonexistent_file(self, tmp_path, project_context):
         """Test error handling for non-existent file."""
         result = impl.file_editor(project_context, "nonexistent/file.txt", "replace", old_string="old", new_string="new")
