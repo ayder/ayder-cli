@@ -79,13 +79,17 @@ def write_agent_note(
     timestamp: str,
     error: str | None = None,
 ) -> str | None:
-    """Persist an agent's final deliverable to .ayder/notes/. Best-effort.
+    """Persist an agent's final deliverable to .ayder/notes/runs/. Best-effort.
 
-    Non-overwriting and YAML-safe. Returns the project-relative path, or None
-    if writing fails (a note failure must never fail the agent run).
+    Agent run logs live in a ``runs/`` subdirectory so they stay separate from
+    caller-named notes: the non-recursive ``note(action="list")`` and the
+    ``/notes`` viewer glob only the top-level ``.ayder/notes/`` and never
+    intermingle these per-run logs with addressable notes. Non-overwriting and
+    YAML-safe. Returns the project-relative path, or None if writing fails
+    (a note failure must never fail the agent run).
     """
     try:
-        notes_dir = _get_notes_dir(project_ctx)
+        notes_dir = _get_notes_dir(project_ctx) / "runs"
         slug = _title_to_slug(agent_name)
         filename = f"{timestamp}-{slug}-run{run_id}.md"
         frontmatter = [

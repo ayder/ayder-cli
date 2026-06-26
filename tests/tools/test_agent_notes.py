@@ -11,7 +11,7 @@ def test_writes_note_with_frontmatter_and_sections(tmp_path):
         task="Review the auth module", content="# Findings\nAll good.",
         timestamp="20260618-143022",
     )
-    assert rel == ".ayder/notes/20260618-143022-reviewer-run3.md"
+    assert rel == ".ayder/notes/runs/20260618-143022-reviewer-run3.md"
     text = (tmp_path / rel).read_text(encoding="utf-8")
     assert text.startswith("---\n")
     assert 'agent: "reviewer"' in text and "run_id: 3" in text and 'status: "done"' in text
