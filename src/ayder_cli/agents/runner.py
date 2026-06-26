@@ -174,7 +174,13 @@ class AgentRunner:
                 self._cancel_event.set()
                 self.status = "timeout"
                 content = self._final_message(messages) or "Agent timed out before producing output."
-                err = f"Agent exceeded {self._timeout}s timeout"
+                err = (
+                    f"Agent FAILED because it exceeded its {self._timeout}s timeout before "
+                    f"finishing (not an error in the work, and any partial output above is "
+                    f"incomplete). The task needs MORE TIME, not a smaller scope — re-dispatch "
+                    f"the same agent with a larger timeout, e.g. "
+                    f'agent(action="call", name=..., timeout_s={self._timeout * 2}).'
+                )
                 logger.debug(
                     "run timeout: agent='%s' run_id=%d after %ds",
                     self.agent_name, self.run_id, self._timeout,

@@ -273,18 +273,24 @@ def test_atexit_prunes_only_session_worktrees(tmp_path):
 
 
 def test_call_threads_base_branch_to_create_run(monkeypatch):
-    # tool.py: base_branch flows from the call into create_run.
+    # tool.py: base_branch and timeout_s flow from the call into create_run.
     from ayder_cli.agents.tool import create_agent_handler
 
     captured = {}
     class _Reg:
         _loop = None
         def _on_loop(self, fn): return fn()
-        def create_run(self, name, task, task_id=None, branch_name=None, base_branch=None):
-            captured.update(name=name, branch_name=branch_name, base_branch=base_branch)
+        def create_run(self, name, task, task_id=None, branch_name=None,
+                       base_branch=None, timeout=None):
+            captured.update(name=name, branch_name=branch_name,
+                            base_branch=base_branch, timeout=timeout)
             return 1
         def run_label(self, rid): return None
     handler = create_agent_handler(_Reg())
     handler(action="call", name="coder", task="x",
             branch_name="agent/x", base_branch="dev")
     assert captured["base_branch"] == "dev"
+    assert captured["timeout"] is None  # omitted -> registry default
+
+    handler(action="call", name="coder", task="x", timeout_s=1200)
+    assert captured["timeout"] == 1200  # explicit per-call override threads through

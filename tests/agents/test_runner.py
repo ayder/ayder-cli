@@ -101,6 +101,11 @@ class TestAgentRunner:
 
         assert result.status == "error"
         assert "timeout" in result.error.lower()
+        # The orchestrator must be told this was a timeout AND how to recover:
+        # re-dispatch with a larger timeout, not a smaller scope (see real-run
+        # misdiagnosis where the orchestrator shrank scope instead).
+        assert "timeout_s" in result.error
+        assert "more time" in result.error.lower()
 
 
 def _fake_rt():

@@ -19,6 +19,7 @@ class AgentRun:
     task_id: str | None = None              # canonical "TASK-NNN" this run implements, if any
     branch_name: str | None = None          # git branch the agent was told to work/commit on
     worktree_path: str | None = None        # project-relative worktree dir, when isolated
+    timeout: int | None = None              # effective run timeout (s); None -> registry default
     task_preview: str | None = None         # short preview of the orchestrator's free-text task
     finished_at: float | None = None
     drained: bool = False

@@ -38,8 +38,8 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
                 "enum": ["call", "list", "status", "read_result"],
                 "description": (
                     "list: enumerate configured agents. call: dispatch `name` with "
-                    "`task` (+ optional task_id/branch_name). status: list your runs. "
-                    "read_result: collect `run_id` (optionally wait)."
+                    "`task` (+ optional task_id/branch_name/timeout_s). status: list your "
+                    "runs. read_result: collect `run_id` (optionally wait)."
                 ),
             },
             "name": {
@@ -86,7 +86,13 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
             },
             "timeout_s": {
                 "type": "integer",
-                "description": "[read_result] Max seconds to block when wait=true (default 60).",
+                "description": (
+                    "[call] Max seconds the agent may run before it is timed out "
+                    "(default: the configured agent_timeout). Raise it for long "
+                    "spec / plan / review tasks, and after a timeout failure re-dispatch "
+                    "with a larger value. [read_result] Max seconds to block when "
+                    "wait=true (default 60)."
+                ),
             },
         },
         "required": ["action"],
@@ -116,7 +122,7 @@ def create_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
         base_branch: str | None = None,
         run_id: int | None = None,
         wait: bool = False,
-        timeout_s: int = 60,
+        timeout_s: int | None = None,
     ) -> str:
         act = (action or "").strip().lower()
 
@@ -140,6 +146,7 @@ def create_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
                 lambda: registry.create_run(
                     name, task, task_id=task_id,
                     branch_name=branch_name, base_branch=base_branch,
+                    timeout=timeout_s,
                 )
             )
             if isinstance(result, int):
@@ -156,9 +163,10 @@ def create_agent_handler(registry: AgentRegistry) -> Callable[..., str]:
             if run_id is None:
                 return json.dumps({"error": "action=read_result requires run_id."})
             if wait:
+                wait_s = timeout_s if timeout_s is not None else 60
                 payload = (
                     asyncio.run_coroutine_threadsafe(
-                        registry.await_run(run_id, timeout_s), registry._loop
+                        registry.await_run(run_id, wait_s), registry._loop
                     ).result()
                     if registry._loop is not None
                     else None

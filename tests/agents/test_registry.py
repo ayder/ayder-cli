@@ -271,6 +271,47 @@ class TestAgentRegistry:
         assert registry._runs[rid].branch_name is None
 
     @pytest.mark.anyio
+    async def test_create_run_defaults_to_registry_timeout(self, registry):
+        """With no per-call timeout, the run uses the registry's agent_timeout."""
+        registry.set_loop(asyncio.get_running_loop())
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            rid = registry.create_run("reviewer", "quick review")
+            await registry._runs[rid].done_event.wait()
+        assert registry._runs[rid].timeout == 300  # fixture's agent_timeout
+        assert MockRunner.call_args.kwargs["timeout"] == 300
+
+    @pytest.mark.anyio
+    async def test_create_run_per_call_timeout_override(self, registry):
+        """A per-call timeout overrides the default and flows to the runner."""
+        registry.set_loop(asyncio.get_running_loop())
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            rid = registry.create_run("reviewer", "long plan review", timeout=1200)
+            await registry._runs[rid].done_event.wait()
+        assert registry._runs[rid].timeout == 1200
+        assert MockRunner.call_args.kwargs["timeout"] == 1200
+
+    @pytest.mark.anyio
+    async def test_create_run_timeout_clamped_to_bounds(self, registry):
+        """An absurd per-call timeout is clamped to the ceiling; <=0 to the floor."""
+        registry.set_loop(asyncio.get_running_loop())
+        with patch("ayder_cli.agents.registry.AgentRunner") as MockRunner:
+            mock_runner = MockRunner.return_value
+            mock_runner.agent_name = "reviewer"
+            mock_runner.run = AsyncMock(return_value=AgentRunOutcome("done", "ok", None, None))
+            big = registry.create_run("reviewer", "huge", timeout=999999)
+            await registry._runs[big].done_event.wait()
+            small = registry.create_run("reviewer", "bad", timeout=0)
+            await registry._runs[small].done_event.wait()
+        assert registry._runs[big].timeout == 3600   # _MAX_AGENT_TIMEOUT
+        assert registry._runs[small].timeout == 1     # _MIN_AGENT_TIMEOUT
+
+    @pytest.mark.anyio
     async def test_create_run_allows_same_agent_twice(self, registry):
         """Same agent can be created concurrently — no duplicate guard, distinct run_ids."""
         registry.set_loop(asyncio.get_running_loop())

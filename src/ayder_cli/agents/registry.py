@@ -38,6 +38,11 @@ _PREVIEW_MAX = 48
 # core/config.py) so the soft cap queues overflow rather than the ceiling
 # rejecting it at the configured maximum.
 _RUNAWAY_CEILING = 50
+# Bounds for a per-call timeout override (agent(action="call", timeout_s=...)).
+# A single agent run never legitimately needs more than an hour; the floor keeps
+# a fat-fingered 0/negative from making every run time out instantly.
+_MIN_AGENT_TIMEOUT = 1
+_MAX_AGENT_TIMEOUT = 3600
 
 
 def _preview(task: str) -> str | None:
@@ -248,6 +253,7 @@ class AgentRegistry:
         task_id: str | None = None,
         branch_name: str | None = None,
         base_branch: str | None = None,
+        timeout: int | None = None,
     ) -> int | str:
         """Create an AgentRun and schedule it. MUST run on the event loop.
 
@@ -256,7 +262,9 @@ class AgentRegistry:
         task exists; when it resolves, the task file is embedded in the agent's
         prompt so the agent receives the spec itself. branch_name (advisory) is
         folded into the prompt as a commit directive — the harness does not run
-        git. Returns run_id (int) or an error string."""
+        git. timeout (s) overrides the configured agent_timeout for THIS run only
+        (clamped to [_MIN_AGENT_TIMEOUT, _MAX_AGENT_TIMEOUT]); None uses the
+        default. Returns run_id (int) or an error string."""
         if name not in self.agents:
             available = ", ".join(sorted(self.agents))
             return (f"Error: Agent '{name}' not found. Available: {available}. "
@@ -310,11 +318,16 @@ class AgentRegistry:
         prompt = _compose_agent_prompt(task, task_meta, branch)
         task_preview = _preview(task)
 
+        effective_timeout = self._agent_timeout
+        if timeout is not None:
+            effective_timeout = max(_MIN_AGENT_TIMEOUT, min(int(timeout), _MAX_AGENT_TIMEOUT))
+
         self._run_counter += 1
         run_id = self._run_counter
         run = AgentRun(run_id=run_id, generation=self._current_generation,
                        agent_name=name, started_at=time.monotonic(), status="queued",
-                       task_id=resolved_task_id, branch_name=branch, task_preview=task_preview)
+                       task_id=resolved_task_id, branch_name=branch, task_preview=task_preview,
+                       timeout=effective_timeout)
         self._runs[run_id] = run
         logger.debug("agent dispatch: run #%d agent='%s' gen=%d task_id=%s branch=%s",
                      run_id, name, self._current_generation, resolved_task_id or "-", branch or "-")
@@ -373,7 +386,8 @@ class AgentRegistry:
                             agent_config=self.agents[name], parent_config=self._parent_config,
                             project_ctx=project_ctx, notes_ctx=notes_ctx,
                             process_manager=self._process_manager,
-                            permissions=self._permissions, timeout=self._agent_timeout,
+                            permissions=self._permissions,
+                            timeout=run.timeout if run.timeout is not None else self._agent_timeout,
                             run_id=run.run_id, generation=run.generation,
                             on_progress=self._on_progress,
                         )
