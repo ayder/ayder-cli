@@ -84,10 +84,12 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="file_editor",
         description=(
             "Modify files. Operations: 'write' (overwrite entirely, for new/small files), "
-            "'replace' (replace an exact string — unique by default; pass replace_all=true "
-            "for multiple matches, or regex=true for pattern mode), 'insert' (add a line), "
-            "and 'delete' (remove a line). Pass dry_run=true on any operation to preview a "
-            "unified diff without writing."
+            "'replace' (replace a byte-exact substring — no whitespace normalization, so a "
+            "partial match can leave adjacent whitespace; unique by default, pass "
+            "replace_all=true for multiple matches or regex=true for pattern mode), "
+            "'insert' (add a line), and 'delete' (remove a line). Pass dry_run=true on any "
+            "operation to preview a unified diff without writing (recommended when "
+            "whitespace is ambiguous)."
         ),
         description_template="File {file_path} will be modified ({operation})",
         tags=("core",),

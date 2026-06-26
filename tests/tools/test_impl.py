@@ -1009,3 +1009,8 @@ class TestFileEditorDocs:
         desc = _file_editor_def().description
         assert "replace_all" in desc
         assert "dry_run" in desc
+
+    def test_description_explains_substring_matching(self):
+        desc = _file_editor_def().description.lower()
+        assert "substring" in desc
+        assert "whitespace" in desc
