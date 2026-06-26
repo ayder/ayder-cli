@@ -365,3 +365,35 @@ class TestInfo:
             assert child_pid in result  # child surfaced via pgrep tree
         finally:
             pm.kill_process(mp.id)
+
+
+class TestPortsViaLsof:
+    """lsof selection options are OR'd unless -a is given (spec: scope to pid)."""
+
+    def test_lsof_command_ands_pid_with_listen_filter(self, monkeypatch):
+        import ayder_cli.process_manager as pmmod
+
+        captured = {}
+
+        class _Result:
+            stdout = (
+                "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\n"
+                "Python  85651 user    4u  IPv6 0x0    0t0      TCP *:48321 (LISTEN)\n"
+            )
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+            return _Result()
+
+        monkeypatch.setattr(pmmod.subprocess, "run", fake_run)
+
+        ports = pmmod._ports_via_lsof([85651])
+
+        # Without -a, lsof returns every LISTEN socket on the box plus the
+        # pid's files (OR semantics). -a intersects pid AND iTCP:LISTEN so
+        # only the process's own ports are reported.
+        assert "-a" in captured["cmd"]
+        assert "-p" in captured["cmd"]
+        assert "-iTCP" in captured["cmd"]
+        assert "-sTCP:LISTEN" in captured["cmd"]
+        assert ports == [48321]

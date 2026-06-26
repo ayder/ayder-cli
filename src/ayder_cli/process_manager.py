@@ -383,7 +383,10 @@ def _ports_via_lsof(pids: "list[int]") -> "list[int] | None":
     """Listening TCP ports for pids via lsof. None if lsof unavailable."""
     try:
         out = subprocess.run(
-            ["lsof", "-nP", "-p", ",".join(str(p) for p in pids),
+            # -a ANDs the selection filters: without it lsof ORs -p with
+            # -iTCP and returns every LISTEN socket on the host, not just
+            # this pid set's ports.
+            ["lsof", "-nP", "-a", "-p", ",".join(str(p) for p in pids),
              "-iTCP", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
