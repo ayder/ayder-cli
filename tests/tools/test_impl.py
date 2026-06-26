@@ -996,3 +996,16 @@ class TestFileEditorDryRun:
         props = _file_editor_def().parameters["properties"]
         assert "dry_run" in props
         assert props["dry_run"]["type"] == "boolean"
+
+
+class TestFileEditorDocs:
+    """The schema description documents the real behavior."""
+
+    def test_insert_description_clarifies_before_semantics(self):
+        op_desc = _file_editor_def().parameters["properties"]["operation"]["description"]
+        assert "becomes the new line" in op_desc
+
+    def test_top_level_description_mentions_unique_and_dry_run(self):
+        desc = _file_editor_def().description
+        assert "replace_all" in desc
+        assert "dry_run" in desc

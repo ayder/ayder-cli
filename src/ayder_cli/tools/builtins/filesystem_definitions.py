@@ -83,8 +83,11 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="file_editor",
         description=(
-            "Modify files. Supports operations: 'write' (overwrite entirely, for new/small files), "
-            "'replace' (replace exact string match), 'insert' (add content at line), and 'delete' (remove line)."
+            "Modify files. Operations: 'write' (overwrite entirely, for new/small files), "
+            "'replace' (replace an exact string — unique by default; pass replace_all=true "
+            "for multiple matches, or regex=true for pattern mode), 'insert' (add a line), "
+            "and 'delete' (remove a line). Pass dry_run=true on any operation to preview a "
+            "unified diff without writing."
         ),
         description_template="File {file_path} will be modified ({operation})",
         tags=("core",),
@@ -99,7 +102,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 "operation": {
                     "type": "string",
                     "enum": ["write", "replace", "insert", "delete"],
-                    "description": "The edit operation to perform",
+                    "description": (
+                        "The edit operation. insert: content becomes the new line N "
+                        "(existing line N and below shift down); line_number past EOF appends."
+                    ),
                 },
                 "content": {
                     "type": "string",
