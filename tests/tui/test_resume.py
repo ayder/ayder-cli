@@ -40,3 +40,47 @@ def test_replay_history_dispatches_to_chat_view():
     app._replay_history(chat_view)
     chat_view.add_user_message.assert_called_once_with("hi")
     chat_view.add_assistant_message.assert_called_once_with("hello")
+
+
+class _FakeApp:
+    """Stand-in for AyderApp so run_tui can be tested without Textual."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.messages = kwargs.get("initial_messages") or [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hi"},
+        ]
+        self.resume_session_id = kwargs.get("resume_session_id")
+        self.model = kwargs.get("model", "test")
+        self.safe_mode = kwargs.get("safe_mode", False)
+        self.permissions = kwargs.get("permissions") or {"r"}
+
+    def run(self, **kwargs):
+        return None
+
+
+def test_run_tui_saves_session_on_exit(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("ayder_cli.tui.AyderApp", _FakeApp)
+    from ayder_cli.tui import run_tui
+
+    run_tui(permissions={"r", "w"}, model="m")
+
+    files = list((tmp_path / ".ayder" / "sessions").glob("*.json"))
+    assert len(files) == 1
+
+
+def test_run_tui_reuses_resume_session_id(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("ayder_cli.tui.AyderApp", _FakeApp)
+    from ayder_cli.tui import run_tui
+
+    run_tui(
+        initial_messages=[
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hi"},
+        ],
+        resume_session_id="a1b2-c3d4",
+    )
+    assert (tmp_path / ".ayder" / "sessions" / "a1b2-c3d4.json").exists()
