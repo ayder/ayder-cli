@@ -1014,3 +1014,8 @@ class TestFileEditorDocs:
         desc = _file_editor_def().description.lower()
         assert "substring" in desc
         assert "whitespace" in desc
+        # Both directions of the asymmetry must be documented so the model can
+        # predict matches without experimenting: no normalization, and a longer
+        # old_string the file lacks fails.
+        assert "never normalized" in desc
+        assert "fails to match" in desc
