@@ -124,6 +124,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Set the logging level for this session (e.g. DEBUG, INFO). Logs are written to .ayder/log/ayder.log",
     )
 
+    parser.add_argument(
+        "--resume",
+        type=str,
+        metavar="ID",
+        default=None,
+        help="Resume a saved session by id (or unique prefix) from "
+        ".ayder/sessions/. Takes no other session options "
+        "(restores the original model, permissions, and system prompt).",
+    )
+
     # Version flag
     parser.add_argument("--version", action="version", version=get_app_version())
 
@@ -314,6 +324,65 @@ def main():
         except PluginError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+        return
+
+    # --resume: restore a saved session and launch the TUI. It is mutually
+    # exclusive with session-shaping options — the saved file already carries
+    # the model, permissions, agent mode, and system prompt.
+    if getattr(args, "resume", None):
+        _conflicts: list[str] = []
+        if getattr(args, "agent", False):
+            _conflicts.append("--agent")
+        if getattr(args, "system_prompt", None):
+            _conflicts.append("--system-prompt")
+        if getattr(args, "w", False):
+            _conflicts.append("-w")
+        if getattr(args, "x", False):
+            _conflicts.append("-x")
+        if getattr(args, "http", False):
+            _conflicts.append("--http")
+        if getattr(args, "file", None):
+            _conflicts.append("--file/-f")
+        if getattr(args, "stdin", False):
+            _conflicts.append("--stdin")
+        if getattr(args, "command", None):
+            _conflicts.append("a command")
+        if getattr(args, "implement", None):
+            _conflicts.append("--implement")
+        if getattr(args, "implement_all", False):
+            _conflicts.append("--implement-all")
+        if getattr(args, "tasks", False):
+            _conflicts.append("--tasks")
+        if getattr(args, "temporal_task_queue", None):
+            _conflicts.append("--temporal-task-queue")
+        if getattr(args, "temporal_prompt", None):
+            _conflicts.append("--temporal-prompt")
+        if _conflicts:
+            print(
+                "Error: --resume takes no other options — it restores the "
+                "original session's settings. Usage: ayder --resume <id>",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        from ayder_cli.core.session import SessionError, load_session
+
+        try:
+            sess = load_session(args.resume)
+        except SessionError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        from ayder_cli.tui import run_tui
+
+        run_tui(
+            model=sess.model or "default",
+            safe_mode=sess.safe_mode,
+            permissions=set(sess.permissions),
+            agent_mode=sess.agent_mode,
+            initial_messages=sess.messages,
+            resume_session_id=sess.session_id,
+        )
         return
 
     # Build granted permissions set from flags

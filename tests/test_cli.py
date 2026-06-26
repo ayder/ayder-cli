@@ -840,3 +840,54 @@ class TestCreateParser:
         mock_setup_logging.assert_called_once_with(
             mock_config, level_override="DEBUG", console_stream=None
         )
+
+
+class TestMainResume:
+    """Test --resume flag parsing, conflict guard, and launch."""
+
+    def test_resume_arg_parses(self):
+        from ayder_cli.cli import create_parser
+
+        args = create_parser().parse_args(['--resume', 'a1b2-c3d4'])
+        assert args.resume == 'a1b2-c3d4'
+
+    def test_resume_conflicts_with_session_flags(self):
+        from ayder_cli.cli import main
+
+        with patch.object(sys, 'argv', ['ayder', '--resume', 'a1b2', '-w']), \
+             patch.object(sys.stdin, 'isatty', return_value=True):
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 1
+
+    def test_resume_loads_and_launches(self, tmp_path, monkeypatch):
+        from ayder_cli.cli import main
+        from ayder_cli.core.session import save_session
+
+        monkeypatch.chdir(tmp_path)
+        sid = save_session(
+            [{"role": "system", "content": "SYS"},
+             {"role": "user", "content": "hi"}],
+            model="qwen", agent_mode=True, permissions={"r", "w", "x", "http"},
+        )
+
+        with patch.object(sys, 'argv', ['ayder', '--resume', sid]), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            main()
+
+        kwargs = mock_run_tui.call_args[1]
+        assert kwargs['resume_session_id'] == sid
+        assert kwargs['initial_messages'][1]['content'] == "hi"
+        assert kwargs['agent_mode'] is True
+        assert kwargs['permissions'] == {"r", "w", "x", "http"}
+
+    def test_resume_bad_id_exits(self, tmp_path, monkeypatch):
+        from ayder_cli.cli import main
+
+        monkeypatch.chdir(tmp_path)
+        with patch.object(sys, 'argv', ['ayder', '--resume', 'zzzz']), \
+             patch.object(sys.stdin, 'isatty', return_value=True):
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 1
