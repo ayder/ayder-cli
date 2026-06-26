@@ -125,6 +125,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "boolean",
                     "description": "For 'replace': treat old_string as a Python regex; new_string supports backreferences like \\1.",
                 },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Preview the change as a unified diff without writing. Works for all operations.",
+                },
             },
             "required": ["file_path", "operation"],
         },

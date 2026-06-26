@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import difflib
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -165,9 +166,36 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
         return ToolError(f"Error exploring path: {str(e)}", "execution")
 
 
+def _finalize(
+    abs_path,
+    rel_path,
+    old_content: str,
+    new_content: str,
+    success_msg: str,
+    dry_run: bool,
+) -> str:
+    """Write *new_content* and return *success_msg*, or, when *dry_run* is set,
+    return a unified diff and write nothing."""
+    if dry_run:
+        if old_content == new_content:
+            return ToolSuccess(f"[DRY RUN] No changes would be made to {rel_path}.")
+        diff = "".join(
+            difflib.unified_diff(
+                old_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile=f"a/{rel_path}",
+                tofile=f"b/{rel_path}",
+            )
+        )
+        return ToolSuccess(f"[DRY RUN] No changes written to {rel_path}.\n{diff}")
+    with open(abs_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+    return ToolSuccess(success_msg)
+
+
 def file_editor(
-    project_ctx: ProjectContext, 
-    file_path: str, 
+    project_ctx: ProjectContext,
+    file_path: str,
     operation: str,
     content: str | None = None,
     old_string: str | None = None,
@@ -175,24 +203,27 @@ def file_editor(
     line_number: int | None = None,
     replace_all: bool = False,
     regex: bool = False,
+    dry_run: bool = False,
 ) -> str:
     """Modify files with specific operations."""
     try:
         abs_path = project_ctx.validate_path(file_path)
-        
+        rel_path = project_ctx.to_relative(abs_path)
+
         if operation == "write":
             if content is None:
                 return ToolError("Error: 'content' parameter is required for 'write' operation.", "validation")
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(abs_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            rel_path = project_ctx.to_relative(abs_path)
-            return ToolSuccess(f"Successfully wrote to {rel_path}")
-            
+            old_content = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
+            if not dry_run:
+                abs_path.parent.mkdir(parents=True, exist_ok=True)
+            return _finalize(
+                abs_path, rel_path, old_content, content,
+                f"Successfully wrote to {rel_path}", dry_run,
+            )
+
         elif operation == "replace":
             if old_string is None or new_string is None:
                 return ToolError("Error: 'old_string' and 'new_string' are required for 'replace' operation.", "validation")
-            rel_path = project_ctx.to_relative(abs_path)
             if not abs_path.exists():
                 return ToolError(f"Error: File '{rel_path}' does not exist.")
             with open(abs_path, "r", encoding="utf-8") as f:
@@ -222,50 +253,53 @@ def file_editor(
                     if replace_all
                     else file_content.replace(old_string, new_string, 1)
                 )
-            with open(abs_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
             noun = "occurrence" if count == 1 else "occurrences"
-            return ToolSuccess(f"Successfully replaced {count} {noun} in {rel_path}")
-            
+            return _finalize(
+                abs_path, rel_path, file_content, new_content,
+                f"Successfully replaced {count} {noun} in {rel_path}", dry_run,
+            )
+
         elif operation == "insert":
             if line_number is None or content is None:
                 return ToolError("Error: 'line_number' and 'content' are required for 'insert' operation.", "validation")
             if not abs_path.exists():
-                rel_path = project_ctx.to_relative(abs_path)
                 return ToolError(f"Error: File '{rel_path}' does not exist.")
             with open(abs_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             if line_number < 1:
                 return ToolError("Error: line_number must be >= 1.", "validation")
+            old_content = "".join(lines)
             idx = min(line_number - 1, len(lines))
-            if content and not content.endswith("\n"):
-                content += "\n"
-            lines.insert(idx, content)
-            with open(abs_path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            rel_path = project_ctx.to_relative(abs_path)
-            return ToolSuccess(f"Successfully inserted content at line {line_number} in {rel_path}")
-            
+            ins = content
+            if ins and not ins.endswith("\n"):
+                ins += "\n"
+            new_content = "".join(lines[:idx] + [ins] + lines[idx:])
+            return _finalize(
+                abs_path, rel_path, old_content, new_content,
+                f"Successfully inserted content at line {line_number} in {rel_path}", dry_run,
+            )
+
         elif operation == "delete":
             if line_number is None:
                 return ToolError("Error: 'line_number' is required for 'delete' operation.", "validation")
             if not abs_path.exists():
-                rel_path = project_ctx.to_relative(abs_path)
                 return ToolError(f"Error: File '{rel_path}' does not exist.")
             with open(abs_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             if line_number < 1 or line_number > len(lines):
                 return ToolError(f"Error: line_number {line_number} is out of range (1-{len(lines)}).", "validation")
-            deleted = lines.pop(line_number - 1)
-            with open(abs_path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            rel_path = project_ctx.to_relative(abs_path)
+            old_content = "".join(lines)
+            deleted = lines[line_number - 1]
+            new_content = "".join(lines[: line_number - 1] + lines[line_number:])
             preview = deleted.rstrip("\n")[:80]
-            return ToolSuccess(f"Deleted line {line_number} from {rel_path}: '{preview}'")
-            
+            return _finalize(
+                abs_path, rel_path, old_content, new_content,
+                f"Deleted line {line_number} from {rel_path}: '{preview}'", dry_run,
+            )
+
         else:
             return ToolError(f"Error: Unknown operation '{operation}'", "validation")
-            
+
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
     except Exception as e:

@@ -928,3 +928,71 @@ class TestSearchOutputFormats:
         result = impl._format_count_results(raw, "pattern", project_context)
         assert "Total matches: 8" in result
         assert "SEARCH RESULTS" in result
+
+
+class TestFileEditorDryRun:
+    """dry_run previews changes as a unified diff and never writes."""
+
+    def test_dry_run_replace(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Hello world!\n")
+        result = impl.file_editor(
+            project_context, str(test_file), "replace",
+            old_string="world", new_string="universe", dry_run=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "[DRY RUN]" in result
+        assert "-Hello world!" in result
+        assert "+Hello universe!" in result
+        assert test_file.read_text() == "Hello world!\n"
+
+    def test_dry_run_write(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("original\n")
+        result = impl.file_editor(
+            project_context, str(test_file), "write",
+            content="replaced\n", dry_run=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "[DRY RUN]" in result
+        assert test_file.read_text() == "original\n"
+
+    def test_dry_run_insert(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\n")
+        result = impl.file_editor(
+            project_context, str(test_file), "insert",
+            line_number=2, content="Inserted", dry_run=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "[DRY RUN]" in result
+        assert "+Inserted" in result
+        assert test_file.read_text() == "Line 1\nLine 2\n"
+
+    def test_dry_run_delete(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Line 1\nLine 2\nLine 3\n")
+        result = impl.file_editor(
+            project_context, str(test_file), "delete",
+            line_number=2, dry_run=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "[DRY RUN]" in result
+        assert "-Line 2" in result
+        assert test_file.read_text() == "Line 1\nLine 2\nLine 3\n"
+
+    def test_dry_run_write_identical_reports_no_change(self, tmp_path, project_context):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("same\n")
+        result = impl.file_editor(
+            project_context, str(test_file), "write",
+            content="same\n", dry_run=True,
+        )
+        assert isinstance(result, ToolSuccess)
+        assert "No changes would be made" in result
+        assert test_file.read_text() == "same\n"
+
+    def test_dry_run_param_in_schema(self):
+        props = _file_editor_def().parameters["properties"]
+        assert "dry_run" in props
+        assert props["dry_run"]["type"] == "boolean"
