@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from ayder_cli.core.cache_monitor import CacheMonitor
 from ayder_cli.core.context_manager import ContextStats
+from ayder_cli.core.default_context_manager import TokenCounter
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,12 @@ class OllamaContextManager:
 
         self._real_prompt_tokens: int = 0
         self._real_completion_tokens: int = 0
+        # Estimate of the last prepared message set, used as a display fallback
+        # for get_stats() when the provider reports no prompt_eval_count (e.g.
+        # Ollama ':cloud' models). provider="ollama" -> char-based estimate, no
+        # tiktoken. Never feeds compaction, which uses real counts only.
+        self._counter = TokenCounter(model=model, provider="ollama")
+        self._estimated_prompt_tokens: int = 0
 
         # Timing data stored for CacheMonitor
         self._last_prompt_eval_ns: int = 0
@@ -207,6 +214,7 @@ class OllamaContextManager:
         if compaction_summary is not None:
             result.append(compaction_summary)
         result.extend(history)
+        self._estimated_prompt_tokens = self._counter.count_messages(result)
         return result
 
     # ------------------------------------------------------------------
@@ -249,7 +257,10 @@ class OllamaContextManager:
     def get_stats(self) -> OllamaContextStats:
         """Return current context utilization metrics."""
         ceiling = self._actual_context_length
-        used = self._real_prompt_tokens
+        # Prefer the provider's real prompt token count; fall back to the
+        # message estimate when it is absent (cloud models omit prompt_eval_count)
+        # so the live ctx indicator is never stuck at 0.
+        used = self._real_prompt_tokens or self._estimated_prompt_tokens
         available = max(0, ceiling - used)
         utilization = (used / ceiling * 100.0) if ceiling > 0 else 0.0
 

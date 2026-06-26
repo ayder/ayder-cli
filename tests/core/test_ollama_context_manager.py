@@ -352,3 +352,32 @@ async def test_detect_context_length_only_runs_once():
 
         # Should still be 8192 — second call is no-op
         assert mgr._actual_context_length == 8192
+
+
+def test_get_stats_estimates_tokens_when_provider_omits_prompt_eval_count():
+    """Ollama ':cloud' models return no prompt_eval_count, so the provider never
+    reports prompt_tokens and update_from_response is never called with one.
+    get_stats() must fall back to a message-token estimate instead of a false 0,
+    so the TUI `ctx:` indicator reflects real context fill (regression: stuck 0)."""
+    mgr = make_manager(ctx_length=524288)
+    mgr.freeze_system_prompt("You are a helpful assistant.", [])
+    msgs = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Tell me about the history of computing. " * 20},
+    ]
+    mgr.prepare_messages(msgs)  # no update_from_response — mimics a cloud model
+    stats = mgr.get_stats()
+    assert stats.total_tokens > 0
+
+
+def test_get_stats_prefers_real_prompt_tokens_over_estimate():
+    """When the provider DOES report prompt_tokens, the real count wins over the
+    estimate — the fallback must not override accurate provider data."""
+    mgr = make_manager(ctx_length=524288)
+    mgr.freeze_system_prompt("Sys.", [])
+    mgr.prepare_messages([
+        {"role": "system", "content": "Sys."},
+        {"role": "user", "content": "hello"},
+    ])
+    mgr.update_from_response({"prompt_tokens": 12345})
+    assert mgr.get_stats().total_tokens == 12345
