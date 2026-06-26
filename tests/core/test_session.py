@@ -109,14 +109,16 @@ def test_resume_hint_mentions_id_and_command():
     assert "ayder --resume a1b2-c3d4" in text
 
 
-def test_persist_and_announce_skips_without_user(tmp_path):
+def test_persist_and_announce_notes_when_nothing_to_save(tmp_path):
     printed = []
     result = persist_and_announce(
         [{"role": "system", "content": "s"}], root=tmp_path, out=printed.append
     )
     assert result is None
-    assert printed == []
+    # No file created for an empty conversation...
     assert list((tmp_path / ".ayder" / "sessions").glob("*.json")) == []
+    # ...but the exit is not silent — the user gets feedback.
+    assert any("no conversation" in line.lower() for line in printed)
 
 
 def test_persist_and_announce_saves_and_prints(tmp_path):

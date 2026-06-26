@@ -183,6 +183,9 @@ def persist_and_announce(
     Returns the session id, or None when there is nothing worth saving.
     """
     if not should_save_session(messages):
+        # Nothing to resume from an empty conversation — don't write a useless
+        # file, but don't exit silently either (the user expects feedback).
+        out("No conversation to save this session.")
         return None
     sid = save_session(
         messages,
