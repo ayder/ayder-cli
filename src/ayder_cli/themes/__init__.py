@@ -17,6 +17,15 @@ class Theme:
     name: str
     description: str
     css: str
+    # When True, this is an ANSI-passthrough theme: the app emits the 16-colour
+    # ANSI palette (and ``ansi_default``) as real ANSI escapes instead of
+    # converting them to RGB, so the user's terminal colours — including their
+    # background — are respected on truecolor terminals too.
+    ansi: bool = False
+    # Name of the Textual built-in/registered theme (``App.theme``) to activate
+    # for this CSS theme, e.g. "ayder-dark"/"ayder-light". None keeps Textual's
+    # default theme. This is how an ANSI theme gets terminal-default surfaces.
+    textual_theme: Optional[str] = None
 
     def __post_init__(self):
         # Validate that CSS is not empty
@@ -39,8 +48,12 @@ def get_theme(name: str) -> Optional[Theme]:
 
 
 def get_default_theme() -> Theme:
-    """Get the default theme (claude)."""
-    return _THEME_REGISTRY.get("claude") or list(_THEME_REGISTRY.values())[0]
+    """Get the default theme (ayder — terminal-respecting ANSI passthrough)."""
+    return (
+        _THEME_REGISTRY.get("ayder")
+        or _THEME_REGISTRY.get("claude")
+        or list(_THEME_REGISTRY.values())[0]
+    )
 
 
 def list_themes() -> list[Theme]:
@@ -56,8 +69,8 @@ def get_theme_names() -> list[str]:
 # Import and register built-in themes
 def _load_builtin_themes():
     """Load all built-in themes."""
-    from . import original  # noqa: F401
     from . import claude  # noqa: F401
+    from . import ayder  # noqa: F401
 
 
 # Auto-load themes on import

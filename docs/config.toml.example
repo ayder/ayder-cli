@@ -95,6 +95,27 @@ agent_timeout = 1800               # seconds before a background agent is cancel
 # (background), and web fetch (http). See /plugin for the full tag list.
 tool_tags = ["core", "metadata", "background", "http"]
 
+[ui]
+# TUI layout (theme) — picks the chrome/layout:
+#   "ayder" (default)  — linux-console layout (tokenised), respects the terminal
+#                        by default and can overlay any palette (see below).
+#   "ayder-dark"       — "ayder" + default ANSI-dark palette.
+#   "ayder-light"      — "ayder" + default ANSI-light palette (light terminals).
+#   "claude"           — dark navy aesthetic with explicit RGB colors.
+theme = "ayder"
+#
+# Palette — the colour palette the "ayder" layout is painted with (App.theme).
+# Ignored by the self-contained "claude" theme.
+#   "auto" (default)   — the layout's own ANSI palette: passthrough that respects
+#                        your terminal's background and palette on every terminal.
+#   "ansi-dark"/"ansi-light" — force the ANSI passthrough palette explicitly.
+#   "monokai", "dracula", "nord", "gruvbox", "tokyo-night", … — any Textual theme
+#                        overlays a fixed RGB palette on the ayder layout. NOTE:
+#                        these paint their OWN background and therefore do NOT
+#                        respect the terminal background — an opt-in trade-off.
+#   e.g.  theme = "ayder"  +  palette = "monokai"  →  "ayder-monokai".
+palette = "auto"
+
 [logging]
 file_enabled = true
 file_path = ".ayder/log/ayder.log"

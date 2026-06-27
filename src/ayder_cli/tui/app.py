@@ -6,7 +6,7 @@ LLM pipeline and tool execution are delegated to ChatLoop.
 Command handlers are in tui.commands.
 """
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, InvalidThemeError
 from textual.widgets import Static
 from textual.timer import Timer
 from textual import on
@@ -25,7 +25,12 @@ from ayder_cli.logging_config import (
     setup_logging,
 )
 from ayder_cli.tui.helpers import create_tui_banner
-from ayder_cli.tui.theme_manager import get_theme_css
+from ayder_cli.tui.theme_manager import (
+    get_theme_css,
+    get_theme_palette,
+    get_theme_textual_theme,
+)
+from ayder_cli.themes.ayder import AYDER_TEXTUAL_THEMES
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.screens import CLIConfirmScreen, CLIHelpScreen
 from ayder_cli.agents.registry import AgentRegistry
@@ -182,7 +187,10 @@ class AyderApp(App):
     """
 
     CSS = get_theme_css()
-    ENABLE_COMMAND_PALETTE = False
+    # Ctrl+P opens Textual's command palette, whose "Change theme" provider
+    # switches App.theme (the palette) live — handy for previewing palettes on
+    # the ayder layout before pinning one via [ui] palette.
+    ENABLE_COMMAND_PALETTE = True
     ENABLE_MOUSE_SUPPORT = False
 
     BINDINGS = [
@@ -222,6 +230,31 @@ class AyderApp(App):
                 instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
         """
         super().__init__(**kwargs)
+        # Register our ANSI palettes (ayder-dark / ayder-light) and paint the
+        # active layout with the resolved palette ([ui] palette). The default
+        # ANSI palettes make every Textual surface the terminal default — the
+        # blessed way to honour the user's terminal colours (background, palette,
+        # and the TextArea input) on every terminal; an RGB palette (monokai …)
+        # overlays a fixed look on the same layout. 'claude' resolves to None and
+        # keeps Textual's default RGB theme. Guarded so an unknown palette name
+        # (or a Textual build lacking the named theme) falls back to the layout's
+        # own default palette, and finally to direct ANSI passthrough, instead of
+        # crashing.
+        for _ansi_theme in AYDER_TEXTUAL_THEMES:
+            self.register_theme(_ansi_theme)
+        _palette = get_theme_palette()
+        if _palette:
+            try:
+                self.theme = _palette
+            except InvalidThemeError:
+                _default_palette = get_theme_textual_theme()
+                try:
+                    if _default_palette and _default_palette != _palette:
+                        self.theme = _default_palette
+                    else:
+                        self.ansi_color = True
+                except InvalidThemeError:
+                    self.ansi_color = True
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
         self._system_prompt_override = system_prompt_override

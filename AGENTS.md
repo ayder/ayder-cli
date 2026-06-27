@@ -137,8 +137,8 @@ ayder-cli/
 │   │
 │   ├── themes/                 # TUI themes
 │   │   ├── __init__.py         # Theme registry
-│   │   ├── claude.py           # Claude theme CSS
-│   │   └── original.py         # Original theme CSS
+│   │   ├── claude.py           # Claude theme CSS (default, RGB)
+│   │   └── ayder.py            # ayder tokenised layout + ANSI/RGB palette overlay ([ui] palette)
 │   │
 │   ├── parser.py               # XML/JSON tool call parser
 │   ├── process_manager.py      # Background process management

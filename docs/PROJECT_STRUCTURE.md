@@ -309,8 +309,8 @@ the design rationale.
 | Module | Purpose |
 |--------|---------|
 | `themes/__init__.py` | Theme registry |
-| `themes/claude.py` | Claude theme CSS |
-| `themes/original.py` | Original theme CSS |
+| `themes/claude.py` | Claude theme CSS (default, RGB) |
+| `themes/ayder.py` | ayder tokenised layout + ANSI/RGB palettes; `[ui] palette` overlay (terminal passthrough by default) |
 
 ---
 

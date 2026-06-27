@@ -294,6 +294,17 @@ class Config(BaseModel):
     model: str = Field(default="qwen3-coder:latest")
     num_ctx: int = Field(default=65536)
     editor: str = Field(default="vim")
+    # Default to the terminal-respecting ayder layout (ANSI passthrough) so a
+    # fresh install honours the user's own terminal background/palette out of the
+    # box. Set theme = "claude" for the fixed-RGB navy look.
+    theme: str = Field(default="ayder")
+    # Palette = the Textual App.theme the ayder LAYOUT is painted with.
+    # "auto" inherits the layout theme's own default palette (ayder-dark ->
+    # ayder-dark/ansi, ayder-light -> ayder-light/ansi), i.e. ansi passthrough
+    # that respects the terminal. Set an RGB Textual theme (monokai, dracula,
+    # nord …) to overlay a fixed palette on the same layout. Ignored by the
+    # self-contained 'claude' theme.
+    palette: str = Field(default="auto")
     verbose: bool = Field(default=False)
     logging_level: str | None = Field(default=None)
     logging_file_enabled: bool = Field(default=True)
@@ -330,6 +341,15 @@ class Config(BaseModel):
         if isinstance(app_section, dict):
             new_data.pop("app", None)
             new_data.update(app_section)
+
+        # [ui] section: 'theme' (layout) and 'palette' (App.theme) map to fields.
+        ui_section = data.get("ui")
+        if isinstance(ui_section, dict):
+            new_data.pop("ui", None)
+            if "theme" in ui_section:
+                new_data["theme"] = ui_section["theme"]
+            if "palette" in ui_section:
+                new_data["palette"] = ui_section["palette"]
 
         provider = str(new_data.get("provider", DEFAULTS["provider"]))
 
