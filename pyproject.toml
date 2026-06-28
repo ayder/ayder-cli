@@ -30,7 +30,6 @@ dependencies = [
     # ansi-light themes. The ayder-dark/ayder-light themes rely on this API.
     "textual==8.2.7",
     "python-dotenv>=1.0.0",
-    "libcst>=1.0.0",
     "tiktoken>=0.7.0",
 ]
 
@@ -41,6 +40,8 @@ qwen = ["dashscope"]
 glm = ["zhipuai"]
 all = ["ayder-cli[anthropic,google,qwen,glm]"]
 mcp = ["mcp"]
+# Optional: required only by plugins that do CST-based code transforms.
+libcst = ["libcst>=1.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/ayder/ayder-cli"
