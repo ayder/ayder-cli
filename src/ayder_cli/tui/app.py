@@ -273,8 +273,14 @@ class AyderApp(App):
         self._show_thinking: bool = False
         self._active_skill: str | None = None
 
-        # Build all shared runtime components via the factory
-        rt = create_runtime(prompt_tier="AGENTIC" if agent_mode else None)
+        # Build all shared runtime components via the factory. An explicit
+        # model argument is used for resumed sessions so they continue with the
+        # model saved in the session file instead of the current config default.
+        rt = create_runtime(
+            prompt_tier="AGENTIC" if agent_mode else None,
+            model_name=None if model == "default" else model,
+            system_prompt_override=system_prompt_override,
+        )
         self.config = rt.config
         if isinstance(self.config, Config) and not is_logging_configured():
             setup_logging(self.config)

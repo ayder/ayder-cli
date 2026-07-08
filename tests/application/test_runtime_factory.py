@@ -154,6 +154,38 @@ class TestFactoryTUIIntegration:
             assert app.registry is not None
             assert app.chat_loop is not None
 
+    def test_tui_passes_explicit_model_to_runtime_factory(self):
+        """AyderApp(model=...) must override config model, used by --resume."""
+        with patch('ayder_cli.tui.app.create_runtime') as mock_create_runtime:
+            mock_components = Mock()
+            mock_components.config = Mock()
+            mock_components.config.model = "saved-model"
+            mock_components.config.provider = "openai"
+            mock_components.config.num_ctx = 65536
+            mock_components.config.max_output_tokens = 4096
+            mock_components.config.stop_sequences = []
+            mock_components.config.tool_tags = ["core", "metadata"]
+            mock_components.config.driver = "openai"
+            mock_components.config.agents = {}
+            mock_components.config.max_history_messages = 0
+            mock_components.llm_provider = Mock()
+            mock_components.tool_registry = Mock()
+            mock_components.tool_registry.execute.return_value = "src/\n  main.py"
+            mock_components.tool_registry.get_system_prompts.return_value = ""
+            mock_components.context_manager = Mock()
+            mock_create_runtime.return_value = mock_components
+
+            app = AyderApp(model="saved-model", initial_messages=[
+                {"role": "system", "content": "saved system"},
+            ])
+
+            mock_create_runtime.assert_called_once_with(
+                prompt_tier=None,
+                model_name="saved-model",
+                system_prompt_override=None,
+            )
+            assert app.model == "saved-model"
+
     def test_tui_system_prompt_override(self):
         """AyderApp(system_prompt_override=...) uses it as the base, skipping prompts.py."""
         with patch('ayder_cli.tui.app.create_runtime') as mock_create_runtime, \

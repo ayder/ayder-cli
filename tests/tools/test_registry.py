@@ -101,6 +101,36 @@ class TestExecuteToolCall:
         assert result.category == "validation"
         assert "Error: Unknown tool" in result
 
+    def test_dynamic_tool_path_parameters_are_sandboxed(self, project_context):
+        """Dynamic/project plugin path metadata must use ProjectContext security."""
+        from ayder_cli.tools.definition import (
+            TOOL_DEFINITIONS_BY_NAME,
+            ToolDefinition,
+        )
+
+        fresh_registry = registry.ToolRegistry(project_context)
+        tool_name = "dynamic_path_probe"
+        tool_def = ToolDefinition(
+            name=tool_name,
+            description="Probe dynamic path normalization",
+            parameters={
+                "type": "object",
+                "properties": {"file_path": {"type": "string"}},
+                "required": ["file_path"],
+            },
+            path_parameters=("file_path",),
+        )
+
+        try:
+            fresh_registry.register_dynamic_tool(tool_def, lambda file_path: file_path)
+            result = fresh_registry.execute(tool_name, {"file_path": "/etc/passwd"})
+        finally:
+            TOOL_DEFINITIONS_BY_NAME.pop(tool_name, None)
+
+        assert isinstance(result, ToolError)
+        assert result.category == "security"
+        assert "outside project root" in result
+
 
 class TestNormalizeToolArguments:
     """Tests for normalize_tool_arguments function."""

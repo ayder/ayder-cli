@@ -43,25 +43,33 @@ def normalize_arguments(
         ValueError: If a path parameter resolves outside the project sandbox.
     """
     normalized = dict(arguments)  # copy to avoid mutating caller's dict
+    td = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    parameter_aliases = (
+        dict(td.parameter_aliases)
+        if td is not None
+        else PARAMETER_ALIASES.get(tool_name, {})
+    )
+    path_parameters = (
+        list(td.path_parameters)
+        if td is not None
+        else PATH_PARAMETERS.get(tool_name, [])
+    )
 
     # Step 1: Apply aliases
-    if tool_name in PARAMETER_ALIASES:
-        for alias, canonical in PARAMETER_ALIASES[tool_name].items():
-            if alias in normalized and canonical not in normalized:
-                normalized[canonical] = normalized.pop(alias)
+    for alias, canonical in parameter_aliases.items():
+        if alias in normalized and canonical not in normalized:
+            normalized[canonical] = normalized.pop(alias)
 
     # Step 2: Resolve path parameters to absolute (validates sandbox)
-    if tool_name in PATH_PARAMETERS:
-        for param_name in PATH_PARAMETERS[tool_name]:
-            if param_name in normalized and normalized[param_name]:
-                try:
-                    validated_path = project_ctx.validate_path(normalized[param_name])
-                    normalized[param_name] = str(validated_path)
-                except ValueError:
-                    raise  # security error — propagate to caller
+    for param_name in path_parameters:
+        if param_name in normalized and normalized[param_name]:
+            try:
+                validated_path = project_ctx.validate_path(normalized[param_name])
+                normalized[param_name] = str(validated_path)
+            except ValueError:
+                raise  # security error — propagate to caller
 
     # Step 3: Type coercion (string → int for integer-typed parameters)
-    td = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if td:
         props = td.parameters.get("properties", {})
         for key, schema in props.items():
