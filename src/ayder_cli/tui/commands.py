@@ -14,6 +14,7 @@ from ayder_cli.core.config import list_provider_profiles, load_config_for_provid
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.logging_config import LOG_LEVELS, setup_logging
 from ayder_cli.providers import provider_orchestrator, ProviderUnavailableError
+from ayder_cli.tools.builtins.skill import SkillInfo, discover_skills, skill
 from ayder_cli.tui.screens import (
     AgentListScreen,
     CLISelectScreen,
@@ -775,62 +776,26 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
     )
 
 
-def _discover_skills(project_ctx: ProjectContext) -> list[tuple[str, Path]]:
-    """Return [(skill_name, skill_md_path), ...] from .ayder/skills/."""
-    from pathlib import Path
-
-    skills_dir = Path(project_ctx.root) / ".ayder" / "skills"
-    results: list[tuple[str, Path]] = []
-    if not skills_dir.is_dir():
-        return results
-    for d in sorted(skills_dir.iterdir()):
-        if d.is_dir() and (d / "SKILL.md").exists():
-            results.append((d.name, d / "SKILL.md"))
-    return results
-
-
-def _apply_skill(
+def _run_skill_tool_for_user(
     app: "AyderApp",
-    skill_name: str,
-    skill_path: Path,
+    action: str,
+    name: str | None,
     chat_view: ChatView,
-    command: str = "",
-) -> None:
-    """Inject a skill into the conversation and update the status bar.
-
-    The file read + empty-check are eager so an empty skill reports immediately
-    without enqueuing a turn. The injection (state mutation) + new_generation +
-    status bar are deferred into ``prepare``. If a trailing ``command`` was
-    given, it is appended in the SAME request and the turn is run.
-    """
-    from pathlib import Path
-
-    content = Path(skill_path).read_text(encoding="utf-8").strip()
-    if not content:
-        chat_view.add_system_message(f"SKILL.md for '{skill_name}' is empty, skipping.")
-        return
-
-    if command:
-        chat_view.add_user_message(command)
-
-    def _prepare() -> None:
-        app.inject_skill(skill_name, content)
-        _agent_reg = getattr(app, "_agent_registry", None)
-        if _agent_reg is not None:
-            _agent_reg.new_generation()
-        status_bar = app.query_one("#status-bar", StatusBar)
-        status_bar.set_skill(skill_name)
-        chat_view.add_system_message(f"Activated skill: {skill_name}")
-        if command:
-            app.messages.append({"role": "user", "content": command})
-
-    app.request_turn(prepare=_prepare, run_loop=bool(command))
+) -> bool:
+    """Run the shared skill tool for a user command and report the result."""
+    result = skill(
+        project_ctx=app.registry.project_ctx,
+        app=app,
+        action=action,
+        name=name,
+    )
+    chat_view.add_system_message(str(result))
+    return getattr(result, "is_success", False)
 
 
 def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
-    """Activate a domain skill from .ayder/skills/ (inject as system message)."""
-    project_ctx = ProjectContext(".")
-    skills = _discover_skills(project_ctx)
+    """Activate a domain skill from .ayder/skills/ via the skill tool."""
+    skills = discover_skills(app.registry.project_ctx)
 
     if not skills:
         chat_view.add_system_message("No skills found in .ayder/skills/")
@@ -841,23 +806,40 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         parts = args.strip().split(None, 1)
         name = parts[0]
         command = parts[1] if len(parts) > 1 else ""
-        match = next(((n, p) for n, p in skills if n == name), None)
+        match = next((skill_info for skill_info in skills if skill_info.name == name), None)
         if match is None:
-            available = ", ".join(n for n, _ in skills)
+            available = ", ".join(skill_info.name for skill_info in skills)
             chat_view.add_system_message(
                 f"Unknown skill: '{name}'. Available: {available}"
             )
             return
-        _apply_skill(app, match[0], match[1], chat_view, command)
+
+        loaded = False
+
+        def _prepare() -> None:
+            nonlocal loaded
+            loaded = _run_skill_tool_for_user(app, "load", match.name, chat_view)
+            if loaded and command:
+                chat_view.add_user_message(command)
+                app.messages.append({"role": "user", "content": command})
+
+        app.request_turn(prepare=_prepare, run_loop=lambda: loaded and bool(command))
     else:
         # Interactive picker
         current = app._active_skill or ""
-        items = [(n, n) for n, _ in skills]
-        skill_map = {n: p for n, p in skills}
+        items = [(skill_info.name, skill_info.name) for skill_info in skills]
+        skill_map: dict[str, SkillInfo] = {skill_info.name: skill_info for skill_info in skills}
 
         def on_skill_selected(selected: str | None) -> None:
             if selected:
-                _apply_skill(app, selected, skill_map[selected], chat_view)
+                selected_skill = skill_map[selected]
+
+                def _prepare() -> None:
+                    _run_skill_tool_for_user(
+                        app, "load", selected_skill.name, chat_view
+                    )
+
+                app.request_turn(prepare=_prepare, run_loop=False)
 
         app.push_screen(
             CLISelectScreen(

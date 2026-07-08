@@ -10,13 +10,16 @@ from textual.app import App, ComposeResult, InvalidThemeError
 from textual.widgets import Static
 from textual.timer import Timer
 from textual import on
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 import asyncio
 import difflib
 import logging
+import uuid
 
+from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.core.config import Config
 from ayder_cli.logging_config import (
@@ -62,8 +65,8 @@ class TurnRequest:
     teardown before pulling the next request.
     """
 
-    prepare: Callable[[], None] | None = None
-    run_loop: bool = True
+    prepare: Callable[[], None | Awaitable[None]] | None = None
+    run_loop: bool | Callable[[], bool] = True
     no_tools: bool = False
 
 
@@ -380,12 +383,14 @@ class AyderApp(App):
         # Add TUI-only commands to autocomplete
         if "/permission" not in self.commands:
             self.commands.append("/permission")
-        # Add /skill <name> completions from .ayder/skills/
-        _skills_dir = Path(".").resolve() / ".ayder" / "skills"
-        if _skills_dir.is_dir():
-            for _skill_dir in sorted(_skills_dir.iterdir()):
-                if _skill_dir.is_dir() and (_skill_dir / "SKILL.md").exists():
-                    self.commands.append(f"/skill {_skill_dir.name}")
+        # Add /skill <name> completions using the shared skill discovery backend.
+        from ayder_cli.tools.builtins.skill import discover_skills
+
+        try:
+            for _skill in discover_skills(rt.project_ctx):
+                self.commands.append(f"/skill {_skill.name}")
+        except (AttributeError, TypeError):
+            pass
 
         self._activity_timer: Timer | None = None
 
@@ -517,9 +522,22 @@ class AyderApp(App):
         ]
         block = SKILL_INJECTION_TEMPLATE.format(
             skill_name=skill_name, skill_content=skill_content
-        )
+        ).lstrip()
         self.messages.append({"role": "system", "content": block})
         self._active_skill = skill_name
+
+    def unload_skill(self) -> str | None:
+        """Remove the active skill system message and return its prior name."""
+        previous = self._active_skill
+        self.messages[:] = [
+            m for m in self.messages
+            if not (
+                m.get("role") == "system"
+                and m.get("content", "").startswith("### ACTIVE SKILL:")
+            )
+        ]
+        self._active_skill = None
+        return previous
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel.
@@ -735,11 +753,14 @@ class AyderApp(App):
             req = await self._requests.get()
             try:
                 if req.prepare is not None:
-                    req.prepare()                      # quiescent: no turn running here
+                    maybe_awaitable = req.prepare()    # quiescent: no turn running here
+                    if hasattr(maybe_awaitable, "__await__"):
+                        await cast(Awaitable[None], maybe_awaitable)
             except Exception as e:
                 self._report_turn_error(e)
                 continue
-            if not req.run_loop:
+            should_run = req.run_loop() if callable(req.run_loop) else req.run_loop
+            if not should_run:
                 continue
             self._cancel_event = asyncio.Event()
             callbacks = getattr(self, "_callbacks", None)
@@ -761,8 +782,12 @@ class AyderApp(App):
                 self._run_task = None
                 self._after_turn_finished()
 
-    def request_turn(self, prepare: Callable[[], None] | None = None, *,
-                     run_loop: bool = True, no_tools: bool = False,
+    def request_turn(
+        self,
+        prepare: Callable[[], None | Awaitable[None]] | None = None,
+        *,
+                     run_loop: bool | Callable[[], bool] = True,
+                     no_tools: bool = False,
                      interrupt: bool = False) -> None:
         """Enqueue a unit of work for the serial turn consumer.
 
@@ -804,6 +829,87 @@ class AyderApp(App):
         except Exception as e:
             chat_view.add_system_message(f"Command error: {type(e).__name__}: {e}")
 
+    def _format_shell_context_message(self, command: str, result: str) -> str:
+        """Return the user message appended after a shell shortcut."""
+        return f"Shell command executed:\n$ {command}\n\nResult:\n{result}"
+
+    async def _prepare_shell_shortcut(self, command: str) -> bool:
+        """Execute a leading-! shell command before the LLM turn.
+
+        Returns True when a command result was appended and the LLM should run.
+        """
+        chat_view = self.query_one("#chat-view", ChatView)
+        arguments = {"command": command, "shell": "bash"}
+        call_id = f"shell-shortcut-{uuid.uuid4().hex}"
+        policy = ExecutionPolicy(self.chat_loop.config.permissions)
+
+        if policy.get_confirmation_requirement("bash").requires_confirmation:
+            confirm = await self._request_confirmation("bash", arguments)
+            if confirm is None or getattr(confirm, "action", None) != "approve":
+                chat_view.add_system_message("Shell command skipped.")
+                return False
+            pre_approved = True
+        else:
+            pre_approved = False
+
+        self._callbacks.on_tool_start(call_id, "bash", arguments)
+        try:
+            exec_result = await asyncio.to_thread(
+                policy.execute_with_registry,
+                ToolRequest("bash", arguments),
+                self.registry,
+                pre_approved=pre_approved,
+            )
+        except Exception as exc:
+            result = f"Error executing shell command: {exc}"
+            chat_view.add_system_message(result)
+            self._callbacks.on_tool_complete(call_id, result)
+            self._callbacks.on_tools_cleanup()
+            return False
+
+        if not exec_result.success:
+            error = str(exec_result.error)
+            chat_view.add_system_message(error)
+            self._callbacks.on_tool_complete(call_id, error)
+            self._callbacks.on_tools_cleanup()
+            return False
+
+        result = str(exec_result.result or "")
+        self._callbacks.on_tool_complete(call_id, result)
+        self._callbacks.on_tools_cleanup()
+
+        if self._agent_registry:
+            self._agent_registry.reset_settled()
+        self.messages.append(
+            {
+                "role": "user",
+                "content": self._format_shell_context_message(command, result),
+            }
+        )
+        return True
+
+    def _handle_shell_shortcut(self, text: str) -> None:
+        """Handle leading ! shell shortcuts."""
+        command = text[1:].strip()
+        chat_view = self.query_one("#chat-view", ChatView)
+        if not command:
+            chat_view.add_system_message("Shell command is empty.")
+            return
+
+        chat_view.add_user_message(text)
+        self.query_one("#thinking-panel", ThinkingPanel).clear()
+
+        should_run = False
+
+        async def _prepare() -> None:
+            nonlocal should_run
+            should_run = await self._prepare_shell_shortcut(command)
+
+        def _run_loop() -> bool:
+            return should_run
+
+        self._requests.put_nowait(TurnRequest(_prepare, run_loop=_run_loop))
+
     @on(CLIInputBar.Submitted)
     def handle_input_submitted(self, event: CLIInputBar.Submitted) -> None:
         """Handle user input submission.
@@ -815,6 +921,9 @@ class AyderApp(App):
         user_input = event.value
         if user_input.startswith("/"):
             self._handle_command(user_input)
+            return
+        if user_input.startswith("!"):
+            self._handle_shell_shortcut(user_input)
             return
         try:
             self.query_one("#chat-view", ChatView).add_user_message(user_input)  # echo now

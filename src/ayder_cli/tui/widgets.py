@@ -502,6 +502,7 @@ class _SubmitTextArea(TextArea):
             super().__init__()
 
     _PASTE_THRESHOLD = 3
+    _FILE_PICKER_LIMIT = 8
 
     def __init__(self, commands: list[str] | None = None, **kwargs):
         super().__init__(soft_wrap=True, show_line_numbers=False, **kwargs)
@@ -509,6 +510,11 @@ class _SubmitTextArea(TextArea):
         self._tab_cycle_matches: list[str] = []
         self._tab_cycle_index = -1
         self._placeholder_widget: Static | None = None
+        self._file_picker_widget: Static | None = None
+        self._file_picker_suggestions: list[str] = []
+        self._file_picker_index = 0
+        self._file_picker_token: tuple[int, int, str] | None = None
+        self._file_picker_root = Path.cwd().resolve()
         # Ordered (marker, content) pairs for collapsed pastes. Markers are
         # shown inline in the textarea; on submit they are expanded back to
         # their full content in place, preserving any surrounding typed text.
@@ -519,10 +525,14 @@ class _SubmitTextArea(TextArea):
             self.PLACEHOLDER, id="input-placeholder"
         )
         self.mount(self._placeholder_widget)
+        self._file_picker_widget = Static("", id="file-picker")
+        self._file_picker_widget.display = False
+        self.mount(self._file_picker_widget)
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if self._placeholder_widget:
             self._placeholder_widget.display = not bool(self.text)
+        self._refresh_file_picker()
 
     def _should_collapse_paste(self, text: str) -> bool:
         """Return True if pasted text should be collapsed."""
@@ -576,6 +586,158 @@ class _SubmitTextArea(TextArea):
         self._tab_cycle_matches = []
         self._tab_cycle_index = -1
 
+    def _offset_from_location(self, location: tuple[int, int]) -> int:
+        """Return the character offset for a TextArea row/column location."""
+        row, col = location
+        lines = self.text.split("\n")
+        offset = 0
+        for line in lines[:row]:
+            offset += len(line) + 1
+        if 0 <= row < len(lines):
+            offset += min(col, len(lines[row]))
+        return offset
+
+    def _location_from_offset(self, offset: int) -> tuple[int, int]:
+        """Return a TextArea row/column location for a character offset."""
+        remaining = max(0, offset)
+        lines = self.text.split("\n")
+        for row, line in enumerate(lines):
+            if remaining <= len(line):
+                return row, remaining
+            remaining -= len(line) + 1
+        return len(lines) - 1, len(lines[-1]) if lines else 0
+
+    @staticmethod
+    def _is_file_token_boundary(char: str) -> bool:
+        """Return True when ``char`` can delimit an @file token."""
+        return char.isspace()
+
+    def _file_token_at_cursor(self) -> tuple[int, int, str] | None:
+        """Return (start, end, token_without_at) for an active @ token."""
+        cursor = self._offset_from_location(self.cursor_location)
+        before = self.text[:cursor]
+        at_index = before.rfind("@")
+        if at_index == -1:
+            return None
+        if at_index > 0 and not self._is_file_token_boundary(before[at_index - 1]):
+            return None
+        token = before[at_index + 1 :]
+        if any(ch.isspace() for ch in token):
+            return None
+        return at_index, cursor, token
+
+    def _path_within_picker_root(self, path: Path) -> bool:
+        """Return True when ``path`` resolves under the project root."""
+        try:
+            path.resolve().relative_to(self._file_picker_root)
+            return True
+        except ValueError:
+            return False
+
+    def _file_picker_entries(self, token: str) -> list[str]:
+        """Return directory-first relative suggestions for an @ token."""
+        normalized = token.replace("\\", "/")
+        if normalized.startswith("/") or ".." in Path(normalized).parts:
+            return []
+
+        parent_text, _, filter_text = normalized.rpartition("/")
+        if normalized.endswith("/"):
+            parent_text = normalized.rstrip("/")
+            filter_text = ""
+
+        parent = self._file_picker_root / parent_text if parent_text else self._file_picker_root
+        if not self._path_within_picker_root(parent) or not parent.is_dir():
+            return []
+
+        include_hidden = filter_text.startswith(".")
+        entries: list[tuple[bool, str]] = []
+        try:
+            children = list(parent.iterdir())
+        except OSError:
+            return []
+
+        for child in children:
+            name = child.name
+            if name.startswith(".") and not include_hidden:
+                continue
+            if filter_text and not name.startswith(filter_text):
+                continue
+            if not self._path_within_picker_root(child):
+                continue
+            rel = child.relative_to(self._file_picker_root).as_posix()
+            is_dir = child.is_dir()
+            entries.append((is_dir, f"{rel}/" if is_dir else rel))
+
+        entries.sort(key=lambda item: (not item[0], item[1].casefold()))
+        return [entry for _is_dir, entry in entries[: self._FILE_PICKER_LIMIT]]
+
+    def _render_file_picker(self) -> None:
+        """Render the current picker suggestions."""
+        if self._file_picker_widget is None:
+            return
+        if not self._file_picker_suggestions:
+            self._file_picker_widget.display = False
+            self._file_picker_widget.update("")
+            return
+
+        lines = []
+        for idx, suggestion in enumerate(self._file_picker_suggestions):
+            marker = ">" if idx == self._file_picker_index else " "
+            lines.append(f"{marker} @{suggestion}")
+        self._file_picker_widget.update("\n".join(lines))
+        self._file_picker_widget.display = True
+
+    def _close_file_picker(self) -> None:
+        """Close and reset the @ file picker."""
+        self._file_picker_suggestions = []
+        self._file_picker_index = 0
+        self._file_picker_token = None
+        self._render_file_picker()
+
+    def _refresh_file_picker(self) -> None:
+        """Refresh @ file suggestions based on the current cursor token."""
+        token = self._file_token_at_cursor()
+        if token is None:
+            self._close_file_picker()
+            return
+        suggestions = self._file_picker_entries(token[2])
+        if not suggestions:
+            self._close_file_picker()
+            return
+        self._file_picker_token = token
+        self._file_picker_suggestions = suggestions
+        self._file_picker_index = min(self._file_picker_index, len(suggestions) - 1)
+        self._render_file_picker()
+
+    def _file_picker_active(self) -> bool:
+        """Return True when @ suggestions are visible."""
+        return bool(self._file_picker_suggestions and self._file_picker_token)
+
+    def _move_file_picker_selection(self, direction: int) -> None:
+        """Move the selected @ suggestion."""
+        if not self._file_picker_suggestions:
+            return
+        self._file_picker_index = (
+            self._file_picker_index + direction
+        ) % len(self._file_picker_suggestions)
+        self._render_file_picker()
+
+    def _accept_file_picker_selection(self) -> None:
+        """Insert the selected @ path; directories keep the picker open."""
+        if not self._file_picker_active():
+            return
+        selected = self._file_picker_suggestions[self._file_picker_index]
+        token = self._file_picker_token
+        if token is None:
+            return
+        start, end, _token_text = token
+        self.delete(self._location_from_offset(start), self._location_from_offset(end))
+        self.insert(f"@{selected}")
+        if selected.endswith("/"):
+            self._refresh_file_picker()
+        else:
+            self._close_file_picker()
+
     def _next_tab_completion(self, current: str) -> str | None:
         """Return the next slash-command completion for current input."""
         if not current.startswith("/"):
@@ -596,6 +758,28 @@ class _SubmitTextArea(TextArea):
         return matches[self._tab_cycle_index]
 
     def _on_key(self, event) -> None:  # type: ignore[override]
+        if self._file_picker_active():
+            if event.key == "escape":
+                event.prevent_default()
+                event.stop()
+                self._close_file_picker()
+                return
+            if event.key == "up":
+                event.prevent_default()
+                event.stop()
+                self._move_file_picker_selection(-1)
+                return
+            if event.key == "down":
+                event.prevent_default()
+                event.stop()
+                self._move_file_picker_selection(1)
+                return
+            if event.key in ("enter", "tab"):
+                event.prevent_default()
+                event.stop()
+                self._accept_file_picker_selection()
+                return
+
         if event.key == "enter":
             event.prevent_default()
             event.stop()

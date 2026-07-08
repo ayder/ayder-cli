@@ -344,7 +344,7 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/tasks` | Browse and implement tasks from `.ayder/tasks/` |
 | `/implement [id]` | Interactive task picker, or implement by ID (e.g., `/implement 1`) |
 | `/notes` | Browse and edit markdown notes |
-| `/skill` | Activate a domain skill from `.ayder/skills/` |
+| `/skill` | Activate a domain skill from `.ayder/skills/` via the shared `skill` tool backend |
 | `/verbose` | Toggle verbose mode |
 | `/logging` | Set log level for current session (NONE, ERROR, WARNING, INFO, DEBUG) |
 | `/compact` | Summarize conversation, save a context snapshot, clear, and reload |
@@ -359,6 +359,9 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/agent cancel <name>` | Cancel a running agent |
 
 ### Logging
+
+The LLM can also call `skill(action="list" | "load" | "unload")`
+automatically when a request clearly matches an available project skill.
 
 - Default: when logging is enabled, logs go to `.ayder/log/ayder.log` (not shown on screen).
 - TUI `/logging` changes are session-only and do not modify `config.toml`.

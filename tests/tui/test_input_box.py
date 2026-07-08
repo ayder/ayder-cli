@@ -112,3 +112,22 @@ async def test_down_at_last_char_navigates_history_back_to_draft():
         await pilot.press("down")  # -> back to the in-progress draft
         await pilot.pause()
         assert ta.text == "draft"
+
+
+@pytest.mark.anyio
+async def test_at_file_picker_accepts_directory_without_submitting():
+    app = AyderApp(model="test")
+    submitted = []
+    async with app.run_test() as pilot:
+        app.handle_input_submitted = lambda event: submitted.append(event.value)  # type: ignore[method-assign]
+        ta = app.query_one("#chat-input", _SubmitTextArea)
+        ta.focus()
+        await pilot.pause()
+        await pilot.press("@", "s")
+        await pilot.pause()
+        assert ta._file_picker_suggestions == ["src/"]
+        await pilot.press("enter")
+        await pilot.pause()
+        assert ta.text == "@src/"
+        assert ta._file_picker_active()
+        assert submitted == []

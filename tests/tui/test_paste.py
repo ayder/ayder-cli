@@ -129,3 +129,69 @@ class TestMarkerAtCursorEnd:
     def test_returns_none_when_no_pastes_stored(self):
         widget = _SubmitTextArea()
         assert widget._marker_at_cursor_end("[pasted: 5 lines]") is None
+
+
+class TestFilePickerHelpers:
+    def test_file_token_at_cursor_parses_nested_token(self):
+        widget = _SubmitTextArea()
+        widget.text = "open @src/ayd"
+        widget.move_cursor((0, len(widget.text)))
+
+        assert widget._file_token_at_cursor() == (5, len(widget.text), "src/ayd")
+
+    def test_file_token_requires_boundary_before_at(self):
+        widget = _SubmitTextArea()
+        widget.text = "email@example"
+        widget.move_cursor((0, len(widget.text)))
+
+        assert widget._file_token_at_cursor() is None
+
+    def test_entries_sort_directories_before_files(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "script.py").write_text("", encoding="utf-8")
+        (tmp_path / "sample.txt").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+
+        assert widget._file_picker_entries("s") == [
+            "src/",
+            "sample.txt",
+            "script.py",
+        ]
+
+    def test_entries_hide_dotfiles_until_dot_is_typed(self, tmp_path):
+        (tmp_path / ".env").write_text("", encoding="utf-8")
+        (tmp_path / "app.py").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+
+        assert ".env" not in widget._file_picker_entries("")
+        assert widget._file_picker_entries(".") == [".env"]
+
+    def test_accept_directory_keeps_picker_open(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.py").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+        widget.text = "@s"
+        widget.move_cursor((0, 2))
+        widget._refresh_file_picker()
+
+        widget._accept_file_picker_selection()
+
+        assert widget.text == "@src/"
+        assert widget._file_picker_active()
+        assert widget._file_picker_suggestions == ["src/main.py"]
+
+    def test_accept_file_inserts_relative_reference(self, tmp_path):
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+        widget.text = "see @m"
+        widget.move_cursor((0, len(widget.text)))
+        widget._refresh_file_picker()
+
+        widget._accept_file_picker_selection()
+
+        assert widget.text == "see @main.py"
+        assert not widget._file_picker_active()
