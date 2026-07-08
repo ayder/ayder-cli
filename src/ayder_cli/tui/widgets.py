@@ -1,6 +1,7 @@
 """TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar, AgentPanel."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from textual.app import ComposeResult
@@ -12,7 +13,7 @@ from textual.suggester import SuggestFromList
 from rich.text import Text
 from rich.markdown import Markdown
 from rich.spinner import Spinner
-from pathlib import Path
+from rich.style import Style
 
 from ayder_cli.parser import content_processor
 from ayder_cli.tui.types import MessageType
@@ -503,6 +504,7 @@ class _SubmitTextArea(TextArea):
 
     _PASTE_THRESHOLD = 3
     _FILE_PICKER_LIMIT = 8
+    _FILE_REFERENCE_STYLE = Style(color="cyan", bold=True, underline=True)
 
     def __init__(self, commands: list[str] | None = None, **kwargs):
         super().__init__(soft_wrap=True, show_line_numbers=False, **kwargs)
@@ -625,6 +627,47 @@ class _SubmitTextArea(TextArea):
         if any(ch.isspace() for ch in token):
             return None
         return at_index, cursor, token
+
+    def _file_reference_path(self, token: str) -> Path | None:
+        """Return an existing project path for a complete @ token."""
+        normalized = token.replace("\\", "/")
+        if not normalized or normalized.startswith("/"):
+            return None
+        if ".." in Path(normalized).parts:
+            return None
+
+        path = self._file_picker_root / normalized
+        if not self._path_within_picker_root(path) or not path.exists():
+            return None
+        return path
+
+    def _file_reference_spans(self, line: str) -> list[tuple[int, int]]:
+        """Return @path spans that resolve to existing project entries."""
+        spans: list[tuple[int, int]] = []
+        index = 0
+        while True:
+            at_index = line.find("@", index)
+            if at_index == -1:
+                return spans
+            if at_index > 0 and not self._is_file_token_boundary(line[at_index - 1]):
+                index = at_index + 1
+                continue
+
+            end = at_index + 1
+            while end < len(line) and not line[end].isspace():
+                end += 1
+
+            token = line[at_index + 1 : end]
+            if self._file_reference_path(token) is not None:
+                spans.append((at_index, end))
+            index = end
+
+    def get_line(self, line_index: int) -> Text:
+        """Retrieve a line and highlight complete @file references."""
+        line = super().get_line(line_index)
+        for start, end in self._file_reference_spans(line.plain):
+            line.stylize(self._FILE_REFERENCE_STYLE, start, end)
+        return line
 
     def _path_within_picker_root(self, path: Path) -> bool:
         """Return True when ``path`` resolves under the project root."""

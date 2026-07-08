@@ -839,6 +839,10 @@ class AyderApp(App):
         """Return the user message appended after a shell shortcut."""
         return f"Shell command executed:\n$ {command}\n\nResult:\n{result}"
 
+    def _format_shell_display_message(self, command: str, result: str) -> str:
+        """Return the visible TUI message for a shell shortcut."""
+        return f"Shell command output:\n$ {command}\n\n{result}"
+
     async def _prepare_shell_shortcut(self, command: str) -> bool:
         """Execute a leading-! shell command before the LLM turn.
 
@@ -883,6 +887,7 @@ class AyderApp(App):
         result = str(exec_result.result or "")
         self._callbacks.on_tool_complete(call_id, result)
         self._callbacks.on_tools_cleanup()
+        chat_view.add_system_message(self._format_shell_display_message(command, result))
 
         if self._agent_registry:
             self._agent_registry.reset_settled()

@@ -146,6 +146,33 @@ class TestFilePickerHelpers:
 
         assert widget._file_token_at_cursor() is None
 
+    def test_file_reference_spans_require_existing_path(self, tmp_path):
+        (tmp_path / "README.md").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+
+        assert widget._file_reference_spans("open @README.md now") == [(5, 15)]
+        assert widget._file_reference_spans("open @missing.py now") == []
+
+    def test_file_reference_spans_do_not_match_email_addresses(self, tmp_path):
+        (tmp_path / "example").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+
+        assert widget._file_reference_spans("email me@example") == []
+
+    def test_get_line_highlights_existing_file_reference(self, tmp_path):
+        (tmp_path / "README.md").write_text("", encoding="utf-8")
+        widget = _SubmitTextArea()
+        widget._file_picker_root = tmp_path
+        widget.text = "open @README.md"
+
+        line = widget.get_line(0)
+
+        assert [(span.start, span.end, span.style) for span in line.spans] == [
+            (5, 15, widget._FILE_REFERENCE_STYLE)
+        ]
+
     def test_entries_sort_directories_before_files(self, tmp_path):
         (tmp_path / "src").mkdir()
         (tmp_path / "script.py").write_text("", encoding="utf-8")

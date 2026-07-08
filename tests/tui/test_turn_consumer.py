@@ -209,6 +209,9 @@ async def test_shell_shortcut_executes_bash_and_appends_before_llm(monkeypatch):
         "bash", {"command": "echo hi", "shell": "bash"}
     )
     assert app._test_chat.add_user_message.call_args.args == ("!echo hi",)
+    app._test_chat.add_system_message.assert_called_once_with(
+        "Shell command output:\n$ echo hi\n\nExit Code: 0\nSTDOUT:\nhi\n"
+    )
     assert app.messages == [
         {
             "role": "user",
