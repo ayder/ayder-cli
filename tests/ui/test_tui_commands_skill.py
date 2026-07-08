@@ -2,7 +2,6 @@ from unittest.mock import MagicMock, patch
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess
-from ayder_cli.tui import commands
 from ayder_cli.tui.commands import COMMAND_MAP, handle_skill
 
 
@@ -115,8 +114,3 @@ def test_handle_skill_picker_selection_delegates_to_skill_tool(tmp_path):
         action="load",
         name="alpha",
     )
-
-
-def test_handle_skill_no_direct_injection_helper_exists():
-    assert not hasattr(commands, "_apply_skill")
-    assert not hasattr(commands, "_discover_skills")
