@@ -2,7 +2,7 @@ import logging
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +319,10 @@ class Config(BaseModel):
     max_history_messages: int = Field(default=0)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
+    # Ollama thinking mode. Defaults on because most local models in the
+    # primary path support it; set ``think = false`` in an [llm.*] profile for
+    # models that do not. Ollama also accepts "low", "medium", and "high".
+    think: bool | Literal["low", "medium", "high"] | None = Field(default=True)
     stop_sequences: list[str] = Field(default_factory=list)
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
@@ -458,6 +462,25 @@ class Config(BaseModel):
         if v < 0:
             raise ValueError("max_history_messages must be non-negative (0 = unlimited)")
         return v
+
+    @field_validator("think", mode="before")
+    @classmethod
+    def validate_think(cls, v: Any) -> bool | Literal["low", "medium", "high"] | None:
+        if v is None or isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            normalized = v.strip().lower()
+            if normalized in {"true", "yes", "on", "1"}:
+                return True
+            if normalized in {"false", "no", "off", "0"}:
+                return False
+            if normalized == "low":
+                return "low"
+            if normalized == "medium":
+                return "medium"
+            if normalized == "high":
+                return "high"
+        raise ValueError("think must be true, false, low, medium, high, or null")
 
     @field_validator("agent_timeout")
     @classmethod

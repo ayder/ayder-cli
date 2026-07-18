@@ -1,7 +1,7 @@
 """Ollama provider routed through per-family chat drivers."""
 
 import json
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from loguru import logger
 from ollama import AsyncClient
@@ -18,6 +18,8 @@ from ayder_cli.providers.impl.ollama_drivers._errors import (
 from ayder_cli.providers.impl.ollama_drivers.base import ChatDriver, DriverMode
 from ayder_cli.providers.impl.ollama_drivers.registry import DriverRegistry
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
+
+ThinkOption = bool | Literal["low", "medium", "high"] | None
 
 
 class OllamaProvider(AIProvider):
@@ -116,6 +118,50 @@ class OllamaProvider(AIProvider):
             ):
                 yield chunk
 
+    def _configured_think(self) -> ThinkOption:
+        """Return the configured Ollama think option.
+
+        ``Config`` defaults this to True. Tests often pass loose mocks without a
+        real ``think`` field; those should behave like the real default.
+        """
+        value = getattr(self.config, "think", True)
+        if value is None or isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "yes", "on", "1"}:
+                return True
+            if normalized in {"false", "no", "off", "0"}:
+                return False
+            if normalized == "low":
+                return "low"
+            if normalized == "medium":
+                return "medium"
+            if normalized == "high":
+                return "high"
+        return True
+
+    @staticmethod
+    def _is_unsupported_thinking_error(exc: BaseException) -> bool:
+        """Return True when Ollama rejected the requested thinking mode."""
+        message = str(exc).lower()
+        if "think" not in message and "thinking" not in message:
+            return False
+        return any(
+            marker in message
+            for marker in (
+                "not support",
+                "unsupported",
+                "invalid",
+                "unknown field",
+                "unrecognized",
+            )
+        )
+
+    @staticmethod
+    def _chunk_committed(chunk: NormalizedStreamChunk) -> bool:
+        return bool(chunk.content or chunk.reasoning or chunk.tool_calls)
+
     async def _stream_with_driver(
         self,
         driver: ChatDriver,
@@ -146,6 +192,34 @@ class OllamaProvider(AIProvider):
         tools: list[dict[str, Any]] | None,
         options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        think = self._configured_think()
+        committed = False
+        try:
+            async for chunk in self._stream_native_once(
+                messages, model, tools, options, think
+            ):
+                if self._chunk_committed(chunk):
+                    committed = True
+                yield chunk
+        except BaseException as exc:
+            if committed or think is False or not self._is_unsupported_thinking_error(exc):
+                raise
+            logger.info(
+                f"Ollama model {model!r} rejected think={think!r}; retrying with think=False"
+            )
+            async for chunk in self._stream_native_once(
+                messages, model, tools, options, False
+            ):
+                yield chunk
+
+    async def _stream_native_once(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None,
+        think: ThinkOption,
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         # Let Ollama size the context window from the model itself (recent
         # versions do this automatically); do not force num_ctx.
         ollama_tools = self._convert_tools(tools) if tools else None
@@ -156,7 +230,7 @@ class OllamaProvider(AIProvider):
             messages=ollama_messages,
             tools=ollama_tools,
             keep_alive=-1,
-            think=True,
+            think=think,
             stream=True,
         )
 
@@ -203,6 +277,35 @@ class OllamaProvider(AIProvider):
         tools: list[dict[str, Any]] | None,
         options: dict[str, Any] | None,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
+        think = self._configured_think()
+        committed = False
+        try:
+            async for chunk in self._stream_in_content_once(
+                driver, messages, model, tools, options, think
+            ):
+                if self._chunk_committed(chunk):
+                    committed = True
+                yield chunk
+        except BaseException as exc:
+            if committed or think is False or not self._is_unsupported_thinking_error(exc):
+                raise
+            logger.info(
+                f"Ollama model {model!r} rejected think={think!r}; retrying with think=False"
+            )
+            async for chunk in self._stream_in_content_once(
+                driver, messages, model, tools, options, False
+            ):
+                yield chunk
+
+    async def _stream_in_content_once(
+        self,
+        driver: ChatDriver,
+        messages: list[dict[str, Any]],
+        model: str,
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None,
+        think: ThinkOption,
+    ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         # Let Ollama size the context window from the model itself; do not
         # force num_ctx.
         formatted_messages = driver.render_tools_into_messages(messages, tools or [])
@@ -213,7 +316,7 @@ class OllamaProvider(AIProvider):
             messages=ollama_messages,
             tools=None,
             keep_alive=-1,
-            think=True,
+            think=think,
             stream=True,
         )
 

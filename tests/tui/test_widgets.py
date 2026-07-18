@@ -2,7 +2,11 @@
 
 from unittest.mock import patch, MagicMock
 
-from ayder_cli.tui.widgets import ActivityBar, AgentPanel, ThinkingPanel
+from textual.content import Content
+from textual.markup import MarkupError
+from textual.widgets import Static
+
+from ayder_cli.tui.widgets import ActivityBar, AgentPanel, ThinkingPanel, _SubmitTextArea
 
 
 class TestActivityBarAgents:
@@ -84,6 +88,41 @@ class TestThinkingPanelStreaming:
 
     @patch.object(ThinkingPanel, "scroll_end")
     @patch.object(ThinkingPanel, "mount")
+    def test_malformed_markup_falls_back_to_plain_text(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        content = '[agent-result name="reviewer" run="3" status="completed"]'
+
+        try:
+            Content.from_markup(content)
+        except MarkupError:
+            pass
+        else:
+            raise AssertionError("test fixture should be malformed Textual markup")
+
+        panel.add_thinking(content)
+
+        assert panel._widget is not None
+        assert panel._widget.render().plain == content
+        mock_mount.assert_called_once()
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_streamed_malformed_markup_update_falls_back_to_plain_text(
+        self, mock_mount, _mock_scroll
+    ):
+        panel = ThinkingPanel()
+        malformed = '[calls call_agent: name="code-reviewer", task="Review src/auth.py"]'
+        expected = f"safe prefix {malformed}"
+
+        panel.add_thinking("safe prefix ")
+        panel.add_thinking(malformed)
+
+        assert panel._widget is not None
+        assert panel._widget.render().plain == expected
+        mock_mount.assert_called_once()
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
     def test_start_phase_inserts_separator_between_phases(self, mock_mount, _mock_scroll):
         panel = ThinkingPanel()
         panel.add_thinking("phase one")
@@ -109,6 +148,18 @@ class TestThinkingPanelStreaming:
         assert panel._buffer == ""
         assert panel._widget is None
         assert panel._needs_separator is False
+
+
+class TestFilePickerRendering:
+    def test_malformed_markup_path_falls_back_to_plain_text(self):
+        input_widget = _SubmitTextArea()
+        input_widget._file_picker_widget = Static("", id="file-picker")
+        malformed = '[agent-result name="reviewer" run="3" status="completed"]'
+        input_widget._file_picker_suggestions = [malformed]
+
+        input_widget._render_file_picker()
+
+        assert input_widget._file_picker_widget.render().plain == f"> @{malformed}"
 
 
 class TestAgentPanelDataModel:

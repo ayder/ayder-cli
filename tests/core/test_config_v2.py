@@ -160,6 +160,39 @@ def test_max_concurrent_agents_range_validator():
             Config(max_concurrent_agents=bad)
 
 
+def test_think_defaults_true():
+    assert Config().think is True
+
+
+def test_think_accepts_false_and_levels():
+    assert Config(think=False).think is False
+    assert Config(think="false").think is False
+    assert Config(think="low").think == "low"
+    assert Config(think="medium").think == "medium"
+    assert Config(think="high").think == "high"
+
+
+def test_think_rejects_invalid_value():
+    with pytest.raises(ValueError):
+        Config(think="extreme")
+
+
+def test_think_can_be_set_in_llm_profile():
+    cfg = Config(
+        **{
+            "app": {"provider": "ollama_local"},
+            "llm": {
+                "ollama_local": {
+                    "driver": "ollama",
+                    "model": "gemma:latest",
+                    "think": False,
+                }
+            },
+        }
+    )
+    assert cfg.think is False
+
+
 def test_provider_profile_infers_driver():
     # A [llm.<name>] profile with no explicit driver infers via _DRIVER_BY_PROVIDER.
     cfg = Config(**{"app": {"provider": "qwen"},

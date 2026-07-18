@@ -6,16 +6,17 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
-from textual.widgets import Static, Input, Label, TextArea
-from textual.reactive import reactive
 from textual.message import Message
+from textual.reactive import reactive
 from textual.suggester import SuggestFromList
+from textual.widgets import Static, Input, Label, TextArea
 from rich.text import Text
 from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.style import Style
 
 from ayder_cli.parser import content_processor
+from ayder_cli.tui.rendering import markup_or_plain
 from ayder_cli.tui.types import MessageType
 
 
@@ -337,11 +338,12 @@ class ThinkingPanel(Container):
         self._buffer += text
 
         content = self._buffer.strip()
+        renderable = markup_or_plain(content)
         if self._widget is None:
-            self._widget = Static(content, classes="thinking-content")
+            self._widget = Static(renderable, classes="thinking-content")
             self.mount(self._widget)
         else:
-            self._widget.update(content)
+            self._widget.update(renderable)
         self.scroll_end(animate=False)
 
     def clear(self) -> None:
@@ -720,14 +722,14 @@ class _SubmitTextArea(TextArea):
             return
         if not self._file_picker_suggestions:
             self._file_picker_widget.display = False
-            self._file_picker_widget.update("")
+            self._file_picker_widget.update(markup_or_plain(""))
             return
 
         lines = []
         for idx, suggestion in enumerate(self._file_picker_suggestions):
             marker = ">" if idx == self._file_picker_index else " "
             lines.append(f"{marker} @{suggestion}")
-        self._file_picker_widget.update("\n".join(lines))
+        self._file_picker_widget.update(markup_or_plain("\n".join(lines)))
         self._file_picker_widget.display = True
 
     def _close_file_picker(self) -> None:
@@ -1108,8 +1110,8 @@ class StatusBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         mode_str = "".join(sorted(self._permissions))
-        yield Label(f"model: {self.model}", id="model-label")
-        yield Label(f" | mode: {mode_str}", id="mode-label")
+        yield Label(markup_or_plain(f"model: {self.model}"), id="model-label")
+        yield Label(markup_or_plain(f" | mode: {mode_str}"), id="mode-label")
         yield Label(" | ctx: —", id="token-label")
         yield Label(" | files: 0", id="files-label")
         yield Label("", id="skill-label")
@@ -1126,7 +1128,7 @@ class StatusBar(Horizontal):
         """Update the displayed model."""
         self.model = model
         label = self.query_one("#model-label", Label)
-        label.update(f"model: {model}")
+        label.update(markup_or_plain(f"model: {model}"))
 
     def update_context_usage(self, used: int, total: int) -> None:
         """Update the live context-window usage: current tokens / window size.
@@ -1151,12 +1153,12 @@ class StatusBar(Horizontal):
         self._permissions = permissions
         mode_str = "".join(sorted(permissions))
         label = self.query_one("#mode-label", Label)
-        label.update(f" | mode: {mode_str}")
+        label.update(markup_or_plain(f" | mode: {mode_str}"))
 
     def set_skill(self, skill_name: str | None) -> None:
         """Update the active skill label."""
         label = self.query_one("#skill-label", Label)
-        label.update(f" | skill: {skill_name}" if skill_name else "")
+        label.update(markup_or_plain(f" | skill: {skill_name}" if skill_name else ""))
 
     @staticmethod
     def _render_badges(

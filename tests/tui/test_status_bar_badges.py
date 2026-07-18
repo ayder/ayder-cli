@@ -15,6 +15,14 @@ def test_compose_yields_plugin_badges_label():
     assert "plugin-badges" in ids
 
 
+def test_model_label_malformed_markup_falls_back_to_plain_text():
+    malformed = '[agent-result name="reviewer" run="3" status="completed"]'
+    bar = StatusBar(model=malformed)
+    labels = {getattr(w, "id", None): w for w in bar.compose()}
+
+    assert labels["model-label"].render().plain == f"model: {malformed}"
+
+
 def test_render_badges_empty_is_blank():
     rendered = StatusBar._render_badges({})
     assert rendered.plain == ""

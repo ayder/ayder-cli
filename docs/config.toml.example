@@ -48,11 +48,12 @@
 #      `export OLLAMA_API_KEY="<key>"`. The api_key config field is INERT on the
 #      native path, so a missing env var ⇒ 401 Unauthorized.
 #
-# NOTE on `think`: on the native `ollama` driver, ayder hardcodes thinking ON
-#       (think=True) and does NOT forward the configured level — so a
-#       `think = "high"` below documents intent, but the "low/medium/high"
-#       granularity is not applied. The `openai` driver sends no reasoning-effort
-#       parameter at all.
+# NOTE on `think`: on the native `ollama` driver, ayder defaults thinking ON
+#       (think = true) and forwards either a boolean or Ollama's "low",
+#       "medium", "high" levels. If a selected model rejects thinking mode,
+#       ayder retries that request once with think=false. Set `think = false`
+#       in an [llm.*] profile for known non-thinking models. The `openai`
+#       driver sends no reasoning-effort parameter at all.
 #
 # NOTE on tuning knobs — which actually take effect depends on the DRIVER. These
 #       agents run on the native `ollama` driver, which ignores most of them:
@@ -60,17 +61,16 @@
 #         • max_output_tokens — NOT sent on the ollama path (Ollama sizes
 #                               generation itself); honored only by the
 #                               openai-family drivers as max_tokens. Default 4096.
-#         • think             — hardcoded ON for ollama (level ignored); openai
-#                               sends none.
+#         • think             — sent on the ollama path (default true; accepts
+#                               false or "low"/"medium"/"high"); openai sends
+#                               none.
 #         • num_ctx           — on ollama it is provisional only (the real window
 #                               is auto-detected from /api/show); on the openai
 #                               path it sizes the context-manager budget.
 #                               Default 65536.
-#       The per-agent temperature / max_output_tokens / think values below are
-#       therefore largely INERT on this Ollama pipeline — they are kept to
-#       document intent and to carry over if you switch an agent to an `openai`
-#       profile. To actually tune these, use the `openai` driver — see
-#       [llm.openai] below.
+#       The per-agent temperature / max_output_tokens values below are largely
+#       INERT on this Ollama pipeline; per-agent `think` is applied when the
+#       agent uses the native ollama driver.
 # =============================================================================
 
 config_version = "2.0"
@@ -154,6 +154,7 @@ driver = "ollama"
 base_url = "http://localhost:11434"  # route :cloud models through the LOCAL daemon (auth via ~/.ollama/id_ed25519, one-time `ollama signin`)
 model = "deepseek-v4-pro:cloud"    # orchestrator default; per-agent `model` overrides this
 num_ctx = 131072
+think = true                       # default; set false for known non-thinking models
 # To hit ollama.com directly instead, swap the line above for:
 #   base_url = "https://ollama.com"   # no /v1; then `export OLLAMA_API_KEY=<key>` (the api_key field is inert on this path)
 
@@ -162,6 +163,7 @@ driver = "ollama"
 base_url = "http://localhost:11434"
 model = "qwen3.6:35b-a3b-coding-nvfp4"
 num_ctx = 32768                     # keep modest: local VRAM is the constraint
+think = true                        # default; set false if the selected model rejects thinking
 
 # Budget/throughput alternative — swap any cloud agent's `provider` to this, or
 # point a duplicate reviewer at it for cheap parallel passes.
