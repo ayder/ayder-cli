@@ -300,6 +300,38 @@ class TestGlobSemantics:
         result = search_codebase(project, "^def ", file_pattern="src/core.py")
         assert _file_headers(result) == ["src/core.py"]
 
+    def test_grep_include_precedes_excludes(self, project, monkeypatch):
+        """GNU grep >= 3.6 resolves --include/--exclude by position: a file
+        matching no glob is searched unless the FIRST such option is
+        --include. Emitting excludes first silently disables the include
+        filter on Linux (BSD grep is order-insensitive, so macOS hides it)."""
+        monkeypatch.setattr(
+            "ayder_cli.tools.builtins.search.shutil.which", lambda name: None
+        )
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+
+            class R:
+                returncode = 1
+                stdout = ""
+                stderr = ""
+
+            return R()
+
+        monkeypatch.setattr(
+            "ayder_cli.tools.builtins.search.subprocess.run", fake_run
+        )
+        search_codebase(project, "^def ", file_pattern="core.py")
+        cmd = captured["cmd"]
+        include_at = cmd.index("--include")
+        exclude_ats = [
+            i for i, arg in enumerate(cmd) if str(arg).startswith("--exclude")
+        ]
+        assert exclude_ats, "expected --exclude options in grep command"
+        assert include_at < min(exclude_ats)
+
     def test_grep_fallback_announces_basename_approximation(
         self, project, monkeypatch
     ):

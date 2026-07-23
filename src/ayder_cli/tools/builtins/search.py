@@ -221,10 +221,6 @@ def _search_with_grep(
     if context_lines > 0 and output_format == "full":
         cmd.extend(["-C", str(context_lines)])
 
-    for exclude_dir in _GREP_EXCLUDE_DIRS:
-        cmd.append(f"--exclude-dir={exclude_dir}")
-    cmd.append("--exclude=*.pyc")
-
     if file_pattern:
         # grep's --include has no path-glob support; degrade loudly, not silently.
         include_pattern = file_pattern.split("/")[-1]
@@ -234,7 +230,14 @@ def _search_with_grep(
                 f"to basename '{include_pattern}' (matches that name in any "
                 f"directory)."
             )
+        # --include must precede the --exclude options: GNU grep >= 3.6
+        # searches glob-unmatched files unless the FIRST filter option is an
+        # --include, so exclude-first ordering disables the filter entirely.
         cmd.extend(["--include", include_pattern])
+
+    for exclude_dir in _GREP_EXCLUDE_DIRS:
+        cmd.append(f"--exclude-dir={exclude_dir}")
+    cmd.append("--exclude=*.pyc")
 
     # -e keeps patterns that start with '-' from being parsed as flags.
     cmd.extend(["-e", pattern, str(abs_directory)])
