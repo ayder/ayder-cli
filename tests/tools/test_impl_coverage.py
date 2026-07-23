@@ -307,13 +307,15 @@ class TestFormatGrepResults:
         assert "Matches found: 0" in result
 
     def test_format_grep_results_max_results(self):
-        """Test grep results with max_results limit."""
+        """Hitting max_results reports the real total and says it truncated."""
         from ayder_cli.core.context import ProjectContext
         project = ProjectContext(".")
         raw_output = "file.txt:1:line1\nfile.txt:2:line2\nfile.txt:3:line3"
         result = impl._format_grep_results(raw_output, "line", 2, project)
 
-        assert "Matches found: 2" in result
+        assert "Matches found: 3 (showing first 2)" in result
+        assert "truncated" in result.lower()
+        assert "line3" not in result
 
 
 class TestGetProjectStructureEdgeCases:

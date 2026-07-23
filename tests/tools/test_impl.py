@@ -548,12 +548,16 @@ class TestFileEditorWriteExceptions:
 
     def test_write_file_general_exception(self, tmp_path, project_context):
         """Test general exception handling in write_file."""
-        with patch('builtins.open', side_effect=PermissionError("Permission denied")):
+        import os
+        os.chmod(tmp_path, 0o555)  # read-only dir: the atomic temp-file write fails
+        try:
             result = impl.file_editor(project_context, "test.txt", "write", content="content")
             assert isinstance(result, ToolError)
             assert result.category == "execution"
             assert "Error executing file_editor" in result
             assert "Permission denied" in result
+        finally:
+            os.chmod(tmp_path, 0o755)
 
 
 class TestFileEditorReplaceExceptions:
@@ -575,16 +579,20 @@ class TestFileEditorReplaceExceptions:
 class TestSearchCodebaseErrors:
     """Test error handling in search_codebase - Lines 239-240, 248, 252-253."""
 
-    def test_search_codebase_path_not_directory(self, tmp_path, project_context):
-        """Test error when path is not a directory - Lines 239-240."""
-        # Create a file
+    def test_search_codebase_accepts_file_target(self, tmp_path, project_context):
+        """A single file is a valid 'directory' scope."""
         test_file = tmp_path / "not_a_dir.txt"
         test_file.write_text("content")
 
-        result = impl.search_codebase(project_context, "pattern", directory="not_a_dir.txt")
+        result = impl.search_codebase(project_context, "content", directory="not_a_dir.txt")
+        assert isinstance(result, ToolSuccess)
+        assert "not_a_dir.txt" in result
+
+    def test_search_codebase_nonexistent_path(self, tmp_path, project_context):
+        """A path that exists neither as file nor directory is an error."""
+        result = impl.search_codebase(project_context, "pattern", directory="missing_dir")
         assert isinstance(result, ToolError)
-        assert "Error" in result
-        assert "is not a directory" in result
+        assert "does not exist" in result
 
     def test_search_codebase_value_error_security(self, tmp_path, project_context):
         """Test ValueError handling for security errors - Lines 252-253."""

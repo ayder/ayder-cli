@@ -102,10 +102,11 @@ class TestSearchCodebase:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         impl.search_codebase(search_context, "def", max_results=10)
-        
+
         cmd = mock_run.call_args[0][0]
         assert "--max-count" in cmd
-        assert "10" in cmd
+        # One extra match is requested so truncation can be detected and reported.
+        assert "11" in cmd
 
     @patch("ayder_cli.tools.builtins.search.shutil.which")
     @patch("ayder_cli.tools.builtins.search.subprocess.run")

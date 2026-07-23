@@ -2,11 +2,14 @@
 Filesystem tools for ayder-cli.
 """
 
+import contextlib
 import json
 import logging
 import os
 import re
 import difflib
+import tempfile
+import threading
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -15,6 +18,17 @@ logger = logging.getLogger(__name__)
 
 # Maximum file size allowed for read_file() to prevent DoS/memory exhaustion
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# The chat loop executes auto-approved tool calls concurrently (asyncio.to_thread),
+# so two edits targeting the same file race read-modify-write. Serialize per
+# resolved path; edits to different files still run in parallel.
+_PATH_LOCKS: dict[str, threading.Lock] = {}
+_PATH_LOCKS_GUARD = threading.Lock()
+
+
+def _path_lock(abs_path) -> threading.Lock:
+    with _PATH_LOCKS_GUARD:
+        return _PATH_LOCKS.setdefault(str(abs_path), threading.Lock())
 
 # Default page size for read_file when no explicit range is given. Mirrors
 # Claude Code's Read tool — large enough for most source files in one shot,
@@ -188,9 +202,68 @@ def _finalize(
             )
         )
         return ToolSuccess(f"[DRY RUN] No changes written to {rel_path}.\n{diff}")
-    with open(abs_path, "w", encoding="utf-8") as f:
-        f.write(new_content)
+    # Atomic write: a crash mid-write must never leave a truncated target,
+    # and concurrent readers must see either the old or the new content.
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(abs_path.parent), prefix=f".{abs_path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        if abs_path.exists():
+            os.chmod(tmp_name, os.stat(abs_path).st_mode)
+        os.replace(tmp_name, str(abs_path))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
     return ToolSuccess(success_msg)
+
+
+_HINT_MIN_RATIO = 0.6
+_HINT_MAX_FILE_CHARS = 1_000_000
+_HINT_MAX_PREVIEW_CHARS = 300
+
+
+def _closest_match_hint(file_content: str, old_string: str) -> str:
+    """Locate the region most similar to a failed 'replace' target.
+
+    Returns a hint naming the line and a repr() of the region (so tabs,
+    trailing spaces, and other invisible mismatches become visible), or ''
+    when nothing is similar enough to be worth suggesting.
+    """
+    if len(file_content) > _HINT_MAX_FILE_CHARS:
+        return ""
+    lines = file_content.splitlines()
+    if not lines:
+        return ""
+    window_size = max(1, len(old_string.splitlines()))
+    matcher = difflib.SequenceMatcher(autojunk=False)
+    matcher.set_seq2(old_string)
+    best_ratio = 0.0
+    best_line = 0
+    best_window = ""
+    for i in range(max(1, len(lines) - window_size + 1)):
+        window = "\n".join(lines[i : i + window_size])
+        matcher.set_seq1(window)
+        if (
+            matcher.real_quick_ratio() <= best_ratio
+            or matcher.quick_ratio() <= best_ratio
+        ):
+            continue
+        ratio = matcher.ratio()
+        if ratio > best_ratio:
+            best_ratio, best_line, best_window = ratio, i + 1, window
+    if best_ratio < _HINT_MIN_RATIO:
+        return ""
+    preview = repr(best_window)
+    if len(preview) > _HINT_MAX_PREVIEW_CHARS:
+        preview = preview[:_HINT_MAX_PREVIEW_CHARS] + "…"
+    return (
+        f" Closest match at line {best_line} ({best_ratio:.0%} similar): "
+        f"{preview}. old_string must match the file byte-for-byte (repr shown: "
+        f"\\t = tab). Retry with the exact text, or dry_run=true to preview."
+    )
 
 
 def file_editor(
@@ -210,95 +283,99 @@ def file_editor(
         abs_path = project_ctx.validate_path(file_path)
         rel_path = project_ctx.to_relative(abs_path)
 
-        if operation == "write":
-            if content is None:
-                return ToolError("Error: 'content' parameter is required for 'write' operation.", "validation")
-            old_content = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
-            if not dry_run:
-                abs_path.parent.mkdir(parents=True, exist_ok=True)
-            return _finalize(
-                abs_path, rel_path, old_content, content,
-                f"Successfully wrote to {rel_path}", dry_run,
-            )
-
-        elif operation == "replace":
-            if old_string is None or new_string is None:
-                return ToolError("Error: 'old_string' and 'new_string' are required for 'replace' operation.", "validation")
-            if not abs_path.exists():
-                return ToolError(f"Error: File '{rel_path}' does not exist.")
-            with open(abs_path, "r", encoding="utf-8") as f:
-                file_content = f.read()
-            if regex:
-                try:
-                    pattern = re.compile(old_string)
-                except re.error as e:
-                    return ToolError(f"Invalid regex pattern: {e}", "validation")
-                count = sum(1 for _ in pattern.finditer(file_content))
-            else:
-                count = file_content.count(old_string)
-            if count == 0:
-                return ToolError(f"Error: 'old_string' not found in {rel_path}. No changes made.")
-            if count > 1 and not replace_all:
-                return ToolError(
-                    f"Error: 'old_string' is not unique (found {count} matches) in {rel_path}. "
-                    f"Pass replace_all=true to replace all occurrences, or add surrounding "
-                    f"context to make it unique. No changes made.",
-                    "validation",
+        with _path_lock(abs_path):
+            if operation == "write":
+                if content is None:
+                    return ToolError("Error: 'content' parameter is required for 'write' operation.", "validation")
+                old_content = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
+                if not dry_run:
+                    abs_path.parent.mkdir(parents=True, exist_ok=True)
+                return _finalize(
+                    abs_path, rel_path, old_content, content,
+                    f"Successfully wrote to {rel_path}", dry_run,
                 )
-            if regex:
-                new_content = pattern.sub(new_string, file_content, count=0 if replace_all else 1)
-            else:
-                new_content = (
-                    file_content.replace(old_string, new_string)
-                    if replace_all
-                    else file_content.replace(old_string, new_string, 1)
+
+            elif operation == "replace":
+                if old_string is None or new_string is None:
+                    return ToolError("Error: 'old_string' and 'new_string' are required for 'replace' operation.", "validation")
+                if not abs_path.exists():
+                    return ToolError(f"Error: File '{rel_path}' does not exist.")
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    file_content = f.read()
+                if regex:
+                    try:
+                        pattern = re.compile(old_string)
+                    except re.error as e:
+                        return ToolError(f"Invalid regex pattern: {e}", "validation")
+                    count = sum(1 for _ in pattern.finditer(file_content))
+                else:
+                    count = file_content.count(old_string)
+                if count == 0:
+                    hint = "" if regex else _closest_match_hint(file_content, old_string)
+                    return ToolError(
+                        f"Error: 'old_string' not found in {rel_path}. No changes made.{hint}"
+                    )
+                if count > 1 and not replace_all:
+                    return ToolError(
+                        f"Error: 'old_string' is not unique (found {count} matches) in {rel_path}. "
+                        f"Pass replace_all=true to replace all occurrences, or add surrounding "
+                        f"context to make it unique. No changes made.",
+                        "validation",
+                    )
+                if regex:
+                    new_content = pattern.sub(new_string, file_content, count=0 if replace_all else 1)
+                else:
+                    new_content = (
+                        file_content.replace(old_string, new_string)
+                        if replace_all
+                        else file_content.replace(old_string, new_string, 1)
+                    )
+                noun = "occurrence" if count == 1 else "occurrences"
+                return _finalize(
+                    abs_path, rel_path, file_content, new_content,
+                    f"Successfully replaced {count} {noun} in {rel_path}", dry_run,
                 )
-            noun = "occurrence" if count == 1 else "occurrences"
-            return _finalize(
-                abs_path, rel_path, file_content, new_content,
-                f"Successfully replaced {count} {noun} in {rel_path}", dry_run,
-            )
 
-        elif operation == "insert":
-            if line_number is None or content is None:
-                return ToolError("Error: 'line_number' and 'content' are required for 'insert' operation.", "validation")
-            if not abs_path.exists():
-                return ToolError(f"Error: File '{rel_path}' does not exist.")
-            with open(abs_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            if line_number < 1:
-                return ToolError("Error: line_number must be >= 1.", "validation")
-            old_content = "".join(lines)
-            idx = min(line_number - 1, len(lines))
-            ins = content
-            if ins and not ins.endswith("\n"):
-                ins += "\n"
-            new_content = "".join(lines[:idx] + [ins] + lines[idx:])
-            return _finalize(
-                abs_path, rel_path, old_content, new_content,
-                f"Successfully inserted content at line {line_number} in {rel_path}", dry_run,
-            )
+            elif operation == "insert":
+                if line_number is None or content is None:
+                    return ToolError("Error: 'line_number' and 'content' are required for 'insert' operation.", "validation")
+                if not abs_path.exists():
+                    return ToolError(f"Error: File '{rel_path}' does not exist.")
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                if line_number < 1:
+                    return ToolError("Error: line_number must be >= 1.", "validation")
+                old_content = "".join(lines)
+                idx = min(line_number - 1, len(lines))
+                ins = content
+                if ins and not ins.endswith("\n"):
+                    ins += "\n"
+                new_content = "".join(lines[:idx] + [ins] + lines[idx:])
+                return _finalize(
+                    abs_path, rel_path, old_content, new_content,
+                    f"Successfully inserted content at line {line_number} in {rel_path}", dry_run,
+                )
 
-        elif operation == "delete":
-            if line_number is None:
-                return ToolError("Error: 'line_number' is required for 'delete' operation.", "validation")
-            if not abs_path.exists():
-                return ToolError(f"Error: File '{rel_path}' does not exist.")
-            with open(abs_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            if line_number < 1 or line_number > len(lines):
-                return ToolError(f"Error: line_number {line_number} is out of range (1-{len(lines)}).", "validation")
-            old_content = "".join(lines)
-            deleted = lines[line_number - 1]
-            new_content = "".join(lines[: line_number - 1] + lines[line_number:])
-            preview = deleted.rstrip("\n")[:80]
-            return _finalize(
-                abs_path, rel_path, old_content, new_content,
-                f"Deleted line {line_number} from {rel_path}: '{preview}'", dry_run,
-            )
+            elif operation == "delete":
+                if line_number is None:
+                    return ToolError("Error: 'line_number' is required for 'delete' operation.", "validation")
+                if not abs_path.exists():
+                    return ToolError(f"Error: File '{rel_path}' does not exist.")
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                if line_number < 1 or line_number > len(lines):
+                    return ToolError(f"Error: line_number {line_number} is out of range (1-{len(lines)}).", "validation")
+                old_content = "".join(lines)
+                deleted = lines[line_number - 1]
+                new_content = "".join(lines[: line_number - 1] + lines[line_number:])
+                preview = deleted.rstrip("\n")[:80]
+                return _finalize(
+                    abs_path, rel_path, old_content, new_content,
+                    f"Deleted line {line_number} from {rel_path}: '{preview}'", dry_run,
+                )
 
-        else:
-            return ToolError(f"Error: Unknown operation '{operation}'", "validation")
+            else:
+                return ToolError(f"Error: Unknown operation '{operation}'", "validation")
 
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
