@@ -6,10 +6,11 @@ from importlib import import_module
 from pkgutil import iter_modules
 from typing import Any
 
-from loguru import logger
-
+from ayder_cli.log import get_logger
 from ayder_cli.providers.impl.ollama_drivers.base import ChatDriver
 from ayder_cli.providers.impl.ollama_drivers.matrix import RESOLUTION_MATRIX
+
+logger = get_logger("llm")
 
 _SKIP_MODULES: frozenset[str] = frozenset({"base", "registry", "matrix", "_errors"})
 

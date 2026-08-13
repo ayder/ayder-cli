@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from loguru import logger
-
+from ayder_cli.log import get_logger
 from ayder_cli.parser import content_processor
 from ayder_cli.providers.base import ToolCallDef
 from ayder_cli.providers.impl.ollama_drivers.base import ChatDriver, DriverMode
+
+logger = get_logger("llm")
 
 _XML_INSTRUCTION = """
 ### TOOL PROTOCOL:

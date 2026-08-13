@@ -3,9 +3,9 @@
 import json
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
-from loguru import logger
 from ollama import AsyncClient
 
+from ayder_cli.log import get_logger
 from ayder_cli.providers.base import (
     AIProvider,
     NormalizedStreamChunk,
@@ -18,6 +18,8 @@ from ayder_cli.providers.impl.ollama_drivers._errors import (
 from ayder_cli.providers.impl.ollama_drivers.base import ChatDriver, DriverMode
 from ayder_cli.providers.impl.ollama_drivers.registry import DriverRegistry
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
+
+logger = get_logger("llm")
 
 ThinkOption = bool | Literal["low", "medium", "high"] | None
 

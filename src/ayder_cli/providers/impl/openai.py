@@ -3,15 +3,17 @@ OpenAI Provider implementation.
 """
 
 from typing import Any, AsyncGenerator, Dict, List, Optional
-from loguru import logger
 from openai import AsyncOpenAI
 
 from ayder_cli.core.config import Config
+from ayder_cli.log import get_logger
 from ayder_cli.providers.base import (
     AIProvider,
     NormalizedStreamChunk,
     ToolCallDef,
 )
+
+logger = get_logger("llm")
 
 
 class OpenAIProvider(AIProvider):

@@ -10,7 +10,9 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
-from loguru import logger
+from ayder_cli.log import get_logger
+
+logger = get_logger("context")
 
 
 @dataclass
