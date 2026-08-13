@@ -48,8 +48,12 @@ DEFAULTS: Dict[str, Any] = {
     "logging": {
         "file_enabled": True,
         "file_path": ".ayder/log/ayder.log",
+        "error_path": ".ayder/log/errors.log",
+        "trace_enabled": False,
+        "trace_path": ".ayder/log/trace.jsonl",
         "rotation": "10 MB",
         "retention": "7 days",
+        "channels": {},
     },
     "max_background_processes": 5,
     "max_concurrent_agents": 5,
@@ -309,8 +313,12 @@ class Config(BaseModel):
     logging_level: str | None = Field(default=None)
     logging_file_enabled: bool = Field(default=True)
     logging_file_path: str = Field(default=".ayder/log/ayder.log")
+    logging_error_path: str = Field(default=".ayder/log/errors.log")
+    logging_trace_enabled: bool = Field(default=False)
+    logging_trace_path: str = Field(default=".ayder/log/trace.jsonl")
     logging_rotation: str = Field(default="10 MB")
     logging_retention: str = Field(default="7 days")
+    logging_channels: dict[str, str] = Field(default_factory=dict)
     max_background_processes: int = Field(default=5)
     max_output_tokens: int = Field(default=4096)
     # 0 = unlimited: let the context manager's token budget + compaction be the
@@ -506,16 +514,34 @@ class Config(BaseModel):
     @field_validator("logging_level")
     @classmethod
     def validate_logging_level(cls, v: str | None) -> str | None:
+        from ayder_cli.log import LOG_LEVELS
+
         if v is None:
             return None
         level = v.strip().upper()
         if not level:
             return None
-        if level not in {"NONE", "ERROR", "WARNING", "INFO", "DEBUG"}:
-            raise ValueError(
-                "logging_level must be one of NONE, ERROR, WARNING, INFO, DEBUG"
-            )
+        if level not in LOG_LEVELS:
+            raise ValueError(f"logging_level must be one of {', '.join(LOG_LEVELS)}")
         return level
+
+    @field_validator("logging_channels")
+    @classmethod
+    def validate_logging_channels(cls, v: dict[str, str]) -> dict[str, str]:
+        from ayder_cli.log import LOG_LEVELS, SELECTABLE_CHANNELS
+
+        for channel, level in v.items():
+            if channel not in SELECTABLE_CHANNELS:
+                raise ValueError(
+                    f"Unknown log channel {channel!r} in [logging.channels]. "
+                    f"Expected one of: {', '.join(SELECTABLE_CHANNELS)}"
+                )
+            if str(level).strip().upper() not in LOG_LEVELS:
+                raise ValueError(
+                    f"Invalid level {level!r} for channel {channel!r}. "
+                    f"Expected one of: {', '.join(LOG_LEVELS)}"
+                )
+        return {k: str(val).strip().upper() for k, val in v.items()}
 
 
 def load_config_for_provider(provider: str) -> Config:

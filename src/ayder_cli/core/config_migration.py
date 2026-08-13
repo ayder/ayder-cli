@@ -107,6 +107,16 @@ def render_v2_config(
     if isinstance(level, str) and level.strip():
         lines.append(f'level = {_toml_str(level)}')
 
+    lines.extend([
+        f'error_path = {_toml_str(str(logging_cfg.get("error_path", ".ayder/log/errors.log")))}',
+        f"trace_enabled = {_toml_bool(bool(logging_cfg.get('trace_enabled', False)))}",
+        f'trace_path = {_toml_str(str(logging_cfg.get("trace_path", ".ayder/log/trace.jsonl")))}',
+        "",
+        "[logging.channels]",
+    ])
+    for name, level_value in sorted((logging_cfg.get("channels") or {}).items()):
+        lines.append(f'{name} = {_toml_str(str(level_value))}')
+
     lines.extend(
         [
             "",

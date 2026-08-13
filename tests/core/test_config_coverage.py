@@ -133,10 +133,10 @@ class TestConfigValidationLoggingLevel:
 
     def test_logging_level_invalid_raises_error(self):
         with pytest.raises(ValidationError) as exc_info:
-            Config(logging_level="TRACE")
-        assert "logging_level must be one of NONE, ERROR, WARNING, INFO, DEBUG" in str(
-            exc_info.value
-        )
+            Config(logging_level="LOUD")
+        message = str(exc_info.value)
+        assert "logging_level must be one of" in message
+        assert "TRACE" in message, "the message must list the full current level set"
 
 
 class TestConfigValidationTemporal:
