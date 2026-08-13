@@ -7,7 +7,8 @@ import argparse
 import sys
 from pathlib import Path
 from ayder_cli.version import get_app_version
-from ayder_cli.logging_config import LOG_LEVELS, setup_logging
+from ayder_cli.log import LOG_LEVELS
+from ayder_cli.logging_config import LoggingSettings, setup_logging
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -123,6 +124,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Set the logging level for this session (e.g. DEBUG, INFO). Logs are written to .ayder/log/ayder.log",
     )
+    parser.add_argument(
+        "--log-channel", type=str, default=None, metavar="CHANNELS",
+        help="Comma-separated channels to log (llm,tool,agent,context,plugin,ui,"
+             "core,external). Omit for all. Never filters the error log.",
+    )
+    parser.add_argument(
+        "--trace", action="store_true",
+        help="Write structured events to .ayder/log/trace.jsonl (not a log level).",
+    )
 
     parser.add_argument(
         "--resume",
@@ -202,6 +212,49 @@ def _create_base_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_logging_settings(args, cfg) -> LoggingSettings:
+    """Resolve CLI args + config into frozen LoggingSettings. CLI wins."""
+    from ayder_cli.log import SELECTABLE_CHANNELS, level_no
+
+    level = getattr(args, "logging_level", None) or cfg.logging_level
+    if getattr(args, "verbose", False) and level is None:
+        level = "INFO"
+    level = level or "NONE"
+
+    channels = None
+    if getattr(args, "log_channel", None):
+        requested = [c.strip() for c in args.log_channel.split(",") if c.strip()]
+        unknown = [c for c in requested if c not in SELECTABLE_CHANNELS]
+        if unknown:
+            print(
+                f"Error: unknown log channel(s): {', '.join(unknown)}. "
+                f"Expected: {', '.join(SELECTABLE_CHANNELS)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        channels = frozenset(requested)
+
+    channel_levels: dict[str, int | None] = {}
+    for channel, name in (cfg.logging_channels or {}).items():
+        channel_levels[channel] = None if name == "NONE" else level_no(name)
+
+    verbose = bool(getattr(args, "verbose", False))
+    return LoggingSettings(
+        level=level,
+        channels=channels,
+        channel_levels=channel_levels,
+        trace_enabled=bool(getattr(args, "trace", False)) or cfg.logging_trace_enabled,
+        console=verbose,
+        console_stream=sys.stdout if verbose else None,
+        file_enabled=cfg.logging_file_enabled,
+        file_path=cfg.logging_file_path,
+        error_path=cfg.logging_error_path,
+        trace_path=cfg.logging_trace_path,
+        rotation=cfg.logging_rotation,
+        retention=cfg.logging_retention,
+    )
+
+
 def main():
     """Main entry point for the CLI."""
     from ayder_cli.cli_runner import (
@@ -247,6 +300,12 @@ def main():
             print(f"Error: Config file not found: {args.config}", file=sys.stderr)
             sys.exit(1)
         set_config_path(config_file)
+
+    from ayder_cli.core.config import load_config
+
+    cfg = load_config(notify_migration=True, output=print)
+    log_settings = build_logging_settings(args, cfg)
+    setup_logging(log_settings)
 
     # Handle plugin subcommands
     if args.subcommand == "install-plugin":
@@ -382,6 +441,7 @@ def main():
             agent_mode=sess.agent_mode,
             initial_messages=sess.messages,
             resume_session_id=sess.session_id,
+            log_settings=log_settings,
         )
         return
 
@@ -398,23 +458,6 @@ def main():
     # commands, and fetch docs unattended — imply write+execute+http.
     if args.agent:
         granted.update({"w", "x", "http"})
-
-    from ayder_cli.core.config import load_config
-
-    cfg = load_config(notify_migration=True, output=print)
-    
-    # --verbose only enables console output; the level comes from --logging-level
-    # (or config.logging_level). When --verbose is used with no level configured
-    # anywhere, default the console to INFO so it isn't empty.
-    effective_log_level = args.logging_level
-    if args.verbose and effective_log_level is None and cfg.logging_level is None:
-        effective_log_level = "INFO"
-
-    setup_logging(
-        cfg,
-        level_override=effective_log_level,
-        console_stream=sys.stdout if args.verbose else None,
-    )
 
     # --agent: warn early if the harness has nothing to orchestrate.
     if args.agent and not (isinstance(cfg.agents, dict) and cfg.agents):
@@ -496,6 +539,7 @@ def main():
             permissions=granted,
             agent_mode=args.agent,
             system_prompt_override=system_prompt_override,
+            log_settings=log_settings,
         )
         return
 

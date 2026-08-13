@@ -1,23 +1,41 @@
-"""Centralized Loguru configuration with stdlib logging interception."""
+"""Loguru sink configuration and stdlib-logging bridge."""
 
 from __future__ import annotations
 
+import inspect
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
 from loguru import logger
 
-from ayder_cli.core.config import Config
-
-LOG_LEVELS: tuple[str, ...] = ("NONE", "ERROR", "WARNING", "INFO", "DEBUG")
+from ayder_cli.log import LOG_LEVELS
 
 _configured = False
 _current_level = "NONE"
 
 
+@dataclass(frozen=True)
+class LoggingSettings:
+    """Fully resolved logging configuration. The only input to setup_logging."""
+
+    level: str = "NONE"
+    channels: frozenset[str] | None = None
+    channel_levels: dict[str, int | None] = field(default_factory=dict)
+    trace_enabled: bool = False
+    console: bool = False
+    console_stream: TextIO | None = None
+    file_enabled: bool = True
+    file_path: str = ".ayder/log/ayder.log"
+    error_path: str = ".ayder/log/errors.log"
+    trace_path: str = ".ayder/log/trace.jsonl"
+    rotation: str = "10 MB"
+    retention: str = "7 days"
+
+
 class _InterceptHandler(logging.Handler):
-    """Redirect standard logging records to Loguru."""
+    """Bridge stdlib logging records into loguru on the `external` channel."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -25,15 +43,14 @@ class _InterceptHandler(logging.Handler):
         except ValueError:
             level = record.levelno
 
-        frame = logging.currentframe()
-        depth = 2
-        while frame is not None and frame.f_code.co_filename == logging.__file__:
-            depth += 1
-            if frame.f_back is None:
-                break
+        frame, depth = inspect.currentframe(), 0
+        while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
             frame = frame.f_back
+            depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        logger.bind(channel="external", lib=record.name).opt(
+            depth=depth, exception=record.exc_info
+        ).log(level, record.getMessage())
 
 
 def _normalize_level(level: str | None) -> str:
@@ -59,44 +76,90 @@ def _add_sink_with_fallback(sink: Any, **kwargs: Any) -> None:
         logger.add(sink, enqueue=False, **kwargs)
 
 
-def setup_logging(
-    config: Config,
-    level_override: str | None = None,
-    *,
-    console_stream: TextIO | None = None,
-) -> str:
-    """Configure Loguru sinks and intercept stdlib logging."""
-    global _configured, _current_level
-
-    effective_level = _normalize_level(
-        level_override if level_override is not None else config.logging_level
+def _error_filter(record) -> bool:
+    """WARNING+ OR anything carrying an exception, at any level."""
+    return (
+        record["level"].no >= logger.level("WARNING").no
+        or record["exception"] is not None
     )
 
+
+def _main_filter(allowed: frozenset[str] | None,
+                 levels: dict[str, int | None],
+                 default_no: int):
+    """Event exclusion, then allowlist, then per-channel threshold."""
+
+    def _filter(record) -> bool:
+        if "evt" in record["extra"]:
+            return False
+        # NEVER index directly: a raw loguru record has an empty extra, and a
+        # KeyError here makes loguru drop the record and spew to stderr.
+        ch = record["extra"].get("channel", "external")
+        if allowed is not None and ch not in allowed:
+            return False
+        threshold = levels.get(ch, default_no)
+        if threshold is None:
+            return False
+        return record["level"].no >= threshold
+
+    return _filter
+
+
+def _ensure_parent(path: str) -> str:
+    p = Path(path).expanduser()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return str(p)
+
+
+def setup_logging(settings: LoggingSettings) -> str:
+    """Configure all sinks from fully-resolved settings. Returns effective level."""
+    global _configured, _current_level
+
+    effective_level = _normalize_level(settings.level)
     logger.remove()
 
-    if effective_level != "NONE":
-        if console_stream is not None:
+    if settings.file_enabled:
+        # ALWAYS added, before any level gate: the no-silent-failure guarantee.
+        _add_sink_with_fallback(
+            _ensure_parent(settings.error_path),
+            level=0,
+            filter=_error_filter,
+            rotation=settings.rotation,
+            retention=settings.retention,
+            backtrace=True,
+            diagnose=False,
+        )
+
+        if settings.trace_enabled:
             _add_sink_with_fallback(
-                console_stream,
-                level=effective_level,
+                _ensure_parent(settings.trace_path),
+                level=0,
+                serialize=True,
+                filter=lambda r: "evt" in r["extra"],
+                rotation=settings.rotation,
+                retention=settings.retention,
                 backtrace=False,
                 diagnose=False,
             )
-        if config.logging_file_enabled:
-            log_path = Path(config.logging_file_path).expanduser()
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if effective_level != "NONE":
+        default_no = logger.level(effective_level).no
+        main_filter = _main_filter(settings.channels, settings.channel_levels, default_no)
+
+        if settings.console and settings.console_stream is not None:
             _add_sink_with_fallback(
-                str(log_path),
-                level=effective_level,
-                rotation=config.logging_rotation,
-                retention=config.logging_retention,
-                backtrace=False,
-                diagnose=False,
+                settings.console_stream, level=0, filter=main_filter,
+                backtrace=False, diagnose=False,
+            )
+        if settings.file_enabled:
+            _add_sink_with_fallback(
+                _ensure_parent(settings.file_path), level=0, filter=main_filter,
+                rotation=settings.rotation, retention=settings.retention,
+                backtrace=False, diagnose=False,
             )
 
     logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
 
-    # Suppress noisy third-party loggers
     for logger_name in ("markdown_it", "httpcore", "httpx", "openai", "anthropic"):
         logging.getLogger(logger_name).setLevel(logging.INFO)
 

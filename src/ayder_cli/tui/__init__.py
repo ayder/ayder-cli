@@ -35,6 +35,7 @@ def run_tui(
     system_prompt_override: str | None = None,
     initial_messages: list[dict] | None = None,
     resume_session_id: str | None = None,
+    log_settings=None,          # LoggingSettings | None
 ) -> None:
     """
     Run the CLI-style TUI application.
@@ -51,6 +52,9 @@ def run_tui(
             saved system prompt) to seed the app with.
         resume_session_id: When resuming, the id of the session being continued
             so save-on-exit updates the same file.
+        log_settings: Fully-resolved LoggingSettings from the CLI entry point.
+            When None, AyderApp resolves its own (e.g. when constructed directly
+            in tests).
     """
     import sys
     from ayder_cli.providers import ProviderUnavailableError
@@ -61,6 +65,7 @@ def run_tui(
             model=model, safe_mode=safe_mode, permissions=permissions,
             agent_mode=agent_mode, system_prompt_override=system_prompt_override,
             initial_messages=initial_messages, resume_session_id=resume_session_id,
+            log_settings=log_settings,
         )
     except ProviderUnavailableError as e:
         print(str(e), file=sys.stderr)

@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.core.config import list_provider_profiles, load_config_for_provider
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.logging_config import LOG_LEVELS, setup_logging
+from ayder_cli.log import LOG_LEVELS
+from ayder_cli.logging_config import setup_logging
 from ayder_cli.providers import provider_orchestrator, ProviderUnavailableError
 from ayder_cli.tools.builtins.skill import SkillInfo, discover_skills, skill
 from ayder_cli.tui.screens import (
@@ -318,6 +319,8 @@ def handle_verbose(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
 def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Open log-level picker and apply level for this session."""
+    from dataclasses import replace
+
     current_level = getattr(app, "_logging_level", "NONE")
 
     if args.strip():
@@ -327,7 +330,8 @@ def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
                 f"Invalid level: {selected}. Choose from: {', '.join(LOG_LEVELS)}"
             )
             return
-        effective = setup_logging(app.config, level_override=selected)
+        app._log_settings = replace(app._log_settings, level=selected)
+        effective = setup_logging(app._log_settings)
         app._logging_level = effective
         log_path = Path(app.config.logging_file_path).expanduser().absolute()
         chat_view.add_system_message(
@@ -339,7 +343,8 @@ def handle_logging(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     def on_logging_selected(selected: str | None) -> None:
         if selected:
-            effective = setup_logging(app.config, level_override=selected)
+            app._log_settings = replace(app._log_settings, level=selected)
+            effective = setup_logging(app._log_settings)
             app._logging_level = effective
             log_path = Path(app.config.logging_file_path).expanduser().absolute()
             chat_view.add_system_message(

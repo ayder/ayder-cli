@@ -324,6 +324,7 @@ class TestRunTuiPermissions:
                 system_prompt_override=None,
                 initial_messages=None,
                 resume_session_id=None,
+                log_settings=None,
             )
 
     def test_run_tui_default_permissions(self):
@@ -342,6 +343,7 @@ class TestRunTuiPermissions:
                 system_prompt_override=None,
                 initial_messages=None,
                 resume_session_id=None,
+                log_settings=None,
             )
 
 

@@ -218,6 +218,7 @@ class AyderApp(App):
         system_prompt_override: str | None = None,
         initial_messages: list[dict] | None = None,
         resume_session_id: str | None = None,
+        log_settings=None,
         **kwargs,
     ):
         """
@@ -231,6 +232,9 @@ class AyderApp(App):
                 AGENTIC orchestrator system prompt (ayder-cli --agent).
             system_prompt_override: When set, use this text as the system-prompt base
                 instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
+            log_settings: Fully-resolved LoggingSettings from the CLI entry point.
+                When None, resolved from config via build_logging_settings (e.g.
+                when AyderApp is constructed directly in tests).
         """
         super().__init__(**kwargs)
         # Register our ANSI palettes (ayder-dark / ayder-light) and paint the
@@ -262,6 +266,7 @@ class AyderApp(App):
         self.permissions = permissions or {"r"}
         self._system_prompt_override = system_prompt_override
         self.resume_session_id = resume_session_id
+        self._log_settings = log_settings
         self._resuming = bool(
             initial_messages and initial_messages[0].get("role") == "system"
         )
@@ -282,8 +287,18 @@ class AyderApp(App):
             system_prompt_override=system_prompt_override,
         )
         self.config = rt.config
+        if self._log_settings is None:
+            from ayder_cli.cli import build_logging_settings
+
+            class _Defaults:
+                logging_level = None
+                log_channel = None
+                trace = False
+                verbose = False
+
+            self._log_settings = build_logging_settings(_Defaults(), self.config)
         if isinstance(self.config, Config) and not is_logging_configured():
-            setup_logging(self.config)
+            setup_logging(self._log_settings)
         self._logging_level = get_effective_log_level()
 
         if isinstance(self.config, dict):

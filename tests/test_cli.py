@@ -806,9 +806,10 @@ class TestCreateParser:
         mock_setup_logging = self._run_main_for_logging(
             ["ayder", "--verbose", "--logging-level", "debug", "--tasks"], mock_config
         )
-        mock_setup_logging.assert_called_once_with(
-            mock_config, level_override="DEBUG", console_stream=sys.stdout
-        )
+        settings = mock_setup_logging.call_args[0][0]
+        assert settings.level == "DEBUG"
+        assert settings.console is True
+        assert settings.console_stream is sys.stdout
 
     def test_main_verbose_alone_defaults_to_info_console(self):
         """--verbose with no level anywhere defaults the console to INFO."""
@@ -816,9 +817,10 @@ class TestCreateParser:
         mock_setup_logging = self._run_main_for_logging(
             ["ayder", "--verbose", "--tasks"], mock_config
         )
-        mock_setup_logging.assert_called_once_with(
-            mock_config, level_override="INFO", console_stream=sys.stdout
-        )
+        settings = mock_setup_logging.call_args[0][0]
+        assert settings.level == "INFO"
+        assert settings.console is True
+        assert settings.console_stream is sys.stdout
 
     def test_main_verbose_respects_config_level(self):
         """--verbose with a config level shows that level on the console (no INFO fallback)."""
@@ -826,10 +828,11 @@ class TestCreateParser:
         mock_setup_logging = self._run_main_for_logging(
             ["ayder", "--verbose", "--tasks"], mock_config
         )
-        # level_override left None so setup_logging uses config.logging_level; console on.
-        mock_setup_logging.assert_called_once_with(
-            mock_config, level_override=None, console_stream=sys.stdout
-        )
+        # level left at the config's own value; console on.
+        settings = mock_setup_logging.call_args[0][0]
+        assert settings.level == "WARNING"
+        assert settings.console is True
+        assert settings.console_stream is sys.stdout
 
     def test_main_logging_level_without_verbose_is_file_only(self):
         """--logging-level without --verbose sets the level but keeps the console off."""
@@ -837,9 +840,10 @@ class TestCreateParser:
         mock_setup_logging = self._run_main_for_logging(
             ["ayder", "--logging-level", "debug", "--tasks"], mock_config
         )
-        mock_setup_logging.assert_called_once_with(
-            mock_config, level_override="DEBUG", console_stream=None
-        )
+        settings = mock_setup_logging.call_args[0][0]
+        assert settings.level == "DEBUG"
+        assert settings.console is False
+        assert settings.console_stream is None
 
 
 class TestMainResume:
@@ -853,15 +857,19 @@ class TestMainResume:
 
     def test_resume_conflicts_with_session_flags(self):
         from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
 
         with patch.object(sys, 'argv', ['ayder', '--resume', 'a1b2', '-w']), \
-             patch.object(sys.stdin, 'isatty', return_value=True):
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=Config()), \
+             patch('ayder_cli.cli.setup_logging'):
             with pytest.raises(SystemExit) as exc:
                 main()
         assert exc.value.code == 1
 
     def test_resume_loads_and_launches(self, tmp_path, monkeypatch):
         from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
         from ayder_cli.core.session import save_session
 
         monkeypatch.chdir(tmp_path)
@@ -873,6 +881,8 @@ class TestMainResume:
 
         with patch.object(sys, 'argv', ['ayder', '--resume', sid]), \
              patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=Config()), \
+             patch('ayder_cli.cli.setup_logging'), \
              patch('ayder_cli.tui.run_tui') as mock_run_tui:
             main()
 
@@ -884,10 +894,97 @@ class TestMainResume:
 
     def test_resume_bad_id_exits(self, tmp_path, monkeypatch):
         from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
 
         monkeypatch.chdir(tmp_path)
         with patch.object(sys, 'argv', ['ayder', '--resume', 'zzzz']), \
-             patch.object(sys.stdin, 'isatty', return_value=True):
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=Config()), \
+             patch('ayder_cli.cli.setup_logging'):
             with pytest.raises(SystemExit) as exc:
                 main()
         assert exc.value.code == 1
+
+
+class TestLoggingIsConfiguredEarly:
+    """Regression guard: setup_logging must run before every early return."""
+
+    @staticmethod
+    def _config(**overrides):
+        cfg = MagicMock()
+        cfg.logging_level = None
+        cfg.logging_channels = {}
+        cfg.logging_trace_enabled = False
+        cfg.logging_file_enabled = True
+        cfg.logging_file_path = ".ayder/log/ayder.log"
+        cfg.logging_error_path = ".ayder/log/errors.log"
+        cfg.logging_trace_path = ".ayder/log/trace.jsonl"
+        cfg.logging_rotation = "10 MB"
+        cfg.logging_retention = "7 days"
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return cfg
+
+    def test_list_plugins_configures_logging_before_listing(self):
+        """The plugin subcommands return before load_config at line 404 today."""
+        from ayder_cli.cli import main
+
+        order = []
+        with patch.object(sys, "argv", ["ayder", "list-plugins"]), \
+             patch("ayder_cli.core.config.load_config",
+                   side_effect=lambda *a, **k: (order.append("config"),
+                                                self._config())[1]), \
+             patch("ayder_cli.cli.setup_logging",
+                   side_effect=lambda s: order.append("log")), \
+             patch("ayder_cli.tools.plugin_manager.list_installed_plugins",
+                   side_effect=lambda **k: (order.append("plugins"), [])[1]):
+            main()          # `list-plugins` ends in `return`, not sys.exit —
+                            # wrapping this in pytest.raises(SystemExit) fails
+
+        assert "log" in order, "setup_logging never ran on the list-plugins path"
+        assert order.index("log") < order.index("plugins"), \
+            f"logging configured after the subcommand ran: {order}"
+
+    def test_resume_configures_logging_before_run_tui(self, tmp_path, monkeypatch):
+        """--resume enters run_tui; logging must already be up."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.session import save_session
+
+        monkeypatch.chdir(tmp_path)
+        sid = save_session([{"role": "system", "content": "S"}], model="m",
+                           agent_mode=False, permissions={"r"})
+        order = []
+        with patch.object(sys, "argv", ["ayder", "--resume", sid]), \
+             patch.object(sys.stdin, "isatty", return_value=True), \
+             patch("ayder_cli.core.config.load_config", return_value=self._config()), \
+             patch("ayder_cli.cli.setup_logging",
+                   side_effect=lambda s: order.append("log")), \
+             patch("ayder_cli.tui.run_tui", side_effect=lambda **kw: order.append("tui")):
+            main()
+
+        assert order == ["log", "tui"], f"setup_logging ran too late: {order}"
+
+    def test_both_tui_call_sites_get_the_same_settings(self, tmp_path, monkeypatch):
+        """One resolution, two call sites — they must not diverge."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.session import save_session
+
+        monkeypatch.chdir(tmp_path)
+        sid = save_session([{"role": "system", "content": "S"}], model="m",
+                           agent_mode=False, permissions={"r"})
+        seen = []
+
+        def _capture(settings):
+            seen.append(settings)
+
+        for argv in (["ayder", "--resume", sid], ["ayder"]):
+            with patch.object(sys, "argv", argv), \
+                 patch.object(sys.stdin, "isatty", return_value=True), \
+                 patch("ayder_cli.core.config.load_config", return_value=self._config()), \
+                 patch("ayder_cli.cli.setup_logging", side_effect=_capture), \
+                 patch("ayder_cli.tui.run_tui") as mock_tui:
+                main()
+            assert mock_tui.call_args[1]["log_settings"] is seen[-1], \
+                "run_tui received settings other than the ones just resolved"
+
+        assert seen[0] == seen[1], "the two launch paths resolved different settings"
