@@ -117,10 +117,23 @@ theme = "ayder"
 palette = "auto"
 
 [logging]
-file_enabled = true
-file_path = ".ayder/log/ayder.log"
-rotation = "10 MB"
-retention = "7 days"
+file_enabled  = true                     # master switch for ALL file logging
+file_path     = ".ayder/log/ayder.log"
+error_path    = ".ayder/log/errors.log"  # always written unless file_enabled = false
+trace_enabled = false
+trace_path    = ".ayder/log/trace.jsonl"
+rotation      = "10 MB"
+retention     = "7 days"
+# level = "INFO"   # optional; omitted entirely when unset, which means NONE.
+                   # NONE, ERROR, WARNING, INFO, DEBUG, TRACE
+
+[logging.channels]
+# Per-channel level overrides. Unlisted channels inherit the global level.
+# Channels: llm, tool, agent, context, plugin, ui, core, external
+#   llm      = "TRACE"     # verbose LLM traffic
+#   plugin   = "WARNING"   # quiet plugin discovery
+#   external = "ERROR"     # throttle third-party libraries
+#   ui       = "NONE"      # disable this channel entirely
 
 [context_manager]
 enabled = true

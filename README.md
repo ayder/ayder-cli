@@ -166,10 +166,23 @@ tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
 agent_timeout = 300           # Seconds before a background agent is cancelled
 
 [logging]
-file_enabled = true
-file_path = ".ayder/log/ayder.log"
-rotation = "10 MB"
-retention = "7 days"
+file_enabled  = true                     # master switch for ALL file logging
+file_path     = ".ayder/log/ayder.log"
+error_path    = ".ayder/log/errors.log"  # always written unless file_enabled = false
+trace_enabled = false
+trace_path    = ".ayder/log/trace.jsonl"
+rotation      = "10 MB"
+retention     = "7 days"
+# level = "INFO"   # optional; omitted entirely when unset, which means NONE.
+                   # NONE, ERROR, WARNING, INFO, DEBUG, TRACE
+
+[logging.channels]
+# Per-channel level overrides. Unlisted channels inherit the global level.
+# Channels: llm, tool, agent, context, plugin, ui, core, external
+#   llm      = "TRACE"     # verbose LLM traffic
+#   plugin   = "WARNING"   # quiet plugin discovery
+#   external = "ERROR"     # throttle third-party libraries
+#   ui       = "NONE"      # disable this channel entirely
 
 [context_manager]
 enabled = true
@@ -346,7 +359,7 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/notes` | Browse and edit markdown notes |
 | `/skill` | Activate a domain skill from `.ayder/skills/` via the shared `skill` tool backend |
 | `/verbose` | Toggle verbose mode |
-| `/logging` | Set log level for current session (NONE, ERROR, WARNING, INFO, DEBUG) |
+| `/logging` | Set log level for current session (NONE, ERROR, WARNING, INFO, DEBUG, TRACE) |
 | `/compact` | Summarize conversation, save a context snapshot, clear, and reload |
 | `/save-context` | Summarize conversation and save it to a named context slot (no clear) |
 | `/load-context` | Load a saved context slot and restore it |
@@ -363,9 +376,17 @@ You can also manually manage context with the `context` tool and its slash-comma
 The LLM can also call `skill(action="list" | "load" | "unload")`
 automatically when a request clearly matches an available project skill.
 
-- Default: when logging is enabled, logs go to `.ayder/log/ayder.log` (not shown on screen).
+- Errors are always captured to `.ayder/log/errors.log`, even when
+  `logging_level` is `NONE`. Set `file_enabled = false` under `[logging]` to
+  turn off all file logging including errors.
+- Narrative logs go to `.ayder/log/ayder.log` when a level is set.
+- `--trace` writes structured events to `.ayder/log/trace.jsonl`. It is not a
+  log level.
+- `--log-channel llm,tool` limits console and narrative output to those
+  subsystems. It never filters the error log.
 - TUI `/logging` changes are session-only and do not modify `config.toml`.
-- CLI `--verbose [LEVEL]` enables stdout logging for that run.
+- CLI `--verbose` enables stdout logging for that run; it does not narrow
+  channels.
 
 ### Keyboard Shortcuts
 

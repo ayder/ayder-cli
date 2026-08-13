@@ -160,7 +160,8 @@ cli.py:main()
 | `core/context_manager_factory.py` | Registry-based factory (OCP) | `ContextManagerFactory`, `context_manager_factory` |
 | `core/cache_monitor.py` | Timing-based KV-cache hit detection | `CacheMonitor`, `CacheStatus`, `CacheSample` |
 | `console.py` | Rich console singleton | `console` |
-| `logging_config.py` | Logger setup (loguru + stdlib bridge) | `setup_logging()` |
+| `log.py` | Channel-scoped loguru facade; leaf module so `logging_config.py` and `core/config.py` can both depend on it | `get_logger()`, `LOG_LEVELS`, `CHANNELS`, `level_no()`, `flush()` |
+| `logging_config.py` | Logger setup (loguru + stdlib bridge) | `setup_logging()`, `LoggingSettings` |
 | `version.py` | Package version constant | `__version__` |
 
 ### Root-Level Application Modules
