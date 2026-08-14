@@ -9,15 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.tools.definition import ToolDefinition
 
 if TYPE_CHECKING:
     from ayder_cli.agents.registry import AgentRegistry
-
-logger = logging.getLogger(__name__)
 
 AGENT_TOOL_DEFINITION = ToolDefinition(
     name="agent",

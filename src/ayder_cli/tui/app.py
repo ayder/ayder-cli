@@ -16,12 +16,12 @@ from pathlib import Path
 from typing import cast
 import asyncio
 import difflib
-import logging
 import uuid
 
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.core.config import Config
+from ayder_cli.log import get_logger
 from ayder_cli.logging_config import (
     get_effective_log_level,
     is_logging_configured,
@@ -53,7 +53,7 @@ from ayder_cli.tui.widgets import (
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger("ui")
 
 
 @dataclass
@@ -995,7 +995,7 @@ class AyderApp(App):
         def _prepare(msg=text):
             self.messages.append({"role": "user", "content": msg})
 
-        logger.debug("agent nudge: %d unread result(s) -> waking LLM", n)
+        logger.debug("agent nudge: {} unread result(s) -> waking LLM", n)
         self.request_turn(prepare=_prepare)         # serial consumer enqueues the nudge turn
         self._agent_registry.mark_nudged(pending)   # finding A: AFTER enqueue
 

@@ -7,12 +7,13 @@ free (stdlib only).
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 import subprocess
 
-logger = logging.getLogger(__name__)
+from ayder_cli.log import get_logger
+
+logger = get_logger("agent")
 
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _GIT_TIMEOUT = 120
@@ -113,7 +114,7 @@ def remove_worktree(repo_root: str, worktree_path: str) -> None:
             cwd=repo_root, capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as e:
-        logger.warning("worktree remove/prune failed for %s: %s", worktree_path, e)
+        logger.warning("worktree remove/prune failed for {}: {}", worktree_path, e)
 
 
 def branch_head(repo_root: str, branch: str) -> str | None:

@@ -7,11 +7,12 @@ to a progress callback (used by AgentPanel in the TUI).
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
-logger = logging.getLogger(__name__)
+from ayder_cli.log import get_logger
+
+logger = get_logger("agent")
 
 
 @dataclass
@@ -64,14 +65,14 @@ class AgentCallbacks:
 
     def on_token_usage(self, total_tokens: int) -> None:
         logger.debug(
-            "agent token_usage: agent='%s' run_id=%d tokens=%d",
+            "agent token_usage: agent='{}' run_id={} tokens={}",
             self.agent_name, self.run_id, total_tokens,
         )
         self._emit("token_usage", total_tokens)
 
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
         logger.debug(
-            "agent tool_start: agent='%s' run_id=%d tool='%s' call_id='%s'",
+            "agent tool_start: agent='{}' run_id={} tool='{}' call_id='{}'",
             self.agent_name, self.run_id, name, call_id,
         )
         self._emit("tool_start", {"call_id": call_id, "name": name, "arguments": arguments})
@@ -79,7 +80,7 @@ class AgentCallbacks:
     def on_tool_complete(self, call_id: str, result: str) -> None:
         result_preview = (result[:200] + "...") if len(result) > 200 else result
         logger.debug(
-            "agent tool_complete: agent='%s' run_id=%d call_id='%s' result='%s'",
+            "agent tool_complete: agent='{}' run_id={} call_id='{}' result='{}'",
             self.agent_name, self.run_id, call_id, result_preview,
         )
         self._emit("tool_complete", {"call_id": call_id, "result": result})
@@ -99,7 +100,7 @@ class AgentCallbacks:
         self, name: str, arguments: dict
     ) -> AgentConfirmResult:
         """Auto-approve all tool confirmations for autonomous agent runs."""
-        logger.debug(f"Agent '{self.agent_name}' auto-approving tool: {name}")
+        logger.debug("Agent '{}' auto-approving tool: {}", self.agent_name, name)
         return AgentConfirmResult(action="approve")
 
     def is_cancelled(self) -> bool:

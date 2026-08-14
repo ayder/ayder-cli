@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import logging
 import os
 import time
 from typing import Any, Callable
@@ -28,9 +27,10 @@ from ayder_cli.agents.worktree import (
     slugify_branch,
 )
 from ayder_cli.core.context import ProjectContext
+from ayder_cli.log import get_logger
 from ayder_cli.tools.builtins.tasks import list_task_ids, read_task
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agent")
 
 _PREVIEW_MAX = 48
 # Hard fail-fast backstop on total in-flight (queued + working) runs per
@@ -156,7 +156,7 @@ class AgentRegistry:
         out of delivery (snapshot/read/nudge) for the new conversation."""
         self._current_generation += 1
         self._settled = {}
-        logger.debug("agent generation -> %d (settled reset; %d run(s) retained)",
+        logger.debug("agent generation -> {} (settled reset; {} run(s) retained)",
                      self._current_generation, len(self._runs))
         return self._current_generation
 
@@ -329,7 +329,7 @@ class AgentRegistry:
                        task_id=resolved_task_id, branch_name=branch, task_preview=task_preview,
                        timeout=effective_timeout)
         self._runs[run_id] = run
-        logger.debug("agent dispatch: run #%d agent='%s' gen=%d task_id=%s branch=%s",
+        logger.debug("agent dispatch: run #{} agent='{}' gen={} task_id={} branch={}",
                      run_id, name, self._current_generation, resolved_task_id or "-", branch or "-")
         asyncio.create_task(self._run_and_queue(run, name, prompt, base_branch))
         return run_id
@@ -367,7 +367,7 @@ class AgentRegistry:
                                     add_worktree, repo_root, wt_dir, run.branch_name, base
                                 )
                             except Exception as e:
-                                logger.exception("worktree add failed: run_id=%d", run.run_id)
+                                logger.exception("worktree add failed: run_id={}", run.run_id)
                                 outcome = AgentRunOutcome(
                                     "error", f"Worktree creation failed: {e}",
                                     "worktree add failed", None,
@@ -417,7 +417,7 @@ class AgentRegistry:
                                     outcome.note_path,
                                 )
         except Exception:
-            logger.exception("agent run crashed: run_id=%d", run.run_id)
+            logger.exception("agent run crashed: run_id={}", run.run_id)
             if outcome is None:
                 outcome = AgentRunOutcome(
                     "error", "Agent encountered an error.", "internal error", None
@@ -430,7 +430,7 @@ class AgentRegistry:
                         remove_worktree, str(self._project_ctx.root), worktree_path
                     )
                 except Exception:
-                    logger.exception("worktree cleanup failed: %s", worktree_path)
+                    logger.exception("worktree cleanup failed: {}", worktree_path)
                 finally:
                     self._session_worktrees.discard(worktree_path)
             if outcome is not None:
@@ -440,7 +440,7 @@ class AgentRegistry:
                 run.note_path = outcome.note_path
             run.finished_at = time.monotonic()
             run.done_event.set()
-            logger.debug("agent done: run #%d agent='%s' status='%s' %ds",
+            logger.debug("agent done: run #{} agent='{}' status='{}' {}s",
                          run.run_id, run.agent_name, run.status,
                          run.working_time(now=run.finished_at))
             if run.generation == self._current_generation and outcome is not None:
@@ -465,7 +465,7 @@ class AgentRegistry:
     def _result_payload(self, run: AgentRun) -> dict:
         """Full payload for a TERMINAL run; marks it drained. Never call on a working run."""
         if not run.drained:
-            logger.debug("agent result drained: run #%d agent='%s' status='%s'",
+            logger.debug("agent result drained: run #{} agent='{}' status='{}'",
                          run.run_id, run.agent_name, run.status)
         run.drained = True
         payload = {"run_id": run.run_id, "name": run.agent_name, "status": run.status,
@@ -529,10 +529,10 @@ class AgentRegistry:
                 run.status = "cancelled"
                 cancelled.append(rid)
         if cancelled:
-            logger.debug("cancel: agent='%s' cancelled %d instance(s): %s",
+            logger.debug("cancel: agent='{}' cancelled {} instance(s): {}",
                          name, len(cancelled), cancelled)
         else:
-            logger.debug("cancel: agent='%s' — no running/queued instances", name)
+            logger.debug("cancel: agent='{}' — no running/queued instances", name)
         return len(cancelled) > 0
 
     def _prune_session_worktrees(self) -> None:

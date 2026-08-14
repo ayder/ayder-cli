@@ -7,7 +7,6 @@ runs a ChatLoop, and produces an AgentRunOutcome.
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,9 +15,10 @@ from typing import Any, Callable
 from ayder_cli.agents.callbacks import AgentCallbacks
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.application.runtime_factory import create_agent_runtime
+from ayder_cli.log import get_logger
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger("agent")
 
 # Lines an agent is REQUIRED to emit (the task_id/task_preview echo) or that
 # carry no deliverable content (the verdict tag). A response that is only these
@@ -72,7 +72,7 @@ class AgentRunner:
 
     def cancel(self) -> bool:
         """Cancel the running agent."""
-        logger.debug("cancel requested: agent='%s' run_id=%d", self.agent_name, self.run_id)
+        logger.debug("cancel requested: agent='{}' run_id={}", self.agent_name, self.run_id)
         self._cancel_event.set()
         self.status = "cancelled"
         return True
@@ -118,7 +118,7 @@ class AgentRunner:
         self.status = "running"
         task_preview = task[:120] + "..." if len(task) > 120 else task
         logger.debug(
-            "run started: agent='%s' run_id=%d model='%s' timeout=%ds task='%s'",
+            "run started: agent='{}' run_id={} model='{}' timeout={}s task='{}'",
             self.agent_name, self.run_id,
             self._agent_config.model or "(default)",
             self._timeout, task_preview,
@@ -182,7 +182,7 @@ class AgentRunner:
                     f'agent(action="call", name=..., timeout_s={self._timeout * 2}).'
                 )
                 logger.debug(
-                    "run timeout: agent='%s' run_id=%d after %ds",
+                    "run timeout: agent='{}' run_id={} after {}s",
                     self.agent_name, self.run_id, self._timeout,
                 )
                 return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
@@ -193,7 +193,7 @@ class AgentRunner:
             if callbacks.last_system_error:
                 self.status = "error"
                 logger.debug(
-                    "run failed (captured via on_system_message): agent='%s' run_id=%d error='%s'",
+                    "run failed (captured via on_system_message): agent='{}' run_id={} error='{}'",
                     self.agent_name, self.run_id, callbacks.last_system_error[:200],
                 )
                 content = self._final_message(messages)
@@ -208,7 +208,7 @@ class AgentRunner:
                 self.status = "error"
                 err = "Agent produced no deliverable (empty or echo-only response)."
                 logger.debug(
-                    "run vacuous: agent='%s' run_id=%d", self.agent_name, self.run_id,
+                    "run vacuous: agent='{}' run_id={}", self.agent_name, self.run_id,
                 )
                 body = content or err
                 return AgentRunOutcome(
@@ -218,13 +218,13 @@ class AgentRunner:
             # Completed successfully
             self.status = "completed"
             logger.debug(
-                "run completed: agent='%s' run_id=%d",
+                "run completed: agent='{}' run_id={}",
                 self.agent_name, self.run_id,
             )
             return AgentRunOutcome("done", content, None, self._persist_note(task, "done", content, None))
 
         except Exception as e:
             self.status = "error"
-            logger.exception(f"Agent '{self.agent_name}' failed: {e}")
+            logger.exception("Agent '{}' failed: {}", self.agent_name, e)
             return AgentRunOutcome("error", "Agent encountered an error.", str(e),
                                    self._persist_note(task, "error", "Agent encountered an error.", str(e)))
