@@ -27,7 +27,7 @@ def test_update_from_response_stamps_model_on_context_log(loguru_caplog):
     )
     mgr.update_from_response({"prompt_tokens": 14109, "completion_tokens": 21})
 
-    text = loguru_caplog.at_level("INFO").text
+    text = loguru_caplog.at_level("DEBUG").text
     assert "kimi-k2.7-code:cloud" in text
     assert "14109/262144" in text
 

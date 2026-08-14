@@ -244,7 +244,7 @@ class OllamaContextManager:
             )
             cache_state = f", cache={status.state}({status.hit_ratio:.0%})"
 
-        logger.info(
+        logger.debug(
             "Context[{}]: {}/{} tokens ({:.0f}%), completion={}, speed={}{}",
             self._model or "?", self._real_prompt_tokens, ceiling, utilization,
             self._real_completion_tokens, prompt_speed, cache_state,

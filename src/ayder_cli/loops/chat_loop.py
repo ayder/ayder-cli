@@ -140,7 +140,7 @@ class ChatLoop:
             llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
             if self.config.verbose:
                 for i, m in enumerate(llm_messages):
-                    llm_log.debug(
+                    llm_log.trace(
                         "  Message {} [{}]: {}...",
                         i,
                         m.get("role"),
@@ -283,7 +283,7 @@ class ChatLoop:
 
             # Detect empty/dropped responses (server closed cleanly but sent nothing)
             if not final_content and not normalized_tool_calls and not final_reasoning:
-                llm_log.warning(
+                llm_log.error(
                     "LLM returned empty response (possible connection drop). "
                     "model={}, provider={}",
                     self.config.model,
@@ -539,7 +539,7 @@ class ChatLoop:
                 name = rd_result["name"]
                 result = str(rd_result["result"])
 
-                tool_log.debug("Appending Tool Result [{}] to history:\n{}", name, result[:500])
+                tool_log.trace("Appending Tool Result [{}] to history:\n{}", name, result[:500])
 
                 escalated = escalated or _is_escalation_result(result)
                 self.messages.append(
@@ -554,7 +554,7 @@ class ChatLoop:
                 # rd_result is BaseException (includes Exception)
                 err_id, err_name = tc.id, tc.function.name
                 error_msg = f"Error: {rd_result}"
-                tool_log.debug("Appending Tool Error [{}] to history:\n{}", err_name, error_msg)
+                tool_log.trace("Appending Tool Error [{}] to history:\n{}", err_name, error_msg)
                 self.messages.append(
                     {
                         "role": "tool",
