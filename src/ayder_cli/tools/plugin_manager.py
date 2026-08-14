@@ -501,7 +501,7 @@ def discover_global_plugins() -> tuple[tuple, dict[str, Callable]]:
                 e,
                 plugin_dir,
             )
-        except Exception as e:
-            logger.warning("Skipping plugin '{}': {}", plugin_dir.name, e)
+        except Exception:
+            logger.opt(exception=True).warning("Skipping plugin '{}'", plugin_dir.name)
 
     return tuple(all_defs), all_handlers

@@ -106,8 +106,10 @@ def write_agent_note(
             body += f"\n\n## Error\n{error}"
         path = _write_note(notes_dir, filename, frontmatter, body, exclusive=True)
         return project_ctx.to_relative(path)
-    except Exception as e:
-        logger.warning("write_agent_note failed for agent '{}' run {}: {}", agent_name, run_id, e)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "write_agent_note failed for agent '{}' run {}", agent_name, run_id
+        )
         return None
 
 

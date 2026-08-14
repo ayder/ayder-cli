@@ -292,8 +292,8 @@ def snapshot_conversation_for_clear(
             json.dumps(snapshot, indent=2),
             overwrite=True,
         )
-    except Exception as exc:
-        logger.warning("Recovery snapshot failed: {}", exc)
+    except Exception:
+        logger.opt(exception=True).warning("Recovery snapshot failed")
         return None
     if isinstance(result, ToolError):
         logger.warning("Recovery snapshot save returned error: {}", result)

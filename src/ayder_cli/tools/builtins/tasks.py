@@ -114,7 +114,7 @@ def _parse_status(filepath):
             if match:
                 return match.group(1).strip()
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Failed to parse status from {}", filepath)
     return "unknown"
 
 
@@ -126,7 +126,7 @@ def _parse_title(filepath):
             if line.startswith("# "):
                 return line[2:].strip()
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Failed to parse title from {}", filepath)
     return Path(filepath).name
 
 
@@ -222,7 +222,9 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
         if candidate.exists() and candidate.is_file():
             return candidate
     except Exception:
-        pass
+        logger.opt(exception=True).debug(
+            "Strategy 1 (relative path) failed for {}", identifier
+        )
 
     # Strategy 2: Try as filename in tasks dir
     candidate = tasks_dir / identifier
@@ -259,6 +261,7 @@ def read_task(project_ctx: ProjectContext, identifier: str):
     try:
         content = path.read_text(encoding="utf-8")
     except Exception:
+        logger.opt(exception=True).warning("Failed to read task file {}", path)
         return None
     tid = _extract_id(path.name)
     canonical = f"TASK-{tid:03d}" if tid is not None else path.stem

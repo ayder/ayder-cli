@@ -103,8 +103,10 @@ class HookManager:
         for cb in self._pre_callbacks:
             try:
                 cb(tool_name, args)
-            except Exception as e:
-                logger.warning("Pre-execute callback failed for {}: {}", tool_name, e)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Pre-execute callback failed for {}", tool_name
+                )
 
     def run_middlewares(self, tool_name: str, args: dict) -> None:
         """Invoke all middlewares. PermissionError is re-raised; others are logged."""
@@ -113,15 +115,15 @@ class HookManager:
                 mw(tool_name, args)
             except PermissionError:
                 raise
-            except Exception as e:
-                logger.warning("Middleware failed for {}: {}", tool_name, e)
+            except Exception:
+                logger.opt(exception=True).warning("Middleware failed for {}", tool_name)
 
     def run_post_callbacks(self, result: ToolExecutionResult) -> None:
         """Invoke all post-execute callbacks. Failures are logged, not raised."""
         for cb in self._post_callbacks:
             try:
                 cb(result)
-            except Exception as e:
-                logger.warning(
-                    "Post-execute callback failed for {}: {}", result.tool_name, e
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Post-execute callback failed for {}", result.tool_name
                 )

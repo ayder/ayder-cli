@@ -166,7 +166,7 @@ def _set_status_skill(app: Any, skill_name: str | None) -> None:
 
         app.query_one("#status-bar", StatusBar).set_skill(skill_name)
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Failed to update status bar skill indicator")
 
 
 def _new_agent_generation(app: Any) -> None:
@@ -175,7 +175,7 @@ def _new_agent_generation(app: Any) -> None:
         try:
             agent_registry.new_generation()
         except Exception:
-            pass
+            logger.opt(exception=True).warning("Failed to advance agent generation")
 
 
 def skill(

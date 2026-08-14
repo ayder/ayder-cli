@@ -122,8 +122,8 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
                     )
             except ImportError as e:
                 logger.warning("Failed to import {}: {}", name, e)
-            except Exception as e:
-                logger.error("Error loading definitions from {}: {}", name, e)
+            except Exception:
+                logger.opt(exception=True).error("Error loading definitions from {}", name)
 
     # Validate: Detect duplicate tool names (with accurate source tracking)
     seen: dict[str, str] = {}
@@ -188,8 +188,8 @@ try:
     from ayder_cli.tools.plugin_manager import discover_global_plugins
 
     _GLOBAL_PLUGIN_DEFS, _PLUGIN_HANDLERS = discover_global_plugins()
-except Exception as e:
-    logger.warning("Failed to load global plugins: {}", e)
+except Exception:
+    logger.opt(exception=True).warning("Failed to load global plugins")
 
 TOOL_DEFINITIONS = _BUILTIN_DEFINITIONS + _GLOBAL_PLUGIN_DEFS
 TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {

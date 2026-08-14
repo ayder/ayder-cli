@@ -157,6 +157,9 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
                     with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                         line_count = sum(1 for _ in f)
                 except Exception:
+                    logger.opt(exception=True).debug(
+                        "Line count failed for {}", rel_path
+                    )
                     line_count = None
 
             info = {
@@ -213,7 +216,7 @@ def _finalize(
         if abs_path.exists():
             os.chmod(tmp_name, os.stat(abs_path).st_mode)
         os.replace(tmp_name, str(abs_path))
-    except BaseException:
+    except BaseException:  # noqa: AYDER-EXC temporary-file cleanup then unconditional re-raise
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise

@@ -40,7 +40,9 @@ def get_project_structure(project_ctx: ProjectContext, max_depth: int = 3) -> st
             if result.returncode == 0:
                 return ToolSuccess(result.stdout.strip())
         except Exception:
-            pass
+            logger.opt(exception=True).debug(
+                "`tree` command failed; falling back to manual tree"
+            )
 
     # Fallback to manual tree generation
     return ToolSuccess(_generate_manual_tree(project_ctx, max_depth))

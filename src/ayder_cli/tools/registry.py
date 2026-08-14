@@ -193,5 +193,5 @@ def _load_project_plugins(reg: ToolRegistry, project_path: Path) -> None:
             logger.info(
                 "Loaded project plugin '{}' ({} tools)", plugin_dir.name, len(defs)
             )
-        except Exception as e:
-            logger.warning("Skipping project plugin '{}': {}", plugin_dir.name, e)
+        except Exception:
+            logger.opt(exception=True).warning("Skipping project plugin '{}'", plugin_dir.name)

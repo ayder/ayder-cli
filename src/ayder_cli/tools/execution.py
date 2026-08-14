@@ -112,6 +112,7 @@ def execute_tool(
         status = ToolExecutionStatus.SUCCESS
         error = None
     except Exception as e:
+        logger.opt(exception=True).error("Tool '{}' raised during execution", tool_name)
         result = ToolError(f"Error executing {tool_name}: {str(e)}", "execution")
         status = ToolExecutionStatus.ERROR
         error = str(e)

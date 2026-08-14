@@ -106,6 +106,6 @@ def prepare_new_content(fname, args, project_ctx=None):
     except json.JSONDecodeError as e:
         logger.error("JSON decode error: {}", e)
         return ""
-    except Exception as e:
-        logger.error("Unexpected error in prepare_new_content: {}", e)
+    except Exception:
+        logger.opt(exception=True).error("Unexpected error in prepare_new_content")
         return ""
