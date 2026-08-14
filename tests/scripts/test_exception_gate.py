@@ -33,12 +33,16 @@ def _verdict(tmp_path: Path, src: str) -> str:
 
 
 def test_bare_raise_passes(tmp_path):
-    assert "sample.py" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except Exception:
             raise
     """)
+    assert "sample.py" not in out
+    # An absence-of-finding assertion alone can't tell "correctly satisfied"
+    # apart from "invisible to the walker" — pin the census too.
+    assert "broad=1" in out, out
 
 
 def test_silent_pass_fails(tmp_path):
@@ -60,12 +64,14 @@ def test_log_without_exception_flag_fails(tmp_path):
 
 
 def test_opt_exception_log_passes(tmp_path):
-    assert "FAIL" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except Exception:
             logger.opt(exception=True).warning("failed")
     """)
+    assert "FAIL" not in out
+    assert "broad=1" in out, out
 
 
 def test_conditional_raise_is_reported_not_passed(tmp_path):
@@ -82,40 +88,51 @@ def test_conditional_raise_is_reported_not_passed(tmp_path):
 
 
 def test_narrow_handler_is_ignored(tmp_path):
-    assert "sample.py" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except FileNotFoundError:
             pass
     """)
+    assert "sample.py" not in out
+    # Confirms it's excluded by policy (still counted, never broad) — not
+    # merely absent from the walk.
+    assert "broad=0" in out, out
 
 
 def test_noqa_marker_suppresses(tmp_path):
-    assert "FAIL" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except Exception:  # noqa: AYDER-EXC plugin boundary
             pass
     """)
+    assert "FAIL" not in out
+    # Suppressed findings are still counted broad — only the finding is hidden.
+    assert "broad=1" in out, out
 
 
 def test_allowlisted_failure_return_passes(tmp_path):
-    assert "FAIL" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except Exception as e:
             return ToolError(str(e))
     """)
+    assert "FAIL" not in out
+    assert "broad=1" in out, out
 
 
 def test_logger_exception_shorthand_passes(tmp_path):
     """ruff TRY400 pushes code to this form; the gate must accept it."""
-    assert "FAIL" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except Exception:
             logger.exception("failed")
     """)
+    assert "FAIL" not in out
+    assert "broad=1" in out, out
 
 
 def test_success_execution_result_does_not_satisfy(tmp_path):
@@ -129,12 +146,14 @@ def test_success_execution_result_does_not_satisfy(tmp_path):
 
 
 def test_failure_execution_result_passes(tmp_path):
-    assert "FAIL" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except Exception as e:
             return ExecutionResult(success=False, error=e)
     """)
+    assert "FAIL" not in out
+    assert "broad=1" in out, out
 
 
 def test_bare_marker_without_reason_does_not_suppress(tmp_path):
@@ -148,12 +167,56 @@ def test_bare_marker_without_reason_does_not_suppress(tmp_path):
 
 def test_bare_except_is_out_of_scope(tmp_path):
     """CONTRACTS C10 scopes the gate to Exception/BaseException only."""
-    assert "sample.py" not in _verdict(tmp_path, """
+    out = _verdict(tmp_path, """
         try:
             x()
         except:
             pass
     """)
+    assert "sample.py" not in out
+    assert "broad=0" in out, out
+
+
+# -- exception-group coverage: `except*` parses to ast.TryStar, not ast.Try ---
+#
+# A NodeVisitor that implements only visit_Try walks straight past a TryStar
+# node via generic_visit and into its ExceptHandler children, so the handler
+# is never counted. That is not a policy miss, it is invisibility: the gate
+# reports the frozen census and exits green over a construct it never saw.
+# "sample.py not in output" or "FAIL not in output" would both be satisfied
+# by this hole too — an absence-of-finding assertion is not a coverage
+# assertion, so both controls below pin the broad-handler census as well.
+
+def test_star_silent_pass_fails(tmp_path):
+    """`except* Exception: pass` must be found, counted, and flagged."""
+    (tmp_path / "sample.py").write_text(textwrap.dedent("""
+        try:
+            x()
+        except* Exception:
+            pass
+    """))
+    code, out = _run("--path", str(tmp_path))
+    assert "broad=1" in out, out
+    assert "FAIL" in out, out
+    assert code == 1
+
+
+def test_star_raise_passes(tmp_path):
+    """Not optional: a fix that enumerates TryStar but always reports FAIL
+    (skipping policy evaluation entirely) would still satisfy the control
+    above. Only a clean `findings=0` alongside `broad=1` proves the verdict
+    logic — not just the census — now runs on TryStar handlers too.
+    """
+    (tmp_path / "sample.py").write_text(textwrap.dedent("""
+        try:
+            x()
+        except* Exception:
+            raise
+    """))
+    code, out = _run("--path", str(tmp_path))
+    assert "broad=1" in out, out
+    assert "findings=0" in out, out
+    assert code == 0
 
 
 # -- receiver controls: only the §C8 bindings satisfy the policy --------------

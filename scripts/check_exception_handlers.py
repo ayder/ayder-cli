@@ -155,6 +155,14 @@ def _broad_handlers(path: str, tree: ast.AST) -> list[tuple[ast.ExceptHandler, s
                     out.append((h, f"{key}::{counter[key]}"))
             self.generic_visit(node)
 
+        # PEP 654 `except*` groups parse to a distinct node type (ast.TryStar,
+        # not ast.Try) with the same `.handlers` shape. Without this alias they
+        # are invisible to the census: generic_visit walks straight through
+        # into the ExceptHandler children and every `except* Exception:` is
+        # silently uncounted rather than silently failing — the gate would
+        # report success over a hole in its own coverage.
+        visit_TryStar = visit_Try
+
     _V().visit(tree)
     return out
 
