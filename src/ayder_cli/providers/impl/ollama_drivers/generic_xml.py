@@ -49,8 +49,8 @@ class GenericXMLDriver(ChatDriver):
 
         try:
             tool_schemas = json.dumps(tools, indent=2)
-        except Exception as exc:
-            logger.warning("Failed to serialize tool schemas: {}; using str()", exc)
+        except Exception:
+            logger.opt(exception=True).warning("Failed to serialize tool schemas; using str()")
             tool_schemas = str(tools)
 
         instruction = _XML_INSTRUCTION.format(tool_schemas=tool_schemas)

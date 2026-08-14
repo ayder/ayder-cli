@@ -42,8 +42,8 @@ class OpenAIProvider(AIProvider):
             response = await self.client.models.list()
             # Extract model IDs from the response
             return [model.id for model in response.data if hasattr(model, "id")]
-        except Exception as e:
-            logger.warning("Failed to list models: {}", e)
+        except Exception:
+            logger.opt(exception=True).warning("Failed to list models")
             return []
 
     async def chat(

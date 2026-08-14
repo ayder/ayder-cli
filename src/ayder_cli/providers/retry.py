@@ -205,11 +205,12 @@ class RetryingProvider(AIProvider):
                 if self._on_reconnect is not None:
                     try:
                         self._on_reconnect()
-                    except Exception as hook_exc:  # noqa: BLE001
-                        logger.debug("on_reconnect hook raised: {}", hook_exc)
+                    except Exception:
+                        logger.opt(exception=True).warning("on_reconnect hook raised")
                 continue
 
             except BaseException as exc:  # noqa: BLE001 — we re-classify below
+                logger.opt(exception=True).debug("Provider stream raised; evaluating retry")
                 if committed:
                     raise
                 verdict = classify_error(exc, self._retry.retry_on_names)
@@ -234,8 +235,8 @@ class RetryingProvider(AIProvider):
                 if self._on_reconnect is not None:
                     try:
                         self._on_reconnect()
-                    except Exception as hook_exc:  # noqa: BLE001
-                        logger.debug("on_reconnect hook raised: {}", hook_exc)
+                    except Exception:
+                        logger.opt(exception=True).warning("on_reconnect hook raised")
                 continue
 
         if last_error is not None:

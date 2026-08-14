@@ -33,8 +33,8 @@ class DriverRegistry:
                 continue
             try:
                 module = import_module(f"{package.__name__}.{modname}")
-            except Exception as exc:
-                logger.warning("Skipping Ollama driver module {!r}: {}", modname, exc)
+            except Exception:
+                logger.opt(exception=True).warning("Skipping Ollama driver module {!r}", modname)
                 continue
             for attr in vars(module).values():
                 if (
@@ -56,8 +56,8 @@ class DriverRegistry:
 
         try:
             info = await self._inspector.get_model_info(model)
-        except Exception as exc:
-            logger.warning("/api/show failed for {!r}: {}; using default", model, exc)
+        except Exception:
+            logger.opt(exception=True).warning("/api/show failed for {!r}; using default", model)
             return self._default_driver()
 
         for rule in RESOLUTION_MATRIX:

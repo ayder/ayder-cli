@@ -135,6 +135,7 @@ class OllamaInspector:
                 raw_error=str(e),
             )
         except Exception as e:  # noqa: BLE001 — surface anything else as a probe failure
+            logger.opt(exception=True).debug("Ollama tool-calling probe failed for {!r}", model)
             return NativeToolProbe(
                 verdict="stream_failed",
                 reason=f"Probe failed with {type(e).__name__}: {e}",

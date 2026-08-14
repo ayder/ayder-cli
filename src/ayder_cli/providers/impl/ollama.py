@@ -49,8 +49,8 @@ class OllamaProvider(AIProvider):
         try:
             response = await self._client.list()
             return [m.model for m in response.models if m.model]
-        except Exception as e:
-            logger.warning("Failed to list Ollama models: {}", e)
+        except Exception:
+            logger.opt(exception=True).warning("Failed to list Ollama models")
             return []
 
     async def chat(
@@ -184,6 +184,7 @@ class OllamaProvider(AIProvider):
                 ):
                     yield chunk
         except BaseException as exc:
+            logger.opt(exception=True).debug("Ollama stream raised; classifying error")
             classified = classify_ollama_error(exc)
             if classified is exc:
                 raise
@@ -206,6 +207,7 @@ class OllamaProvider(AIProvider):
                     committed = True
                 yield chunk
         except BaseException as exc:
+            logger.opt(exception=True).debug("Ollama native stream raised; evaluating fallback")
             if committed or think is False or not self._is_unsupported_thinking_error(exc):
                 raise
             logger.info(
@@ -292,6 +294,7 @@ class OllamaProvider(AIProvider):
                     committed = True
                 yield chunk
         except BaseException as exc:
+            logger.opt(exception=True).debug("Ollama in-content stream raised; evaluating fallback")
             if committed or think is False or not self._is_unsupported_thinking_error(exc):
                 raise
             logger.info(
