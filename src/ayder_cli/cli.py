@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 from ayder_cli.version import get_app_version
+from ayder_cli.diagnostics import install_exception_hooks
 from ayder_cli.log import LOG_LEVELS, get_logger
 from ayder_cli.logging_config import LoggingSettings, setup_logging
 
@@ -308,6 +309,7 @@ def main():
     cfg = load_config(notify_migration=True, output=print)
     log_settings = build_logging_settings(args, cfg)
     setup_logging(log_settings)
+    install_exception_hooks()
 
     # Handle plugin subcommands
     if args.subcommand == "install-plugin":

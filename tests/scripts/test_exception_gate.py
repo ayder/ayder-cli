@@ -267,7 +267,7 @@ def test_full_tree_census_is_frozen():
     wrong tree, or the census moved without the plan being updated."""
     code, out = _run()
     assert "broad=119" in out, out
-    assert "files=112/112" in out, out
+    assert "files=113/113" in out, out
     code, out = _run("--expect-broad", "118")
     assert code == 1
     assert "census: found 119" in out

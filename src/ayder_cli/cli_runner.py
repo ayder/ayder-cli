@@ -21,6 +21,7 @@ from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.providers import ProviderUnavailableError
 from ayder_cli.cli_callbacks import CliCallbacks
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
+from ayder_cli.diagnostics import install_asyncio_handler
 from ayder_cli.log import get_logger
 
 logger = get_logger("core")
@@ -104,6 +105,7 @@ def _run_loop(
     )
 
     async def _drive() -> None:
+        install_asyncio_handler(asyncio.get_running_loop())
         # AgentRegistry.dispatch needs a running loop to schedule agent runs
         # via run_coroutine_threadsafe. Wire it before entering the chat loop
         # so agent(action="call") works in single-shot CLI mode too.

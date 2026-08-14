@@ -22,6 +22,7 @@ import uuid
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.core.config import Config
+from ayder_cli.diagnostics import install_asyncio_handler
 from ayder_cli.log import get_logger
 from ayder_cli.logging_config import (
     get_effective_log_level,
@@ -751,6 +752,7 @@ class AyderApp(App):
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
+        install_asyncio_handler(asyncio.get_running_loop())
         self.title = f"ayder - {self.model}"
 
         # Start the single serial turn consumer (owns the turn lifecycle)

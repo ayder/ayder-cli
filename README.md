@@ -379,6 +379,9 @@ automatically when a request clearly matches an available project skill.
 - Errors are always captured to `.ayder/log/errors.log`, even when
   `logging_level` is `NONE`. Set `file_enabled = false` under `[logging]` to
   turn off all file logging including errors.
+- Unhandled exceptions, SIGTERM and SIGINT are captured to
+  `.ayder/log/errors.log`. Records in flight are lost on `SIGKILL` (`kill -9`),
+  which no process can intercept.
 - Narrative logs go to `.ayder/log/ayder.log` when a level is set.
 - `--trace` writes structured events to `.ayder/log/trace.jsonl`. It is not a
   log level.
