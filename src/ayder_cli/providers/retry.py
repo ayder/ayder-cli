@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import enum
-import logging
 import random
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional
 
+from ayder_cli.log import get_logger
 from ayder_cli.providers.base import AIProvider, NormalizedStreamChunk
 
-logger = logging.getLogger(__name__)
+logger = get_logger("llm")
 
 
 class RetryVerdict(enum.Enum):
@@ -188,7 +188,8 @@ class RetryingProvider(AIProvider):
                 if remaining <= 0:
                     logger.warning(
                         "Provider returned empty response after "
-                        f"{attempt + 1} attempts; yielding final usage-only chunk"
+                        "{} attempts; yielding final usage-only chunk",
+                        attempt + 1,
                     )
                     # Yield the final usage-only chunk so token accounting survives.
                     if usage_only_this_attempt:
@@ -196,15 +197,16 @@ class RetryingProvider(AIProvider):
                     return
                 delay = compute_delay(self._retry, attempt)
                 logger.info(
-                    f"Empty response from provider; retrying in {delay:.2f}s "
-                    f"({remaining} attempts left)"
+                    "Empty response from provider; retrying in {:.2f}s "
+                    "({} attempts left)",
+                    delay, remaining,
                 )
                 await self._sleep(delay)
                 if self._on_reconnect is not None:
                     try:
                         self._on_reconnect()
                     except Exception as hook_exc:  # noqa: BLE001
-                        logger.debug(f"on_reconnect hook raised: {hook_exc}")
+                        logger.debug("on_reconnect hook raised: {}", hook_exc)
                 continue
 
             except BaseException as exc:  # noqa: BLE001 — we re-classify below
@@ -217,21 +219,23 @@ class RetryingProvider(AIProvider):
                 remaining = self._retry.max_attempts - attempt - 1
                 if remaining <= 0:
                     logger.warning(
-                        f"Provider retry budget exhausted after {attempt + 1} "
-                        f"attempts; raising {type(exc).__name__}: {exc}"
+                        "Provider retry budget exhausted after {} "
+                        "attempts; raising {}: {}",
+                        attempt + 1, type(exc).__name__, exc,
                     )
                     raise
                 delay = compute_delay(self._retry, attempt)
                 logger.info(
-                    f"Provider stream failed ({type(exc).__name__}: {exc}); "
-                    f"retrying in {delay:.2f}s ({remaining} attempts left)"
+                    "Provider stream failed ({}: {}); "
+                    "retrying in {:.2f}s ({} attempts left)",
+                    type(exc).__name__, exc, delay, remaining,
                 )
                 await self._sleep(delay)
                 if self._on_reconnect is not None:
                     try:
                         self._on_reconnect()
                     except Exception as hook_exc:  # noqa: BLE001
-                        logger.debug(f"on_reconnect hook raised: {hook_exc}")
+                        logger.debug("on_reconnect hook raised: {}", hook_exc)
                 continue
 
         if last_error is not None:

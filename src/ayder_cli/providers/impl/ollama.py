@@ -50,7 +50,7 @@ class OllamaProvider(AIProvider):
             response = await self._client.list()
             return [m.model for m in response.models if m.model]
         except Exception as e:
-            logger.warning(f"Failed to list Ollama models: {e}")
+            logger.warning("Failed to list Ollama models: {}", e)
             return []
 
     async def chat(
@@ -92,12 +92,13 @@ class OllamaProvider(AIProvider):
             and self.config.chat_protocol not in {"ollama", "xml"}
         ):
             logger.warning(
-                f"Ollama chat_protocol={self.config.chat_protocol!r} is not "
-                "recognized; forcing generic_xml fallback"
+                "Ollama chat_protocol={!r} is not "
+                "recognized; forcing generic_xml fallback",
+                self.config.chat_protocol,
             )
 
         driver = await self._registry.resolve(model, override=driver_override_name)
-        logger.debug(f"Ollama driver={driver.name} mode={driver.mode.value} for {model!r}")
+        logger.debug("Ollama driver={} mode={} for {!r}", driver.name, driver.mode.value, model)
 
         committed = False
         try:
@@ -112,8 +113,9 @@ class OllamaProvider(AIProvider):
                 raise
             fallback = self._registry.get(driver.fallback_driver)
             logger.info(
-                f"{driver.name} ({driver.mode.value}) failed mid-stream: {exc!r}; "
-                f"transparently retrying with {fallback.name} ({fallback.mode.value})"
+                "{} ({}) failed mid-stream: {!r}; "
+                "transparently retrying with {} ({})",
+                driver.name, driver.mode.value, exc, fallback.name, fallback.mode.value,
             )
             async for chunk in self._stream_with_driver(
                 fallback, messages, model, tools, options
@@ -207,7 +209,8 @@ class OllamaProvider(AIProvider):
             if committed or think is False or not self._is_unsupported_thinking_error(exc):
                 raise
             logger.info(
-                f"Ollama model {model!r} rejected think={think!r}; retrying with think=False"
+                "Ollama model {!r} rejected think={!r}; retrying with think=False",
+                model, think,
             )
             async for chunk in self._stream_native_once(
                 messages, model, tools, options, False
@@ -292,7 +295,8 @@ class OllamaProvider(AIProvider):
             if committed or think is False or not self._is_unsupported_thinking_error(exc):
                 raise
             logger.info(
-                f"Ollama model {model!r} rejected think={think!r}; retrying with think=False"
+                "Ollama model {!r} rejected think={!r}; retrying with think=False",
+                model, think,
             )
             async for chunk in self._stream_in_content_once(
                 driver, messages, model, tools, options, False
@@ -406,8 +410,9 @@ class OllamaProvider(AIProvider):
                             args = json.loads(args)
                         except (json.JSONDecodeError, ValueError):
                             logger.warning(
-                                f"Malformed tool arguments for '{name}': "
-                                f"{args!r:.200} — replacing with empty dict"
+                                "Malformed tool arguments for '{}': "
+                                "{!r:.200} — replacing with empty dict",
+                                name, args,
                             )
                             args = {}
                     if not isinstance(args, dict):

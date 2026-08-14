@@ -78,7 +78,7 @@ class QwenNativeProvider(AIProvider):
 
         for response in responses:
             if response.status_code != 200:
-                logger.error(f"Qwen streaming error: {response.message}")
+                logger.error("Qwen streaming error: {}", response.message)
                 break
             yield self._normalize_chunk(response)
 

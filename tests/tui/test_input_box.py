@@ -123,7 +123,10 @@ async def test_at_file_picker_accepts_directory_without_submitting():
         ta = app.query_one("#chat-input", _SubmitTextArea)
         ta.focus()
         await pilot.pause()
-        await pilot.press("@", "s")
+        # "sr" rather than "s": the repo has more than one top-level directory
+        # beginning with "s", and this test is about accepting a directory, not
+        # about how many the prefix matches.
+        await pilot.press("@", "s", "r")
         await pilot.pause()
         assert ta._file_picker_suggestions == ["src/"]
         await pilot.press("enter")

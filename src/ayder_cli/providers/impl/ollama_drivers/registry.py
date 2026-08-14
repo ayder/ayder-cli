@@ -34,7 +34,7 @@ class DriverRegistry:
             try:
                 module = import_module(f"{package.__name__}.{modname}")
             except Exception as exc:
-                logger.warning(f"Skipping Ollama driver module {modname!r}: {exc}")
+                logger.warning("Skipping Ollama driver module {!r}: {}", modname, exc)
                 continue
             for attr in vars(module).values():
                 if (
@@ -57,22 +57,23 @@ class DriverRegistry:
         try:
             info = await self._inspector.get_model_info(model)
         except Exception as exc:
-            logger.warning(f"/api/show failed for {model!r}: {exc}; using default")
+            logger.warning("/api/show failed for {!r}: {}; using default", model, exc)
             return self._default_driver()
 
         for rule in RESOLUTION_MATRIX:
             if rule.matches(info) and rule.driver in self._by_name:
                 driver = self._by_name[rule.driver]
                 logger.debug(
-                    f"Matrix matched {model!r} to {driver.name} "
-                    f"({rule.note or 'no note'})"
+                    "Matrix matched {!r} to {} "
+                    "({})",
+                    model, driver.name, rule.note or 'no note',
                 )
                 self._cache[model] = driver
                 return driver
 
         for driver in self._drivers:
             if driver.supports(info):
-                logger.debug(f"Driver {driver.name} self-claimed {model!r}")
+                logger.debug("Driver {} self-claimed {!r}", driver.name, model)
                 self._cache[model] = driver
                 return driver
 

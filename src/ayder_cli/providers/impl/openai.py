@@ -43,7 +43,7 @@ class OpenAIProvider(AIProvider):
             # Extract model IDs from the response
             return [model.id for model in response.data if hasattr(model, "id")]
         except Exception as e:
-            logger.warning(f"Failed to list models: {e}")
+            logger.warning("Failed to list models: {}", e)
             return []
 
     async def chat(
@@ -71,7 +71,7 @@ class OpenAIProvider(AIProvider):
                 kwargs["extra_body"] = extra
 
         if verbose:
-            logger.debug(f"OpenAI Chat Request: model={model}, tools={len(tools) if tools else 0}")
+            logger.debug("OpenAI Chat Request: model={}, tools={}", model, len(tools) if tools else 0)
             if self.interaction_sink:
                 self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
@@ -79,7 +79,7 @@ class OpenAIProvider(AIProvider):
             response = await self.client.chat.completions.create(**kwargs)
             return self._normalize_response(response)
         except Exception as e:
-            logger.error(f"OpenAI chat failed: {e}")
+            logger.error("OpenAI chat failed: {}", e)
             raise
 
     def _normalize_response(self, response: Any) -> NormalizedStreamChunk:
@@ -139,12 +139,15 @@ class OpenAIProvider(AIProvider):
                 kwargs["extra_body"] = extra
 
         if verbose:
-            logger.debug(f"OpenAI Stream Request: model={model}, tools={len(tools) if tools else 0}")
+            logger.debug("OpenAI Stream Request: model={}, tools={}", model, len(tools) if tools else 0)
             if self.interaction_sink:
                 self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         try:
-            logger.debug(f"Stream kwargs: {', '.join(f'{k}={v!r}' for k, v in kwargs.items() if k != 'messages')}")
+            logger.debug(
+                "Stream kwargs: {}",
+                ', '.join(f'{k}={v!r}' for k, v in kwargs.items() if k != 'messages'),
+            )
             async_stream = await self.client.chat.completions.create(**kwargs)
 
             chunk_count = 0
@@ -156,10 +159,10 @@ class OpenAIProvider(AIProvider):
             if chunk_count == 0:
                 logger.warning("Stream yielded zero chunks")
             else:
-                logger.debug(f"Stream completed: {chunk_count} chunks total")
+                logger.debug("Stream completed: {} chunks total", chunk_count)
 
         except Exception as e:
-            logger.error(f"OpenAI streaming failed: {e}")
+            logger.error("OpenAI streaming failed: {}", e)
             raise
 
     def _build_extra_body(self, options: Dict[str, Any]) -> Dict[str, Any] | None:

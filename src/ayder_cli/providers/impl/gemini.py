@@ -50,7 +50,7 @@ class GeminiProvider(AIProvider):
             )
             return self._normalize_response(response)
         except Exception as e:
-            logger.error(f"Gemini chat failed: {e}")
+            logger.error("Gemini chat failed: {}", e)
             raise
 
     def _normalize_response(self, response: Any) -> NormalizedStreamChunk:
@@ -107,7 +107,7 @@ class GeminiProvider(AIProvider):
             gen_config.max_output_tokens = self.config.max_output_tokens
 
         if verbose:
-            logger.debug(f"Gemini Stream Request: model={model}, tools={len(tools) if tools else 0}")
+            logger.debug("Gemini Stream Request: model={}, tools={}", model, len(tools) if tools else 0)
             if self.interaction_sink:
                 self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
@@ -124,7 +124,7 @@ class GeminiProvider(AIProvider):
                 yield self._normalize_chunk(chunk)
                 
         except Exception as e:
-            logger.error(f"Gemini streaming failed: {e}")
+            logger.error("Gemini streaming failed: {}", e)
             raise
 
     def _normalize_chunk(self, chunk: Any) -> NormalizedStreamChunk:

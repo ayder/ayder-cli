@@ -11,6 +11,7 @@ MODULES = [
     ("ayder_cli.providers.impl.ollama_drivers.registry", "llm"),
     ("ayder_cli.providers.impl.qwen", "llm"),
     ("ayder_cli.providers.impl.ollama_drivers.generic_xml", "llm"),
+    ("ayder_cli.providers.retry", "llm"),
     ("ayder_cli.core.cache_monitor", "context"),
 ]
 
