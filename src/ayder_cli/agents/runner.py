@@ -116,12 +116,11 @@ class AgentRunner:
     async def run(self, task: str) -> AgentRunOutcome:
         """Execute the agent task and return an AgentRunOutcome."""
         self.status = "running"
-        task_preview = task[:120] + "..." if len(task) > 120 else task
         logger.info(
-            "run started: agent='{}' run_id={} model='{}' timeout={}s task='{}'",
+            "run started: agent='{}' run_id={} model='{}' timeout={}s task_chars={}",
             self.agent_name, self.run_id,
             self._agent_config.model or "(default)",
-            self._timeout, task_preview,
+            self._timeout, len(task),
         )
 
         try:

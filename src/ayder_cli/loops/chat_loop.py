@@ -140,11 +140,13 @@ class ChatLoop:
             llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
             if self.config.verbose:
                 for i, m in enumerate(llm_messages):
+                    content = m.get("content")
                     llm_log.trace(
-                        "  Message {} [{}]: {}...",
+                        "  Message {} [{}] content_type={} content_len={}",
                         i,
                         m.get("role"),
-                        repr(m.get("content"))[:200],
+                        type(content).__name__,
+                        len(content) if hasattr(content, "__len__") else 0,
                     )
 
             # 2. Call LLM (Streaming)

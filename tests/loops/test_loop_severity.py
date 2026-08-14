@@ -115,7 +115,7 @@ def test_context_record_is_debug_on_the_production_path(loguru_caplog):
 
 EXPECTED = {
     "loops/chat_loop.py :: ChatLoop.run :: Calling LLM with history:": "debug",
-    "loops/chat_loop.py :: ChatLoop.run :: Message {} [{}]:": "trace",
+    "loops/chat_loop.py :: ChatLoop.run :: Message {} [{}] content_type=": "trace",
     "loops/chat_loop.py :: ChatLoop._execute_tool_calls :: Appending Tool Result": "trace",
     "loops/chat_loop.py :: ChatLoop._execute_tool_calls :: Appending Tool Error": "trace",
     "loops/chat_loop.py :: ChatLoop.run :: LLM returned empty response": "error",

@@ -223,7 +223,7 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
             return candidate
     except Exception:
         logger.opt(exception=True).debug(
-            "Strategy 1 (relative path) failed for {}", identifier
+            "Strategy 1 (relative path) failed ({} chars)", len(identifier)
         )
 
     # Strategy 2: Try as filename in tasks dir

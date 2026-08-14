@@ -23,12 +23,27 @@ def test_tool_complete_is_trace_on_the_production_path(loguru_caplog):
     assert hits[0]["extra"]["channel"] == "agent"
 
 
-def test_tool_complete_excerpt_stays_bounded(loguru_caplog):
-    """The excerpt is truncated, so TRACE cannot become a payload dump."""
-    _cb().on_tool_complete("call-1", "x" * 5000)
-    msg = loguru_caplog.records[0]["message"]
-    assert "..." in msg
-    assert msg.count("x") == 200
+def test_tool_complete_does_not_leak_raw_result_content(loguru_caplog):
+    """The TRACE record must carry only the result's length, never the
+    result content itself -- not even truncated. Regression for the
+    agents/callbacks.py:82 leak found in security review: `result[:200]`
+    truncates but still emits up to 200 raw characters, and truncation is
+    not redaction. Supersedes the old bounded-excerpt assertion, whose
+    premise (a truncated preview is safe) is exactly what was wrong."""
+    secret = "sk-proj-SENTINEL-DO-NOT-LOG-1234567890"
+    result = f"tool output containing {secret}"
+
+    _cb().on_tool_complete("call-1", result)
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("agent tool_complete:")]
+    assert hits, "tool_complete record never emitted"
+    hit = hits[0]
+    assert hit["level"].name == "TRACE"
+    assert hit["extra"]["channel"] == "agent"
+    assert str(len(result)) in hit["message"], "expected the result length to be logged"
+    assert secret not in hit["message"]
+    assert secret not in loguru_caplog.text
 
 
 def test_token_usage_is_debug_and_fires_once_per_turn(loguru_caplog):

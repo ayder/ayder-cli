@@ -78,10 +78,9 @@ class AgentCallbacks:
         self._emit("tool_start", {"call_id": call_id, "name": name, "arguments": arguments})
 
     def on_tool_complete(self, call_id: str, result: str) -> None:
-        result_preview = (result[:200] + "...") if len(result) > 200 else result
         logger.trace(
-            "agent tool_complete: agent='{}' run_id={} call_id='{}' result='{}'",
-            self.agent_name, self.run_id, call_id, result_preview,
+            "agent tool_complete: agent='{}' run_id={} call_id='{}' result_chars={}",
+            self.agent_name, self.run_id, call_id, len(result),
         )
         self._emit("tool_complete", {"call_id": call_id, "result": result})
 

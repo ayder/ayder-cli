@@ -79,19 +79,23 @@ class FakeCallbacks:
         return self._calls > 4
 
 
-def _run_loop(tool_name: str, fake_result: str, arguments: str = '{}') -> tuple[list[dict], ChatLoop]:
+def _run_loop(
+    tool_name: str, fake_result: str, arguments: str = '{}', *, verbose: bool = False,
+    messages: list[dict] | None = None,
+) -> tuple[list[dict], ChatLoop]:
     registry = MagicMock()
     registry.get_schemas.return_value = [
         {"type": "function", "function": {"name": tool_name, "parameters": {}}}
     ]
     registry.execute.return_value = fake_result
 
-    messages = [{"role": "system", "content": "test"}]
+    if messages is None:
+        messages = [{"role": "system", "content": "test"}]
     loop = ChatLoop(
         llm=_make_provider(tool_name, arguments=arguments),
         registry=registry,
         messages=messages,
-        config=ChatLoopConfig(permissions={"r", "w", "x"}),
+        config=ChatLoopConfig(permissions={"r", "w", "x"}, verbose=verbose),
         callbacks=FakeCallbacks(),
     )
     return messages, loop
@@ -206,6 +210,43 @@ async def test_tool_result_and_exception_history_trace_do_not_leak_raw_content(l
     tool_msgs2 = [m for m in messages2 if m.get("role") == "tool"]
     assert any(secret in m["content"] for m in tool_msgs2), (
         "test setup didn't actually exercise the exception path with the secret"
+    )
+    assert secret not in loguru_caplog.text
+
+
+@pytest.mark.anyio
+async def test_verbose_message_trace_does_not_leak_content(loguru_caplog):
+    """The verbose per-message TRACE record must carry only role/type/length
+    metadata, never the message content itself -- not even a repr prefix.
+
+    Regression for the chat_loop.py:143 leak found in security review:
+    `repr(content)[:200]` truncates but still emits up to 200 raw
+    characters, and truncation is not redaction.
+    """
+    secret = "sk-proj-SENTINEL-DO-NOT-LOG-1234567890"
+    seed_messages = [
+        {"role": "system", "content": "test"},
+        {"role": "user", "content": f"please rotate this key: {secret}"},
+    ]
+
+    messages, loop = _run_loop(
+        "search_codebase", "ok", arguments='{"pattern": "x"}',
+        verbose=True, messages=seed_messages,
+    )
+    await loop.run()
+
+    # Point 1: prove the secret genuinely reached the seeded conversation
+    # that the verbose trace loop iterates over.
+    assert any(secret in m.get("content", "") for m in messages), (
+        "test setup didn't actually seed the secret into the conversation"
+    )
+
+    hits = [r for r in loguru_caplog.records if r["message"].startswith("  Message ")]
+    assert hits, "verbose per-message trace record never emitted"
+    assert all(h["level"].name == "TRACE" for h in hits)
+    assert all(h["extra"]["channel"] == "llm" for h in hits)
+    assert any("content_len=" in h["message"] for h in hits), (
+        "expected content_type/content_len metadata to be logged"
     )
     assert secret not in loguru_caplog.text
 

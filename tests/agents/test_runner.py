@@ -79,6 +79,44 @@ class TestAgentRunner:
         assert "deliverable" in (result.error or "").lower()
 
     @pytest.mark.anyio
+    async def test_run_started_log_does_not_leak_task_content(self, loguru_caplog):
+        """The `run started` INFO record must carry the task's length, never
+        the task text itself. Regression for the agents/runner.py:120 leak
+        found in security review: `task[:120]` truncates but still emits up
+        to 120 raw characters of the task/prompt, and truncation is not
+        redaction."""
+        secret = "sk-proj-SENTINEL-DO-NOT-LOG-1234567890"
+        task = f"please rotate this key: {secret}"
+        runner = self._make_runner()
+
+        mock_rt = MagicMock()
+        mock_rt.config = runner._parent_config
+        mock_rt.llm_provider = MagicMock()
+        mock_rt.tool_registry = MagicMock()
+        mock_rt.system_prompt = "test"
+
+        with patch("ayder_cli.agents.runner.create_agent_runtime", return_value=mock_rt), \
+             patch("ayder_cli.agents.runner.ChatLoop") as MockLoop:
+            mock_loop = MockLoop.return_value
+            mock_loop.run = AsyncMock()
+            await runner.run(task)
+
+        # Point 1: prove the secret genuinely reached AgentRunner.run's input.
+        messages = MockLoop.call_args.kwargs["messages"]
+        assert any(secret in m.get("content", "") for m in messages), (
+            "test setup didn't actually exercise run() with the secret"
+        )
+
+        hits = [r for r in loguru_caplog.records if r["message"].startswith("run started:")]
+        assert hits, "run started record never emitted"
+        hit = hits[0]
+        assert hit["level"].name == "INFO"
+        assert hit["extra"]["channel"] == "agent"
+        assert str(len(task)) in hit["message"], "expected the task length to be logged"
+        assert secret not in hit["message"]
+        assert secret not in loguru_caplog.text
+
+    @pytest.mark.anyio
     async def test_run_timeout(self):
         """AgentRunner.run() produces error outcome when exceeding timeout."""
         runner = self._make_runner(timeout=0.01)  # 10ms timeout

@@ -357,6 +357,43 @@ class TestTaskResolution:
     def test_resolve_missing_returns_none(self, project_context, tasks_dir):
         assert resolve_task_path(project_context, "TASK-999") is None
 
+    def test_resolve_strategy1_failure_does_not_leak_identifier(
+        self, project_context, tasks_dir, loguru_caplog, monkeypatch
+    ):
+        """Strategy 1's except-and-continue must log the identifier's
+        length, never the identifier itself. Regression for the
+        tools/builtins/tasks.py:225 leak found in security review (it
+        previously logged the raw identifier verbatim)."""
+        import pathlib
+
+        secret = "sk-proj-SENTINEL-DO-NOT-LOG-1234567890"
+        real_exists = pathlib.Path.exists
+
+        def _boom_for_strategy1(self):
+            # Only Strategy 1's candidate (`project_ctx.root / identifier`)
+            # has this exact parent -- Strategy 2's candidate
+            # (`tasks_dir / identifier`) is untouched, so it can still run
+            # to confirm the identifier genuinely resolves to nothing.
+            if self.parent == project_context.root:
+                raise OSError("simulated failure")
+            return real_exists(self)
+
+        monkeypatch.setattr(pathlib.Path, "exists", _boom_for_strategy1)
+
+        # Point 1: the secret IS the input -- no separate proof needed that
+        # it "reached" resolve_task_path, it's the argument itself.
+        result = resolve_task_path(project_context, secret)
+        assert result is None
+
+        hits = [r for r in loguru_caplog.records if "Strategy 1" in r["message"]]
+        assert hits, "Strategy 1 failure record never emitted"
+        hit = hits[0]
+        assert hit["level"].name == "DEBUG"
+        assert hit["extra"]["channel"] == "tool"
+        assert str(len(secret)) in hit["message"], "expected the identifier length to be logged"
+        assert secret not in hit["message"]
+        assert secret not in loguru_caplog.text
+
     def test_read_task_returns_canonical_id_relpath_and_content(self, project_context, tasks_dir):
         self._make(tasks_dir, "TASK-003-add-auth.md", body="DO THE AUTH WORK")
         result = read_task(project_context, "3")
