@@ -337,6 +337,10 @@ def main():
                     try:
                         install_plugin_dependencies(manifest.dependencies)
                     except Exception as e:
+                        logger.opt(exception=True).error(
+                            "Dependency install failed for plugin {!r}; rolling back",
+                            manifest.name,
+                        )
                         # Rollback: remove the installed plugin
                         uninstall_plugin(
                             manifest.name,
@@ -502,6 +506,7 @@ def main():
             )
             sys.exit(1)
         except Exception as e:
+            logger.opt(exception=True).error("Failed to read system prompt file")
             print(
                 f"Error reading system prompt file {args.system_prompt}: {e}",
                 file=sys.stderr,
@@ -519,6 +524,7 @@ def main():
             print(f"Error: File not found: {args.file}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
+            logger.opt(exception=True).error("Failed to read --file input")
             print(f"Error reading file {args.file}: {e}", file=sys.stderr)
             sys.exit(1)
     elif args.stdin:

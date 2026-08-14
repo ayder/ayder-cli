@@ -169,6 +169,7 @@ async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
             on_model_selected,
         )
     except Exception as e:
+        logger.opt(exception=True).error("Model listing failed")
         chat_view.add_system_message(f"Error listing models: {e}")
 
 
@@ -279,6 +280,7 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
         )
 
     except Exception as e:
+        logger.opt(exception=True).error("Task listing failed for /tasks")
         chat_view.add_system_message(f"Error listing tasks: {e}")
 
 
@@ -304,6 +306,7 @@ def handle_tools(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
         chat_view.add_assistant_message(tools_text)
     except Exception as e:
+        logger.opt(exception=True).error("Tool listing failed")
         chat_view.add_system_message(f"Error listing tools: {e}")
 
 
@@ -546,6 +549,7 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
         )
 
     except Exception as e:
+        logger.opt(exception=True).error("Task listing failed for /implement")
         chat_view.add_system_message(f"Error listing tasks: {e}")
 
 
@@ -559,6 +563,7 @@ def _open_task_in_editor(
     try:
         content = path.read_text(encoding="utf-8")
     except Exception as e:
+        logger.opt(exception=True).error("Failed to read task file {}", path)
         chat_view.add_system_message(f"Error reading task: {e}")
         return
 
@@ -570,6 +575,7 @@ def _open_task_in_editor(
             path.write_text(new_content, encoding="utf-8")
             chat_view.add_system_message(f"Task TASK-{task_id:03d} saved.")
         except Exception as e:
+            logger.opt(exception=True).error("Failed to save task file {}", path)
             chat_view.add_system_message(f"Error saving task: {e}")
 
     app.push_screen(
@@ -587,6 +593,7 @@ def _open_note_in_editor(
     try:
         content = path.read_text(encoding="utf-8")
     except Exception as e:
+        logger.opt(exception=True).error("Failed to read note file {}", path)
         chat_view.add_system_message(f"Error reading note: {e}")
         return
 
@@ -598,6 +605,7 @@ def _open_note_in_editor(
             path.write_text(new_content, encoding="utf-8")
             chat_view.add_system_message(f"Note '{display_name}' saved.")
         except Exception as e:
+            logger.opt(exception=True).error("Failed to save note file {}", path)
             chat_view.add_system_message(f"Error saving note: {e}")
 
     app.push_screen(
@@ -670,6 +678,7 @@ def handle_notes(app: "AyderApp", args: str, chat_view: ChatView) -> None:
         )
 
     except Exception as e:
+        logger.opt(exception=True).error("Note listing failed")
         chat_view.add_system_message(f"Error listing notes: {e}")
 
 
@@ -735,6 +744,9 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
         TemporalWorker = getattr(temporal_worker, "TemporalWorker")
         TemporalWorkerConfig = getattr(temporal_worker, "TemporalWorkerConfig")
     except Exception:
+        logger.opt(exception=True).debug(
+            "Temporal plugin worker module unavailable"
+        )
         chat_view.add_system_message(
             "Temporal plugin not installed. Install with: "
             "ayder install-plugin <path-to-temporal-tools>"
@@ -1006,7 +1018,7 @@ def _refresh_status_badges(app: "AyderApp") -> None:
 
         app.query_one("#status-bar", StatusBar).refresh_plugin_badges()
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Status-bar badge refresh failed")
 
 
 def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
@@ -1103,12 +1115,17 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
             try:
                 input_widget = app.query_one("#chat-input", TextArea)
             except Exception:
+                logger.opt(exception=True).debug(
+                    "Chat input lookup failed; cannot prefill the /agent command"
+                )
                 return
             input_widget.text = f"/agent {name} "
             try:
                 input_widget.focus()
             except Exception:
-                pass
+                logger.opt(exception=True).debug(
+                    "Could not focus the chat input after agent selection"
+                )
 
         app.push_screen(
             AgentListScreen(registry=app._agent_registry),
@@ -1170,7 +1187,10 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
             agent_panel = app.query_one("#agent-panel", AgentPanel)
             agent_panel.add_agent(agent_name, run_id)
         except Exception:
-            pass
+            # agent_name is a validated key of the configured agents mapping.
+            logger.opt(exception=True).debug(
+                "Agent panel could not show run {} of agent {}", run_id, agent_name
+            )
 
         chat_view.add_system_message(
             f"Agent '{agent_name}' dispatched as run #{run_id} (working).\n"
@@ -1187,7 +1207,9 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         activity.set_agents_running(count)
         app._start_activity_timer()
     except Exception:
-        pass
+        logger.opt(exception=True).debug(
+            "Activity bar agent count update failed after /agent dispatch"
+        )
 
 
 # Command dispatch map: command name -> handler function

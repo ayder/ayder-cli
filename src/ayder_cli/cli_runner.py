@@ -143,6 +143,7 @@ class CommandRunner:
             print(str(e), file=sys.stderr)   # message already starts with "Error:"
             return 1
         except Exception as e:
+            logger.opt(exception=True).error("Single-command run failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
 
@@ -186,6 +187,7 @@ class TaskRunner:
             print(result)
             return 0
         except Exception as e:
+            logger.opt(exception=True).error("Task listing failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
 
@@ -238,6 +240,7 @@ class TaskRunner:
             print(f"No tasks found matching: {task_query}", file=sys.stderr)
             return 1
         except Exception as e:
+            logger.opt(exception=True).error("Task implementation failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
 
@@ -281,6 +284,7 @@ class TaskRunner:
                 permissions=permissions,
             )
         except Exception as e:
+            logger.opt(exception=True).error("Implement-all run failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
 

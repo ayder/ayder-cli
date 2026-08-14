@@ -88,6 +88,9 @@ def create_runtime(
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
         macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
     except Exception:
+        logger.opt(exception=True).warning(
+            "Project-structure macro unavailable; continuing without it"
+        )
         macro = ""
 
     # Format the final prompt (protocol injection now handled dynamically by chat_loop and protocols)

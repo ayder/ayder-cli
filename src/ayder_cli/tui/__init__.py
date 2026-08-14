@@ -98,6 +98,7 @@ def run_tui(
                 permissions=app.permissions,
             )
         except Exception as exc:  # never let a save failure mask the exit
+            logger.opt(exception=True).warning("Session auto-save failed on exit")
             print(f"Warning: could not save session: {exc}", file=sys.stderr)
 
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
 from textual.suggester import SuggestFromList
@@ -949,7 +950,10 @@ class _SubmitTextArea(TextArea):
         """
         try:
             panel = self.app.query_one("#agent-panel", AgentPanel)
+        except NoMatches:
+            return False              # panel not mounted — chat view handles it
         except Exception:
+            logger.opt(exception=True).debug("Agent panel lookup failed")
             return False
         if not panel.display:
             return False
@@ -1002,7 +1006,9 @@ class CLIInputBar(Horizontal):
                 lines = [line.strip() for line in content.split("\n") if line.strip()]
                 return lines[-1000:]
             except Exception:
-                pass
+                logger.opt(exception=True).debug(
+                    "Failed to load chat history file; starting with empty history"
+                )
         return []
 
     def _save_to_history(self, command: str) -> None:
@@ -1011,7 +1017,9 @@ class CLIInputBar(Horizontal):
             with open(self._history_file, "a", encoding="utf-8") as f:
                 f.write(command + "\n")
         except Exception:
-            pass
+            logger.opt(exception=True).debug(
+                "Failed to append to the chat history file"
+            )
 
     def compose(self) -> ComposeResult:
         """Compose the input bar."""
@@ -1196,6 +1204,9 @@ class StatusBar(Horizontal):
                 return None
             return chat_loop.config.tool_tags
         except Exception:
+            logger.opt(exception=True).debug(
+                "Could not read enabled tool tags; badges rendered unfiltered"
+            )
             return None
 
     def refresh_plugin_badges(self) -> None:
@@ -1204,8 +1215,11 @@ class StatusBar(Horizontal):
 
         try:
             label = self.query_one("#plugin-badges", Label)
-        except Exception:
+        except NoMatches:
             return  # not mounted yet
+        except Exception:
+            logger.opt(exception=True).debug("Plugin badge label lookup failed")
+            return
         label.update(self._render_badges(plugin_status.get_all(), self._enabled_tags()))
 
 

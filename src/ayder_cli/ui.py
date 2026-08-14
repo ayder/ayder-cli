@@ -137,6 +137,9 @@ def print_file_content(file_path):
             Panel(content, title=file_path, border_style="cyan", padding=(1, 2))
         )
     except Exception as e:
+        logger.opt(exception=True).warning(
+            "Failed to render file panel for {}", file_path
+        )
         console.print(
             Panel(
                 f"Could not read file: {e}",
@@ -162,6 +165,9 @@ def print_file_content_rich(file_path: str, content: str | None = None) -> None:
             Panel(content, title=file_path, border_style="cyan", padding=(1, 2))
         )
     except Exception as e:
+        logger.opt(exception=True).warning(
+            "Failed to render file panel for {}", file_path
+        )
         console.print(
             Panel(
                 f"Could not read file: {e}",
@@ -287,6 +293,9 @@ def generate_diff_preview(file_path, new_content):
         return combined
 
     except Exception:
+        logger.opt(exception=True).debug(
+            "Diff preview generation failed for {}", file_path
+        )
         return None
 
 

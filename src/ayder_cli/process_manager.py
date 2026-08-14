@@ -206,7 +206,10 @@ class ProcessManager:
                 try:
                     self._terminate_tree(mp.process)
                 except Exception:
-                    pass
+                    logger.opt(exception=True).debug(
+                        "Failed to terminate process tree for background process {}",
+                        mp.id,
+                    )
 
     @staticmethod
     def _read_stream(mp: ManagedProcess, stream, buffer: Deque[str]):

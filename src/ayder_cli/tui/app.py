@@ -7,6 +7,7 @@ Command handlers are in tui.commands.
 """
 
 from textual.app import App, ComposeResult, InvalidThemeError
+from textual.css.query import NoMatches
 from textual.widgets import Static
 from textual.timer import Timer
 from textual import on
@@ -112,6 +113,9 @@ class AppCallbacks:
             used = int(stats.total_tokens)
             total = int(stats.total_tokens + stats.available_tokens)
         except Exception:
+            logger.opt(exception=True).debug(
+                "Context stats unavailable; skipping status-bar usage update"
+            )
             return
         self._app.call_later(
             lambda u=used, t=total: self._app.query_one(
@@ -340,22 +344,41 @@ class AyderApp(App):
         # Initialize agent registry if agents are configured (Part 1)
         self._agent_registry: AgentRegistry | None = None
         if hasattr(self.config, 'agents') and isinstance(self.config.agents, dict) and self.config.agents:
+            # Agent progress fires once per streamed chunk. A persistent failure
+            # would otherwise write one traceback per chunk, so the first
+            # unexpected error records its stack and then switches this purely
+            # cosmetic mirroring off for the rest of the session.
+            self._agent_ui_sync_off = False
+
             def _agent_progress(run_id, name, event, data):
                 """Forward agent events to AgentPanel and sync activity bar."""
+                if self._agent_ui_sync_off:
+                    return
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
                     label = self._agent_registry.run_label(run_id) if self._agent_registry else None
                     self.call_later(lambda: panel.update_agent(run_id, name, event, data, label))
+                except NoMatches:
+                    pass                      # panel not mounted (yet) — nothing to mirror
                 except Exception:
-                    pass
+                    self._agent_ui_sync_off = True
+                    logger.opt(exception=True).warning(
+                        "Agent panel update failed; agent UI mirroring disabled for this session"
+                    )
+                    return
                 # Keep activity bar agent count in sync and ensure spinner animates
                 try:
                     activity = self.query_one("#activity-bar", ActivityBar)
                     count = self._agent_registry.active_count if self._agent_registry else 0
                     self.call_later(lambda: activity.set_agents_running(count))
                     self.call_later(self._start_activity_timer)
+                except NoMatches:
+                    pass                      # activity bar not mounted (yet)
                 except Exception:
-                    pass
+                    self._agent_ui_sync_off = True
+                    logger.opt(exception=True).warning(
+                        "Activity bar sync failed; agent UI mirroring disabled for this session"
+                    )
 
             def _agent_complete(run_id, run):
                 """Handle agent completion: update UI and nudge the idle LLM."""
@@ -363,13 +386,17 @@ class AyderApp(App):
                     panel = self.query_one("#agent-panel", AgentPanel)
                     self.call_later(lambda: panel.complete_agent(run_id, run.result, run.status))
                 except Exception:
-                    pass
+                    logger.opt(exception=True).debug(
+                        "Agent panel completion update failed for run {}", run_id
+                    )
                 try:
                     activity = self.query_one("#activity-bar", ActivityBar)
                     count = self._agent_registry.active_count if self._agent_registry else 0
                     self.call_later(lambda: activity.set_agents_running(count))
                 except Exception:
-                    pass
+                    logger.opt(exception=True).debug(
+                        "Activity bar agent count update failed after run {}", run_id
+                    )
                 self._maybe_nudge()                 # event-driven nudge (spec §7)
 
             self._agent_registry = AgentRegistry(
@@ -481,6 +508,9 @@ class AyderApp(App):
             structure = self.registry.execute("get_project_structure", {"max_depth": 3})
             macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
         except Exception:
+            logger.opt(exception=True).warning(
+                "Project-structure macro unavailable; continuing without it"
+            )
             macro = ""
 
         if self._system_prompt_override is not None:
@@ -519,6 +549,10 @@ class AyderApp(App):
                     project_structure=structure
                 )
             except Exception:
+                logger.opt(exception=True).warning(
+                    "Project-structure macro unavailable on model switch; "
+                    "continuing without it"
+                )
                 macro = ""
             tags = self.chat_loop.config.tool_tags
             tool_prompts = self.registry.get_system_prompts(tags=tags)
@@ -667,6 +701,9 @@ class AyderApp(App):
             return "\n".join(diff) or None
 
         except Exception:
+            logger.opt(exception=True).debug(
+                "Diff preview generation failed for tool {}", tool_name
+            )
             return None
 
     async def _request_confirmation(
@@ -778,6 +815,7 @@ class AyderApp(App):
                     if hasattr(maybe_awaitable, "__await__"):
                         await cast(Awaitable[None], maybe_awaitable)
             except Exception as e:
+                logger.opt(exception=True).error("Turn preparation failed")
                 self._report_turn_error(e)
                 continue
             should_run = req.run_loop() if callable(req.run_loop) else req.run_loop
@@ -798,6 +836,7 @@ class AyderApp(App):
                 if consumer_task is not None and consumer_task.cancelling():
                     raise
             except Exception as e:
+                logger.opt(exception=True).error("Turn execution failed")
                 self._report_turn_error(e)
             finally:
                 self._run_task = None
@@ -828,7 +867,11 @@ class AyderApp(App):
         try:
             self.query_one("#chat-view", ChatView).add_system_message(f"Error: {exc}")
         except Exception:
-            pass
+            # The turn error itself is already logged with its stack by the
+            # consumer; this only records that it could not be surfaced.
+            logger.opt(exception=True).debug(
+                "Could not surface the turn error in the chat view"
+            )
 
     def _handle_command(self, cmd: str) -> None:
         """Handle slash commands - dispatch to tui.commands handlers."""
@@ -848,6 +891,11 @@ class AyderApp(App):
                     f"Unknown command: {cmd_name}. Type /help for available commands."
                 )
         except Exception as e:
+            # Only an allowlisted COMMAND_MAP key is logged — never raw input.
+            logger.opt(exception=True).error(
+                "Slash command handler failed for {}",
+                cmd_name if cmd_name in COMMAND_MAP else "<unknown command>",
+            )
             chat_view.add_system_message(f"Command error: {type(e).__name__}: {e}")
 
     def _format_shell_context_message(self, command: str, result: str) -> str:
@@ -886,6 +934,7 @@ class AyderApp(App):
                 pre_approved=pre_approved,
             )
         except Exception as exc:
+            logger.opt(exception=True).error("Shell shortcut execution raised")
             result = f"Error executing shell command: {exc}"
             chat_view.add_system_message(result)
             self._callbacks.on_tool_complete(call_id, result)
@@ -956,7 +1005,9 @@ class AyderApp(App):
             # Start each turn's reasoning fresh in the thinking panel.
             self.query_one("#thinking-panel", ThinkingPanel).clear()
         except Exception:
-            pass
+            logger.opt(exception=True).debug(
+                "Could not echo the submitted message into the chat view"
+            )
 
         def _prepare(text=user_input):
             if self._agent_registry:
@@ -972,7 +1023,7 @@ class AyderApp(App):
             self.query_one("#activity-bar", ActivityBar).clear()
             self.query_one("#input-bar", CLIInputBar).focus_input()
         except Exception:
-            pass
+            logger.opt(exception=True).debug("Post-turn UI teardown failed")
         if self._agent_registry:
             self._maybe_nudge()
 
@@ -1079,7 +1130,12 @@ class AyderApp(App):
         ):
             try:
                 panel = self.query_one(panel_id, panel_cls)
+            except NoMatches:
+                continue                  # panel not mounted — try the next one
             except Exception:
+                logger.opt(exception=True).debug(
+                    "Panel lookup failed for {}", panel_id
+                )
                 continue
             if not panel.display:
                 continue
@@ -1099,7 +1155,9 @@ class AyderApp(App):
             input_bar = self.query_one("#input-bar", CLIInputBar)
             input_bar.focus_input()
         except Exception:
-            pass
+            logger.opt(exception=True).debug(
+                "Could not restore input focus on app focus"
+            )
 
 
 def _split_into_exchanges(messages: list[dict]) -> list[list[dict]]:

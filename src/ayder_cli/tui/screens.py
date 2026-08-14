@@ -2,6 +2,7 @@
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import Static, Input, Label, TextArea
 from textual.screen import ModalScreen
 from rich.text import Text
@@ -130,8 +131,10 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
                     diff_scroll.scroll_page_up(animate=False)
                 else:
                     diff_scroll.scroll_page_down(animate=False)
+            except NoMatches:
+                pass          # no diff pane on this confirm screen — nothing to scroll
             except Exception:
-                pass
+                logger.opt(exception=True).debug("Diff pane scroll failed")
             return
 
         if key in ("up", "k"):
@@ -557,6 +560,11 @@ class AgentListScreen(ModalScreen[str | None]):
         self._snapshot: list[dict] = []
         self.selected_index = 0
         self._refresh_handle = None
+        # Both live-refresh paths below run on a 1 s timer, so each records its
+        # stack once and then switches itself off; a persistent failure must not
+        # write one traceback per tick.
+        self._snapshot_refresh_off = False
+        self._display_refresh_off = False
         self._refresh_snapshot()
 
     def _refresh_snapshot(self) -> None:
@@ -564,9 +572,15 @@ class AgentListScreen(ModalScreen[str | None]):
         if self._registry is None:
             self._snapshot = []
             return
+        if self._snapshot_refresh_off:
+            return                      # gave up refreshing; keep the last rows
         try:
             self._snapshot = list(self._registry.list_agents())
         except Exception:
+            self._snapshot_refresh_off = True
+            logger.opt(exception=True).warning(
+                "Agent status refresh failed; live refresh stopped for this screen"
+            )
             self._snapshot = []
 
     def _clamp_index(self) -> None:
@@ -689,9 +703,17 @@ class AgentListScreen(ModalScreen[str | None]):
         return ("·", "dim", status, "dim")
 
     def _update_display(self) -> None:
+        if self._display_refresh_off:
+            return
         try:
             list_widget = self.query_one("#agent-list", Static)
+        except NoMatches:
+            return                      # not composed yet, or already unmounted
         except Exception:
+            self._display_refresh_off = True
+            logger.opt(exception=True).warning(
+                "Agent list redraw failed; live redraw stopped for this screen"
+            )
             return
         list_widget.update(self._render_list())
 
