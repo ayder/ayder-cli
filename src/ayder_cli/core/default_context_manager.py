@@ -117,12 +117,22 @@ class TokenCounter:
         if self._encoder is not None:
             try:
                 return len(self._encoder.encode(text))
+            except ValueError:
+                # Anticipated: tiktoken rejects content containing special-token
+                # markers (e.g. "<|endoftext|>"), which ordinary LLM traffic can
+                # legitimately contain. Fall back for this string only — the
+                # encoder is fine and stays available for the next one.
+                pass
             except Exception:
+                # Unexpected encoder failure. Log once with a stack, then disable
+                # the encoder so a persistent defect can't emit a traceback per
+                # message per turn for the rest of the session.
                 logger.opt(exception=True).debug(
-                    "Encoder failed to tokenize string of length {}; falling back "
-                    "to heuristic estimate",
+                    "Encoder failed unexpectedly on a string of length {}; "
+                    "disabling it for the rest of this session",
                     len(text),
                 )
+                self._encoder = None
 
         is_code = any(c in text for c in "{}[]();=<>+-*/%&|^~!")
         chars_per_token = (

@@ -1,7 +1,7 @@
 """Tests for DefaultContextManager — preserves existing behavior for non-Ollama providers."""
 from unittest.mock import MagicMock
 
-from ayder_cli.core.default_context_manager import DefaultContextManager
+from ayder_cli.core.default_context_manager import DefaultContextManager, TokenCounter
 from ayder_cli.core.context_manager import ContextStats
 
 
@@ -321,3 +321,98 @@ def test_assign_tier_user_messages_never_old_assistant():
     old_user_msg = {"role": "user", "content": "an old user message"}
     tier = mgr._assign_tier(old_user_msg, message_index=1)
     assert tier != MessageTier.OLD_ASSISTANT
+
+
+# -- TokenCounter._estimate_string: encoder failure branches ----------------
+#
+# tiktoken raises ValueError for content it refuses to encode (e.g. text
+# containing a literal "<|endoftext|>" marker) — anticipated, high-frequency,
+# ordinary LLM traffic. Any other exception is an unexpected encoder failure.
+# These are fakes, not the real tiktoken encoder, so the branch behavior is
+# pinned deterministically without depending on tiktoken's exact exception
+# text or version. See the task report for a probe against the real encoder.
+
+
+class _RaisingEncoder:
+    """Fake tiktoken-shaped encoder that always raises a fixed exception."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+        self.calls = 0
+
+    def encode(self, text: str):
+        self.calls += 1
+        raise self._exc
+
+
+def _counter_with_fake_encoder(exc: Exception) -> TokenCounter:
+    """A TokenCounter whose encoder is replaced with one that always raises."""
+    counter = TokenCounter(model="gpt-4o", provider="openai")
+    counter._encoder = _RaisingEncoder(exc)
+    return counter
+
+
+def _heuristic_estimate(text: str) -> int:
+    """Independent re-implementation of the non-encoder fallback formula."""
+    is_code = any(c in text for c in "{}[]();=<>+-*/%&|^~!")
+    chars_per_token = 3.5 if is_code else 4.0
+    return int(len(text) / chars_per_token) + 1
+
+
+def test_estimate_string_value_error_falls_back_without_logging(loguru_caplog):
+    """ValueError (disallowed special token) falls back silently, repeatedly,
+    and never disables the encoder."""
+    counter = _counter_with_fake_encoder(ValueError("disallowed special token"))
+    encoder = counter._encoder
+
+    text_a = "first poisoned string"
+    result_a = counter._estimate_string(text_a)
+    assert result_a == _heuristic_estimate(text_a)
+    assert encoder.calls == 1
+    assert counter._encoder is encoder  # still installed after one failure
+
+    # Absence case: no record anywhere carries an exception.
+    assert not any(r["exception"] is not None for r in loguru_caplog.records)
+
+    # A second poisoned string is handled the same way: falls back again,
+    # encoder is still consulted (still available), still no log.
+    text_b = "second poisoned string, a bit longer than the first"
+    result_b = counter._estimate_string(text_b)
+    assert result_b == _heuristic_estimate(text_b)
+    assert encoder.calls == 2
+    assert counter._encoder is encoder
+
+    assert not any(r["exception"] is not None for r in loguru_caplog.records)
+
+
+def test_estimate_string_unexpected_error_logs_once_then_disables_encoder(
+    loguru_caplog,
+):
+    """A non-ValueError encoder failure logs exactly one exception-bearing
+    DEBUG record and disables the encoder; later calls use the heuristic
+    without a second encoder call or a second log record."""
+    counter = _counter_with_fake_encoder(RuntimeError("encoder blew up"))
+    encoder = counter._encoder
+
+    text_a = "first string"
+    result_a = counter._estimate_string(text_a)
+    assert result_a == _heuristic_estimate(text_a)
+    assert encoder.calls == 1
+    assert counter._encoder is None  # disabled after the unexpected failure
+
+    exception_records = [r for r in loguru_caplog.records if r["exception"] is not None]
+    assert len(exception_records) == 1
+    assert exception_records[0]["level"].name == "DEBUG"
+    assert exception_records[0]["extra"].get("channel") == "context"
+
+    # Second call: encoder is disabled, so the fake must not be invoked again,
+    # and no second exception-bearing record should appear.
+    text_b = "second string, a bit longer than the first one was"
+    result_b = counter._estimate_string(text_b)
+    assert result_b == _heuristic_estimate(text_b)
+    assert encoder.calls == 1  # unchanged — never called again
+
+    exception_records_after = [
+        r for r in loguru_caplog.records if r["exception"] is not None
+    ]
+    assert len(exception_records_after) == 1  # still exactly one, total
