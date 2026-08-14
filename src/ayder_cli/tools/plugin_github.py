@@ -133,7 +133,7 @@ def _download_directory(
 
 def _download_file(url: str, dest: Path) -> None:
     """Download a single file from a URL."""
-    logger.debug("Downloading {}", dest.name)
+    logger.trace("Downloading {}", dest.name)
     headers = {}
     token = os.environ.get("GITHUB_TOKEN")
     if token:
