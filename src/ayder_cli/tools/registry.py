@@ -7,18 +7,18 @@ Responsibilities (after Phase 2 decomposition):
 """
 
 import importlib
-import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolResult
+from ayder_cli.log import get_logger
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.tools.execution import execute_tool
 from ayder_cli.tools.hooks import HookManager
 from ayder_cli.tools.normalization import normalize_arguments as normalize_arguments  # re-export: callers/tests use registry.normalize_arguments
 
-logger = logging.getLogger(__name__)
+logger = get_logger("tool")
 
 
 class ToolRegistry:
@@ -191,7 +191,7 @@ def _load_project_plugins(reg: ToolRegistry, project_path: Path) -> None:
                 reg.register_dynamic_tool(td, handlers[td.name])
 
             logger.info(
-                f"Loaded project plugin '{plugin_dir.name}' ({len(defs)} tools)"
+                "Loaded project plugin '{}' ({} tools)", plugin_dir.name, len(defs)
             )
         except Exception as e:
-            logger.warning(f"Skipping project plugin '{plugin_dir.name}': {e}")
+            logger.warning("Skipping project plugin '{}': {}", plugin_dir.name, e)

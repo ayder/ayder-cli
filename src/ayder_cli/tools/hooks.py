@@ -4,12 +4,13 @@ Extracted from tools/registry.py. Single responsibility: manage ordered lists
 of middleware and pre/post execution callbacks, and invoke them safely.
 """
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -103,7 +104,7 @@ class HookManager:
             try:
                 cb(tool_name, args)
             except Exception as e:
-                logger.warning(f"Pre-execute callback failed for {tool_name}: {e}")
+                logger.warning("Pre-execute callback failed for {}: {}", tool_name, e)
 
     def run_middlewares(self, tool_name: str, args: dict) -> None:
         """Invoke all middlewares. PermissionError is re-raised; others are logged."""
@@ -113,7 +114,7 @@ class HookManager:
             except PermissionError:
                 raise
             except Exception as e:
-                logger.warning(f"Middleware failed for {tool_name}: {e}")
+                logger.warning("Middleware failed for {}: {}", tool_name, e)
 
     def run_post_callbacks(self, result: ToolExecutionResult) -> None:
         """Invoke all post-execute callbacks. Failures are logged, not raised."""
@@ -122,5 +123,5 @@ class HookManager:
                 cb(result)
             except Exception as e:
                 logger.warning(
-                    f"Post-execute callback failed for {result.tool_name}: {e}"
+                    "Post-execute callback failed for {}: {}", result.tool_name, e
                 )

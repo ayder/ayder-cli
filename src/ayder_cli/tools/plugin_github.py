@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +10,9 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-logger = logging.getLogger(__name__)
+from ayder_cli.log import get_logger
+
+logger = get_logger("plugin")
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ def download_plugin(source: GitHubPluginSource, dest_dir: Path) -> str:
             f"Unexpected response type from GitHub API: {type(commit_info)}"
         )
     commit_sha = commit_info["sha"]
-    logger.info(f"Downloading '{source.repo}' at {commit_sha[:7]}")
+    logger.info("Downloading '{}' at {}", source.repo, commit_sha[:7])
 
     # 3. Download directory contents recursively
     content_path = source.path or ""
@@ -132,7 +133,7 @@ def _download_directory(
 
 def _download_file(url: str, dest: Path) -> None:
     """Download a single file from a URL."""
-    logger.debug(f"Downloading {dest.name}")
+    logger.debug("Downloading {}", dest.name)
     headers = {}
     token = os.environ.get("GITHUB_TOKEN")
     if token:

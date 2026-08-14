@@ -7,7 +7,6 @@ with a single polymorphic tool dispatching on ``action``.
 from __future__ import annotations
 
 import json
-import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -15,8 +14,9 @@ from typing import Any
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError, ToolSuccess
+from ayder_cli.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("context")
 
 
 _VALID_ACTIONS = frozenset({"save", "load", "list", "stats", "clear"})
@@ -158,7 +158,7 @@ def _scan_context_dir(ctx_dir: Path) -> tuple[list[tuple[str, dict, Path]], list
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Unreadable context slot at %s: %s", path, exc)
+            logger.warning("Unreadable context slot at {}: {}", path, exc)
             unreadable.append(path)
             continue
         name = payload.get("name")
@@ -293,10 +293,10 @@ def snapshot_conversation_for_clear(
             overwrite=True,
         )
     except Exception as exc:
-        logger.warning("Recovery snapshot failed: %s", exc)
+        logger.warning("Recovery snapshot failed: {}", exc)
         return None
     if isinstance(result, ToolError):
-        logger.warning("Recovery snapshot save returned error: %s", result)
+        logger.warning("Recovery snapshot save returned error: {}", result)
         return None
     return RECOVERY_SLOT_NAME
 

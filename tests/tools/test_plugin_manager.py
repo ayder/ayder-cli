@@ -1,6 +1,5 @@
 """Tests for plugin manager — TOML parsing and validation."""
 
-import logging
 import os
 import subprocess
 import sys
@@ -310,7 +309,7 @@ def test_install_deps_noop_when_empty():
     run.assert_not_called()
 
 
-def test_discover_reports_missing_dependency_actionably(global_plugins_dir, caplog):
+def test_discover_reports_missing_dependency_actionably(global_plugins_dir, loguru_caplog):
     """A plugin that fails to import because of a missing dependency yields an
     actionable warning naming the plugin, the missing module, and how to fix —
     not a silent generic skip."""
@@ -334,14 +333,13 @@ definitions = "defs.py"
         "import totally_missing_pkg\nTOOL_DEFINITIONS = ()\n"
     )
 
-    with caplog.at_level(logging.WARNING):
-        defs, handlers = discover_global_plugins()
+    defs, handlers = discover_global_plugins()
 
     assert defs == ()
-    msg = caplog.text
+    msg = loguru_caplog.at_level("WARNING").text
     assert "needsdep" in msg
     assert "totally_missing_pkg" in msg
-    assert "install" in msg.lower()  # actionable remedy
+    assert "install" in msg.lower()        # actionable remedy
 
 
 def test_plugin_reading_tool_definitions_at_import_still_loads(tmp_path):

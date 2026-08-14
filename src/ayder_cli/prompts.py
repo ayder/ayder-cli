@@ -253,8 +253,8 @@ When in doubt, ask the user.
 
 def get_system_prompt(prompt_name: str) -> str:
     """Retrieve the system prompt by tier name."""
-    import logging
-    logger = logging.getLogger(__name__)
+    from ayder_cli.log import get_logger
+    logger = get_logger("core")
 
     prompts = {
         "MINIMAL": MINIMAL_SYSTEM_PROMPT,
@@ -268,7 +268,7 @@ def get_system_prompt(prompt_name: str) -> str:
     if upper_name in prompts:
         return prompts[upper_name]
         
-    logger.warning(f"Unknown prompt definition '{prompt_name}' requested. Falling back to STANDARD.")
+    logger.warning("Unknown prompt definition '{}' requested. Falling back to STANDARD.", prompt_name)
     return STANDARD_SYSTEM_PROMPT
 
 

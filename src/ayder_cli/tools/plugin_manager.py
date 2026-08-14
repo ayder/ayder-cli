@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import logging
 import shutil
 import sys
 import tempfile
@@ -14,13 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from ayder_cli.log import get_logger
 from ayder_cli.tools.plugin_api import check_api_compatibility
 from ayder_cli.tools.plugin_github import (
     parse_github_url,
     download_plugin,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("plugin")
 
 # Plugin directories
 GLOBAL_PLUGINS_DIR = Path.home() / ".ayder" / "plugins"
@@ -169,7 +169,7 @@ def install_plugin_from_local(
     }
     _write_plugins_json(plugins_dir, data)
 
-    logger.info(f"Installed plugin '{manifest.name}' v{manifest.version}")
+    logger.info("Installed plugin '{}' v{}", manifest.name, manifest.version)
     return manifest
 
 
@@ -241,7 +241,7 @@ def uninstall_plugin(
             data = read_plugins_json(plugins_dir)
             data["plugins"].pop(name, None)
             _write_plugins_json(plugins_dir, data)
-            logger.info(f"Uninstalled plugin '{name}'")
+            logger.info("Uninstalled plugin '{}'", name)
             return
     raise PluginError(f"Plugin '{name}' not found")
 
@@ -315,7 +315,7 @@ def install_plugin_from_github(
     }
     _write_plugins_json(plugins_dir, data)
 
-    logger.info(f"Installed plugin '{manifest.name}' v{manifest.version}")
+    logger.info("Installed plugin '{}' v{}", manifest.name, manifest.version)
     return manifest
 
 
@@ -358,7 +358,7 @@ def update_plugin(
                 source_path = Path(source)
                 if not source_path.exists():
                     logger.warning(
-                        f"Source path for '{pname}' no longer exists: {source}"
+                        "Source path for '{}' no longer exists: {}", pname, source
                     )
                     continue
                 install_plugin_from_local(
@@ -486,19 +486,22 @@ def discover_global_plugins() -> tuple[tuple, dict[str, Callable]]:
             all_defs.extend(defs)
             all_handlers.update(handlers)
             logger.info(
-                f"Loaded global plugin '{plugin_dir.name}' "
-                f"({len(defs)} tools)"
+                "Loaded global plugin '{}' ({} tools)", plugin_dir.name, len(defs)
             )
         except ModuleNotFoundError as e:
             # A declared dependency isn't installed in ayder's environment.
             # Point the user at the fix instead of silently swallowing it.
             logger.warning(
-                f"Plugin '{plugin_dir.name}' is missing a dependency "
-                f"({e.name!r}: {e}). Reinstall it to install its declared "
-                f"dependencies — e.g. `ayder install-plugin "
-                f"{plugin_dir} --force` — or install the package manually."
+                "Plugin '{}' is missing a dependency "
+                "({!r}: {}). Reinstall it to install its declared "
+                "dependencies — e.g. `ayder install-plugin "
+                "{} --force` — or install the package manually.",
+                plugin_dir.name,
+                e.name,
+                e,
+                plugin_dir,
             )
         except Exception as e:
-            logger.warning(f"Skipping plugin '{plugin_dir.name}': {e}")
+            logger.warning("Skipping plugin '{}': {}", plugin_dir.name, e)
 
     return tuple(all_defs), all_handlers

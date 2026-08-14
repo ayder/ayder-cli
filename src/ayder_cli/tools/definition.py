@@ -8,12 +8,13 @@ TERMINAL_TOOLS) are generated from TOOL_DEFINITIONS at import time.
 """
 
 import importlib
-import logging
 import pkgutil
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from ayder_cli.log import get_logger
+
+logger = get_logger("plugin")
 
 
 @dataclass(frozen=True)
@@ -117,12 +118,12 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
                     all_defs.extend((td, name) for td in module_defs)
                     discovered_modules.append(name)
                     logger.debug(
-                        f"Discovered {len(module_defs)} tools from {name}"
+                        "Discovered {} tools from {}", len(module_defs), name
                     )
             except ImportError as e:
-                logger.warning(f"Failed to import {name}: {e}")
+                logger.warning("Failed to import {}: {}", name, e)
             except Exception as e:
-                logger.error(f"Error loading definitions from {name}: {e}")
+                logger.error("Error loading definitions from {}: {}", name, e)
 
     # Validate: Detect duplicate tool names (with accurate source tracking)
     seen: dict[str, str] = {}
@@ -148,8 +149,11 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
         )
     
     logger.info(
-        f"Auto-discovered {len(definitions)} tool definitions "
-        f"from {len(discovered_modules)} modules: {', '.join(discovered_modules)}"
+        "Auto-discovered {} tool definitions "
+        "from {} modules: {}",
+        len(definitions),
+        len(discovered_modules),
+        ", ".join(discovered_modules),
     )
     
     return tuple(definitions)
@@ -185,7 +189,7 @@ try:
 
     _GLOBAL_PLUGIN_DEFS, _PLUGIN_HANDLERS = discover_global_plugins()
 except Exception as e:
-    logger.warning(f"Failed to load global plugins: {e}")
+    logger.warning("Failed to load global plugins: {}", e)
 
 TOOL_DEFINITIONS = _BUILTIN_DEFINITIONS + _GLOBAL_PLUGIN_DEFS
 TOOL_DEFINITIONS_BY_NAME: Dict[str, ToolDefinition] = {

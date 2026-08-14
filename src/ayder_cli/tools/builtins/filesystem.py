@@ -4,7 +4,6 @@ Filesystem tools for ayder-cli.
 
 import contextlib
 import json
-import logging
 import os
 import re
 import difflib
@@ -13,8 +12,6 @@ import threading
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
-
-logger = logging.getLogger(__name__)
 
 # Maximum file size allowed for read_file() to prevent DoS/memory exhaustion
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB

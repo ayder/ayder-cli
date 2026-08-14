@@ -9,7 +9,6 @@ execution engine used by the TUI.
 """
 
 import asyncio
-import logging
 import sys
 from pathlib import Path
 
@@ -22,8 +21,9 @@ from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.providers import ProviderUnavailableError
 from ayder_cli.cli_callbacks import CliCallbacks
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
+from ayder_cli.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("core")
 
 
 def _run_loop(
@@ -76,7 +76,11 @@ def _run_loop(
         cap_prompts = agent_registry.get_capability_prompts()
         if cap_prompts and messages[0].get("role") == "system":
             messages[0]["content"] += cap_prompts
-            logger.info(f"Registered {len(rt.config.agents)} agent(s): {', '.join(rt.config.agents.keys())}")
+            logger.info(
+                "Registered {} agent(s): {}",
+                len(rt.config.agents),
+                ", ".join(rt.config.agents.keys()),
+            )
 
     config = ChatLoopConfig(
         model=rt.config.model,

@@ -171,13 +171,17 @@ class TestRegistration:
         assert props["shell"]["enum"] == ["bash", "zsh", "sh", "busybox"]
 
 
-def test_execute_tool_debug_logs(tmp_path, caplog):
-    import logging
-
+def test_execute_tool_debug_logs(tmp_path, loguru_caplog):
     from ayder_cli.tools.execution import execute_tool
     from ayder_cli.tools.hooks import HookManager
 
     ctx = ProjectContext(str(tmp_path))
-    with caplog.at_level(logging.DEBUG, logger="ayder_cli.tools.execution"):
-        execute_tool("bash", {"command": "echo hi"}, bash, HookManager(), ctx)
-    assert any("bash" in r.getMessage() for r in caplog.records)
+    execute_tool("bash", {"command": "echo hi"}, bash, HookManager(), ctx)
+
+    hits = [
+        r for r in loguru_caplog.at_level("DEBUG").records
+        if r["name"] == "ayder_cli.tools.execution"
+    ]
+    assert hits, "no record from ayder_cli.tools.execution"
+    assert any("bash" in r["message"] for r in hits)
+    assert {r["extra"].get("channel") for r in hits} == {"tool"}

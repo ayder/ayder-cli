@@ -2,7 +2,6 @@
 Utility tools for ayder-cli.
 """
 
-import logging
 import secrets
 import shutil
 import subprocess
@@ -10,8 +9,6 @@ from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
-
-logger = logging.getLogger(__name__)
 
 
 def get_project_structure(project_ctx: ProjectContext, max_depth: int = 3) -> str:

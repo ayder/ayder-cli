@@ -6,15 +6,15 @@ Imports from core/result.py (NOT from tools/) to avoid circular imports.
 """
 
 import json
-import logging
 import re
 from datetime import datetime
 from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("tool")
 
 
 def _get_notes_dir(project_ctx: ProjectContext) -> Path:
@@ -107,7 +107,7 @@ def write_agent_note(
         path = _write_note(notes_dir, filename, frontmatter, body, exclusive=True)
         return project_ctx.to_relative(path)
     except Exception as e:
-        logger.warning("write_agent_note failed for agent '%s' run %d: %s", agent_name, run_id, e)
+        logger.warning("write_agent_note failed for agent '{}' run {}: {}", agent_name, run_id, e)
         return None
 
 

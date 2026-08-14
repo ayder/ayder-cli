@@ -9,16 +9,16 @@ Schema validation is handled upstream by ValidationAuthority → SchemaValidator
 
 import inspect
 import json
-import logging
 import time
 from typing import Any, Callable, Optional
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError, ToolResult
+from ayder_cli.log import get_logger
 from ayder_cli.tools.hooks import HookManager, ToolExecutionResult, ToolExecutionStatus
 from ayder_cli.tools.normalization import normalize_arguments
 
-logger = logging.getLogger(__name__)
+logger = get_logger("tool")
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ def execute_tool(
         call_args["app"] = app
 
     # Step 7: Execute with timing
-    logger.debug(f"Tool call: {tool_name}  args={args}")
+    logger.debug("Tool call: {}  args={}", tool_name, args)
     start_time = time.time()
     try:
         result = tool_func(**call_args)

@@ -2,7 +2,6 @@
 Codebase search tools for ayder-cli.
 """
 
-import logging
 import re
 import shutil
 import subprocess
@@ -10,8 +9,9 @@ from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("tool")
 
 # Build artifacts excluded from every search.
 _RG_IGNORE_GLOBS = (
@@ -529,5 +529,5 @@ def _to_rel(path_str, project_ctx):
     try:
         return project_ctx.to_relative(Path(path_str))
     except (ValueError, TypeError) as e:
-        logger.debug(f"Failed to convert path to relative: {e}")
+        logger.debug("Failed to convert path to relative: {}", e)
         return str(path_str)

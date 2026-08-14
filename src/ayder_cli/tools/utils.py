@@ -3,10 +3,11 @@ Utility functions for tool operations.
 """
 
 import json
-import logging
-from ayder_cli.core.context import ProjectContext
 
-logger = logging.getLogger(__name__)
+from ayder_cli.core.context import ProjectContext
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 
 def prepare_new_content(fname, args, project_ctx=None):
@@ -43,10 +44,10 @@ def prepare_new_content(fname, args, project_ctx=None):
                 return content.replace(old_string, new_string)
             except ValueError as e:
                 # Security error - return empty to trigger error in UI
-                logger.warning(f"Security error in replace_string: {e}")
+                logger.warning("Security error in replace_string: {}", e)
                 return ""
             except (IOError, OSError) as e:
-                logger.error(f"File error in replace_string: {e}")
+                logger.error("File error in replace_string: {}", e)
                 return ""
 
         elif fname == "insert_line":
@@ -72,7 +73,7 @@ def prepare_new_content(fname, args, project_ctx=None):
                 lines.insert(idx, content)
                 return "".join(lines)
             except (ValueError, IOError, OSError) as e:
-                logger.warning(f"Error in insert_line preview: {e}")
+                logger.warning("Error in insert_line preview: {}", e)
                 return ""
 
         elif fname == "delete_line":
@@ -96,15 +97,15 @@ def prepare_new_content(fname, args, project_ctx=None):
                     lines.pop(idx)
                 return "".join(lines)
             except (ValueError, IOError, OSError) as e:
-                logger.warning(f"Error in delete_line preview: {e}")
+                logger.warning("Error in delete_line preview: {}", e)
                 return ""
 
         else:
             return ""
 
     except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}")
+        logger.error("JSON decode error: {}", e)
         return ""
     except Exception as e:
-        logger.error(f"Unexpected error in prepare_new_content: {e}")
+        logger.error("Unexpected error in prepare_new_content: {}", e)
         return ""
