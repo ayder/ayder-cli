@@ -105,7 +105,10 @@ def execute_tool(
         call_args["app"] = app
 
     # Step 7: Execute with timing
-    logger.debug("Tool call: {}  args={}", tool_name, args)
+    # Never log argument values or keys here: keys are caller-controlled and
+    # unvalidated, and values may carry secrets (e.g. manage_environment_vars'
+    # `value`). Name + count only.
+    logger.debug("Tool call: {} ({} args)", tool_name, len(args))
     start_time = time.time()
     try:
         result = tool_func(**call_args)

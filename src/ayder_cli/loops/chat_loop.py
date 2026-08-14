@@ -342,9 +342,9 @@ class ChatLoop:
                         except (json.JSONDecodeError, ValueError):
                             llm_log.warning(
                                 "Malformed tool arguments for '{}': "
-                                "{!r:.200s} — repairing before storing in history",
+                                "{} chars — repairing before storing in history",
                                 tc_entry["function"].get("name", "?"),
-                                raw_args,
+                                len(raw_args),
                             )
                             parsed = _parse_arguments(raw_args)
                             tc_entry["function"]["arguments"] = json.dumps(parsed)
@@ -425,11 +425,10 @@ class ChatLoop:
                 self.cb.on_tool_start(tc.id, tc.function.name, args)
                 self.cb.on_tool_complete(tc.id, err_msg)
                 tool_log.warning(
-                    "Tool '{}' called with missing args {}. "
-                    "Raw: {!r}",
+                    "Tool '{}' called with missing args {} ({} chars raw)",
                     tc.function.name,
                     missing,
-                    tc.function.arguments,
+                    len(tc.function.arguments),
                 )
                 continue
 
@@ -541,7 +540,11 @@ class ChatLoop:
                 name = rd_result["name"]
                 result = str(rd_result["result"])
 
-                tool_log.trace("Appending Tool Result [{}] to history:\n{}", name, result[:500])
+                # Length only: `result` is tool-result content and may itself
+                # echo caller-supplied arguments (e.g. a missing-required-arg
+                # error message), so it must never reach a log verbatim --
+                # not even truncated ("truncation is not redaction").
+                tool_log.trace("Appending Tool Result [{}] to history: {} chars", name, len(result))
 
                 escalated = escalated or _is_escalation_result(result)
                 self.messages.append(
@@ -556,7 +559,9 @@ class ChatLoop:
                 # rd_result is BaseException (includes Exception)
                 err_id, err_name = tc.id, tc.function.name
                 error_msg = f"Error: {rd_result}"
-                tool_log.trace("Appending Tool Error [{}] to history:\n{}", err_name, error_msg)
+                tool_log.trace(
+                    "Appending Tool Error [{}] to history: {} chars", err_name, len(error_msg)
+                )
                 self.messages.append(
                     {
                         "role": "tool",
@@ -625,7 +630,7 @@ def _parse_arguments(arguments) -> dict:
         try:
             return json.loads(arguments)
         except (json.JSONDecodeError, ValueError):
-            tool_log.warning("Tool arguments JSON parse failed: {!r:.200s}", arguments)
+            tool_log.warning("Tool arguments JSON parse failed ({} chars)", len(arguments))
             # Try extracting just the first JSON object (handles concatenated
             # JSON like '{...}{...}' that slipped past expansion).
             try:

@@ -44,6 +44,43 @@ def test_tool_dispatch_is_debug_on_the_production_path(tmp_path, loguru_caplog):
     assert hits[0]["extra"]["channel"] == "tool"
 
 
+def test_tool_dispatch_does_not_leak_argument_values_or_keys(tmp_path, loguru_caplog):
+    """`Tool call:` must carry only the tool name and an argument count --
+    never argument values (secrets) or argument keys (unvalidated, and thus
+    a second leak surface). Regression for the tools/execution.py:108 leak
+    (`args={'variable_name': 'OPENAI_API_KEY', 'value': 'sk-proj-...'}`)
+    found in review of commit 38676b2."""
+    from ayder_cli.core.context import ProjectContext
+    from ayder_cli.tools.builtins.utils_tools import manage_environment_vars
+    from ayder_cli.tools.execution import execute_tool
+    from ayder_cli.tools.hooks import HookManager
+
+    secret = "sk-proj-SENTINEL-DO-NOT-LOG-1234567890"
+    ctx = ProjectContext(str(tmp_path))
+    execute_tool(
+        "manage_environment_vars",
+        {"mode": "set", "variable_name": "OPENAI_API_KEY", "value": secret},
+        manage_environment_vars,
+        HookManager(),
+        ctx,
+    )
+
+    hits = [r for r in loguru_caplog.records if r["message"].startswith("Tool call:")]
+    assert len(hits) == 1, "expected exactly one dispatch record"
+    hit = hits[0]
+    assert hit["level"].name == "DEBUG"
+    assert hit["extra"]["channel"] == "tool"
+    assert "manage_environment_vars" in hit["message"]
+    assert "args)" in hit["message"], "record must still carry an argument count"
+    # Neither the secret value nor the argument keys may appear.
+    assert secret not in hit["message"]
+    assert "OPENAI_API_KEY" not in hit["message"]
+    assert "variable_name" not in hit["message"]
+    assert "value" not in hit["message"]
+    # Nothing else logged during dispatch leaks it either.
+    assert secret not in loguru_caplog.text
+
+
 def test_no_warnings_on_the_happy_path(tmp_path, loguru_caplog):
     from ayder_cli.core.context import ProjectContext
     from ayder_cli.tools.builtins.shell import bash

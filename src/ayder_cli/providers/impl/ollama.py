@@ -414,8 +414,8 @@ class OllamaProvider(AIProvider):
                         except (json.JSONDecodeError, ValueError):
                             logger.warning(
                                 "Malformed tool arguments for '{}': "
-                                "{!r:.200} — replacing with empty dict",
-                                name, args,
+                                "{} chars — replacing with empty dict",
+                                name, len(args),
                             )
                             args = {}
                     if not isinstance(args, dict):

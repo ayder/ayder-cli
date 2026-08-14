@@ -381,6 +381,30 @@ class TestConvertMessagesSDKCompliance:
         result = self._validate_through_sdk(msgs)
         assert result[0].tool_calls[0].function.arguments == {}
 
+    def test_malformed_json_arguments_does_not_leak_raw_content(self, loguru_caplog):
+        """The malformed-arguments warning must carry a length, not the raw
+        string. Regression for the ollama.py:415 leak found in security
+        review of commit 38676b2 (`{!r:.200}` truncates but still emits up
+        to 200 raw characters -- truncation is not redaction)."""
+        secret = "sk-proj-SENTINEL-DO-NOT-LOG-1234567890"
+        malformed = '{"value": "' + secret + '"'  # unterminated -> invalid JSON
+        msgs = [{
+            "role": "assistant", "content": "",
+            "tool_calls": [{
+                "id": "call_0", "type": "function",
+                "function": {"name": "manage_environment_vars", "arguments": malformed},
+            }],
+        }]
+        result = self._convert(msgs)
+        assert result[0]["tool_calls"][0]["function"]["arguments"] == {}
+
+        warnings = loguru_caplog.only("WARNING")
+        assert warnings, "expected the malformed-arguments warning to fire"
+        assert secret not in loguru_caplog.text
+        assert any(str(len(malformed)) in msg for msg in warnings.messages), (
+            "expected the char count to be logged in place of the raw content"
+        )
+
     def test_dummy_tool_calls_filtered(self):
         """Dummy tool calls with empty name (from streaming gaps) should be filtered."""
         msgs = [{
