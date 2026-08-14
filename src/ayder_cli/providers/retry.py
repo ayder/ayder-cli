@@ -209,7 +209,7 @@ class RetryingProvider(AIProvider):
                         logger.opt(exception=True).warning("on_reconnect hook raised")
                 continue
 
-            except BaseException as exc:  # noqa: BLE001 — we re-classify below
+            except Exception as exc:  # noqa: BLE001 — we re-classify below
                 logger.opt(exception=True).debug("Provider stream raised; evaluating retry")
                 if committed:
                     raise

@@ -183,7 +183,7 @@ class OllamaProvider(AIProvider):
                     driver, messages, model, tools, options
                 ):
                     yield chunk
-        except BaseException as exc:
+        except Exception as exc:
             logger.opt(exception=True).debug("Ollama stream raised; classifying error")
             classified = classify_ollama_error(exc)
             if classified is exc:
@@ -206,7 +206,7 @@ class OllamaProvider(AIProvider):
                 if self._chunk_committed(chunk):
                     committed = True
                 yield chunk
-        except BaseException as exc:
+        except Exception as exc:
             logger.opt(exception=True).debug("Ollama native stream raised; evaluating fallback")
             if committed or think is False or not self._is_unsupported_thinking_error(exc):
                 raise
@@ -293,7 +293,7 @@ class OllamaProvider(AIProvider):
                 if self._chunk_committed(chunk):
                     committed = True
                 yield chunk
-        except BaseException as exc:
+        except Exception as exc:
             logger.opt(exception=True).debug("Ollama in-content stream raised; evaluating fallback")
             if committed or think is False or not self._is_unsupported_thinking_error(exc):
                 raise
