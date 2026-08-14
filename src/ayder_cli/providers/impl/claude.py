@@ -50,8 +50,8 @@ class ClaudeProvider(AIProvider):
         try:
             response = await self.client.messages.create(**kwargs)
             return self._normalize_response(response)
-        except Exception as e:
-            logger.error("Claude chat failed: {}", e)
+        except Exception:
+            logger.exception("Claude chat failed")
             raise
 
     def _normalize_response(self, response: Any) -> NormalizedStreamChunk:
@@ -115,8 +115,8 @@ class ClaudeProvider(AIProvider):
                     if verbose:
                         logger.trace("Claude Chunk: type={}", chunk.type)
                     yield self._normalize_chunk(chunk)
-        except Exception as e:
-            logger.error("Claude streaming failed: {}", e)
+        except Exception:
+            logger.exception("Claude streaming failed")
             raise
 
     def _normalize_chunk(self, chunk: Any) -> NormalizedStreamChunk:

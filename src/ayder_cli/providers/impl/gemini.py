@@ -49,8 +49,8 @@ class GeminiProvider(AIProvider):
                 config=gen_config,
             )
             return self._normalize_response(response)
-        except Exception as e:
-            logger.error("Gemini chat failed: {}", e)
+        except Exception:
+            logger.exception("Gemini chat failed")
             raise
 
     def _normalize_response(self, response: Any) -> NormalizedStreamChunk:
@@ -123,8 +123,8 @@ class GeminiProvider(AIProvider):
                     logger.trace("Gemini Chunk Received")
                 yield self._normalize_chunk(chunk)
                 
-        except Exception as e:
-            logger.error("Gemini streaming failed: {}", e)
+        except Exception:
+            logger.exception("Gemini streaming failed")
             raise
 
     def _normalize_chunk(self, chunk: Any) -> NormalizedStreamChunk:

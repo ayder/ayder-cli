@@ -78,8 +78,8 @@ class OpenAIProvider(AIProvider):
         try:
             response = await self.client.chat.completions.create(**kwargs)
             return self._normalize_response(response)
-        except Exception as e:
-            logger.error("OpenAI chat failed: {}", e)
+        except Exception:
+            logger.exception("OpenAI chat failed")
             raise
 
     def _normalize_response(self, response: Any) -> NormalizedStreamChunk:
@@ -161,8 +161,8 @@ class OpenAIProvider(AIProvider):
             else:
                 logger.debug("Stream completed: {} chunks total", chunk_count)
 
-        except Exception as e:
-            logger.error("OpenAI streaming failed: {}", e)
+        except Exception:
+            logger.exception("OpenAI streaming failed")
             raise
 
     def _build_extra_body(self, options: Dict[str, Any]) -> Dict[str, Any] | None:

@@ -224,6 +224,6 @@ class AgentRunner:
 
         except Exception as e:
             self.status = "error"
-            logger.exception("Agent '{}' failed: {}", self.agent_name, e)
+            logger.exception("Agent '{}' failed", self.agent_name)
             return AgentRunOutcome("error", "Agent encountered an error.", str(e),
                                    self._persist_note(task, "error", "Agent encountered an error.", str(e)))

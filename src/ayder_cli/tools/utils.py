@@ -46,8 +46,8 @@ def prepare_new_content(fname, args, project_ctx=None):
                 # Security error - return empty to trigger error in UI
                 logger.warning("Security error in replace_string: {}", e)
                 return ""
-            except (IOError, OSError) as e:
-                logger.error("File error in replace_string: {}", e)
+            except (IOError, OSError):
+                logger.exception("File error in replace_string")
                 return ""
 
         elif fname == "insert_line":
@@ -103,8 +103,8 @@ def prepare_new_content(fname, args, project_ctx=None):
         else:
             return ""
 
-    except json.JSONDecodeError as e:
-        logger.error("JSON decode error: {}", e)
+    except json.JSONDecodeError:
+        logger.exception("JSON decode error")
         return ""
     except Exception:
         logger.opt(exception=True).error("Unexpected error in prepare_new_content")
