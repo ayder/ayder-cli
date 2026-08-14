@@ -79,7 +79,7 @@ class AgentCallbacks:
 
     def on_tool_complete(self, call_id: str, result: str) -> None:
         result_preview = (result[:200] + "...") if len(result) > 200 else result
-        logger.debug(
+        logger.trace(
             "agent tool_complete: agent='{}' run_id={} call_id='{}' result='{}'",
             self.agent_name, self.run_id, call_id, result_preview,
         )

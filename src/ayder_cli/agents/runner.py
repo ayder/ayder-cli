@@ -117,7 +117,7 @@ class AgentRunner:
         """Execute the agent task and return an AgentRunOutcome."""
         self.status = "running"
         task_preview = task[:120] + "..." if len(task) > 120 else task
-        logger.debug(
+        logger.info(
             "run started: agent='{}' run_id={} model='{}' timeout={}s task='{}'",
             self.agent_name, self.run_id,
             self._agent_config.model or "(default)",
@@ -192,7 +192,7 @@ class AgentRunner:
             # error AgentRunOutcome so callers see the cause.
             if callbacks.last_system_error:
                 self.status = "error"
-                logger.debug(
+                logger.error(
                     "run failed (captured via on_system_message): agent='{}' run_id={} error='{}'",
                     self.agent_name, self.run_id, callbacks.last_system_error[:200],
                 )
@@ -207,7 +207,7 @@ class AgentRunner:
             if self._is_vacuous(content):
                 self.status = "error"
                 err = "Agent produced no deliverable (empty or echo-only response)."
-                logger.debug(
+                logger.error(
                     "run vacuous: agent='{}' run_id={}", self.agent_name, self.run_id,
                 )
                 body = content or err
@@ -217,7 +217,7 @@ class AgentRunner:
 
             # Completed successfully
             self.status = "completed"
-            logger.debug(
+            logger.info(
                 "run completed: agent='{}' run_id={}",
                 self.agent_name, self.run_id,
             )
