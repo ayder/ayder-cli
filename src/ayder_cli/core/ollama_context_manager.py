@@ -12,16 +12,16 @@ Stable-prefix layout per call to prepare_messages():
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from ayder_cli.core.cache_monitor import CacheMonitor
 from ayder_cli.core.context_manager import ContextStats
 from ayder_cli.core.default_context_manager import TokenCounter
+from ayder_cli.log import get_logger
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
-logger = logging.getLogger(__name__)
+logger = get_logger("context")
 
 
 @dataclass
@@ -98,7 +98,7 @@ class OllamaContextManager:
         self._frozen_system = system_content
         self._frozen_schemas = list(tool_schemas)
         logger.info(
-            "Context: system prompt frozen (%d chars, %d tool schemas, ctx=%d)",
+            "Context: system prompt frozen ({} chars, {} tool schemas, ctx={})",
             len(system_content), len(tool_schemas), self._actual_context_length,
         )
 
@@ -125,21 +125,21 @@ class OllamaContextManager:
                 old = self._actual_context_length
                 self._actual_context_length = info.max_context_length
                 logger.info(
-                    "Context: detected real context length from Ollama: %d tokens "
-                    "(model=%s, family=%s, quantization=%s) — was %d from config",
+                    "Context: detected real context length from Ollama: {} tokens "
+                    "(model={}, family={}, quantization={}) — was {} from config",
                     info.max_context_length, self._model, info.family,
                     info.quantization, old,
                 )
             else:
                 logger.info(
-                    "Context: model '%s' did not report context_length, "
-                    "using configured num_ctx=%d",
+                    "Context: model '{}' did not report context_length, "
+                    "using configured num_ctx={}",
                     self._model, self._actual_context_length,
                 )
         except Exception as e:
             logger.warning(
-                "Context: failed to detect context length from Ollama (%s), "
-                "falling back to configured num_ctx=%d",
+                "Context: failed to detect context length from Ollama ({}), "
+                "falling back to configured num_ctx={}",
                 e, self._actual_context_length,
             )
 
@@ -166,7 +166,7 @@ class OllamaContextManager:
             actual_content = messages[0].get("content", "")
             if actual_content and actual_content != self._frozen_system:
                 logger.info(
-                    "Context: system prompt updated on first call (%d → %d chars)",
+                    "Context: system prompt updated on first call ({} → {} chars)",
                     len(self._frozen_system or ""), len(actual_content),
                 )
                 self._frozen_system = actual_content
@@ -245,7 +245,7 @@ class OllamaContextManager:
             cache_state = f", cache={status.state}({status.hit_ratio:.0%})"
 
         logger.info(
-            "Context[%s]: %d/%d tokens (%.0f%%), completion=%d, speed=%s%s",
+            "Context[{}]: {}/{} tokens ({:.0f}%), completion={}, speed={}{}",
             self._model or "?", self._real_prompt_tokens, ceiling, utilization,
             self._real_completion_tokens, prompt_speed, cache_state,
         )
@@ -304,8 +304,8 @@ class OllamaContextManager:
         should = used >= budget * threshold
         if should:
             logger.info(
-                "Context: compaction triggered — %d tokens used, "
-                "budget=%d, threshold=%.0f%%",
+                "Context: compaction triggered — {} tokens used, "
+                "budget={}, threshold={:.0f}%",
                 used, int(budget), threshold * 100,
             )
         return should
@@ -418,8 +418,8 @@ class OllamaContextManager:
         self._messages_compacted += compacted_msg_count
 
         logger.info(
-            "OllamaContextManager: compacted %d messages into summary "
-            "(compaction #%d)",
+            "OllamaContextManager: compacted {} messages into summary "
+            "(compaction #{})",
             compacted_msg_count,
             self._compaction_count,
         )

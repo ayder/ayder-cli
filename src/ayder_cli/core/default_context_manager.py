@@ -9,15 +9,16 @@ a circular import with context_manager.py (which re-exports this class).
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from ayder_cli.log import get_logger
+
 if TYPE_CHECKING:
     from ayder_cli.core.context_manager import ContextStats
 
-logger = logging.getLogger(__name__)
+logger = get_logger("context")
 
 # Fallback context budget used only when neither an explicit max_context_tokens
 # nor a model num_ctx is available (e.g. a bare config section in tests).
@@ -161,13 +162,13 @@ class DefaultContextManager:
         if isinstance(configured, int) and configured > 0:
             self._max_context_tokens = configured
             logger.info(
-                "Context budget: %d tokens (explicit max_context_tokens; num_ctx=%s)",
+                "Context budget: {} tokens (explicit max_context_tokens; num_ctx={})",
                 configured, num_ctx,
             )
         elif isinstance(num_ctx, int) and num_ctx > 0:
             self._max_context_tokens = num_ctx
             logger.info(
-                "Context budget: %d tokens (derived from num_ctx; "
+                "Context budget: {} tokens (derived from num_ctx; "
                 "max_context_tokens unset)",
                 num_ctx,
             )
@@ -175,7 +176,7 @@ class DefaultContextManager:
             self._max_context_tokens = DEFAULT_MAX_CONTEXT_TOKENS
             logger.warning(
                 "Context budget: could not read num_ctx or max_context_tokens; "
-                "falling back to default %d tokens. Recommend setting num_ctx "
+                "falling back to default {} tokens. Recommend setting num_ctx "
                 "(or [context_manager] max_context_tokens) in your config.",
                 DEFAULT_MAX_CONTEXT_TOKENS,
             )
@@ -438,7 +439,7 @@ class DefaultContextManager:
         if compressed > 0:
             self._compressed_count += compressed
             self._cache_valid = False
-            logger.info(f"Compressed {compressed} old tool results")
+            logger.info("Compressed {} old tool results", compressed)
 
         return compressed
 

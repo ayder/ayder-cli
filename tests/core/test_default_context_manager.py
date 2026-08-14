@@ -225,24 +225,23 @@ def test_budget_syncs_from_num_ctx_when_max_context_tokens_unset():
     assert mgr.reserve == int(131072 * 0.30)
 
 
-def test_budget_fallback_to_default_logs_warning(caplog):
+def test_budget_fallback_to_default_logs_warning(loguru_caplog):
     """When neither max_context_tokens nor num_ctx is readable, warn + use default."""
-    import logging
     from ayder_cli.core.config import ContextManagerConfigSection
     from ayder_cli.core.default_context_manager import DEFAULT_MAX_CONTEXT_TOKENS
 
     config = ContextManagerConfigSection()  # max_context_tokens=None, no num_ctx attr
-    with caplog.at_level(logging.WARNING):
-        mgr = DefaultContextManager(config)
+    mgr = DefaultContextManager(config)
 
     assert mgr._max_context_tokens == DEFAULT_MAX_CONTEXT_TOKENS
-    assert "num_ctx" in caplog.text
-    assert str(DEFAULT_MAX_CONTEXT_TOKENS) in caplog.text
+    warn = loguru_caplog.at_level("WARNING")
+    assert "num_ctx" in warn.text
+    assert str(DEFAULT_MAX_CONTEXT_TOKENS) in warn.text
+    assert warn.channels == {"context"}
 
 
-def test_budget_derived_from_num_ctx_logs_info(caplog):
+def test_budget_derived_from_num_ctx_logs_info(loguru_caplog):
     """Deriving the budget from num_ctx is reported at INFO with both values."""
-    import logging
     from types import SimpleNamespace
     from ayder_cli.core.config import ContextManagerConfigSection
 
@@ -252,11 +251,11 @@ def test_budget_derived_from_num_ctx_logs_info(caplog):
         provider="openai",
         model="x",
     )
-    with caplog.at_level(logging.INFO):
-        DefaultContextManager(cfg)
+    DefaultContextManager(cfg)
 
-    assert "131072" in caplog.text
-    assert "num_ctx" in caplog.text
+    text = loguru_caplog.at_level("INFO").text
+    assert "131072" in text
+    assert "num_ctx" in text
 
 
 def test_explicit_max_context_tokens_overrides_num_ctx():

@@ -1,10 +1,11 @@
-import logging
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Any, Callable, Dict, Literal
 
-logger = logging.getLogger(__name__)
+from ayder_cli.log import get_logger
+
+logger = get_logger("core")
 
 CONFIG_DIR = Path("~/.ayder").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -374,17 +375,17 @@ class Config(BaseModel):
                 if isinstance(default_profile, dict):
                     profile = default_profile
                     logger.error(
-                        "Provider %r has no [llm.%s] profile; falling back to the "
-                        "default [llm.%s] profile. Available profiles: %s. Fix the "
-                        "provider name or add an [llm.%s] section.",
+                        "Provider {!r} has no [llm.{}] profile; falling back to the "
+                        "default [llm.{}] profile. Available profiles: {}. Fix the "
+                        "provider name or add an [llm.{}] section.",
                         provider, provider, DEFAULTS["provider"], available, provider,
                     )
                 else:
                     logger.error(
-                        "Provider %r has no [llm.%s] profile and no default "
-                        "[llm.%s] profile exists; the driver will default to "
+                        "Provider {!r} has no [llm.{}] profile and no default "
+                        "[llm.{}] profile exists; the driver will default to "
                         "'openai' with built-in endpoint defaults. Available "
-                        "profiles: %s. Fix the provider name or add an [llm.%s] "
+                        "profiles: {}. Fix the provider name or add an [llm.{}] "
                         "section.",
                         provider, provider, DEFAULTS["provider"], available, provider,
                     )
@@ -436,7 +437,7 @@ class Config(BaseModel):
         )
         if v not in valid:
             logger.error(
-                "Unsupported driver %r; must be one of: %s. Fix the driver in "
+                "Unsupported driver {!r}; must be one of: {}. Fix the driver in "
                 "your [llm.<provider>] profile.",
                 v, ", ".join(valid),
             )

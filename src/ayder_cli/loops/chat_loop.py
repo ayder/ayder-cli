@@ -13,15 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
 
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
+from ayder_cli.log import get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 
-logger = logging.getLogger(__name__)
+llm_log = get_logger("llm")
+tool_log = get_logger("tool")
 
 if TYPE_CHECKING:
     from ayder_cli.providers import AIProvider
@@ -136,11 +137,14 @@ class ChatLoop:
                 else:
                     content_str = content
                 history_summary.append(f"{role}({len(content_str)})")
-            logger.debug(f"Calling LLM with history: {' -> '.join(history_summary)}")
+            llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
             if self.config.verbose:
                 for i, m in enumerate(llm_messages):
-                    logger.debug(
-                        f"  Message {i} [{m.get('role')}]: {repr(m.get('content'))[:200]}..."
+                    llm_log.debug(
+                        "  Message {} [{}]: {}...",
+                        i,
+                        m.get("role"),
+                        repr(m.get("content"))[:200],
                     )
 
             # 2. Call LLM (Streaming)
@@ -265,10 +269,10 @@ class ChatLoop:
                     normalized_tool_calls.append(tool_call_obj)
 
             except asyncio.CancelledError:
-                logger.info("LLM stream cancelled")
+                llm_log.info("LLM stream cancelled")
                 return
             except Exception as e:
-                logger.exception("LLM stream failed")
+                llm_log.exception("LLM stream failed")
                 self.cb.on_system_message(f"Error: {e}")
                 return
             finally:
@@ -279,9 +283,11 @@ class ChatLoop:
 
             # Detect empty/dropped responses (server closed cleanly but sent nothing)
             if not final_content and not normalized_tool_calls and not final_reasoning:
-                logger.warning(
+                llm_log.warning(
                     "LLM returned empty response (possible connection drop). "
-                    f"model={self.config.model}, provider={self.config.provider}"
+                    "model={}, provider={}",
+                    self.config.model,
+                    self.config.provider,
                 )
                 self.cb.on_system_message(
                     "LLM returned an empty response. Check model compatibility "
@@ -300,16 +306,16 @@ class ChatLoop:
                 self._total_tokens += len(str(final_content)) // 4 + len(str(final_reasoning)) // 4
             self.cb.on_token_usage(self._total_tokens)
 
-            logger.debug(f"LLM Response Content Length: {len(final_content)}")
+            llm_log.debug("LLM Response Content Length: {}", len(final_content))
             if final_reasoning:
-                logger.debug(f"LLM Reasoning Length: {len(final_reasoning)}")
+                llm_log.debug("LLM Reasoning Length: {}", len(final_reasoning))
 
             if normalized_tool_calls:
-                logger.debug(f"LLM Tool Calls: {len(normalized_tool_calls)}")
+                llm_log.debug("LLM Tool Calls: {}", len(normalized_tool_calls))
 
             # If model thought but forgot to output content/tools, prompt it
             if not final_content and not normalized_tool_calls and final_reasoning:
-                logger.debug(
+                llm_log.debug(
                     "Model thought but provided no content or tools. Prompting for final response."
                 )
                 self.messages.append(
@@ -334,9 +340,11 @@ class ChatLoop:
                         try:
                             json.loads(raw_args)
                         except (json.JSONDecodeError, ValueError):
-                            logger.warning(
-                                f"Malformed tool arguments for '{tc_entry['function'].get('name', '?')}': "
-                                f"{raw_args!r:.200s} — repairing before storing in history"
+                            llm_log.warning(
+                                "Malformed tool arguments for '{}': "
+                                "{!r:.200s} — repairing before storing in history",
+                                tc_entry["function"].get("name", "?"),
+                                raw_args,
                             )
                             parsed = _parse_arguments(raw_args)
                             tc_entry["function"]["arguments"] = json.dumps(parsed)
@@ -416,9 +424,12 @@ class ChatLoop:
                 tool_results_map[tc.id] = rd
                 self.cb.on_tool_start(tc.id, tc.function.name, args)
                 self.cb.on_tool_complete(tc.id, err_msg)
-                logger.warning(
-                    f"Tool '{tc.function.name}' called with missing args {missing}. "
-                    f"Raw: {tc.function.arguments!r}"
+                tool_log.warning(
+                    "Tool '{}' called with missing args {}. "
+                    "Raw: {!r}",
+                    tc.function.name,
+                    missing,
+                    tc.function.arguments,
                 )
                 continue
 
@@ -443,10 +454,10 @@ class ChatLoop:
                 try:
                     return tc_obj, await self._exec_tool_async(tc_obj)
                 except asyncio.CancelledError:
-                    logger.warning(f"Tool execution cancelled: {tc_obj.function.name}")
+                    tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
                     return tc_obj, RuntimeError("Tool execution cancelled")
                 except Exception as e:
-                    logger.warning(f"Tool execution failed for '{tc_obj.function.name}': {e}")
+                    tool_log.warning("Tool execution failed for '{}': {}", tc_obj.function.name, e)
                     return tc_obj, e
 
             tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
@@ -528,7 +539,7 @@ class ChatLoop:
                 name = rd_result["name"]
                 result = str(rd_result["result"])
 
-                logger.debug(f"Appending Tool Result [{name}] to history:\n{result[:500]}")
+                tool_log.debug("Appending Tool Result [{}] to history:\n{}", name, result[:500])
 
                 escalated = escalated or _is_escalation_result(result)
                 self.messages.append(
@@ -543,7 +554,7 @@ class ChatLoop:
                 # rd_result is BaseException (includes Exception)
                 err_id, err_name = tc.id, tc.function.name
                 error_msg = f"Error: {rd_result}"
-                logger.debug(f"Appending Tool Error [{err_name}] to history:\n{error_msg}")
+                tool_log.debug("Appending Tool Error [{}] to history:\n{}", err_name, error_msg)
                 self.messages.append(
                     {
                         "role": "tool",
@@ -612,21 +623,21 @@ def _parse_arguments(arguments) -> dict:
         try:
             return json.loads(arguments)
         except (json.JSONDecodeError, ValueError):
-            logger.warning(f"Tool arguments JSON parse failed: {arguments!r:.200s}")
+            tool_log.warning("Tool arguments JSON parse failed: {!r:.200s}", arguments)
             # Try extracting just the first JSON object (handles concatenated
             # JSON like '{...}{...}' that slipped past expansion).
             try:
                 obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
                 if isinstance(obj, dict):
-                    logger.warning("Recovered tool arguments via raw_decode")
+                    tool_log.warning("Recovered tool arguments via raw_decode")
                     return obj
             except (json.JSONDecodeError, ValueError):
                 pass
             repaired = _repair_truncated_json(arguments)
             if repaired is not None:
-                logger.warning("Recovered tool arguments via truncated JSON repair")
+                tool_log.warning("Recovered tool arguments via truncated JSON repair")
                 return repaired
-            logger.warning("Could not recover tool arguments — using empty dict")
+            tool_log.warning("Could not recover tool arguments — using empty dict")
             return {}
     return {}
 
@@ -706,14 +717,17 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
                     pos += 1
             except json.JSONDecodeError:
                 if pos > 0:
-                    logger.warning(
-                        f"Concatenated tool call JSON parse stopped at pos {pos}/{len(stripped)}"
+                    tool_log.warning(
+                        "Concatenated tool call JSON parse stopped at pos {}/{}",
+                        pos,
+                        len(stripped),
                     )
                 break
         if len(objects) > 1:
-            logger.debug(
-                f"Expanding concatenated tool call '{raw_tc['function']['name']}' "
-                f"into {len(objects)} separate calls"
+            tool_log.debug(
+                "Expanding concatenated tool call '{}' into {} separate calls",
+                raw_tc["function"]["name"],
+                len(objects),
             )
             for i, args in enumerate(objects):
                 result.append({
