@@ -120,7 +120,7 @@ class GeminiProvider(AIProvider):
             
             async for chunk in async_stream:
                 if verbose:
-                    logger.debug("Gemini Chunk Received")
+                    logger.trace("Gemini Chunk Received")
                 yield self._normalize_chunk(chunk)
                 
         except Exception as e:

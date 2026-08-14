@@ -113,7 +113,7 @@ class ClaudeProvider(AIProvider):
             async with self.client.messages.stream(**kwargs) as stream:
                 async for chunk in stream:
                     if verbose:
-                        logger.debug("Claude Chunk: type={}", chunk.type)
+                        logger.trace("Claude Chunk: type={}", chunk.type)
                     yield self._normalize_chunk(chunk)
         except Exception as e:
             logger.error("Claude streaming failed: {}", e)

@@ -144,7 +144,7 @@ class OpenAIProvider(AIProvider):
                 self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
         try:
-            logger.debug(
+            logger.trace(
                 "Stream kwargs: {}",
                 ', '.join(f'{k}={v!r}' for k, v in kwargs.items() if k != 'messages'),
             )

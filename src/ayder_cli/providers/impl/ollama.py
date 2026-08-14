@@ -98,7 +98,7 @@ class OllamaProvider(AIProvider):
             )
 
         driver = await self._registry.resolve(model, override=driver_override_name)
-        logger.debug("Ollama driver={} mode={} for {!r}", driver.name, driver.mode.value, model)
+        logger.info("Ollama driver={} mode={} for {!r}", driver.name, driver.mode.value, model)
 
         committed = False
         try:
