@@ -562,6 +562,11 @@ def load_config_for_provider(provider: str) -> Config:
         try:
             data = tomllib.load(f)
         except Exception:
+            logger.opt(exception=True).warning(
+                "Failed to load config at {}; using defaults for provider {!r}",
+                CONFIG_PATH,
+                provider,
+            )
             return Config(provider=provider)
 
     app = data.get("app")
@@ -585,6 +590,10 @@ def list_provider_profiles() -> list[str]:
         with open(CONFIG_PATH, "rb") as f:
             data = tomllib.load(f)
     except Exception:
+        logger.opt(exception=True).warning(
+            "Failed to load config at {}; no provider profiles available",
+            CONFIG_PATH,
+        )
         return [DEFAULTS["provider"]]
 
     llm = data.get("llm")
@@ -619,4 +628,8 @@ def load_config(
             data = tomllib.load(f)
             return Config(**data)
         except Exception:
+            logger.opt(exception=True).warning(
+                "Failed to load config at {}; using defaults",
+                CONFIG_PATH,
+            )
             return Config()

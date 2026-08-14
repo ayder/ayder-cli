@@ -118,7 +118,11 @@ class TokenCounter:
             try:
                 return len(self._encoder.encode(text))
             except Exception:
-                pass
+                logger.opt(exception=True).debug(
+                    "Encoder failed to tokenize string of length {}; falling back "
+                    "to heuristic estimate",
+                    len(text),
+                )
 
         is_code = any(c in text for c in "{}[]();=<>+-*/%&|^~!")
         chars_per_token = (

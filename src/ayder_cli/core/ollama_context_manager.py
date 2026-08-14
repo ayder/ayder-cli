@@ -136,11 +136,11 @@ class OllamaContextManager:
                     "using configured num_ctx={}",
                     self._model, self._actual_context_length,
                 )
-        except Exception as e:
-            logger.warning(
-                "Context: failed to detect context length from Ollama ({}), "
+        except Exception:
+            logger.opt(exception=True).warning(
+                "Context: failed to detect context length from Ollama, "
                 "falling back to configured num_ctx={}",
-                e, self._actual_context_length,
+                self._actual_context_length,
             )
 
     # ------------------------------------------------------------------

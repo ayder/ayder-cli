@@ -291,6 +291,11 @@ def ensure_latest_config(
             else:
                 parse_error = True
     except Exception:
+        logger.opt(exception=True).warning(
+            "Failed to parse config at {}; treating as unreadable and regenerating "
+            "from defaults",
+            config_path,
+        )
         parse_error = True
 
     if (
@@ -320,6 +325,10 @@ def ensure_latest_config(
                 llm_overrides=llm_overrides,
             )
         except Exception:
+            logger.opt(exception=True).warning(
+                "Failed to migrate legacy overrides for {}; regenerating from defaults",
+                config_path,
+            )
             new_content = render_v2_config(defaults)
 
     config_path.write_text(new_content, encoding="utf-8")
