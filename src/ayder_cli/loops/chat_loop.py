@@ -457,7 +457,9 @@ class ChatLoop:
                     tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
                     return tc_obj, RuntimeError("Tool execution cancelled")
                 except Exception as e:
-                    tool_log.warning("Tool execution failed for '{}': {}", tc_obj.function.name, e)
+                    tool_log.opt(exception=True).warning(
+                        "Tool execution failed for '{}'", tc_obj.function.name
+                    )
                     return tc_obj, e
 
             tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
