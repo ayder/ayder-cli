@@ -5,6 +5,9 @@ from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 # Serializes task-id allocation + file claim across the agent harness's
 # worker threads (tool handlers run in asyncio.to_thread). _next_id is a

@@ -8,6 +8,9 @@ from rich.text import Text
 
 from ayder_cli.tui.keybindings import get_keybindings_by_category
 from ayder_cli.tui.types import ConfirmResult
+from ayder_cli.log import get_logger
+
+logger = get_logger("ui")
 
 
 class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):

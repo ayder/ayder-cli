@@ -18,6 +18,9 @@ from rich.style import Style
 from ayder_cli.parser import content_processor
 from ayder_cli.tui.rendering import markup_or_plain
 from ayder_cli.tui.types import MessageType
+from ayder_cli.log import get_logger
+
+logger = get_logger("ui")
 
 
 def _sanitize_for_assistant_render(content: str) -> str:

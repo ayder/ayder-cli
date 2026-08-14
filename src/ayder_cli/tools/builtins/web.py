@@ -12,6 +12,9 @@ from typing import Any
 import httpx
 
 from ayder_cli.core.result import ToolError, ToolSuccess
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _COOKIE_JAR = httpx.Cookies()

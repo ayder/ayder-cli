@@ -13,6 +13,9 @@ from datetime import datetime
 from typing import Optional
 
 from ollama import AsyncClient, ResponseError
+from ayder_cli.log import get_logger
+
+logger = get_logger("llm")
 
 
 @dataclass

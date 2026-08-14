@@ -41,6 +41,9 @@ from .tasks import (
     _title_to_slug,
     resolve_task_path,
 )
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 # Status enum (D4). ``done`` is reopenable — any enum value is a legal target;
 # an off-enum value is the "illegal transition".

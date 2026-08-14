@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.core.config import list_provider_profiles, load_config_for_provider
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.log import LOG_LEVELS
+from ayder_cli.log import LOG_LEVELS, get_logger
 from ayder_cli.logging_config import setup_logging
 from ayder_cli.providers import provider_orchestrator, ProviderUnavailableError
 from ayder_cli.tools.builtins.skill import SkillInfo, discover_skills, skill
@@ -27,6 +27,8 @@ from ayder_cli.tui.widgets import AgentPanel, ActivityBar, ChatView, StatusBar
 
 if TYPE_CHECKING:
     from ayder_cli.tui.app import AyderApp
+
+logger = get_logger("ui")
 
 
 def handle_help(app: AyderApp, args: str, chat_view: ChatView) -> None:

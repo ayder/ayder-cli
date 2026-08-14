@@ -25,6 +25,9 @@ from ayder_cli.tui.widgets import (
     StatusBar,
 )
 from ayder_cli.tui.app import AyderApp
+from ayder_cli.log import get_logger
+
+logger = get_logger("ui")
 
 
 def run_tui(

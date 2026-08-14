@@ -12,6 +12,9 @@ import threading
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 # Maximum file size allowed for read_file() to prevent DoS/memory exhaustion
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB

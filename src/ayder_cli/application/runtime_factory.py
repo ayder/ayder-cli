@@ -23,6 +23,9 @@ from ayder_cli.prompts import (
     get_system_prompt,
     PROJECT_STRUCTURE_MACRO_TEMPLATE,
 )
+from ayder_cli.log import get_logger
+
+logger = get_logger("core")
 
 
 @dataclass

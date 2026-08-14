@@ -9,6 +9,9 @@ from pathlib import Path
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 
 def get_project_structure(project_ctx: ProjectContext, max_depth: int = 3) -> str:

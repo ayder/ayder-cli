@@ -8,6 +8,9 @@ import subprocess
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 _VALID_SHELLS = ("bash", "zsh", "sh", "busybox")
 

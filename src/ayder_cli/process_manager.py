@@ -19,6 +19,9 @@ from typing import Deque, Dict, Optional
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolResult, ToolSuccess, ToolError
+from ayder_cli.log import get_logger
+
+logger = get_logger("tool")
 
 
 def _has_killpg() -> bool:

@@ -7,8 +7,10 @@ import argparse
 import sys
 from pathlib import Path
 from ayder_cli.version import get_app_version
-from ayder_cli.log import LOG_LEVELS
+from ayder_cli.log import LOG_LEVELS, get_logger
 from ayder_cli.logging_config import LoggingSettings, setup_logging
+
+logger = get_logger("core")
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:

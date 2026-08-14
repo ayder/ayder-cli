@@ -8,6 +8,9 @@ from rich.panel import Panel
 from rich.status import Status
 from rich.text import Text
 from ayder_cli.console import console
+from ayder_cli.log import get_logger
+
+logger = get_logger("ui")
 
 
 def print_tool_call(function_name: str, arguments: str) -> None:

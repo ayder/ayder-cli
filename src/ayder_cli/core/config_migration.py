@@ -6,6 +6,10 @@ import tomllib
 from pathlib import Path
 from typing import Any, Callable
 
+from ayder_cli.log import get_logger
+
+logger = get_logger("core")
+
 LATEST_CONFIG_VERSION = "2.0"
 LEGACY_PROVIDER_TABLES: tuple[str, ...] = ("openai", "anthropic", "gemini")
 _DRIVER_BY_PROVIDER: dict[str, str] = {
