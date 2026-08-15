@@ -85,7 +85,15 @@ lint = "ruff check src/"
 lint-fix = "ruff check src/ --fix"
 typecheck = "mypy src/"
 format = "ruff format src/"
-check-all = ["lint", "typecheck", "test"]
+check-all = ["lint", "typecheck", "gates", "test"]
+
+[tool.poe.tasks.gates]
+help = "Run the logging AST gates"
+sequence = [
+    { cmd = "python scripts/find_percent_logging.py" },
+    { cmd = "python scripts/check_logging_imports.py" },
+    { cmd = "python scripts/check_exception_handlers.py" },
+]
 
 [tool.poe.tasks.clean]
 help = "Deep clean cache and build artifacts"
