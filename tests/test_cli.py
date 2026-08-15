@@ -1,5 +1,6 @@
 """Tests for cli.py — coverage for run_command, main(), and task runners."""
 
+import contextlib
 import sys
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -14,6 +15,53 @@ def _close_coro(coro):
     when garbage-collected. Closing it here keeps the patch but silences the leak.
     """
     coro.close()
+
+
+@contextlib.contextmanager
+def _process_hook_isolation():
+    """Snapshot and restore everything ``install_exception_hooks`` mutates.
+
+    ``main()`` installs the excepthook and both signal wrappers process-wide, so
+    a test that calls it leaks them into every later test — and into every later
+    file in the same pytest process. Snapshot the three hook objects and the two
+    ``diagnostics`` flags, clear only the flags so an in-test install is
+    observable, and put all five back afterwards.
+
+    The flags are RESTORED to their entering values rather than reset to False,
+    so a process that legitimately entered with hooks installed leaves this
+    context with its wrappers and its flags still agreeing.
+
+    pytest (and each xdist worker) runs tests on the main thread, so the
+    teardown ``signal.signal`` calls cannot raise ``ValueError``; a genuine
+    failure surfaces as a visible teardown error instead of being swallowed.
+    """
+    import signal
+
+    import ayder_cli.diagnostics as d
+
+    saved_hook = sys.excepthook
+    saved_sigint = signal.getsignal(signal.SIGINT)
+    saved_sigterm = signal.getsignal(signal.SIGTERM)
+    saved_hooks_installed = d._hooks_installed
+    saved_signals_installed = d._signals_installed
+
+    d._hooks_installed = False
+    d._signals_installed = False
+    try:
+        yield
+    finally:
+        sys.excepthook = saved_hook
+        signal.signal(signal.SIGINT, saved_sigint)
+        signal.signal(signal.SIGTERM, saved_sigterm)
+        d._hooks_installed = saved_hooks_installed
+        d._signals_installed = saved_signals_installed
+
+
+@pytest.fixture(autouse=True)
+def _reset_hook_state():
+    """Isolate process-level hook state around every test in this module."""
+    with _process_hook_isolation():
+        yield
 
 
 class TestRunCommand:
@@ -547,6 +595,108 @@ class TestMainSystemPromptFlag:
 
             call_kwargs = mock_run_tui.call_args[1]
             assert call_kwargs['system_prompt_override'] == "TUI CUSTOM PROMPT"
+
+
+def test_repeated_hook_installs_are_single_layer_within_a_test():
+    """Installing twice inside one test adds exactly one wrapper layer.
+
+    The first install chains the excepthook this test just set — proven
+    behaviourally by the call-through, not by inspecting the closure. The
+    second install is a no-op because ``_hooks_installed`` and
+    ``_signals_installed`` are True by then; the ``_ayder_chained`` marker is
+    the separate fallback for a marked excepthook whose flag was cleared, and
+    that path is covered in tests/core/test_exception_hooks.py, not here.
+    """
+    import signal
+
+    from ayder_cli.diagnostics import install_exception_hooks
+
+    sentinel_called = []
+
+    def sentinel(exc_type, exc, tb):
+        sentinel_called.append(exc_type)
+
+    sys.excepthook = sentinel
+
+    install_exception_hooks()
+    first_hook = sys.excepthook
+    first_term = signal.getsignal(signal.SIGTERM)
+    first_int = signal.getsignal(signal.SIGINT)
+
+    assert first_hook is not sentinel
+    assert getattr(first_hook, "_ayder_chained", False)
+    assert "chained_signal" in first_term.__qualname__
+    assert "chained_signal" in first_int.__qualname__
+
+    # ``_handle_uncaught`` returns before logging on KeyboardInterrupt, so this
+    # call proves the wrapper delegates to the previous hook with no side effect.
+    first_hook(KeyboardInterrupt, KeyboardInterrupt(), None)
+    assert sentinel_called == [KeyboardInterrupt]
+
+    install_exception_hooks()
+    assert sys.excepthook is first_hook
+    assert signal.getsignal(signal.SIGTERM) is first_term
+    assert signal.getsignal(signal.SIGINT) is first_int
+
+
+def test_previous_cli_test_did_not_leak_process_hooks():
+    """No preceding test in this file left an Ayder process hook installed.
+
+    The ``main()``-invoking tests above install the excepthook and both signal
+    wrappers for real, so in a clean run this node observes their fixture
+    teardowns. It is a regression check on those teardowns only — it does not
+    claim to sanitise arbitrary external state.
+    """
+    import signal
+
+    import ayder_cli.diagnostics as d
+
+    assert not getattr(sys.excepthook, "_ayder_chained", False)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        assert "chained_signal" not in getattr(
+            signal.getsignal(sig), "__qualname__", ""
+        )
+    # The autouse fixture clears both flags on entry, so these two record the
+    # expected state rather than detecting a leak; the hook objects above carry
+    # the regression weight.
+    assert d._hooks_installed is False
+    assert d._signals_installed is False
+
+
+def test_isolation_restores_entering_installed_flags():
+    """The helper restores the entering flags, not a False default.
+
+    Driving ``_process_hook_isolation()`` directly (the autouse fixture cannot
+    be called from a test) shows the full lifecycle: both flags cleared inside,
+    hooks untouched on entry, and every entering object and flag value back in
+    place on exit even though an install happened in between.
+    """
+    import signal
+
+    import ayder_cli.diagnostics as d
+    from ayder_cli.diagnostics import install_exception_hooks
+
+    d._hooks_installed = True
+    d._signals_installed = True
+    entering_hook = sys.excepthook
+    entering_term = signal.getsignal(signal.SIGTERM)
+    entering_int = signal.getsignal(signal.SIGINT)
+
+    with _process_hook_isolation():
+        assert d._hooks_installed is False
+        assert d._signals_installed is False
+        assert sys.excepthook is entering_hook
+        assert signal.getsignal(signal.SIGTERM) is entering_term
+        assert signal.getsignal(signal.SIGINT) is entering_int
+
+        install_exception_hooks()
+        assert sys.excepthook is not entering_hook
+
+    assert d._hooks_installed is True
+    assert d._signals_installed is True
+    assert sys.excepthook is entering_hook
+    assert signal.getsignal(signal.SIGTERM) is entering_term
+    assert signal.getsignal(signal.SIGINT) is entering_int
 
 
 class TestMainTaskOptions:
