@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 
@@ -9,8 +10,8 @@ from ayder_cli.diagnostics import install_asyncio_handler, install_exception_hoo
 from ayder_cli.logging_config import LoggingSettings, setup_logging
 
 
-@pytest.fixture(autouse=True)
-def _reset_hook_state():
+@contextlib.contextmanager
+def _process_hook_isolation():
     """`install_exception_hooks` mutates process-global state. Restore ALL of it.
 
     Resetting only the two flags is not enough. Each install wraps
@@ -21,7 +22,16 @@ def _reset_hook_state():
     a no-op, so the idempotency test would pass vacuously against a hook that
     was never wrapped.
 
-    Snapshot the three globals, reset the flags, and put all three back.
+    So snapshot all five values, clear only the two flags, and afterwards put
+    the three hook objects back followed by the two flags — restored to what
+    they were on ENTRY, not hard-reset to False. Hard-resetting them is the
+    very asymmetry described above, one level up: a process that legitimately
+    entered with hooks already installed would leave with its wrappers back but
+    its flags claiming otherwise, so the next install nests a second layer.
+
+    pytest (and each xdist worker) runs tests on the main thread, so the
+    teardown `signal.signal` calls cannot raise `ValueError`; a genuine failure
+    surfaces as a visible teardown error instead of being swallowed.
     """
     import signal
 
@@ -30,6 +40,9 @@ def _reset_hook_state():
     saved_hook = sys.excepthook
     saved_sigint = signal.getsignal(signal.SIGINT)
     saved_sigterm = signal.getsignal(signal.SIGTERM)
+    saved_hooks_installed = d._hooks_installed
+    saved_signals_installed = d._signals_installed
+
     d._hooks_installed = False
     d._signals_installed = False
     try:
@@ -38,8 +51,54 @@ def _reset_hook_state():
         sys.excepthook = saved_hook
         signal.signal(signal.SIGINT, saved_sigint)
         signal.signal(signal.SIGTERM, saved_sigterm)
-        d._hooks_installed = False
-        d._signals_installed = False
+        d._hooks_installed = saved_hooks_installed
+        d._signals_installed = saved_signals_installed
+
+
+@pytest.fixture(autouse=True)
+def _reset_hook_state():
+    """Isolate process-level hook state around every test in this module."""
+    with _process_hook_isolation():
+        yield
+
+
+def test_isolation_restores_entering_installed_flags():
+    """The helper restores the entering flags, not a False default.
+
+    Driving `_process_hook_isolation()` directly (the autouse fixture cannot be
+    called from a test) shows the whole lifecycle: both flags cleared inside,
+    the three hooks untouched on entry, all three genuinely mutated by an
+    install — so the exit assertions are not vacuous — and every entering
+    object and flag value back in place on exit. The outer autouse fixture
+    still restores the real process entry state after this node.
+    """
+    import signal
+
+    import ayder_cli.diagnostics as d
+
+    d._hooks_installed = True
+    d._signals_installed = True
+    entering_hook = sys.excepthook
+    entering_sigint = signal.getsignal(signal.SIGINT)
+    entering_sigterm = signal.getsignal(signal.SIGTERM)
+
+    with _process_hook_isolation():
+        assert d._hooks_installed is False
+        assert d._signals_installed is False
+        assert sys.excepthook is entering_hook
+        assert signal.getsignal(signal.SIGINT) is entering_sigint
+        assert signal.getsignal(signal.SIGTERM) is entering_sigterm
+
+        install_exception_hooks()
+        assert sys.excepthook is not entering_hook
+        assert signal.getsignal(signal.SIGINT) is not entering_sigint
+        assert signal.getsignal(signal.SIGTERM) is not entering_sigterm
+
+    assert d._hooks_installed is True
+    assert d._signals_installed is True
+    assert sys.excepthook is entering_hook
+    assert signal.getsignal(signal.SIGINT) is entering_sigint
+    assert signal.getsignal(signal.SIGTERM) is entering_sigterm
 
 
 def _setup(tmp_path: Path) -> None:
