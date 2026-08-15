@@ -1382,10 +1382,13 @@ def test_treating_external_as_a_plain_channel_fails(tmp_path):
 
 # -- the dynamic-channel exemption belongs to the guard, not to the name ------
 
-GUARDED_FACTORY = textwrap.dedent("""
+FROZEN_CHANNELS_SRC = (
+    'CHANNELS = ("llm", "tool", "agent", "context", "plugin", "ui", "core")')
+
+GUARDED_FACTORY = textwrap.dedent(f"""
     from loguru import logger
 
-    CHANNELS = ("core", "llm")
+    {FROZEN_CHANNELS_SRC}
 
     def get_logger(channel):
         if channel not in CHANNELS:
@@ -1462,16 +1465,16 @@ def test_channel_guard_proof_fails_closed_on_drift(tmp_path, mutation,
                       name="log.py")
     assert code == 1, f"{reason} was accepted:\n{out}"
     assert "CHAIN-CHANNEL" in out, out
-    assert "without the reviewed" in out, out
+    assert "does not prove" in out, out
 
 
 def test_conditional_guard_does_not_count(tmp_path):
     """A guard nested inside another branch is conditional, and a conditional
     guard says nothing about the bind that follows it."""
-    code, out = _scan(tmp_path, textwrap.dedent("""
+    code, out = _scan(tmp_path, textwrap.dedent(f"""
         from loguru import logger
 
-        CHANNELS = ("core",)
+        {FROZEN_CHANNELS_SRC}
 
         def get_logger(channel, strict=True):
             if strict:
@@ -1480,7 +1483,7 @@ def test_conditional_guard_does_not_count(tmp_path):
             return logger.bind(channel=channel)
     """), name="log.py")
     assert code == 1, out
-    assert "CHAIN-CHANNEL" in out and "without the reviewed" in out, out
+    assert "CHAIN-CHANNEL" in out and "does not prove" in out, out
 
 
 def test_removing_get_logger_membership_guard_fails(tmp_path):
@@ -1498,7 +1501,7 @@ def test_removing_get_logger_membership_guard_fails(tmp_path):
     assert code == 1, out
     assert "CHAIN-CHANNEL" in out, out
     assert "log.py" in out and "get_logger" in out, out
-    assert "without the reviewed" in out, out
+    assert "does not prove" in out, out
 
 
 def test_live_get_logger_still_carries_the_guard():
@@ -1509,3 +1512,169 @@ def test_live_get_logger_still_carries_the_guard():
     code, out = _run()
     assert code == 0, out
     assert "CHAIN-CHANNEL" not in out, out
+
+
+# -- the guard must prove the value BOUND, not merely that a guard ran --------
+
+def _factory(body: str) -> str:
+    """A `log.py`-shaped factory with the reviewed vocabulary and a given body.
+
+    `body` is written at zero indentation and re-indented here, so a multi-line
+    fragment keeps its own internal shape instead of being flattened.
+    """
+    indented = "\n".join(("    " + ln) if ln.strip() else ""
+                         for ln in body.strip("\n").split("\n"))
+    return (f"from loguru import logger\n\n{FROZEN_CHANNELS_SRC}\n\n"
+            f"def get_logger(channel):\n{indented}\n")
+
+
+def _guarded_body(middle: str = "") -> str:
+    return ("if channel not in CHANNELS:\n"
+            "    raise ValueError\n"
+            + (middle + "\n" if middle else "")
+            + "return logger.bind(channel=channel)")
+
+
+def test_channel_rebind_after_guard_fails(tmp_path):
+    """The guard checks a value; the bind may not receive a different one.
+
+    A post-guard assignment keeps the accepted bind AST and the pinned site
+    identity intact while destroying what the guard proved - so validating that
+    a guard merely EXISTS before the bind validates nothing.
+    """
+    code, out = _scan(tmp_path, _factory(_guarded_body("channel = user_input")),
+                      name="log.py")
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out and "does not prove" in out, out
+
+
+@pytest.mark.parametrize("write", [
+    pytest.param("channel = user_input", id="assign"),
+    pytest.param("channel: str = user_input", id="annassign"),
+    pytest.param("channel += suffix", id="augassign"),
+    pytest.param("print(channel := user_input)", id="namedexpr"),
+    pytest.param("del channel", id="delete"),
+    pytest.param("for channel in candidates:\n    pass", id="loop-target"),
+    pytest.param("with opened() as channel:\n    pass", id="with-target"),
+    pytest.param("if flag:\n    channel = user_input", id="conditional-assign"),
+    pytest.param("try:\n    pass\nexcept KeyError as channel:\n    pass",
+                 id="except-alias"),
+    pytest.param("import collections as channel", id="import-alias"),
+    pytest.param("def channel():\n    pass", id="shadowing-def"),
+    pytest.param("global channel", id="global-declaration"),
+])
+def test_any_write_between_guard_and_bind_fails(tmp_path, write):
+    """Every way a name can be re-bound counts, not just `=`.
+
+    A name can be replaced without ever appearing in a Store `Name` node -
+    `except ... as`, an import alias, a nested `def`, a `global` declaration -
+    and each one leaves the bind holding a value the guard never inspected.
+    Conditional and nested writes count too: the gate cannot prove which branch
+    ran, and conservative rejection is the correct answer.
+    """
+    code, out = _scan(tmp_path, _factory(_guarded_body(write)), name="log.py")
+    assert "UNPARSEABLE" not in out, out
+    assert code == 1, f"{write} was accepted:\n{out}"
+    assert "CHAIN-CHANNEL" in out and "does not prove" in out, out
+
+
+def test_write_inside_the_binding_statement_fails(tmp_path):
+    """The binding statement is inside the window too: a walrus in the call
+    rewrites the name after every guard has already run."""
+    code, out = _scan(tmp_path, _factory(
+        "if channel not in CHANNELS:\n"
+        "    raise ValueError\n"
+        "return logger.bind(channel=(channel := user_input)).bind("
+        "channel=channel)"), name="log.py")
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out, out
+
+
+def test_revalidated_channel_after_rebind_is_accepted(tmp_path):
+    """Re-validation is legitimate: normalize, then prove membership again.
+
+    The proof follows the LAST guard, so this is accepted while the identical
+    code without the second guard is refused - which is what makes the rule a
+    dataflow property rather than a line-ordering one.
+    """
+    code, out = _scan(tmp_path, _factory(
+        "if channel not in CHANNELS:\n"
+        "    raise ValueError\n"
+        "channel = normalize(channel)\n"
+        "if channel not in CHANNELS:\n"
+        "    raise ValueError\n"
+        "return logger.bind(channel=channel)"), name="log.py")
+    assert "CHAIN-CHANNEL" not in out, out
+    assert "CHAIN-SHAPE" not in out, out
+
+
+def test_guard_that_only_precedes_the_rebind_is_not_enough(tmp_path):
+    """The mirror image of the control above, so the pair pins the direction."""
+    code, out = _scan(tmp_path, _factory(
+        _guarded_body("channel = normalize(channel)")), name="log.py")
+    assert code == 1, out
+    assert "does not prove" in out, out
+
+
+VOCABULARY_CASES = [
+    pytest.param("", "missing", id="missing"),
+    pytest.param("CHANNELS = tuple(load_channels())", "nonliteral",
+                 id="dynamic-construction"),
+    pytest.param('CHANNELS = ("core",)', "drifted", id="content-drift"),
+    pytest.param('CHANNELS = ("llm", "tool", "agent", "context", "plugin", '
+                 '"ui", "core", "external")', "reserved-promoted",
+                 id="reserved-added"),
+    pytest.param("for CHANNELS in registry:\n    pass", "unreadable",
+                 id="loop-bound"),
+]
+
+
+@pytest.mark.parametrize("vocabulary, reason", VOCABULARY_CASES)
+def test_dynamic_guard_vocabulary_must_match_frozen_channels(tmp_path,
+                                                             vocabulary, reason):
+    """`not in CHANNELS` is only a guard if CHANNELS is the reviewed vocabulary.
+
+    A module that builds it dynamically, or ships a different tuple, can pass
+    the exact guard shape while rejecting nothing - so the vocabulary is proven
+    from the source on ANY tree, not only on the committed one where the
+    gate's copy is diffed against log.py.
+    """
+    source = ("from loguru import logger\n\n"
+              f"{vocabulary}\n\n"
+              "def get_logger(channel):\n"
+              "    if channel not in CHANNELS:\n"
+              '        raise ValueError("unknown channel")\n'
+              "    return logger.bind(channel=channel)\n")
+    code, out = _scan(tmp_path, source, name="log.py")
+    assert "UNPARSEABLE" not in out, out
+    assert code == 1, f"{reason} vocabulary was accepted:\n{out}"
+    assert "CHAIN-CHANNEL" in out, out
+    assert "a guard is worth exactly what it tests against" in out, out
+
+
+def test_rebound_vocabulary_is_unreadable(tmp_path):
+    """Two bindings mean the gate cannot say which one the guard tests."""
+    source = ("from loguru import logger\n\n"
+              f"{FROZEN_CHANNELS_SRC}\n"
+              'CHANNELS = ("anything",)\n\n'
+              "def get_logger(channel):\n"
+              "    if channel not in CHANNELS:\n"
+              '        raise ValueError("unknown channel")\n'
+              "    return logger.bind(channel=channel)\n")
+    code, out = _scan(tmp_path, source, name="log.py")
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out, out
+    assert "a guard is worth exactly what it tests against" in out, out
+
+
+def test_live_log_py_vocabulary_is_statically_provable():
+    """The committed factory's exemption depends on this being readable."""
+    import ast as _ast
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    try:
+        import check_log_arguments as gate
+    finally:
+        sys.path.pop(0)
+    tree = _ast.parse((REPO / "src" / "ayder_cli" / "log.py").read_text())
+    assert gate.module_channel_vocabulary(tree) == gate.CHANNELS_FROZEN

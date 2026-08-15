@@ -693,13 +693,79 @@ def _rejects_non_members(stmt: ast.stmt, param: str) -> bool:
             and any(isinstance(s, ast.Raise) for s in stmt.body))
 
 
-def _guards_channel_membership(func: ast.AST | None, param: str,
-                               bind_line: int) -> bool:
-    """Does `func` reject a non-member channel BEFORE binding it?
+def _writes_name(node: ast.AST, name: str) -> bool:
+    """Does anything in `node` rebind, shadow or delete `name`?
 
-    Only DIRECT statements of the body count. A guard nested inside another
+    Deliberately broad. `Name` in a Store/Del context covers assignment,
+    annotated and augmented assignment, walrus, `del`, and loop/`with`/
+    comprehension targets, but a name can also be re-bound without ever
+    appearing as a `Name`: `except E as channel`, `global`/`nonlocal`,
+    `import x as channel`, a nested `def`/`class` of that name, or a nested
+    parameter shadowing it. Every one of those breaks the link between the
+    guard and the value that reaches the bind, so every one counts as a write.
+    """
+    for child in ast.walk(node):
+        if (isinstance(child, ast.Name) and child.id == name
+                and isinstance(child.ctx, (ast.Store, ast.Del))):
+            return True
+        if isinstance(child, ast.ExceptHandler) and child.name == name:
+            return True
+        if isinstance(child, (ast.Global, ast.Nonlocal)) and name in child.names:
+            return True
+        if isinstance(child, ast.alias) and (
+                child.asname or child.name.split(".")[0]) == name:
+            return True
+        if (isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)) and child.name == name):
+            return True
+        if isinstance(child, ast.arg) and child.arg == name:
+            return True
+    return False
+
+
+def module_channel_vocabulary(tree: ast.Module) -> tuple | None:
+    """The module's statically literal `CHANNELS` tuple, or None if unprovable.
+
+    The guard is only worth as much as the vocabulary it tests against, so the
+    vocabulary has to be readable off the source: exactly one binding, a tuple
+    literal, no dynamic construction and no rebinding. Anything else and the
+    gate cannot say what `not in CHANNELS` actually rejects.
+    """
+    stores = [n for n in ast.walk(tree)
+              if isinstance(n, ast.Name) and n.id == CHANNEL_VOCABULARY
+              and isinstance(n.ctx, (ast.Store, ast.Del))]
+    if len(stores) != 1:
+        return None                      # missing, or bound more than once
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target])
+        if not any(t is stores[0] for t in targets):
+            continue
+        if node.value is None or not isinstance(node.value, ast.Tuple):
+            return None                  # dynamic construction
+        try:
+            return ast.literal_eval(node.value)
+        except ValueError:
+            return None
+    return None                          # bound by something we cannot read
+
+
+def _guards_channel_membership(func: ast.AST | None, param: str,
+                               bind_node: ast.Call) -> bool:
+    """Does `func` reject a non-member channel, and is THAT the value bound?
+
+    A guard proves something about a value, not about a line number. So it is
+    not enough that a guard runs first: nothing may rewrite `param` between the
+    guard and the bind, or the bind receives a value the guard never saw. Only
+    DIRECT statements of the body count as guards - one nested inside another
     branch, a loop or a `try` is conditional, and a conditional guard proves
-    nothing about the bind that follows it.
+    nothing.
+
+    Re-validation is supported by construction: guards are tried newest first,
+    so `guard; rebind; guard; bind` is accepted on the second guard while
+    `guard; rebind; bind` is refused.
     """
     if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return False
@@ -707,13 +773,30 @@ def _guards_channel_membership(func: ast.AST | None, param: str,
     if param not in {a.arg for a in
                      args.posonlyargs + args.args + args.kwonlyargs}:
         return False
-    return any(_rejects_non_members(stmt, param) and stmt.lineno < bind_line
-               for stmt in func.body)
+
+    bind_index = None
+    for index, stmt in enumerate(func.body):
+        if any(child is bind_node for child in ast.walk(stmt)):
+            bind_index = index
+            break
+    if bind_index is None:
+        return False              # not reached from a direct body statement
+
+    for index in range(bind_index - 1, -1, -1):
+        if not _rejects_non_members(func.body[index], param):
+            continue
+        # The guard statement and the binding statement are both inside the
+        # window: a write in either one is still a write the guard never saw.
+        if any(_writes_name(func.body[i], param)
+               for i in range(index, bind_index + 1)):
+            return False          # an earlier guard is only ever weaker
+        return True
+    return False
 
 
 def _check_channel_bind(findings: list[str], path: str, node: ast.Call,
                         qualname: str, keyword: ast.keyword, dump: str,
-                        enclosing: ast.AST | None) -> None:
+                        enclosing: ast.AST | None, tree: ast.Module) -> None:
     """A bound channel must be a real channel: constant, or proven at the source.
 
     A constant must name a member of the frozen selectable vocabulary,
@@ -743,12 +826,22 @@ def _check_channel_bind(findings: list[str], path: str, node: ast.Call,
                 f"belongs to that factory's membership guard, not to the name "
                 f"`{CHANNEL_PARAM}`")
             return
-        if not _guards_channel_membership(enclosing, CHANNEL_PARAM, node.lineno):
+        vocabulary = module_channel_vocabulary(tree)
+        if vocabulary != CHANNELS_FROZEN:
+            findings.append(
+                f"CHAIN-CHANNEL {path}:{node.lineno} {qualname} guards against "
+                f"a {CHANNEL_VOCABULARY} this gate cannot read as the reviewed "
+                f"vocabulary (found {vocabulary!r}, expected "
+                f"{list(CHANNELS_FROZEN)}); a guard is worth exactly what it "
+                f"tests against")
+            return
+        if not _guards_channel_membership(enclosing, CHANNEL_PARAM, node):
             findings.append(
                 f"CHAIN-CHANNEL {path}:{node.lineno} {qualname} binds a dynamic "
-                f"channel without the reviewed "
+                f"channel that the reviewed "
                 f"`if {CHANNEL_PARAM} not in {CHANNEL_VOCABULARY}: raise` guard "
-                f"preceding it; the exemption rests on that guard")
+                f"does not prove: the guard is missing, conditional, or the "
+                f"name is rewritten between the guard and the bind")
         return
 
     findings.append(
@@ -890,7 +983,7 @@ def scan_module(path: str, tree: ast.Module) -> dict:
                 if key == "channel":
                     _check_channel_bind(findings, path, node, qualname, keyword,
                                         dump,
-                                        analysis._enclosing_function(node))
+                                        analysis._enclosing_function(node), tree)
                     continue
                 if key in SCHEMA_BIND_KEYS:
                     if dump not in ALLOWED_BIND_SHAPES[key]:
