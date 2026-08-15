@@ -168,7 +168,7 @@ async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
             ),
             on_model_selected,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - slash-command guard: /model reports listing failures in chat rather than killing the app
         logger.opt(exception=True).error("Model listing failed")
         chat_view.add_system_message(f"Error listing models: {e}")
 
@@ -279,7 +279,7 @@ def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
             on_task_selected,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - slash-command guard: /tasks reports listing failures in chat rather than killing the app
         logger.opt(exception=True).error("Task listing failed for /tasks")
         chat_view.add_system_message(f"Error listing tasks: {e}")
 
@@ -305,7 +305,7 @@ def handle_tools(app: AyderApp, args: str, chat_view: ChatView) -> None:
             tools_text += f"- `{name}` — {desc}\n"
 
         chat_view.add_assistant_message(tools_text)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - slash-command guard: /tools reports listing failures in chat rather than killing the app
         logger.opt(exception=True).error("Tool listing failed")
         chat_view.add_system_message(f"Error listing tools: {e}")
 
@@ -548,7 +548,7 @@ def handle_implement(app: AyderApp, args: str, chat_view: ChatView) -> None:
             on_task_selected,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - slash-command guard: /implement reports listing failures in chat rather than killing the app
         logger.opt(exception=True).error("Task listing failed for /implement")
         chat_view.add_system_message(f"Error listing tasks: {e}")
 
@@ -562,7 +562,7 @@ def _open_task_in_editor(
     path = Path(task_path)
     try:
         content = path.read_text(encoding="utf-8")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - file boundary: an unreadable task file is reported in chat, not raised into the app
         logger.opt(exception=True).error("Failed to read task file {}", path)
         chat_view.add_system_message(f"Error reading task: {e}")
         return
@@ -574,7 +574,7 @@ def _open_task_in_editor(
         try:
             path.write_text(new_content, encoding="utf-8")
             chat_view.add_system_message(f"Task TASK-{task_id:03d} saved.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - file boundary: a failed task save is reported in chat from a screen callback
             logger.opt(exception=True).error("Failed to save task file {}", path)
             chat_view.add_system_message(f"Error saving task: {e}")
 
@@ -592,7 +592,7 @@ def _open_note_in_editor(
     path = Path(note_path)
     try:
         content = path.read_text(encoding="utf-8")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - file boundary: an unreadable note file is reported in chat, not raised into the app
         logger.opt(exception=True).error("Failed to read note file {}", path)
         chat_view.add_system_message(f"Error reading note: {e}")
         return
@@ -604,7 +604,7 @@ def _open_note_in_editor(
         try:
             path.write_text(new_content, encoding="utf-8")
             chat_view.add_system_message(f"Note '{display_name}' saved.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - file boundary: a failed note save is reported in chat from a screen callback
             logger.opt(exception=True).error("Failed to save note file {}", path)
             chat_view.add_system_message(f"Error saving note: {e}")
 
@@ -677,7 +677,7 @@ def handle_notes(app: "AyderApp", args: str, chat_view: ChatView) -> None:
             on_note_selected,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - slash-command guard: /notes reports listing failures in chat rather than killing the app
         logger.opt(exception=True).error("Note listing failed")
         chat_view.add_system_message(f"Error listing notes: {e}")
 
@@ -743,7 +743,7 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
         temporal_worker = _find_plugin_module("temporal-tools", "temporal_worker")
         TemporalWorker = getattr(temporal_worker, "TemporalWorker")
         TemporalWorkerConfig = getattr(temporal_worker, "TemporalWorkerConfig")
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional plugin probe: the temporal worker module may be absent or fail to import
         logger.opt(exception=True).debug(
             "Temporal plugin worker module unavailable"
         )
@@ -1017,7 +1017,7 @@ def _refresh_status_badges(app: "AyderApp") -> None:
         from ayder_cli.tui.widgets import StatusBar
 
         app.query_one("#status-bar", StatusBar).refresh_plugin_badges()
-    except Exception:
+    except Exception:  # noqa: BLE001 - status-bar guard: badge refresh is cosmetic and must not kill the app
         logger.opt(exception=True).debug("Status-bar badge refresh failed")
 
 
@@ -1114,7 +1114,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
 
             try:
                 input_widget = app.query_one("#chat-input", TextArea)
-            except Exception:
+            except Exception:  # noqa: BLE001 - widget lookup guard: without the chat input there is nothing to prefill
                 logger.opt(exception=True).debug(
                     "Chat input lookup failed; cannot prefill the /agent command"
                 )
@@ -1122,7 +1122,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
             input_widget.text = f"/agent {name} "
             try:
                 input_widget.focus()
-            except Exception:
+            except Exception:  # noqa: BLE001 - focus guard: failing to focus the chat input must not kill the app
                 logger.opt(exception=True).debug(
                     "Could not focus the chat input after agent selection"
                 )
@@ -1186,7 +1186,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         try:
             agent_panel = app.query_one("#agent-panel", AgentPanel)
             agent_panel.add_agent(agent_name, run_id)
-        except Exception:
+        except Exception:  # noqa: BLE001 - agent panel guard: showing the new run is cosmetic and must not kill the app
             # agent_name is a validated key of the configured agents mapping.
             logger.opt(exception=True).debug(
                 "Agent panel could not show run {} of agent {}", run_id, agent_name
@@ -1206,7 +1206,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         count = app._agent_registry.active_count if app._agent_registry else 0
         activity.set_agents_running(count)
         app._start_activity_timer()
-    except Exception:
+    except Exception:  # noqa: BLE001 - activity bar guard: the agent count is cosmetic and must not kill the app
         logger.opt(exception=True).debug(
             "Activity bar agent count update failed after /agent dispatch"
         )

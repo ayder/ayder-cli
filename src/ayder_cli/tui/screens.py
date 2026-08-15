@@ -133,7 +133,7 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
                     diff_scroll.scroll_page_down(animate=False)
             except NoMatches:
                 pass          # no diff pane on this confirm screen — nothing to scroll
-            except Exception:
+            except Exception:  # noqa: BLE001 - key-handler guard: residual after NoMatches; a raise in on_key would kill the app
                 logger.opt(exception=True).debug("Diff pane scroll failed")
             return
 
@@ -576,7 +576,7 @@ class AgentListScreen(ModalScreen[str | None]):
             return                      # gave up refreshing; keep the last rows
         try:
             self._snapshot = list(self._registry.list_agents())
-        except Exception:
+        except Exception:  # noqa: BLE001 - registry snapshot guard: a failing refresh disables itself instead of killing the screen
             self._snapshot_refresh_off = True
             logger.opt(exception=True).warning(
                 "Agent status refresh failed; live refresh stopped for this screen"
@@ -709,7 +709,7 @@ class AgentListScreen(ModalScreen[str | None]):
             list_widget = self.query_one("#agent-list", Static)
         except NoMatches:
             return                      # not composed yet, or already unmounted
-        except Exception:
+        except Exception:  # noqa: BLE001 - redraw guard: residual after NoMatches; a failing redraw disables itself instead of killing the screen
             self._display_refresh_off = True
             logger.opt(exception=True).warning(
                 "Agent list redraw failed; live redraw stopped for this screen"

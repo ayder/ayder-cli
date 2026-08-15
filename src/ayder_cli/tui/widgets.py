@@ -952,7 +952,7 @@ class _SubmitTextArea(TextArea):
             panel = self.app.query_one("#agent-panel", AgentPanel)
         except NoMatches:
             return False              # panel not mounted — chat view handles it
-        except Exception:
+        except Exception:  # noqa: BLE001 - scroll guard: residual after NoMatches; the chat view handles the key instead
             logger.opt(exception=True).debug("Agent panel lookup failed")
             return False
         if not panel.display:
@@ -1005,7 +1005,7 @@ class CLIInputBar(Horizontal):
                 content = self._history_file.read_text(encoding="utf-8")
                 lines = [line.strip() for line in content.split("\n") if line.strip()]
                 return lines[-1000:]
-            except Exception:
+            except Exception:  # noqa: BLE001 - history file boundary: an unreadable history file starts an empty history
                 logger.opt(exception=True).debug(
                     "Failed to load chat history file; starting with empty history"
                 )
@@ -1016,7 +1016,7 @@ class CLIInputBar(Horizontal):
         try:
             with open(self._history_file, "a", encoding="utf-8") as f:
                 f.write(command + "\n")
-        except Exception:
+        except Exception:  # noqa: BLE001 - history file boundary: a failed append must never block submitting the command
             logger.opt(exception=True).debug(
                 "Failed to append to the chat history file"
             )
@@ -1203,7 +1203,7 @@ class StatusBar(Horizontal):
             if chat_loop is None:
                 return None
             return chat_loop.config.tool_tags
-        except Exception:
+        except Exception:  # noqa: BLE001 - badge filter guard: unreadable tool tags render badges unfiltered rather than killing the app
             logger.opt(exception=True).debug(
                 "Could not read enabled tool tags; badges rendered unfiltered"
             )
@@ -1217,7 +1217,7 @@ class StatusBar(Horizontal):
             label = self.query_one("#plugin-badges", Label)
         except NoMatches:
             return  # not mounted yet
-        except Exception:
+        except Exception:  # noqa: BLE001 - badge lookup guard: residual after NoMatches; badge rendering is cosmetic
             logger.opt(exception=True).debug("Plugin badge label lookup failed")
             return
         label.update(self._render_badges(plugin_status.get_all(), self._enabled_tags()))

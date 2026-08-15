@@ -113,7 +113,7 @@ class AppCallbacks:
             stats = cm.get_stats()
             used = int(stats.total_tokens)
             total = int(stats.total_tokens + stats.available_tokens)
-        except Exception:
+        except Exception:  # noqa: BLE001 - status-bar guard: context-manager stats are optional, so any failure skips the update
             logger.opt(exception=True).debug(
                 "Context stats unavailable; skipping status-bar usage update"
             )
@@ -364,7 +364,7 @@ class AyderApp(App):
                     self.call_later(lambda: panel.update_agent(run_id, name, event, data, label))
                 except NoMatches:
                     pass                      # panel not mounted (yet) — nothing to mirror
-                except Exception:
+                except Exception:  # noqa: BLE001 - agent-event guard: residual after NoMatches; a raise in this callback would kill the app
                     self._agent_ui_sync_off = True
                     logger.opt(exception=True).warning(
                         "Agent panel update failed; agent UI mirroring disabled for this session"
@@ -378,7 +378,7 @@ class AyderApp(App):
                     self.call_later(self._start_activity_timer)
                 except NoMatches:
                     pass                      # activity bar not mounted (yet)
-                except Exception:
+                except Exception:  # noqa: BLE001 - agent-event guard: residual after NoMatches; a raise in this callback would kill the app
                     self._agent_ui_sync_off = True
                     logger.opt(exception=True).warning(
                         "Activity bar sync failed; agent UI mirroring disabled for this session"
@@ -389,7 +389,7 @@ class AyderApp(App):
                 try:
                     panel = self.query_one("#agent-panel", AgentPanel)
                     self.call_later(lambda: panel.complete_agent(run_id, run.result, run.status))
-                except Exception:
+                except Exception:  # noqa: BLE001 - agent-completion guard: panel mirroring is cosmetic and must not kill the app
                     logger.opt(exception=True).debug(
                         "Agent panel completion update failed for run {}", run_id
                     )
@@ -397,7 +397,7 @@ class AyderApp(App):
                     activity = self.query_one("#activity-bar", ActivityBar)
                     count = self._agent_registry.active_count if self._agent_registry else 0
                     self.call_later(lambda: activity.set_agents_running(count))
-                except Exception:
+                except Exception:  # noqa: BLE001 - agent-completion guard: activity-bar mirroring is cosmetic and must not kill the app
                     logger.opt(exception=True).debug(
                         "Activity bar agent count update failed after run {}", run_id
                     )
@@ -513,7 +513,7 @@ class AyderApp(App):
         try:
             structure = self.registry.execute("get_project_structure", {"max_depth": 3})
             macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
-        except Exception:
+        except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so startup continues without it
             logger.opt(exception=True).warning(
                 "Project-structure macro unavailable; continuing without it"
             )
@@ -554,7 +554,7 @@ class AyderApp(App):
                 macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(
                     project_structure=structure
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so the model switch continues without it
                 logger.opt(exception=True).warning(
                     "Project-structure macro unavailable on model switch; "
                     "continuing without it"
@@ -706,7 +706,7 @@ class AyderApp(App):
             )
             return "\n".join(diff) or None
 
-        except Exception:
+        except Exception:  # noqa: BLE001 - diff preview guard: preview rendering is cosmetic and must never block a confirmation
             logger.opt(exception=True).debug(
                 "Diff preview generation failed for tool {}", tool_name
             )
@@ -821,7 +821,7 @@ class AyderApp(App):
                     maybe_awaitable = req.prepare()    # quiescent: no turn running here
                     if hasattr(maybe_awaitable, "__await__"):
                         await cast(Awaitable[None], maybe_awaitable)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - turn-preparation boundary: a failed prepare is reported and the consumer takes the next request
                 logger.opt(exception=True).error("Turn preparation failed")
                 self._report_turn_error(e)
                 continue
@@ -842,7 +842,7 @@ class AyderApp(App):
                 consumer_task = asyncio.current_task()
                 if consumer_task is not None and consumer_task.cancelling():
                     raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - turn-execution boundary: a failed turn is reported and the consumer stays alive for the next one
                 logger.opt(exception=True).error("Turn execution failed")
                 self._report_turn_error(e)
             finally:
@@ -873,7 +873,7 @@ class AyderApp(App):
         """Surface a turn/prepare error in the chat view (best effort)."""
         try:
             self.query_one("#chat-view", ChatView).add_system_message(f"Error: {exc}")
-        except Exception:
+        except Exception:  # noqa: BLE001 - error-reporting guard: failing to surface an error must not raise a second one
             # The turn error itself is already logged with its stack by the
             # consumer; this only records that it could not be surfaced.
             logger.opt(exception=True).debug(
@@ -897,7 +897,7 @@ class AyderApp(App):
                 chat_view.add_system_message(
                     f"Unknown command: {cmd_name}. Type /help for available commands."
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - slash-command guard: COMMAND_MAP handlers are arbitrary code and a raise would kill the app
             # Only an allowlisted COMMAND_MAP key is logged — never raw input.
             logger.opt(exception=True).error(
                 "Slash command handler failed for {}",
@@ -940,7 +940,7 @@ class AyderApp(App):
                 self.registry,
                 pre_approved=pre_approved,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - shell shortcut boundary: a raising tool dispatch becomes a chat message, not an app crash
             logger.opt(exception=True).error("Shell shortcut execution raised")
             result = f"Error executing shell command: {exc}"
             chat_view.add_system_message(result)
@@ -1017,7 +1017,7 @@ class AyderApp(App):
             self.query_one("#chat-view", ChatView).add_user_message(user_input)  # echo now
             # Start each turn's reasoning fresh in the thinking panel.
             self.query_one("#thinking-panel", ThinkingPanel).clear()
-        except Exception:
+        except Exception:  # noqa: BLE001 - echo guard: failing to echo the submission must not stop the turn from running
             logger.opt(exception=True).debug(
                 "Could not echo the submitted message into the chat view"
             )
@@ -1035,7 +1035,7 @@ class AyderApp(App):
         try:
             self.query_one("#activity-bar", ActivityBar).clear()
             self.query_one("#input-bar", CLIInputBar).focus_input()
-        except Exception:
+        except Exception:  # noqa: BLE001 - teardown guard: post-turn UI cleanup is cosmetic and must not kill the app
             logger.opt(exception=True).debug("Post-turn UI teardown failed")
         if self._agent_registry:
             self._maybe_nudge()
@@ -1145,7 +1145,7 @@ class AyderApp(App):
                 panel = self.query_one(panel_id, panel_cls)
             except NoMatches:
                 continue                  # panel not mounted — try the next one
-            except Exception:
+            except Exception:  # noqa: BLE001 - panel lookup guard: residual after NoMatches; the loop must continue to the next panel
                 logger.opt(exception=True).debug(
                     "Panel lookup failed for {}", panel_id
                 )
@@ -1167,7 +1167,7 @@ class AyderApp(App):
         try:
             input_bar = self.query_one("#input-bar", CLIInputBar)
             input_bar.focus_input()
-        except Exception:
+        except Exception:  # noqa: BLE001 - focus guard: a raise in this Textual event handler would kill the app
             logger.opt(exception=True).debug(
                 "Could not restore input focus on app focus"
             )
