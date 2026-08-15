@@ -320,11 +320,17 @@ def test_plain_marker_draws_no_ruff_noqa_warning(tmp_path):
 
 
 def test_full_tree_census_is_frozen():
-    """119 is the §C10 census. A different number means the gate is reading the
-    wrong tree, or the census moved without the plan being updated."""
+    """125 is the §C10 census. A different number means the gate is reading the
+    wrong tree, or the census moved without the plan being updated.
+
+    Step 5-04 commit 1 moved it from 119/113: `masking.py` is a new module, and
+    the transactional `setup_logging` adds six broad handlers - the shape-guard
+    conversion, the two best-effort cleanup helpers, the per-id teardown loop,
+    and the Phase A/B failure boundaries.
+    """
     code, out = _run()
-    assert "broad=119" in out, out
-    assert "files=113/113" in out, out
-    code, out = _run("--expect-broad", "118")
+    assert "broad=125" in out, out
+    assert "files=114/114" in out, out
+    code, out = _run("--expect-broad", "124")
     assert code == 1
-    assert "census: found 119" in out
+    assert "census: found 125" in out

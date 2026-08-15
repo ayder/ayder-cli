@@ -22,7 +22,9 @@ classifiers = [
 dependencies = [
     "openai",
     "ollama>=0.6.2",
-    "loguru",
+    # Bounded deliberately: the masking sinks wrap Loguru's private FileSink /
+    # Message / StreamSink shapes (§F5-R6), guarded by `_shape_guard()`.
+    "loguru>=0.7,<0.8",
     "httpx",
     "rich>=13.0.0",
     # Pinned exactly to match the runtime: 8.2.5+ replaced the single

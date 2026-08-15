@@ -24,7 +24,7 @@ DEFAULT_BASELINE = REPO / "scripts" / "exception_baseline.txt"
 
 # Frozen census (§C10). A different number means the gate is looking at the
 # wrong tree, or the census moved without the plan being updated.
-EXPECTED_BROAD = 119
+EXPECTED_BROAD = 125
 BRANCHING = (ast.If, ast.Try, ast.For, ast.While, ast.With, ast.Match)
 TERMINAL = (ast.Return, ast.Break, ast.Continue, ast.Pass)
 

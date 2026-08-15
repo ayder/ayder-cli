@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
@@ -11,9 +12,12 @@ from typing import Any, TextIO
 from loguru import logger
 
 from ayder_cli.log import LOG_LEVELS
+from ayder_cli.masking import mask
 
 _configured = False
 _current_level = "NONE"
+
+_SUPPRESSED_LIBS = ("markdown_it", "httpcore", "httpx", "openai", "anthropic")
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,166 @@ class LoggingSettings:
     trace_path: str = ".ayder/log/trace.jsonl"
     rotation: str = "10 MB"
     retention: str = "7 days"
+
+
+@dataclass(frozen=True)
+class _SinkSpec:
+    """Exactly what this process installed. Published only on full success."""
+
+    error_file: bool
+    main_file: bool
+    console: bool
+    default_no: int | None          # None <=> effective level NONE
+    channel_levels: dict[str, int | None]
+    allowed_channels: frozenset[str] | None
+
+
+_sink_spec: _SinkSpec | None = None
+
+
+# ---------------------------------------------------------------- private API
+
+# Loguru's public `add()` accepts an arbitrary object sink, but mask-after-
+# render needs the file sink's own rotation/retention machinery, which is
+# private. §F5-R6 accepts that against an explicit `loguru>=0.7,<0.8` bound
+# plus this loud guard, rather than reimplementing rotation badly.
+
+_REQUIRED_FILE_SINK_PARAMS = frozenset({
+    "path", "rotation", "retention", "compression", "delay", "watch",
+    "mode", "buffering", "encoding",
+})
+
+
+def _loguru_private() -> tuple[Any, Any, Any]:
+    """The three private Loguru objects the masking sinks are built on."""
+    from loguru._file_sink import FileSink
+    from loguru._handler import Message
+    from loguru._simple_sinks import StreamSink
+
+    return FileSink, Message, StreamSink
+
+
+class _StopProbe:
+    """A stream that HAS `stop`, used only to prove StreamSink's dispatch."""
+
+    def stop(self) -> None:
+        """Never called: only its presence is measured."""
+
+
+def _core_handlers() -> dict[int, Any]:
+    """Loguru's live handler dict. One private read, shape-guarded above."""
+    return logger._core.handlers  # type: ignore[attr-defined]
+
+
+def _shape_guard() -> None:
+    """Verify Loguru's private shape BEFORE anything is torn down.
+
+    Ordering is the whole point. This runs while the previous configuration is
+    still installed, so drift raises a named RuntimeError and logging keeps
+    working; running it after `logger.remove()` would leave the process silent.
+    """
+    try:
+        file_sink, message_cls, stream_sink = _loguru_private()
+
+        params = set(inspect.signature(file_sink.__init__).parameters)
+        lost = sorted(_REQUIRED_FILE_SINK_PARAMS - params)
+        if lost:
+            raise RuntimeError(f"Loguru drift: FileSink.__init__ lost {lost}")
+        for name in ("write", "stop"):
+            if not callable(getattr(file_sink, name, None)):
+                raise RuntimeError(f"Loguru drift: FileSink has no {name}()")
+
+        if not issubclass(message_cls, str):
+            raise RuntimeError("Loguru drift: Message is no longer a str subclass")
+        if getattr(message_cls, "__slots__", None) != ("record",):
+            raise RuntimeError("Loguru drift: Message.__slots__ is not ('record',)")
+
+        # The console shim's whole safety argument: a sink object WITHOUT a
+        # `stop` attribute is never stopped, so `logger.remove()` cannot close
+        # a stream the caller owns.
+        if getattr(stream_sink(object()), "_stoppable", None) is not False:
+            raise RuntimeError(
+                "Loguru drift: StreamSink no longer derives _stoppable from `stop`")
+        if getattr(stream_sink(_StopProbe()), "_stoppable", None) is not True:
+            raise RuntimeError(
+                "Loguru drift: StreamSink no longer stops a stoppable sink")
+
+        handlers = _core_handlers()
+        if not isinstance(handlers, dict):
+            raise RuntimeError("Loguru drift: _core.handlers is no longer a dict")
+        for handler in handlers.values():
+            if not isinstance(getattr(handler, "levelno", None), int):
+                raise RuntimeError("Loguru drift: handlers no longer expose levelno")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "probe.log"
+            probe = MaskingFileSink(str(target), rotation="10 MB",
+                                    retention="7 days")
+            message = message_cls("probe token=abc123\n")
+            message.record = {}
+            probe.write(message)
+            probe.flush()
+            probe.stop()
+            if "<redacted:kv>" not in target.read_text(encoding="utf-8"):
+                raise RuntimeError("Loguru drift: the masking file sink wrote raw text")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(
+            f"Loguru drift: private sink probe failed with {type(e).__name__}") from e
+
+
+class MaskingFileSink:
+    """A file sink that masks credentials AFTER Loguru renders the record.
+
+    Owns its inner `FileSink` exclusively: `stop()` cascades, and that cascade
+    is what closes the file, applies the rotation rename and runs retention.
+    """
+
+    def __init__(self, path: str, *, rotation: str | None = None,
+                 retention: str | None = None) -> None:
+        file_sink, message_cls, _stream_sink = _loguru_private()
+        self._message = message_cls
+        # The constructor opens the file, so a bad path or an unparseable
+        # rotation string fails HERE - before any teardown.
+        self._inner = file_sink(path, rotation=rotation, retention=retention)
+
+    def write(self, message: Any) -> None:
+        out = self._message(mask(str(message)))
+        # Time-based rotation reads record["time"] off the message it is
+        # handed; a bare str would make the rotation function raise.
+        out.record = message.record
+        self._inner.write(out)
+
+    def flush(self) -> None:
+        handle = getattr(self._inner, "_file", None)
+        if handle is not None:
+            handle.flush()
+
+    def stop(self) -> None:
+        self._inner.stop()
+
+
+class _MaskingStream:
+    """Console shim: masks on the way out, owns nothing.
+
+    Deliberately has NO `stop()` and NO `close()`. Loguru's StreamSink derives
+    `_stoppable` from `callable(getattr(stream, "stop", None))`, so leaving it
+    off is exactly what keeps `logger.remove()` from closing the caller's
+    stream. Adding one would close somebody else's stdout.
+    """
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> None:
+        self._stream.write(mask(text))
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def isatty(self) -> bool:
+        return self._stream.isatty()
 
 
 class _InterceptHandler(logging.Handler):
@@ -66,14 +230,17 @@ def _normalize_level(level: str | None) -> str:
     return normalized
 
 
-def _add_sink_with_fallback(sink: Any, **kwargs: Any) -> None:
-    """Add sink with enqueue=True, fallback to enqueue=False on fd limitations."""
+def _add_sink_with_fallback(sink: Any, **kwargs: Any) -> int:
+    """Add sink with enqueue=True, fallback to enqueue=False on fd limitations.
+
+    Returns the handler id: Phase B needs it to unwind a partial install.
+    """
     try:
-        logger.add(sink, enqueue=True, **kwargs)
+        return logger.add(sink, enqueue=True, **kwargs)
     except ValueError as e:
         if "fds_to_keep" not in str(e):
             raise
-        logger.add(sink, enqueue=False, **kwargs)
+        return logger.add(sink, enqueue=False, **kwargs)
 
 
 def _error_filter(record) -> bool:
@@ -82,6 +249,11 @@ def _error_filter(record) -> bool:
         record["level"].no >= logger.level("WARNING").no
         or record["exception"] is not None
     )
+
+
+def _trace_filter(record) -> bool:
+    """Structured events only - the trace sink is not a prose sink."""
+    return "evt" in record["extra"]
 
 
 def _main_filter(allowed: frozenset[str] | None,
@@ -105,64 +277,193 @@ def _main_filter(allowed: frozenset[str] | None,
     return _filter
 
 
+def would_reach_prose(channel: str, level_no: int, has_exception: bool) -> bool:
+    """Would a record of this shape reach ANY prose sink right now?
+
+    Mirrors `_error_filter` and `_main_filter` against the spec this process
+    published, rather than counting handlers - a handler count cannot tell a
+    prose sink from the trace sink, and cannot apply the channel allowlist.
+    Three states are covered by exactly one branch each: never configured,
+    configured, and the safe state a failed setup publishes.
+    """
+    spec = _sink_spec
+    if spec is None:
+        # Pre-setup or failed-setup. Loguru's OWN default stderr handler is
+        # present until the first `remove()`, so a record that reaches it is
+        # already visible and must not be duplicated by a fallback.
+        handlers = _core_handlers()
+        if not handlers:
+            return False
+        return level_no >= min(h.levelno for h in handlers.values())
+    if spec.error_file and (level_no >= logger.level("WARNING").no or has_exception):
+        return True
+    if spec.default_no is None:
+        return False                          # level NONE: no main/console sink
+    if spec.allowed_channels is not None and channel not in spec.allowed_channels:
+        return False
+    threshold = spec.channel_levels.get(channel, spec.default_no)
+    if threshold is None:
+        return False
+    return (spec.main_file or spec.console) and level_no >= threshold
+
+
 def _ensure_parent(path: str) -> str:
     p = Path(path).expanduser()
     p.parent.mkdir(parents=True, exist_ok=True)
     return str(p)
 
 
+def _stop_owned(sinks: list[Any], failure: BaseException, stage: str) -> None:
+    """Close owned sinks, newest first, best effort. Never raises, never logs.
+
+    Content-free by construction: a cleanup failure contributes only its stage
+    and exception TYPE to the original failure's notes. Logging here would push
+    a record through the very sinks being torn down.
+    """
+    for sink in reversed(sinks):
+        try:
+            sink.stop()
+        except Exception as e:  # noqa: BLE001 - AYDER-EXC best-effort cleanup; type-only note, caller re-raises the original
+            failure.add_note(
+                f"ayder setup cleanup ({stage}): {type(e).__name__} stopping a sink")
+
+
+def _remove_handlers(handler_ids: list[int], failure: BaseException) -> None:
+    """Remove handlers this call added, best effort. Never raises, never logs."""
+    for hid in handler_ids:
+        try:
+            logger.remove(hid)
+        except Exception as e:  # noqa: BLE001 - AYDER-EXC best-effort cleanup; type-only note, caller re-raises the original
+            failure.add_note(
+                f"ayder setup cleanup (install): {type(e).__name__} removing "
+                f"handler {hid}")
+
+
 def setup_logging(settings: LoggingSettings) -> str:
-    """Configure all sinks from fully-resolved settings. Returns effective level."""
-    global _configured, _current_level
+    """Configure all sinks from fully-resolved settings. Returns effective level.
 
+    Transactional. Every failure converges to one of exactly two observable
+    states: the PREVIOUS configuration fully intact (anything that fails before
+    the teardown boundary), or the explicit safe state - zero handlers, no
+    published spec, `_configured` False, level "NONE" (anything after it).
+    Loguru cannot re-add a removed handler, so restoring the old sinks after
+    teardown is refused rather than faked.
+    """
+    global _configured, _current_level, _sink_spec
+
+    # ---- Phase A: pure computation. No published state is touched. ----------
     effective_level = _normalize_level(settings.level)
-    logger.remove()
+    _shape_guard()
 
-    if settings.file_enabled:
-        # ALWAYS added, before any level gate: the no-silent-failure guarantee.
-        _add_sink_with_fallback(
-            _ensure_parent(settings.error_path),
-            level=0,
-            filter=_error_filter,
-            rotation=settings.rotation,
-            retention=settings.retention,
-            backtrace=True,
-            diagnose=False,
-        )
+    allowed = settings.channels
+    # ONE snapshot, shared by the filter closure and the published spec, so the
+    # predicate can never disagree with the sinks about a channel threshold -
+    # and a later mutation of the caller's dict changes neither.
+    levels = dict(settings.channel_levels)
+    default_no = (logger.level(effective_level).no
+                  if effective_level != "NONE" else None)
 
-        if settings.trace_enabled:
-            _add_sink_with_fallback(
-                _ensure_parent(settings.trace_path),
-                level=0,
-                serialize=True,
-                filter=lambda r: "evt" in r["extra"],
-                rotation=settings.rotation,
-                retention=settings.retention,
-                backtrace=False,
-                diagnose=False,
-            )
-
-    if effective_level != "NONE":
-        default_no = logger.level(effective_level).no
-        main_filter = _main_filter(settings.channels, settings.channel_levels, default_no)
-
-        if settings.console and settings.console_stream is not None:
-            _add_sink_with_fallback(
-                settings.console_stream, level=0, filter=main_filter,
-                backtrace=False, diagnose=False,
-            )
+    constructed: list[Any] = []
+    error_sink = trace_sink = console_sink = main_sink = None
+    try:
         if settings.file_enabled:
-            _add_sink_with_fallback(
-                _ensure_parent(settings.file_path), level=0, filter=main_filter,
-                rotation=settings.rotation, retention=settings.retention,
-                backtrace=False, diagnose=False,
-            )
+            # ALWAYS constructed, before any level gate: the no-silent-failure
+            # guarantee.
+            error_sink = MaskingFileSink(_ensure_parent(settings.error_path),
+                                         rotation=settings.rotation,
+                                         retention=settings.retention)
+            constructed.append(error_sink)
+            if settings.trace_enabled:
+                # Raw and UNMASKED, but preconstructed like the rest so that a
+                # bad trace path still fails before the teardown boundary.
+                file_sink, _message_cls, _stream_sink = _loguru_private()
+                trace_sink = file_sink(_ensure_parent(settings.trace_path),
+                                       rotation=settings.rotation,
+                                       retention=settings.retention)
+                constructed.append(trace_sink)
+        if default_no is not None:
+            if settings.console and settings.console_stream is not None:
+                console_sink = _MaskingStream(settings.console_stream)  # not owned
+            if settings.file_enabled:
+                main_sink = MaskingFileSink(_ensure_parent(settings.file_path),
+                                            rotation=settings.rotation,
+                                            retention=settings.retention)
+                constructed.append(main_sink)
+    except BaseException as failure:
+        _stop_owned(constructed, failure, "construct")
+        raise                       # old handlers and all published state intact
 
-    logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
+    main_filter = (_main_filter(allowed, levels, default_no)
+                   if default_no is not None else None)
+    # Rotation and retention now live INSIDE the constructed sinks, so an add
+    # carries only the dispatch options.
+    planned: list[tuple[Any, dict[str, Any]]] = []
+    if error_sink is not None:
+        planned.append((error_sink, {"level": 0, "filter": _error_filter,
+                                     "backtrace": True, "diagnose": False}))
+    if trace_sink is not None:
+        planned.append((trace_sink, {"level": 0, "serialize": True,
+                                     "filter": _trace_filter,
+                                     "backtrace": False, "diagnose": False}))
+    if console_sink is not None:
+        planned.append((console_sink, {"level": 0, "filter": main_filter,
+                                       "backtrace": False, "diagnose": False}))
+    if main_sink is not None:
+        planned.append((main_sink, {"level": 0, "filter": main_filter,
+                                    "backtrace": False, "diagnose": False}))
 
-    for logger_name in ("markdown_it", "httpcore", "httpx", "openai", "anthropic"):
-        logging.getLogger(logger_name).setLevel(logging.INFO)
+    next_spec = _SinkSpec(
+        error_file=error_sink is not None,
+        main_file=main_sink is not None,
+        console=console_sink is not None,
+        default_no=default_no,
+        channel_levels=levels,
+        allowed_channels=allowed,
+    )
 
+    # ---- Phase B: teardown and install, inside ONE failure boundary. --------
+    added_ids: list[int] = []
+    added_sinks: set[int] = set()
+    try:
+        teardown_failure: BaseException | None = None
+        # Per id, not a bare `logger.remove()`: Loguru pops the handler and
+        # republishes the dict BEFORE calling stop(), so a raising stop() still
+        # leaves that handler deregistered. One at a time keeps that property
+        # for every handler instead of losing the rest to the first failure.
+        for hid in list(_core_handlers()):
+            try:
+                logger.remove(hid)
+            except Exception as e:  # noqa: BLE001 - AYDER-EXC best-effort teardown; first failure raised, the rest noted by type
+                if teardown_failure is None:
+                    teardown_failure = e
+                else:
+                    teardown_failure.add_note(
+                        f"ayder setup: also failed removing handler {hid}: "
+                        f"{type(e).__name__}")
+        if teardown_failure is not None:
+            raise teardown_failure
+
+        for sink, kwargs in planned:
+            added_ids.append(_add_sink_with_fallback(sink, **kwargs))
+            added_sinks.add(id(sink))
+
+        logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
+        for logger_name in _SUPPRESSED_LIBS:
+            logging.getLogger(logger_name).setLevel(logging.INFO)
+    except BaseException as failure:
+        _remove_handlers(added_ids, failure)
+        _stop_owned([s for s in constructed if id(s) not in added_sinks],
+                    failure, "install")
+        # Spec FIRST: `would_reach_prose` reads only `_sink_spec`, in a single
+        # read, so publishing it first makes the safe state atomic with respect
+        # to every predicate evaluation.
+        _sink_spec = None
+        _configured = False
+        _current_level = "NONE"
+        raise
+
+    # ---- Phase C: publish only after handlers AND the bridge are installed. -
+    _sink_spec = next_spec
     _configured = True
     _current_level = effective_level
     return effective_level

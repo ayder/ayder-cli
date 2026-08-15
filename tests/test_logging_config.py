@@ -47,7 +47,10 @@ def test_file_logging_installs_the_error_sink_and_the_narrative_sink(tmp_path):
 
     assert level == "INFO"
     assert mock_add.call_count == 2, "expected errors.log AND ayder.log"
-    paths = [c.args[0] for c in mock_add.call_args_list]
+    # Step 5-04 preconstructs every sink, so `add()` receives a MaskingFileSink
+    # rather than a path string. The order and the gating are what §C5 pins, so
+    # read the paths back off the wrapped file sinks.
+    paths = [c.args[0]._inner._path for c in mock_add.call_args_list]
     assert paths[0] == str(tmp_path / "errors.log"), "error sink must be added first"
     assert paths[1] == str(tmp_path / "ayder.log")
 
