@@ -437,9 +437,9 @@ class Config(BaseModel):
         )
         if v not in valid:
             logger.error(
-                "Unsupported driver {!r}; must be one of: {}. Fix the driver in "
-                "your [llm.<provider>] profile.",
-                v, ", ".join(valid),
+                "Unsupported driver (value_chars={}); must be one of: {}. Fix "
+                "the driver in your [llm.<provider>] profile.",
+                len(v), ", ".join(valid),
             )
             raise ValueError(f"driver must be one of: {', '.join(valid)}")
         return v

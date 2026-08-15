@@ -34,8 +34,21 @@ def test_valid_provider_profile_logs_no_error(loguru_caplog):
 
 
 def test_invalid_driver_logs_error(loguru_caplog):
-    """An unsupported driver name logs an error before raising."""
-    with pytest.raises(ValidationError):
-        Config(driver="not_a_real_driver", provider="openai")
+    """An unsupported driver name logs an error before raising.
 
-    assert "not_a_real_driver" in loguru_caplog.at_level("ERROR").text
+    The REJECTED value is arbitrary user text (it failed the enum check, so
+    it is not a bounded member) and may be a pasted secret. The record must
+    carry its exact size and the valid list, never the value itself.
+    """
+    rejected = "not_a_real_driver?token=hunter2-CONFIGCANARY"
+
+    with pytest.raises(ValidationError):
+        Config(driver=rejected, provider="openai")
+
+    errors = loguru_caplog.at_level("ERROR")
+    assert errors.text, "driver-rejection record never emitted"
+    assert rejected not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
+    assert f"value_chars={len(rejected)}" in errors.text
+    assert "must be one of: openai, ollama, deepseek" in errors.text
+    assert "zhipu" in errors.text
