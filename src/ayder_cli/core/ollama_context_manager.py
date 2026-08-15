@@ -141,7 +141,7 @@ class OllamaContextManager:
                     "using configured num_ctx={}",
                     self._model, self._actual_context_length,
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001 - Ollama probe boundary: detection failure must fall back to the configured num_ctx
             logger.opt(exception=True).warning(
                 "Context: failed to detect context length from Ollama, "
                 "falling back to configured num_ctx={}",

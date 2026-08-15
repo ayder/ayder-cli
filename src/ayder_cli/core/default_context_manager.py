@@ -123,7 +123,7 @@ class TokenCounter:
                 # legitimately contain. Fall back for this string only — the
                 # encoder is fine and stays available for the next one.
                 pass
-            except Exception:
+            except Exception:  # noqa: BLE001 - residual encoder boundary: anticipated ValueError is handled above, any other tiktoken defect disables the encoder
                 # Unexpected encoder failure. Log once with a stack, then disable
                 # the encoder so a persistent defect can't emit a traceback per
                 # message per turn for the rest of the session.

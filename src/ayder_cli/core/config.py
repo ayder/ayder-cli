@@ -561,7 +561,7 @@ def load_config_for_provider(provider: str) -> Config:
     with open(CONFIG_PATH, "rb") as f:
         try:
             data = tomllib.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001 - config-read boundary: an unreadable or malformed user TOML must degrade to defaults
             logger.opt(exception=True).warning(
                 "Failed to load config at {}; using defaults for provider {!r}",
                 CONFIG_PATH,
@@ -589,7 +589,7 @@ def list_provider_profiles() -> list[str]:
     try:
         with open(CONFIG_PATH, "rb") as f:
             data = tomllib.load(f)
-    except Exception:
+    except Exception:  # noqa: BLE001 - config-read boundary: an unreadable or malformed user TOML must degrade to defaults
         logger.opt(exception=True).warning(
             "Failed to load config at {}; no provider profiles available",
             CONFIG_PATH,
@@ -627,7 +627,7 @@ def load_config(
         try:
             data = tomllib.load(f)
             return Config(**data)
-        except Exception:
+        except Exception:  # noqa: BLE001 - config-read boundary: parse plus Config(**data) over arbitrary user keys
             logger.opt(exception=True).warning(
                 "Failed to load config at {}; using defaults",
                 CONFIG_PATH,

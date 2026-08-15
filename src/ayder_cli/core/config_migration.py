@@ -290,7 +290,7 @@ def ensure_latest_config(
                 parsed = loaded
             else:
                 parse_error = True
-    except Exception:
+    except Exception:  # noqa: BLE001 - config-read boundary: an unparseable file is treated as unreadable and regenerated
         logger.opt(exception=True).warning(
             "Failed to parse config at {}; treating as unreadable and regenerating "
             "from defaults",
@@ -324,7 +324,7 @@ def ensure_latest_config(
                 temporal_overrides=temporal_overrides,
                 llm_overrides=llm_overrides,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - migration boundary: legacy user config of any shape must still yield a usable v2 file
             logger.opt(exception=True).warning(
                 "Failed to migrate legacy overrides for {}; regenerating from defaults",
                 config_path,
