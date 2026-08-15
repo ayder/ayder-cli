@@ -113,8 +113,10 @@ def remove_worktree(repo_root: str, worktree_path: str) -> None:
             ["git", "worktree", "prune"],
             cwd=repo_root, capture_output=True, text=True, timeout=60,
         )
-    except (OSError, subprocess.SubprocessError) as e:
-        logger.warning("worktree remove/prune failed for {}: {}", worktree_path, e)
+    except (OSError, subprocess.SubprocessError):
+        logger.opt(exception=True).warning(
+            "worktree remove/prune failed for {}", worktree_path
+        )
 
 
 def branch_head(repo_root: str, branch: str) -> str | None:

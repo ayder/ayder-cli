@@ -103,3 +103,32 @@ def test_branch_head_resolves_and_misses(tmp_path):
 
 def test_branch_head_none_for_non_git(tmp_path):
     assert branch_head(str(tmp_path), "main") is None
+
+
+def test_remove_worktree_failure_logs_path_only_with_stack(monkeypatch, loguru_caplog):
+    """The failure MESSAGE carries the worktree path and nothing else.
+
+    Subprocess error text is arbitrary git/OS output, so it is removed from
+    `record["message"]`; the exception is attached instead (deliberate, per
+    CR-2) so the stack still reaches a debugging sink.
+    """
+    sentinel = "git-said: /secret/token=hunter2"
+
+    def _boom(*a, **k):
+        raise OSError(sentinel)
+
+    monkeypatch.setattr("ayder_cli.agents.worktree.subprocess.run", _boom)
+
+    # Best-effort helper: still must not raise.
+    remove_worktree("/repo", "/repo/.ayder/worktrees/feat-x")
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("worktree remove/prune failed for")]
+    assert hits, "remove-failure record never emitted"
+    assert hits[0]["level"].name == "WARNING"
+    assert "/repo/.ayder/worktrees/feat-x" in hits[0]["message"]
+    assert sentinel not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
+    # The exception is attached rather than interpolated.
+    assert hits[0]["exception"] is not None
+    assert hits[0]["exception"].type is OSError

@@ -7,6 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
 
+# Longer than the 200-character slice the pre-redaction call logged, so a
+# regression that reinstates `[:200]` still leaks the head and fails.
+SYSTEM_ERROR_SENTINEL = (
+    "Error: stream failed - upstream said token=hunter2 " + "P" * 200
+)
+
 
 class TestAgentRunner:
     def _make_runner(self, **overrides):
@@ -188,7 +194,7 @@ async def test_run_returns_final_message_not_transcript(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_run_reports_error_when_stream_fails_after_text():
+async def test_run_reports_error_when_stream_fails_after_text(loguru_caplog):
     cfg = AgentConfig(name="x", system_prompt="s")
     runner = AgentRunner(
         agent_config=cfg, parent_config=MagicMock(), project_ctx=MagicMock(),
@@ -202,7 +208,9 @@ async def test_run_reports_error_when_stream_fails_after_text():
         async def _run(*a, **k):
             msgs.append({"role": "assistant", "content": "intermediate text"})
             cb.last_content = "intermediate text"          # cumulative, non-empty
-            cb.last_system_error = "Error: stream failed"  # late failure
+            # Sentinel-bearing: the captured system error is arbitrary upstream
+            # text (model/provider prose), so it must never reach a log message.
+            cb.last_system_error = SYSTEM_ERROR_SENTINEL  # late failure
         m.run = _run
         return m
 
@@ -212,7 +220,19 @@ async def test_run_reports_error_when_stream_fails_after_text():
         out = await runner.run("t")
 
     assert out.status == "error"               # NOT "done"
-    assert out.error == "Error: stream failed"
+    assert out.error == SYSTEM_ERROR_SENTINEL
+
+    # The outcome still carries the full error; the LOG must carry only its
+    # size. Absence is asserted across the whole capture, not one record.
+    assert SYSTEM_ERROR_SENTINEL not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("run failed (captured via on_system_message):")]
+    assert hits, "captured-error record never emitted"
+    assert hits[0]["level"].name == "ERROR"
+    # The UN-truncated length, not the 200-char slice the old call logged.
+    assert len(SYSTEM_ERROR_SENTINEL) > 200
+    assert f"error_chars={len(SYSTEM_ERROR_SENTINEL)}" in hits[0]["message"]
 
 
 def test_persist_note_uses_notes_ctx_not_project_ctx(tmp_path):

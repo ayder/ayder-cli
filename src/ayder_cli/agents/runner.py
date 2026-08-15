@@ -198,8 +198,8 @@ class AgentRunner:
             if callbacks.last_system_error:
                 self.status = "error"
                 logger.error(
-                    "run failed (captured via on_system_message): agent='{}' run_id={} error='{}'",
-                    self.agent_name, self.run_id, callbacks.last_system_error[:200],
+                    "run failed (captured via on_system_message): agent='{}' run_id={} error_chars={}",
+                    self.agent_name, self.run_id, len(callbacks.last_system_error),
                 )
                 content = self._final_message(messages)
                 err = callbacks.last_system_error
