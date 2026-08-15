@@ -123,4 +123,7 @@ module = ["zhipuai", "dashscope"]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
-extend-select = ["TRY400", "TRY401"]
+extend-select = ["TRY400", "TRY401", "BLE001", "LOG", "G"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["BLE001", "G004"]
