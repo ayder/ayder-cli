@@ -22,10 +22,27 @@ construction.
 
 What is deliberately NOT claimed. These shapes pass through unmasked and are
 named here as the residual, not pinned by any test: uppercase `SK-`, Stripe
-`sk_live_`, quoted values spanning a newline, prose "bearer <word>" that is not
-a credential, unknown URL forms, and arbitrary unknown secrets. Masking known
-shapes does not make arbitrary logged text secret; it removes the credential
-families this project actually handles.
+`sk_live_`, quoted values spanning a newline, unknown URL forms, and arbitrary
+unknown secrets. Masking known shapes does not make arbitrary logged text
+secret; it removes the credential families this project actually handles.
+
+One residual is UNSAFE and is called that here rather than being smoothed over.
+The Bearer value alphabet is `[A-Za-z0-9._~+/=-]`, so a value that starts in
+that alphabet and then hits an out-of-alphabet, non-space character masks only
+the maximal accepted PREFIX and can leave the rest visible:
+
+    Bearer abc!secret   ->   <redacted:bearer>!secret
+
+Anything after such a character must be treated as exposed, not as accepted
+content. Widening the alphabet trades directly against false positives on
+ordinary prose, so it is a reviewed decision rather than a quick edit, and no
+test pins the suffix as unmasked - a regression assertion there would block the
+strengthening rather than record it.
+
+The opposite direction is a documented, deliberate over-mask: prose that reads
+`Bearer <word>` is redacted even when it is not a credential - `The Bearer of
+bad news` becomes `The <redacted:bearer> bad news`. Losing a word of prose is
+the safe direction, and the frozen vector table pins that behavior.
 
 Newlines are never added or removed: every pattern that scans to end-of-line
 uses `[^\\r\\n]` or `[^\\S\\r\\n]`, so a record's line structure survives

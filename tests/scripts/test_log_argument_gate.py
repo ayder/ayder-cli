@@ -1378,3 +1378,134 @@ def test_treating_external_as_a_plain_channel_fails(tmp_path):
     code, out = _run(cwd=tmp_path, gate=gate)
     assert code == 1, out
     assert "CHAIN-CHANNEL" in out and "no longer matches log.py" in out, out
+
+
+# -- the dynamic-channel exemption belongs to the guard, not to the name ------
+
+GUARDED_FACTORY = textwrap.dedent("""
+    from loguru import logger
+
+    CHANNELS = ("core", "llm")
+
+    def get_logger(channel):
+        if channel not in CHANNELS:
+            raise ValueError("unknown channel")
+        return logger.bind(channel=channel)
+""")
+
+
+def test_dynamic_channel_name_outside_guarded_factory_fails(tmp_path):
+    """`bind(channel=channel)` in an arbitrary function binds whatever the
+    caller passed - the parameter NAME proves nothing.
+
+    Without this the shape allowlist would hand every module a blanket
+    dynamic-channel exemption just for spelling the variable `channel`.
+    """
+    code, out = _scan(tmp_path, textwrap.dedent("""
+        from loguru import logger
+
+        def bad(channel):
+            logger.bind(channel=channel).info("x")
+    """))
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out, out
+    assert "outside log.py:get_logger" in out, out
+
+
+def test_guarded_factory_shape_is_accepted(tmp_path):
+    """The real factory's shape passes on any tree - it carries its own proof."""
+    code, out = _scan(tmp_path, GUARDED_FACTORY, name="log.py")
+    assert "CHAIN-CHANNEL" not in out, out
+    assert "CHAIN-SHAPE" not in out, out
+
+
+def test_dynamic_channel_at_the_right_name_but_wrong_file_fails(tmp_path):
+    """Identity is path AND qualname: a `get_logger` elsewhere is another
+    function, and its guard has not been reviewed."""
+    code, out = _scan(tmp_path, GUARDED_FACTORY, name="helpers.py")
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out and "outside log.py:get_logger" in out, out
+
+
+@pytest.mark.parametrize("mutation, replacement, reason", [
+    pytest.param('    if channel not in CHANNELS:\n'
+                 '        raise ValueError("unknown channel")\n',
+                 "", "guard-deleted", id="guard-deleted"),
+    pytest.param("if channel not in CHANNELS:", "if channel in CHANNELS:",
+                 "membership-inverted", id="membership-inverted"),
+    pytest.param('raise ValueError("unknown channel")', 'logger.warning("odd")',
+                 "no-raise", id="raise-replaced-by-a-log"),
+    pytest.param("def get_logger(channel):", "def get_logger(name):",
+                 "parameter-renamed", id="parameter-drift"),
+    pytest.param("    if channel not in CHANNELS:\n"
+                 '        raise ValueError("unknown channel")\n'
+                 "    return logger.bind(channel=channel)\n",
+                 "    bound = logger.bind(channel=channel)\n"
+                 "    if channel not in CHANNELS:\n"
+                 '        raise ValueError("unknown channel")\n'
+                 "    return bound\n", "guard-after-bind", id="ordering-drift"),
+    pytest.param('        raise ValueError("unknown channel")',
+                 "        pass\n    if True:\n"
+                 '        raise ValueError("unknown channel")',
+                 "raise-moved-out", id="raise-outside-the-membership-branch"),
+])
+def test_channel_guard_proof_fails_closed_on_drift(tmp_path, mutation,
+                                                   replacement, reason):
+    """Every clause of the guard is load-bearing, so every clause is proven.
+
+    An inverted test, a guard that logs instead of raising, a renamed
+    parameter, or a guard that runs AFTER the bind all leave the factory
+    binding an unvalidated channel - and each must fail closed.
+    """
+    assert mutation in GUARDED_FACTORY, mutation
+    code, out = _scan(tmp_path, GUARDED_FACTORY.replace(mutation, replacement),
+                      name="log.py")
+    assert code == 1, f"{reason} was accepted:\n{out}"
+    assert "CHAIN-CHANNEL" in out, out
+    assert "without the reviewed" in out, out
+
+
+def test_conditional_guard_does_not_count(tmp_path):
+    """A guard nested inside another branch is conditional, and a conditional
+    guard says nothing about the bind that follows it."""
+    code, out = _scan(tmp_path, textwrap.dedent("""
+        from loguru import logger
+
+        CHANNELS = ("core",)
+
+        def get_logger(channel, strict=True):
+            if strict:
+                if channel not in CHANNELS:
+                    raise ValueError("unknown channel")
+            return logger.bind(channel=channel)
+    """), name="log.py")
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out and "without the reviewed" in out, out
+
+
+def test_removing_get_logger_membership_guard_fails(tmp_path):
+    """The live factory, hermetically: delete its guard and the gate must
+    refuse the dynamic bind it was protecting."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _mutate_corpus(root, "log.py",
+                   "    if channel not in CHANNELS:\n"
+                   "        raise ValueError(\n"
+                   "            f\"Unknown log channel {channel!r}. "
+                   "Expected one of: {', '.join(CHANNELS)}\"\n"
+                   "        )\n",
+                   "")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out, out
+    assert "log.py" in out and "get_logger" in out, out
+    assert "without the reviewed" in out, out
+
+
+def test_live_get_logger_still_carries_the_guard():
+    """The exemption the committed baseline relies on, asserted at its source."""
+    source = (REPO / "src" / "ayder_cli" / "log.py").read_text()
+    assert "if channel not in CHANNELS:" in source
+    assert "raise ValueError(" in source
+    code, out = _run()
+    assert code == 0, out
+    assert "CHAIN-CHANNEL" not in out, out

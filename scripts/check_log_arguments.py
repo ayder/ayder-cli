@@ -162,9 +162,14 @@ ALLOWED_BIND_SHAPES: dict[str, frozenset[str]] = {
     "evt": frozenset({"Name(id='evt', ctx=Load())"}),
     "**": frozenset({"Name(id='fields', ctx=Load())"}),
 }
-# The dynamic form is accepted only in this shape, and only at the site pinned
-# below - the factory that validates membership before binding.
+# The dynamic form is accepted only in this shape, only at the factory below,
+# and only while that factory still PROVES membership before binding. The shape
+# alone means nothing: `bind(channel=channel)` in an arbitrary function binds
+# whatever the caller passed.
 CHANNEL_NAME_DUMP = "Name(id='channel', ctx=Load())"
+CHANNEL_PARAM = "channel"
+CHANNEL_VOCABULARY = "CHANNELS"
+GUARDED_CHANNEL_FACTORY = ("log.py", "get_logger")
 
 # Mirrors `log.py`. `external` is RESERVED: selectable for filtering and bound
 # by the stdlib bridge, but deliberately rejected by `get_logger`. Verified
@@ -665,17 +670,61 @@ def _message_kind(node: ast.AST) -> str:
     return "dynamic"
 
 
-def _check_channel_bind(findings: list[str], path: str, node: ast.Call,
-                        qualname: str, keyword: ast.keyword, dump: str) -> None:
-    """A bound channel must be a real channel, constant or validated.
+def _rejects_non_members(stmt: ast.stmt, param: str) -> bool:
+    """Is `stmt` exactly `if <param> not in CHANNELS: ... raise ...`?
 
-    The dynamic form is accepted only as the factory's own parameter, whose
-    membership guard is what makes it safe; a constant must name a member of
-    the frozen selectable vocabulary, `external` included - it is the reserved
-    channel the stdlib bridge binds.
+    Every clause is load-bearing, so every clause is checked: the tested name
+    must be the bound parameter, the operator must be `not in` (an `in` test
+    inverts the guard into an accept-list), the vocabulary must be the frozen
+    tuple, and the body must actually raise - a guard that logs and continues
+    still binds the rejected channel.
     """
-    if dump == CHANNEL_NAME_DUMP:
-        return
+    if not isinstance(stmt, ast.If):
+        return False
+    test = stmt.test
+    return (isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and test.left.id == param
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.NotIn)
+            and len(test.comparators) == 1
+            and isinstance(test.comparators[0], ast.Name)
+            and test.comparators[0].id == CHANNEL_VOCABULARY
+            and any(isinstance(s, ast.Raise) for s in stmt.body))
+
+
+def _guards_channel_membership(func: ast.AST | None, param: str,
+                               bind_line: int) -> bool:
+    """Does `func` reject a non-member channel BEFORE binding it?
+
+    Only DIRECT statements of the body count. A guard nested inside another
+    branch, a loop or a `try` is conditional, and a conditional guard proves
+    nothing about the bind that follows it.
+    """
+    if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    args = func.args
+    if param not in {a.arg for a in
+                     args.posonlyargs + args.args + args.kwonlyargs}:
+        return False
+    return any(_rejects_non_members(stmt, param) and stmt.lineno < bind_line
+               for stmt in func.body)
+
+
+def _check_channel_bind(findings: list[str], path: str, node: ast.Call,
+                        qualname: str, keyword: ast.keyword, dump: str,
+                        enclosing: ast.AST | None) -> None:
+    """A bound channel must be a real channel: constant, or proven at the source.
+
+    A constant must name a member of the frozen selectable vocabulary,
+    `external` included - it is the reserved channel the stdlib bridge binds.
+
+    The dynamic form carries no information by itself; what makes it safe is
+    the factory that refuses a non-member before binding. So the exemption is
+    granted to the PROOF, not to the spelling: the bind must sit in the pinned
+    factory, and that factory must still contain the reviewed membership guard
+    ahead of it. Anywhere else, `channel=channel` is just the caller's string.
+    """
     value = keyword.value
     if isinstance(value, ast.Constant) and isinstance(value.value, str):
         if value.value not in SELECTABLE_CHANNELS_FROZEN:
@@ -684,6 +733,24 @@ def _check_channel_bind(findings: list[str], path: str, node: ast.Call,
                 f".bind(channel={value.value!r}) is not one of "
                 f"{list(SELECTABLE_CHANNELS_FROZEN)}")
         return
+
+    if dump == CHANNEL_NAME_DUMP:
+        factory_path, factory_name = GUARDED_CHANNEL_FACTORY
+        if (path, qualname) != GUARDED_CHANNEL_FACTORY:
+            findings.append(
+                f"CHAIN-CHANNEL {path}:{node.lineno} {qualname} binds a dynamic "
+                f"channel outside {factory_path}:{factory_name}; the exemption "
+                f"belongs to that factory's membership guard, not to the name "
+                f"`{CHANNEL_PARAM}`")
+            return
+        if not _guards_channel_membership(enclosing, CHANNEL_PARAM, node.lineno):
+            findings.append(
+                f"CHAIN-CHANNEL {path}:{node.lineno} {qualname} binds a dynamic "
+                f"channel without the reviewed "
+                f"`if {CHANNEL_PARAM} not in {CHANNEL_VOCABULARY}: raise` guard "
+                f"preceding it; the exemption rests on that guard")
+        return
+
     findings.append(
         f"CHAIN-SHAPE {path}:{node.lineno} {qualname} "
         f".bind(channel=...) carries an unvalidated value "
@@ -822,7 +889,8 @@ def scan_module(path: str, tree: ast.Module) -> dict:
 
                 if key == "channel":
                     _check_channel_bind(findings, path, node, qualname, keyword,
-                                        dump)
+                                        dump,
+                                        analysis._enclosing_function(node))
                     continue
                 if key in SCHEMA_BIND_KEYS:
                     if dump not in ALLOWED_BIND_SHAPES[key]:
