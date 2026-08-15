@@ -27,7 +27,7 @@ from ayder_cli.agents.worktree import (
     slugify_branch,
 )
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.log import get_logger
+from ayder_cli.log import emit_event, get_logger
 from ayder_cli.tools.builtins.tasks import list_task_ids, read_task
 
 logger = get_logger("agent")
@@ -444,6 +444,14 @@ class AgentRegistry:
                 run.error = outcome.error
                 run.note_path = outcome.note_path
             run.finished_at = time.monotonic()
+            emit_event(
+                "agent", "agent_run",
+                agent=run.agent_name,
+                run_id=run.run_id,
+                status=run.status,
+                secs=run.working_time(now=run.finished_at),
+                session_id=self._session_id,
+            )
             run.done_event.set()
             logger.debug("agent done: run #{} agent='{}' status='{}' {}s",
                          run.run_id, run.agent_name, run.status,

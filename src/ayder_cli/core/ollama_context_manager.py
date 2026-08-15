@@ -18,7 +18,7 @@ from typing import Any, Optional
 from ayder_cli.core.cache_monitor import CacheMonitor
 from ayder_cli.core.context_manager import ContextStats
 from ayder_cli.core.default_context_manager import TokenCounter
-from ayder_cli.log import get_logger
+from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
 logger = get_logger("context")
@@ -152,6 +152,26 @@ class OllamaContextManager:
     # Protocol: prepare_messages
     # ------------------------------------------------------------------
 
+    def _emit_trim(self, before: int, after: int, strategy: str) -> None:
+        """One `context_trim` event per real trimming operation (C11).
+
+        An operation that drops nothing says nothing. `run_id` is present only
+        inside an agent run; a parent loop omits the key rather than nulling it.
+        """
+        dropped = before - after
+        if dropped <= 0:
+            return
+        fields: dict[str, Any] = {
+            "before": before,
+            "after": after,
+            "dropped": dropped,
+            "strategy": strategy,
+            "session_id": self.session_id,
+        }
+        if self.run_id is not None:
+            fields["run_id"] = self.run_id
+        emit_event("context", "context_trim", **fields)
+
     def prepare_messages(
         self,
         messages: list[dict],
@@ -196,12 +216,15 @@ class OllamaContextManager:
         # Compact if threshold exceeded
         compaction_summary: dict | None = None
         if self.should_compact() and history:
+            before_compact = len(history)
             history, compaction_summary = self._compact(history)
+            self._emit_trim(before_compact, len(history), "compaction")
 
         # Apply max_history cap — trim from the head on unit boundaries so
         # assistant+tool_calls stays atomic with its tool_result responses.
         # See opus47.md finding #3.
         if max_history > 0 and len(history) > max_history:
+            before_trim = len(history)
             units = self._group_into_units(history)
             kept: list[list[dict]] = []
             msg_count = 0
@@ -211,6 +234,7 @@ class OllamaContextManager:
                 kept.insert(0, unit)
                 msg_count += len(unit)
             history = [m for unit in kept for m in unit]
+            self._emit_trim(before_trim, len(history), "max_history")
 
         # Build the output — stable prefix order
         result: list[dict] = []

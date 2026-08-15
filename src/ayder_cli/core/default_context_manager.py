@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from ayder_cli.log import get_logger
+from ayder_cli.log import emit_event, get_logger
 
 if TYPE_CHECKING:
     from ayder_cli.core.context_manager import ContextStats
@@ -291,6 +291,26 @@ class DefaultContextManager:
 
     # -- Core logic ----------------------------------------------------------
 
+    def _emit_trim(self, before: int, after: int, strategy: str) -> None:
+        """One `context_trim` event per real trimming operation (C11).
+
+        An operation that drops nothing says nothing. `run_id` is present only
+        inside an agent run; a parent loop omits the key rather than nulling it.
+        """
+        dropped = before - after
+        if dropped <= 0:
+            return
+        fields: Dict[str, Any] = {
+            "before": before,
+            "after": after,
+            "dropped": dropped,
+            "strategy": strategy,
+            "session_id": self.session_id,
+        }
+        if self.run_id is not None:
+            fields["run_id"] = self.run_id
+        emit_event("context", "context_trim", **fields)
+
     @property
     def reserve(self) -> int:
         return int(self._max_context_tokens * self._config.reserve_ratio)
@@ -352,6 +372,9 @@ class DefaultContextManager:
         available = self._available_budget(overhead)
 
         if available <= 0:
+            # Overhead ate the whole budget: every history message is dropped.
+            kept = 1 if system_msg else 0
+            self._emit_trim(len(self._messages), kept, "budget_exhausted")
             return [system_msg] if system_msg else []
 
         start_idx = 1 if system_msg else 0
@@ -362,17 +385,25 @@ class DefaultContextManager:
         result: List[Dict[str, Any]] = []
         used = 0
         messages_count = 0
+        reason: str | None = None
         for unit in reversed(units):
             if max_history > 0 and messages_count + len(unit) > max_history:
+                reason = "max_history"
                 break
 
             cost = self._counter.count_messages(unit)
             if used + cost > available:
+                reason = "token_budget"
                 break
 
             result = unit + result
             used += cost
             messages_count += len(unit)
+
+        # Emitted BEFORE the truncation marker below: that marker ADDS a
+        # message, and counting after it would under-report `dropped` by one.
+        if reason is not None:
+            self._emit_trim(len(history_msgs), len(result), reason)
 
         if result and result[0].get("role") != "user":
             result.insert(
