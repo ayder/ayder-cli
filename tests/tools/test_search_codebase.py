@@ -257,3 +257,24 @@ class TestSearchFallback:
         result = impl.search_codebase(search_context, "pattern")
         assert isinstance(result, ToolSuccess)
         assert "SEARCH RESULTS" in result
+
+
+def test_to_rel_failure_logs_error_type_only(loguru_caplog):
+    """The relativisation fallback logs the exception CLASS, not its text.
+
+    Path-conversion errors embed the offending path (and therefore whatever
+    the searched tree is named) in their message, so only the type is logged.
+    """
+    sentinel = "/home/dev/secret-project/REL-CANARY-hunter2"
+    ctx = MagicMock()
+    ctx.to_relative.side_effect = TypeError(sentinel)
+
+    assert search._to_rel(sentinel, ctx) == sentinel
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Failed to convert path to relative:")]
+    assert hits, "relativisation-failure record never emitted"
+    assert hits[0]["level"].name == "DEBUG"
+    assert hits[0]["message"] == "Failed to convert path to relative: TypeError"
+    assert sentinel not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text

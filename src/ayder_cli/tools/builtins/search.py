@@ -529,5 +529,5 @@ def _to_rel(path_str, project_ctx):
     try:
         return project_ctx.to_relative(Path(path_str))
     except (ValueError, TypeError) as e:
-        logger.debug("Failed to convert path to relative: {}", e)
+        logger.debug("Failed to convert path to relative: {}", type(e).__name__)
         return str(path_str)

@@ -191,13 +191,17 @@ def test_list_includes_current_slots_with_dots_in_name(project_ctx):
     assert [entry["name"] for entry in entries] == ["project.v1"]
 
 
-def test_list_surfaces_unreadable_slots(project_ctx):
+def test_list_surfaces_unreadable_slots(project_ctx, loguru_caplog):
     """Corrupt JSON files in .ayder/context/ are surfaced in `list` with an
     `unreadable: True` flag rather than silently dropped."""
     context(project_ctx=project_ctx, action="save", name="good", content="payload")
 
     ctx_dir = project_ctx.root / ".ayder" / "context"
-    (ctx_dir / "broken.json").write_text("{ this is not valid json", encoding="utf-8")
+    # The decoder echoes the offending source text into its own message, so
+    # the file body is a real sentinel for the log record.
+    (ctx_dir / "broken.json").write_text(
+        "{ this is not valid json SLOTCANARY-hunter2", encoding="utf-8"
+    )
 
     result = context(project_ctx=project_ctx, action="list")
     entries = json.loads(str(result))
@@ -207,6 +211,49 @@ def test_list_surfaces_unreadable_slots(project_ctx):
     assert "unreadable" not in by_name["good"]
     assert "broken" in by_name
     assert by_name["broken"].get("unreadable") is True
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Unreadable context slot at")]
+    assert hits, "unreadable-slot record never emitted"
+    assert hits[0]["level"].name == "WARNING"
+    # The path stays (which file failed is the diagnostic); the decoder's text,
+    # which quotes the slot body, does not.
+    assert "broken.json" in hits[0]["message"]
+    assert hits[0]["message"].endswith("JSONDecodeError")
+    assert "SLOTCANARY-hunter2" not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
+
+
+def test_recovery_snapshot_save_error_logs_metadata_only(project_ctx, loguru_caplog):
+    """A failed recovery snapshot logs the error CATEGORY and SIZE only.
+
+    ``ToolError`` is a ``str`` subclass whose body is arbitrary prose built
+    from the failure — it can quote paths and message bodies — so the record
+    must never interpolate the value itself.
+    """
+    from unittest.mock import patch
+
+    from ayder_cli.tools.builtins.context import snapshot_conversation_for_clear
+
+    failure = ToolError(
+        "could not write snapshot: SNAPSHOTCANARY-hunter2", category="filesystem"
+    )
+    app = MagicMock()
+    app.messages = [{"role": "user", "content": "hello"}]
+
+    with patch("ayder_cli.tools.builtins.context._save", return_value=failure):
+        assert snapshot_conversation_for_clear(project_ctx, app) is None
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Recovery snapshot save returned error:")]
+    assert hits, "recovery-snapshot record never emitted"
+    assert hits[0]["level"].name == "WARNING"
+    assert hits[0]["message"] == (
+        "Recovery snapshot save returned error: "
+        f"category=filesystem chars={len(failure)}"
+    )
+    assert "SNAPSHOTCANARY-hunter2" not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
 
 
 def test_stats_returns_token_and_cache_fields(project_ctx):

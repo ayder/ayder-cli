@@ -193,7 +193,7 @@ class TestDiscoveryErrorHandling:
                 definitions = _discover_definitions()
                 assert len(definitions) == 4
 
-    def test_handles_import_error_gracefully(self):
+    def test_handles_import_error_gracefully(self, loguru_caplog):
         """Test that ImportError during module import is handled."""
         tools = [
             ToolDefinition(
@@ -232,14 +232,25 @@ class TestDiscoveryErrorHandling:
                 mock_good_module = MagicMock()
                 mock_good_module.TOOL_DEFINITIONS = tools
                 
+                import_sentinel = "Module not found: IMPORTCANARY-hunter2"
                 mock_import.side_effect = [
-                    ImportError("Module not found"),
+                    ImportError(import_sentinel),
                     mock_good_module
                 ]
-                
+
                 # Should handle error gracefully and return good tools
                 definitions = _discover_definitions()
                 assert len(definitions) == 4
+
+        # The record names the module it failed to import; the importer's own
+        # text (which quotes paths and third-party prose) is dropped.
+        hits = [r for r in loguru_caplog.records
+                if r["message"].startswith("Failed to import")]
+        assert hits, "import-failure record never emitted"
+        assert hits[0]["level"].name == "WARNING"
+        assert hits[0]["message"] == "Failed to import bad_definitions"
+        assert import_sentinel not in loguru_caplog.text
+        assert "hunter2" not in loguru_caplog.text
 
 
 class TestBackwardCompatibility:

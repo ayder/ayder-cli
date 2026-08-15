@@ -120,8 +120,8 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
                     logger.debug(
                         "Discovered {} tools from {}", len(module_defs), name
                     )
-            except ImportError as e:
-                logger.warning("Failed to import {}: {}", name, e)
+            except ImportError:
+                logger.warning("Failed to import {}", name)
             except Exception:  # noqa: BLE001 - tool discovery boundary: importing a definitions module executes third-party code
                 logger.opt(exception=True).error("Error loading definitions from {}", name)
 

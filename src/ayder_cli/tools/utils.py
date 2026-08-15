@@ -44,7 +44,7 @@ def prepare_new_content(fname, args, project_ctx=None):
                 return content.replace(old_string, new_string)
             except ValueError as e:
                 # Security error - return empty to trigger error in UI
-                logger.warning("Security error in replace_string: {}", e)
+                logger.warning("Security error in replace_string: {}", type(e).__name__)
                 return ""
             except (IOError, OSError):
                 logger.exception("File error in replace_string")
@@ -73,7 +73,7 @@ def prepare_new_content(fname, args, project_ctx=None):
                 lines.insert(idx, content)
                 return "".join(lines)
             except (ValueError, IOError, OSError) as e:
-                logger.warning("Error in insert_line preview: {}", e)
+                logger.warning("Error in insert_line preview: {}", type(e).__name__)
                 return ""
 
         elif fname == "delete_line":
@@ -97,7 +97,7 @@ def prepare_new_content(fname, args, project_ctx=None):
                     lines.pop(idx)
                 return "".join(lines)
             except (ValueError, IOError, OSError) as e:
-                logger.warning("Error in delete_line preview: {}", e)
+                logger.warning("Error in delete_line preview: {}", type(e).__name__)
                 return ""
 
         else:

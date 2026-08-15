@@ -158,7 +158,7 @@ def _scan_context_dir(ctx_dir: Path) -> tuple[list[tuple[str, dict, Path]], list
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Unreadable context slot at {}: {}", path, exc)
+            logger.warning("Unreadable context slot at {}: {}", path, type(exc).__name__)
             unreadable.append(path)
             continue
         name = payload.get("name")
@@ -296,7 +296,10 @@ def snapshot_conversation_for_clear(
         logger.opt(exception=True).warning("Recovery snapshot failed")
         return None
     if isinstance(result, ToolError):
-        logger.warning("Recovery snapshot save returned error: {}", result)
+        logger.warning(
+            "Recovery snapshot save returned error: category={} chars={}",
+            result.category, len(result),
+        )
         return None
     return RECOVERY_SLOT_NAME
 

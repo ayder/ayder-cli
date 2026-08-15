@@ -96,15 +96,28 @@ class TestPrepareNewContentReplaceString:
         result = prepare_new_content("replace_string", args)
         assert result == ""
 
-    def test_replace_string_file_not_found(self):
-        """Test prepare_new_content returns empty when file doesn't exist."""
+    def test_replace_string_file_not_found(self, loguru_caplog):
+        """Test prepare_new_content returns empty when file doesn't exist.
+
+        The security ValueError quotes the rejected path; the record must
+        carry only its class name.
+        """
+        sentinel = "/nonexistent/file/REPLACECANARY-hunter2.txt"
         args = {
-            "file_path": "/nonexistent/file/path.txt",
+            "file_path": sentinel,
             "old_string": "old",
             "new_string": "new"
         }
         result = prepare_new_content("replace_string", args)
         assert result == ""
+
+        hits = [r for r in loguru_caplog.records
+                if r["message"].startswith("Security error in replace_string:")]
+        assert hits, "security-error record never emitted"
+        assert hits[0]["level"].name == "WARNING"
+        assert hits[0]["message"] == "Security error in replace_string: ValueError"
+        assert sentinel not in loguru_caplog.text
+        assert "hunter2" not in loguru_caplog.text
 
     def test_replace_string_multiple_occurrences(self, tmp_path, project_context):
         """Test replace_string with multiple occurrences of old_string."""
@@ -207,3 +220,43 @@ class TestPrepareNewContentEdgeCases:
         }
         result = prepare_new_content("replace_string", args)
         assert result == ""
+
+
+def test_insert_line_preview_error_logs_type_only(loguru_caplog):
+    """The insert_line preview logs the exception CLASS, never its text.
+
+    The raising path validates the caller-supplied path, so the exception
+    message embeds the rejected path itself.
+    """
+    sentinel = "/nonexistent/dir/INSERTCANARY-hunter2.txt"
+    result = prepare_new_content(
+        "insert_line",
+        {"file_path": sentinel, "line_number": 1, "content": "x"},
+    )
+    assert result == ""
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Error in insert_line preview:")]
+    assert hits, "insert_line preview record never emitted"
+    assert hits[0]["level"].name == "WARNING"
+    assert hits[0]["message"] == "Error in insert_line preview: ValueError"
+    assert sentinel not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
+
+
+def test_delete_line_preview_error_logs_type_only(loguru_caplog):
+    """The delete_line preview logs the exception CLASS, never its text."""
+    sentinel = "/nonexistent/dir/DELETECANARY-hunter2.txt"
+    result = prepare_new_content(
+        "delete_line",
+        {"file_path": sentinel, "line_number": 1},
+    )
+    assert result == ""
+
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Error in delete_line preview:")]
+    assert hits, "delete_line preview record never emitted"
+    assert hits[0]["level"].name == "WARNING"
+    assert hits[0]["message"] == "Error in delete_line preview: ValueError"
+    assert sentinel not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text

@@ -340,6 +340,39 @@ definitions = "defs.py"
     assert "needsdep" in msg
     assert "totally_missing_pkg" in msg
     assert "install" in msg.lower()        # actionable remedy
+    # The missing module NAME stays; the importer's message text does not.
+    assert "No module named" not in msg
+
+
+def test_missing_dependency_with_none_module_name(global_plugins_dir, loguru_caplog):
+    """`ModuleNotFoundError.name` is Optional — a None name must not fall back
+    to the exception text, which carries arbitrary importer prose."""
+    plugin = global_plugins_dir / "namelessdep"
+    plugin.mkdir()
+    (plugin / "plugin.toml").write_text("""\
+[plugin]
+name = "namelessdep"
+version = "1.0.0"
+api_version = 1
+description = "raises a nameless ModuleNotFoundError"
+author = "test"
+
+[tools]
+definitions = "defs.py"
+""")
+    sentinel = "no module named 'DEPCANARY-hunter2' (from /home/dev/secret)"
+    (plugin / "defs.py").write_text(
+        f"raise ModuleNotFoundError({sentinel!r})\n"
+    )
+
+    defs, handlers = discover_global_plugins()
+
+    assert defs == ()
+    msg = loguru_caplog.at_level("WARNING").text
+    assert "namelessdep" in msg
+    assert "'<unknown>'" in msg            # the ruled None-safe fallback
+    assert sentinel not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
 
 
 def test_plugin_reading_tool_definitions_at_import_still_loads(tmp_path):

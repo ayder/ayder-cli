@@ -493,12 +493,13 @@ def discover_global_plugins() -> tuple[tuple, dict[str, Callable]]:
             # Point the user at the fix instead of silently swallowing it.
             logger.warning(
                 "Plugin '{}' is missing a dependency "
-                "({!r}: {}). Reinstall it to install its declared "
+                "({!r}). Reinstall it to install its declared "
                 "dependencies — e.g. `ayder install-plugin "
                 "{} --force` — or install the package manually.",
                 plugin_dir.name,
-                e.name,
-                e,
+                # ModuleNotFoundError.name is Optional; the fallback keeps the
+                # record readable without falling back to the exception text.
+                e.name or "<unknown>",
                 plugin_dir,
             )
         except Exception:  # noqa: BLE001 - plugin sandbox: loading a plugin executes third-party module code
