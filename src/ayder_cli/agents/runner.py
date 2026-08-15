@@ -52,6 +52,7 @@ class AgentRunner:
         generation: int = 0,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
         notes_ctx: Any = None,
+        session_id: str | None = None,
     ) -> None:
         self._agent_config = agent_config
         self._parent_config = parent_config
@@ -61,6 +62,9 @@ class AgentRunner:
         self._permissions = permissions
         self._timeout = timeout
         self.run_id = run_id
+        # Inherited from the parent session, never generated here: an agent's
+        # events must tie back to the turn that spawned them (C11b).
+        self._session_id = session_id
         self._generation = generation
         self._on_progress = on_progress
         self._cancel_event = asyncio.Event()
@@ -153,6 +157,8 @@ class AgentRunner:
                 permissions=self._permissions,
                 tool_tags=frozenset(rt.config.tool_tags) if getattr(rt.config, "tool_tags", None) else None,
                 max_history=getattr(rt.config, "max_history_messages", 30),
+                session_id=self._session_id,
+                run_id=self.run_id,
             )
 
             chat_loop = ChatLoop(

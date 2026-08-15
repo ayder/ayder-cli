@@ -53,7 +53,7 @@ from ayder_cli.tui.widgets import (
     StatusBar,
 )
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
-from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
+from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig, new_session_id
 
 logger = get_logger("ui")
 
@@ -271,6 +271,9 @@ class AyderApp(App):
         self.permissions = permissions or {"r"}
         self._system_prompt_override = system_prompt_override
         self.resume_session_id = resume_session_id
+        # A resumed session keeps its persisted id so its events stay one
+        # thread; a fresh session gets an event-correlation id (C11b).
+        self._session_id = resume_session_id or new_session_id()
         self._log_settings = log_settings
         self._resuming = bool(
             initial_messages and initial_messages[0].get("role") == "system"
@@ -410,6 +413,7 @@ class AyderApp(App):
                 max_concurrent_agents=getattr(self.config, 'max_concurrent_agents', 5),
                 on_progress=_agent_progress,
                 on_complete=_agent_complete,
+                session_id=self._session_id,
             )
 
             # Register agent tool
@@ -481,6 +485,7 @@ class AyderApp(App):
                 permissions=self.permissions,
                 tool_tags=tool_tags,
                 max_history=getattr(self.config, 'max_history_messages', 0),
+                session_id=self._session_id,
             ),
             callbacks=self._callbacks,
             context_manager=self.context_manager,

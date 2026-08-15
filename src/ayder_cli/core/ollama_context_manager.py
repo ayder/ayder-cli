@@ -87,6 +87,11 @@ class OllamaContextManager:
 
         self._cache_monitor: CacheMonitor = CacheMonitor()
 
+        # Event-correlation ids. The factory that builds this manager knows
+        # nothing about sessions, so ChatLoop.__init__ assigns them (C11b).
+        self.session_id: str | None = None
+        self.run_id: int | None = None
+
     # ------------------------------------------------------------------
     # Protocol: freeze_system_prompt
     # ------------------------------------------------------------------

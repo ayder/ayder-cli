@@ -219,6 +219,11 @@ class DefaultContextManager:
         self._compaction_count: int = 0
         self._messages_compacted: int = 0
 
+        # Event-correlation ids. The factory that builds this manager knows
+        # nothing about sessions, so ChatLoop.__init__ assigns them (C11b).
+        self.session_id: str | None = None
+        self.run_id: int | None = None
+
     # -- Protocol methods ----------------------------------------------------
 
     @classmethod

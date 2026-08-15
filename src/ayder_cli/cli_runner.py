@@ -20,7 +20,7 @@ from ayder_cli.agents.tool import (
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.providers import ProviderUnavailableError
 from ayder_cli.cli_callbacks import CliCallbacks
-from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
+from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig, new_session_id
 from ayder_cli.diagnostics import install_asyncio_handler
 from ayder_cli.log import get_logger
 
@@ -59,6 +59,10 @@ def _run_loop(
         {"role": "user", "content": prompt},
     ]
 
+    # One id per invocation, shared by the registry and the loop so agent
+    # events correlate with the turn that spawned them (C11b).
+    session_id = new_session_id()
+
     agent_registry: AgentRegistry | None = None
     if hasattr(rt.config, "agents") and isinstance(rt.config.agents, dict) and rt.config.agents:
         agent_registry = AgentRegistry(
@@ -69,6 +73,7 @@ def _run_loop(
             permissions=set(permissions or {"r"}),
             agent_timeout=getattr(rt.config, "agent_timeout", 600),
             max_concurrent_agents=getattr(rt.config, "max_concurrent_agents", 5),
+            session_id=session_id,
         )
         rt.tool_registry.register_dynamic_tool(
             AGENT_TOOL_DEFINITION, create_agent_handler(agent_registry)
@@ -92,6 +97,7 @@ def _run_loop(
         permissions=set(permissions or {"r"}),
         tool_tags=frozenset(rt.config.tool_tags) if rt.config.tool_tags else None,
         max_history=rt.config.max_history_messages,
+        session_id=session_id,
     )
 
     cb = CliCallbacks(verbose=rt.config.verbose)

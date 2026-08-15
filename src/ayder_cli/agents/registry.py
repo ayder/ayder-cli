@@ -114,9 +114,13 @@ class AgentRegistry:
         max_concurrent_agents: int = 5,
         on_progress: Callable[[int, str, str, Any], None] | None = None,
         on_complete: Callable[[int, AgentRun], None] | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.agents = agents
         self._parent_config = parent_config
+        # The PARENT session's id, passed in explicitly: parent_config is the
+        # application Config and never carries one (C11b).
+        self._session_id = session_id
         self._project_ctx = project_ctx
         self._process_manager = process_manager
         self._permissions = permissions
@@ -390,6 +394,7 @@ class AgentRegistry:
                             timeout=run.timeout if run.timeout is not None else self._agent_timeout,
                             run_id=run.run_id, generation=run.generation,
                             on_progress=self._on_progress,
+                            session_id=self._session_id,
                         )
                         self._active[run.run_id] = runner
                         run.status = "working"

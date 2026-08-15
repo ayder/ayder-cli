@@ -45,6 +45,15 @@ class ChatLoopConfig:
     max_history: int = 0
     verbose: bool = False
     pre_iteration_hook: Any | None = None  # async callable(messages) -> None
+    session_id: str | None = None
+    run_id: int | None = None  # set only for agent loops; None for parent loops
+
+
+def new_session_id() -> str:
+    """Short unique id used to correlate events from one session."""
+    import uuid
+
+    return uuid.uuid4().hex[:12]
 
 
 @runtime_checkable
@@ -93,6 +102,10 @@ class ChatLoop:
         else:
             # Backward compat: create one from ChatLoopConfig (legacy path)
             self.context_manager = ContextManager(config=config, model=config.model)
+        # Correlation ids reach the manager by assignment: the factory that
+        # builds it knows nothing about sessions (C11b).
+        self.context_manager.session_id = self.config.session_id
+        self.context_manager.run_id = self.config.run_id
 
     # -- public API ----------------------------------------------------------
 
