@@ -93,6 +93,7 @@ sequence = [
     { cmd = "python scripts/find_percent_logging.py" },
     { cmd = "python scripts/check_logging_imports.py" },
     { cmd = "python scripts/check_exception_handlers.py" },
+    { cmd = "python scripts/check_log_arguments.py" },
 ]
 
 [tool.poe.tasks.clean]
