@@ -8,6 +8,10 @@ from ollama import ResponseError
 from ayder_cli.providers.impl.ollama import OllamaProvider
 from ayder_cli.providers.impl.ollama_drivers._errors import OllamaServerToolBug
 
+# Arbitrary server-side tail text appended to a classified signature: the
+# fallback record must carry the exception TYPE and none of this.
+SERVER_ERROR_SENTINEL = "near-token=hunter2-LEAKCANARY"
+
 
 def _config():
     cfg = MagicMock()
@@ -50,15 +54,18 @@ def _show(family: str = "qwen3"):
         "failed to parse JSON: unexpected end of JSON input",
     ],
 )
-async def test_fallback_engages_when_uncommitted_tool_bug(error_message):
+async def test_fallback_engages_when_uncommitted_tool_bug(error_message, loguru_caplog):
     cfg = _config()
     call_count = {"chat": 0}
+    # The classified signature still matches (substring), but the raised text
+    # now carries arbitrary upstream tail content that must never be logged.
+    raised_message = f"{error_message} {SERVER_ERROR_SENTINEL}"
 
     async def fail_then_succeed(*args, **kwargs):
         call_count["chat"] += 1
         if call_count["chat"] == 1:
             async def boom():
-                raise ResponseError(error_message)
+                raise ResponseError(raised_message)
                 yield
 
             return boom()
@@ -89,6 +96,13 @@ async def test_fallback_engages_when_uncommitted_tool_bug(error_message):
 
     assert call_count["chat"] == 2
     assert any("recovered" in chunk.content for chunk in chunks)
+
+    # The fallback record names the failure TYPE, never the server's text.
+    hits = [r for r in loguru_caplog.records if "failed mid-stream" in r["message"]]
+    assert hits, "fallback record never emitted"
+    assert "error_type=OllamaServerToolBug" in hits[0]["message"]
+    assert SERVER_ERROR_SENTINEL not in loguru_caplog.text
+    assert error_message not in loguru_caplog.text
 
 
 @pytest.mark.asyncio

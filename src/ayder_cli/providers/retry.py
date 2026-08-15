@@ -221,15 +221,15 @@ class RetryingProvider(AIProvider):
                 if remaining <= 0:
                     logger.warning(
                         "Provider retry budget exhausted after {} "
-                        "attempts; raising {}: {}",
-                        attempt + 1, type(exc).__name__, exc,
+                        "attempts; raising {}",
+                        attempt + 1, type(exc).__name__,
                     )
                     raise
                 delay = compute_delay(self._retry, attempt)
                 logger.info(
-                    "Provider stream failed ({}: {}); "
+                    "Provider stream failed ({}); "
                     "retrying in {:.2f}s ({} attempts left)",
-                    type(exc).__name__, exc, delay, remaining,
+                    type(exc).__name__, delay, remaining,
                 )
                 await self._sleep(delay)
                 if self._on_reconnect is not None:

@@ -113,9 +113,10 @@ class OllamaProvider(AIProvider):
                 raise
             fallback = self._registry.get(driver.fallback_driver)
             logger.info(
-                "{} ({}) failed mid-stream: {!r}; "
+                "{} ({}) failed mid-stream (error_type={}); "
                 "transparently retrying with {} ({})",
-                driver.name, driver.mode.value, exc, fallback.name, fallback.mode.value,
+                driver.name, driver.mode.value, type(exc).__name__,
+                fallback.name, fallback.mode.value,
             )
             async for chunk in self._stream_with_driver(
                 fallback, messages, model, tools, options

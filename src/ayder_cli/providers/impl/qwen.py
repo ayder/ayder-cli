@@ -78,7 +78,15 @@ class QwenNativeProvider(AIProvider):
 
         for response in responses:
             if response.status_code != 200:
-                logger.error("Qwen streaming error: {}", response.message)
+                # Read once: the message is arbitrary upstream text, so only
+                # its size reaches the log. `is None`, not truthiness — a
+                # falsy-but-present message still has a real length.
+                message = response.message
+                message_chars = len("" if message is None else str(message))
+                logger.error(
+                    "Qwen streaming error: status={} message_chars={}",
+                    response.status_code, message_chars,
+                )
                 break
             yield self._normalize_chunk(response)
 

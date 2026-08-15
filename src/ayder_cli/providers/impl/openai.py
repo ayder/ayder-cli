@@ -145,8 +145,8 @@ class OpenAIProvider(AIProvider):
 
         try:
             logger.trace(
-                "Stream kwargs: {}",
-                ', '.join(f'{k}={v!r}' for k, v in kwargs.items() if k != 'messages'),
+                "Stream kwargs keys: {}",
+                ', '.join(sorted(k for k in kwargs if k != 'messages')),
             )
             async_stream = await self.client.chat.completions.create(**kwargs)
 

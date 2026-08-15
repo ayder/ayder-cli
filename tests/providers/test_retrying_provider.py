@@ -9,6 +9,10 @@ from ayder_cli.providers.base import (
 )
 from ayder_cli.providers.retry import RetryConfig, RetryingProvider
 
+# Provider exception text is arbitrary upstream prose (URLs, request bodies,
+# credentials). The retry records must carry the class name, never the text.
+ERROR_SENTINEL = "https://api.example/v1?key=hunter2-RETRYCANARY"
+
 
 class _FakeProvider(AIProvider):
     """Test double that replays a scripted sequence of streams."""
@@ -82,10 +86,10 @@ async def _noop_sleep(delay: float) -> None:
 
 
 @pytest.mark.anyio
-async def test_retryable_error_before_emit_triggers_retry():
+async def test_retryable_error_before_emit_triggers_retry(loguru_caplog):
     """httpx.ConnectError before any meaningful chunk → retry succeeds."""
     import httpx
-    err = httpx.ConnectError("dropped")
+    err = httpx.ConnectError(ERROR_SENTINEL)
     good = [NormalizedStreamChunk(content="ok")]
     inner = _FakeProvider([[err], good])  # attempt 0 raises, attempt 1 succeeds
     retry_cfg = RetryConfig(
@@ -97,6 +101,17 @@ async def test_retryable_error_before_emit_triggers_retry():
 
     assert [g.content for g in got] == ["ok"]
     assert inner.calls == 2
+
+    # The retry notice names the exception TYPE and the retry metadata only.
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Provider stream failed")]
+    assert hits, "retry record never emitted"
+    assert hits[0]["level"].name == "INFO"
+    assert hits[0]["message"] == (
+        "Provider stream failed (ConnectError); retrying in 0.00s (2 attempts left)"
+    )
+    assert ERROR_SENTINEL not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
 
 
 @pytest.mark.anyio
@@ -136,10 +151,10 @@ async def test_error_after_emit_propagates_without_retry():
 
 
 @pytest.mark.anyio
-async def test_retry_budget_exhausted_raises_last_error():
+async def test_retry_budget_exhausted_raises_last_error(loguru_caplog):
     """After max_attempts failures, raise the last exception."""
     import httpx
-    errs = [httpx.ConnectError(f"drop-{i}") for i in range(3)]
+    errs = [httpx.ConnectError(f"drop-{i} {ERROR_SENTINEL}") for i in range(3)]
     inner = _FakeProvider([[errs[0]], [errs[1]], [errs[2]]])
     retry_cfg = RetryConfig(max_attempts=3, initial_delay_seconds=0.0, jitter=False)
     wrapped = RetryingProvider(inner, retry_cfg, sleep=_noop_sleep)
@@ -148,6 +163,18 @@ async def test_retry_budget_exhausted_raises_last_error():
         async for _ in wrapped.stream_with_tools(messages=[], model="m"):
             pass
     assert inner.calls == 3
+
+    # The exhaustion notice names the class it is about to raise, not its text.
+    hits = [r for r in loguru_caplog.records
+            if r["message"].startswith("Provider retry budget exhausted")]
+    assert hits, "budget-exhausted record never emitted"
+    assert hits[0]["level"].name == "WARNING"
+    assert hits[0]["message"] == (
+        "Provider retry budget exhausted after 3 attempts; raising ConnectError"
+    )
+    assert ERROR_SENTINEL not in loguru_caplog.text
+    assert "drop-2" not in loguru_caplog.text
+    assert "hunter2" not in loguru_caplog.text
 
 
 @pytest.mark.anyio
