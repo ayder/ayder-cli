@@ -325,7 +325,7 @@ class ChatLoop:
                 except asyncio.CancelledError:
                     llm_log.info("LLM stream cancelled")
                     return
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
                     llm_log.exception("LLM stream failed")
                     self.cb.on_system_message(f"Error: {e}")
                     return
@@ -517,7 +517,7 @@ class ChatLoop:
                 except asyncio.CancelledError:
                     tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
                     return tc_obj, RuntimeError("Tool execution cancelled")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
                     tool_log.opt(exception=True).warning(
                         "Tool execution failed for '{}'", tc_obj.function.name
                     )
