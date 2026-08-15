@@ -8,9 +8,19 @@ verdict there.
 Every fail-closed branch carries a mutation control: a synthetic tree that the
 branch must reject, so weakening the branch turns a passing suite red rather
 than quietly widening what the gate lets through.
+
+No control ever writes to a repository-owned file. The frozen-tally branch is
+the one that tempts it - it only fires for the gate's OWN committed baseline -
+and it is reached instead by copying the whole script-relative layout into a
+test-owned directory, because the gate resolves both its source root and its
+baseline from its own `__file__`. Mutating the real baseline in place would
+race every concurrent reader of it, under `-n auto` or under two shells, and a
+killed worker would leave the repository dirty.
 """
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -35,13 +45,44 @@ def _live_py_count() -> int:
     return len(list(SRC_ROOT.rglob("*.py")))
 
 
-def _run(*args, cwd: Path = REPO):
+def _run(*args, cwd: Path = REPO, gate: Path = GATE):
     """Run the gate; return (exit code, stdout+stderr). Never let a crash pass."""
-    r = subprocess.run([sys.executable, str(GATE), *args],
+    r = subprocess.run([sys.executable, str(gate), *args],
                        capture_output=True, text=True, cwd=cwd)
     out = r.stdout + r.stderr
     assert "Traceback" not in out, f"gate crashed:\n{out}"
     return r.returncode, out
+
+
+def _isolated_layout(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A complete, test-owned replica of the gate's script-relative layout.
+
+    The gate derives `REPO` from its own `__file__`, so a copy at
+    `<tmp>/scripts/` resolves its default source root to `<tmp>/src/ayder_cli`
+    and its committed baseline to `<tmp>/scripts/log_argument_baseline.txt`.
+    The frozen-tally branch keys off that resolved default, so the replica
+    reaches it while the repository's own files stay read-only.
+
+    The real corpus is copied rather than stubbed so the replica reproduces the
+    repository verdict exactly - which is what lets the mutation prove that a
+    retag is invisible to every ROW-level report.
+    """
+    scripts = tmp_path / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    gate = scripts / GATE.name
+    gate.write_bytes(GATE.read_bytes())
+    baseline = scripts / BASELINE.name
+    baseline.write_bytes(BASELINE.read_bytes())
+    root = tmp_path / "src" / "ayder_cli"
+    shutil.copytree(SRC_ROOT, root,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    return gate, baseline, root
+
+
+def _write_rows(path: Path, rows: list[dict]) -> None:
+    path.write_bytes("".join(
+        json.dumps(r, sort_keys=True, ensure_ascii=True,
+                   separators=(",", ":")) + "\n" for r in rows).encode())
 
 
 def _tree(tmp_path: Path, src: str, name: str = "sample.py") -> Path:
@@ -169,37 +210,52 @@ FROZEN_TALLY = {
 }
 
 
-@pytest.mark.parametrize("invocation", [
-    pytest.param((), id="default-path"),
-    pytest.param(("--root", str(SRC_ROOT), "--baseline", str(BASELINE)),
-                 id="explicit-resolved-path"),
+@pytest.mark.parametrize("explicit", [
+    pytest.param(False, id="default-path"),
+    pytest.param(True, id="explicit-resolved-path"),
 ])
-def test_gate_itself_enforces_the_frozen_tally(tmp_path, invocation):
+def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     """Row-by-row diffing cannot see a silent retag: the identity is unchanged,
     so NEW/REMOVED/CHANGED all stay quiet. Only the composition catches it -
-    and the gate, not a test, has to be the one that catches it."""
-    original = BASELINE.read_bytes()
-    rows = [json.loads(ln) for ln in original.decode().splitlines() if ln.strip()]
+    and the gate, not a test, has to be the one that catches it.
+
+    Everything here happens inside a test-owned replica of the gate's layout.
+    Nothing repository-owned is written, so there is nothing to restore and
+    nothing to race: the control is safe under arbitrary process concurrency
+    and survives a killed worker without leaving the repository dirty.
+    """
+    repo_baseline_before = hashlib.sha256(BASELINE.read_bytes()).hexdigest()
+    gate, baseline, root = _isolated_layout(tmp_path)
+    invocation = (("--root", str(root), "--baseline", str(baseline))
+                  if explicit else ())
+
+    # The replica must first reproduce the repository verdict exactly,
+    # otherwise the mutation below would be proving nothing.
+    code, out = _run(*invocation, cwd=tmp_path, gate=gate)
+    assert code == 0, out
+    assert "278 baseline row(s)" in out, out
+    assert "0 findings" in out, out
+
+    rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
+            if ln.strip()]
     victim = next(i for i, r in enumerate(rows) if r["class"] == "R-path")
     rows[victim]["class"] = "R-name"          # allowed tag, wrong provenance
-    try:
-        BASELINE.write_bytes("".join(
-            json.dumps(r, sort_keys=True, ensure_ascii=True,
-                       separators=(",", ":")) + "\n" for r in rows).encode())
-        code, out = _run(*invocation)
-        assert code == 1, out
-        assert "CLASS-TALLY" in out, out
-        assert "94 'R-name'" in out and "is 93" in out, out
-        assert "21 'R-path'" in out and "is 22" in out, out
-        # The retag is invisible to every row-level report - that is the point.
-        assert "NEW unclassified" not in out, out
-        assert "REMOVED" not in out, out
-        assert "CHANGED" not in out, out
-    finally:
-        BASELINE.write_bytes(original)
-    assert BASELINE.read_bytes() == original
-    code, out = _run()
-    assert code == 0, out
+    _write_rows(baseline, rows)
+
+    code, out = _run(*invocation, cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CLASS-TALLY" in out, out
+    assert "94 'R-name'" in out and "is 93" in out, out
+    assert "21 'R-path'" in out and "is 22" in out, out
+    # The retag is invisible to every row-level report - that is the point.
+    assert "NEW unclassified" not in out, out
+    assert "REMOVED" not in out, out
+    assert "CHANGED" not in out, out
+
+    # Not a restoration - an assertion that the repository file was never a
+    # participant. A control that had to restore it would already have raced.
+    assert hashlib.sha256(BASELINE.read_bytes()).hexdigest() == \
+        repo_baseline_before, "the control wrote to the repository baseline"
 
 
 def test_caller_supplied_baselines_are_exempt_from_the_frozen_tally(tmp_path):
