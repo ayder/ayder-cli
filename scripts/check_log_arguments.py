@@ -703,6 +703,15 @@ def _writes_name(node: ast.AST, name: str) -> bool:
     `import x as channel`, a nested `def`/`class` of that name, or a nested
     parameter shadowing it. Every one of those breaks the link between the
     guard and the value that reaches the bind, so every one counts as a write.
+
+    Structural pattern matching is the subtle member of that family. A capture
+    binds a name without any `Name` node at all - the target is a plain STRING
+    field on the pattern (`MatchAs.name` for both `case channel:` and
+    `case ... as channel:`, `MatchStar.name` for `[*channel]`, and
+    `MatchMapping.rest` for `{**channel}`) - so a Store-only scan walks straight
+    past `match x: case channel: ...`. Captures nest arbitrarily, and `ast.walk`
+    reaches them wherever they sit. A wildcard carries `name is None` and binds
+    nothing, so it is correctly not a write.
     """
     for child in ast.walk(node):
         if (isinstance(child, ast.Name) and child.id == name
@@ -719,6 +728,10 @@ def _writes_name(node: ast.AST, name: str) -> bool:
                                ast.ClassDef)) and child.name == name):
             return True
         if isinstance(child, ast.arg) and child.arg == name:
+            return True
+        if isinstance(child, (ast.MatchAs, ast.MatchStar)) and child.name == name:
+            return True
+        if isinstance(child, ast.MatchMapping) and child.rest == name:
             return True
     return False
 

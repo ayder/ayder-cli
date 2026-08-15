@@ -1678,3 +1678,70 @@ def test_live_log_py_vocabulary_is_statically_provable():
         sys.path.pop(0)
     tree = _ast.parse((REPO / "src" / "ayder_cli" / "log.py").read_text())
     assert gate.module_channel_vocabulary(tree) == gate.CHANNELS_FROZEN
+
+
+# -- structural pattern matching binds without a Store `Name` -----------------
+
+@pytest.mark.parametrize("pattern, field", [
+    pytest.param("case channel:\n        pass", "MatchAs.name",
+                 id="matchas-capture"),
+    pytest.param("case [1] as channel:\n        pass", "MatchAs.name",
+                 id="matchas-as-clause"),
+    pytest.param("case [*channel]:\n        pass", "MatchStar.name",
+                 id="matchstar"),
+    pytest.param("case {'a': 1, **channel}:\n        pass",
+                 "MatchMapping.rest", id="matchmapping-rest"),
+    pytest.param("case {'k': [0, other as channel]}:\n        pass",
+                 "MatchAs.name (nested)", id="nested-matchas"),
+    pytest.param("case {'k': [0, *channel]}:\n        pass",
+                 "MatchStar.name (nested)", id="nested-matchstar"),
+])
+def test_pattern_capture_between_guard_and_bind_fails(tmp_path, pattern, field):
+    """A `match` capture rebinds without ever producing a Store `Name`.
+
+    The target is a plain string field on the pattern node, so a Store-only
+    scan walks straight past `case channel:` and the bind receives whatever the
+    subject happened to be. Captures nest arbitrarily, so the nested forms are
+    covered too rather than only a top-level `match`.
+    """
+    code, out = _scan(tmp_path, _factory(
+        "if channel not in CHANNELS:\n"
+        "    raise ValueError\n"
+        "match user_input:\n"
+        f"    {pattern}\n"
+        "return logger.bind(channel=channel)"), name="log.py")
+    assert "UNPARSEABLE" not in out, out
+    assert code == 1, f"{field} capture was accepted:\n{out}"
+    assert "CHAIN-CHANNEL" in out and "does not prove" in out, out
+
+
+@pytest.mark.parametrize("pattern", [
+    pytest.param("case _:\n        pass", id="wildcard"),
+    pytest.param("case [*_]:\n        pass", id="star-wildcard"),
+    pytest.param("case other:\n        pass", id="captures-another-name"),
+    pytest.param("case {'a': 1}:\n        pass", id="no-rest-capture"),
+])
+def test_non_capturing_pattern_is_not_a_write(tmp_path, pattern):
+    """`name is None` binds nothing, and a capture of some OTHER name leaves
+    `channel` alone - neither may be treated as a rewrite."""
+    code, out = _scan(tmp_path, _factory(
+        "if channel not in CHANNELS:\n"
+        "    raise ValueError\n"
+        "match user_input:\n"
+        f"    {pattern}\n"
+        "return logger.bind(channel=channel)"), name="log.py")
+    assert "UNPARSEABLE" not in out, out
+    assert "CHAIN-CHANNEL" not in out, out
+
+
+def test_pattern_capture_before_the_guard_is_fine(tmp_path):
+    """Only the window between the guard and the bind matters: a capture that
+    happens BEFORE the guard is re-validated by it."""
+    code, out = _scan(tmp_path, _factory(
+        "match user_input:\n"
+        "    case channel:\n"
+        "        pass\n"
+        "if channel not in CHANNELS:\n"
+        "    raise ValueError\n"
+        "return logger.bind(channel=channel)"), name="log.py")
+    assert "CHAIN-CHANNEL" not in out, out
