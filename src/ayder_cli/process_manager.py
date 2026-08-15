@@ -205,7 +205,7 @@ class ProcessManager:
             if mp.status == "running":
                 try:
                     self._terminate_tree(mp.process)
-                except Exception:
+                except Exception:  # noqa: BLE001 - atexit cleanup: one process that resists termination must not stop the others being killed
                     logger.opt(exception=True).debug(
                         "Failed to terminate process tree for background process {}",
                         mp.id,
@@ -248,7 +248,7 @@ def run_background_process(
         )
     except RuntimeError as e:
         return ToolError(str(e), "execution")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: residual after RuntimeError; any spawn failure becomes a ToolError
         return ToolError(f"Error starting background process: {str(e)}", "execution")
 
 

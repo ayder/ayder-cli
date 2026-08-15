@@ -150,7 +150,7 @@ class CommandRunner:
         except ProviderUnavailableError as e:
             print(str(e), file=sys.stderr)   # message already starts with "Error:"
             return 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - CLI exit-code boundary: residual after ProviderUnavailableError; every failure becomes exit 1
             logger.opt(exception=True).error("Single-command run failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -194,7 +194,7 @@ class TaskRunner:
             result = list_tasks(ProjectContext("."))
             print(result)
             return 0
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - CLI exit-code boundary: task listing failure becomes exit 1, not a traceback
             logger.opt(exception=True).error("Task listing failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -247,7 +247,7 @@ class TaskRunner:
 
             print(f"No tasks found matching: {task_query}", file=sys.stderr)
             return 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - CLI exit-code boundary: task implementation failure becomes exit 1, not a traceback
             logger.opt(exception=True).error("Task implementation failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -291,7 +291,7 @@ class TaskRunner:
                 TASK_EXECUTION_ALL_PROMPT_TEMPLATE,
                 permissions=permissions,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - CLI exit-code boundary: implement-all failure becomes exit 1, not a traceback
             logger.opt(exception=True).error("Implement-all run failed")
             print(f"Error: {e}", file=sys.stderr)
             return 1

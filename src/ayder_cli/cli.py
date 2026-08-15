@@ -338,7 +338,7 @@ def main():
                 if confirm.lower() == "y":
                     try:
                         install_plugin_dependencies(manifest.dependencies)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 - plugin install boundary: a failing dependency install must roll back, not traceback out of the CLI
                         logger.opt(exception=True).error(
                             "Dependency install failed for plugin {!r}; rolling back",
                             manifest.name,
@@ -507,7 +507,7 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - CLI entry boundary: residual after FileNotFoundError; any read failure exits with a message, not a traceback
             logger.opt(exception=True).error("Failed to read system prompt file")
             print(
                 f"Error reading system prompt file {args.system_prompt}: {e}",
@@ -525,7 +525,7 @@ def main():
         except FileNotFoundError:
             print(f"Error: File not found: {args.file}", file=sys.stderr)
             sys.exit(1)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - CLI entry boundary: residual after FileNotFoundError; any read failure exits with a message, not a traceback
             logger.opt(exception=True).error("Failed to read --file input")
             print(f"Error reading file {args.file}: {e}", file=sys.stderr)
             sys.exit(1)

@@ -136,7 +136,7 @@ def print_file_content(file_path):
         console.print(
             Panel(content, title=file_path, border_style="cyan", padding=(1, 2))
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - render guard: an unreadable file or Rich markup failure falls back to plain output
         logger.opt(exception=True).warning(
             "Failed to render file panel for {}", file_path
         )
@@ -164,7 +164,7 @@ def print_file_content_rich(file_path: str, content: str | None = None) -> None:
         console.print(
             Panel(content, title=file_path, border_style="cyan", padding=(1, 2))
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - render guard: an unreadable file or Rich markup failure falls back to plain output
         logger.opt(exception=True).warning(
             "Failed to render file panel for {}", file_path
         )
@@ -292,7 +292,7 @@ def generate_diff_preview(file_path, new_content):
 
         return combined
 
-    except Exception:
+    except Exception:  # noqa: BLE001 - diff preview guard: preview rendering is cosmetic and must never block a confirmation
         logger.opt(exception=True).debug(
             "Diff preview generation failed for {}", file_path
         )
