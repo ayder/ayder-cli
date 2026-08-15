@@ -49,7 +49,7 @@ class OllamaProvider(AIProvider):
         try:
             response = await self._client.list()
             return [m.model for m in response.models if m.model]
-        except Exception:
+        except Exception:  # noqa: BLE001 - Ollama SDK boundary: list() surfaces transport, protocol and model-parse failures
             logger.opt(exception=True).warning("Failed to list Ollama models")
             return []
 

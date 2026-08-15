@@ -33,7 +33,7 @@ class DriverRegistry:
                 continue
             try:
                 module = import_module(f"{package.__name__}.{modname}")
-            except Exception:
+            except Exception:  # noqa: BLE001 - driver discovery boundary: import_module executes arbitrary driver module code
                 logger.opt(exception=True).warning("Skipping Ollama driver module {!r}", modname)
                 continue
             for attr in vars(module).values():
@@ -56,7 +56,7 @@ class DriverRegistry:
 
         try:
             info = await self._inspector.get_model_info(model)
-        except Exception:
+        except Exception:  # noqa: BLE001 - Ollama /api/show probe boundary: any failure must fall back to the default driver
             logger.opt(exception=True).warning("/api/show failed for {!r}; using default", model)
             return self._default_driver()
 

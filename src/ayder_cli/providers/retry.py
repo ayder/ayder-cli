@@ -205,7 +205,7 @@ class RetryingProvider(AIProvider):
                 if self._on_reconnect is not None:
                     try:
                         self._on_reconnect()
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - reconnect boundary: user-supplied on_reconnect hook must not abort the retry
                         logger.opt(exception=True).warning("on_reconnect hook raised")
                 continue
 
@@ -235,7 +235,7 @@ class RetryingProvider(AIProvider):
                 if self._on_reconnect is not None:
                     try:
                         self._on_reconnect()
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - reconnect boundary: user-supplied on_reconnect hook must not abort the retry
                         logger.opt(exception=True).warning("on_reconnect hook raised")
                 continue
 

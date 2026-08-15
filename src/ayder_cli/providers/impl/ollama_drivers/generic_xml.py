@@ -49,7 +49,7 @@ class GenericXMLDriver(ChatDriver):
 
         try:
             tool_schemas = json.dumps(tools, indent=2)
-        except Exception:
+        except Exception:  # noqa: BLE001 - serialization safety net: arbitrary tool schemas fall back to str() on any dump failure
             logger.opt(exception=True).warning("Failed to serialize tool schemas; using str()")
             tool_schemas = str(tools)
 

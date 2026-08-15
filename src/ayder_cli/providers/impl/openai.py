@@ -42,7 +42,7 @@ class OpenAIProvider(AIProvider):
             response = await self.client.models.list()
             # Extract model IDs from the response
             return [model.id for model in response.data if hasattr(model, "id")]
-        except Exception:
+        except Exception:  # noqa: BLE001 - OpenAI SDK boundary: servers that omit model listing raise arbitrary client errors
             logger.opt(exception=True).warning("Failed to list models")
             return []
 
