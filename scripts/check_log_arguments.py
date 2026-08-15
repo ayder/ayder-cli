@@ -14,12 +14,30 @@ which is exactly the review that keeps content out of the message.
 
 Scope of an "interpolated argument" (the frozen census boundary):
 
-  * the arguments a logger level-method interpolates into its message, and
-  * the event fields handed to the `emit_event` facade,
+  * the arguments a logger level-method interpolates into its message,
+  * the event fields handed to the `emit_event` facade, and
+  * the data-bearing `.bind()` keywords, which land in `record["extra"]`.
 
-but NOT `.bind()/.opt()/.patch()` keywords, which populate `record["extra"]`
-rather than `record["message"]`. Extra-field exposure is a sink question, not
-an argument question, and is deliberately out of this gate's frame.
+`.bind()/.opt()/.patch()` inputs are NOT all alike, so they are not all treated
+alike. Three kinds exist and each gets the control it deserves:
+
+  * CONTROL options - `.opt(exception=..., depth=...)` - steer Loguru rather
+    than carrying payload. The key allowlist is not enough on its own, because
+    `exception=<anything>` would then pass unreviewed, so the VALUE SHAPE is
+    frozen too. `.patch()` is refused outright.
+  * SCHEMA keys - `channel`, `schema_version`, `evt` and the facade's `**fields`
+    splat - select the frozen C11 event schema. Their value shapes are frozen
+    and a constant channel must name a real channel, so they are validated
+    rather than enumerated; a row per call would say nothing a reviewer needs.
+  * DATA keys - anything else - are payload reaching `record["extra"]`, and get
+    a baseline row exactly like a message argument. A new one is NEW.
+
+Locations and counts, not shapes, are what only the committed tree can pin:
+the exact production site identities and the aggregate chain tally are checked
+only when the gate runs against its own committed baseline, the same rule the
+CLASS-TALLY branch uses. Every shape and membership rule above holds on every
+tree, so a synthetic fixture can exercise one rule without recreating the whole
+package.
 
 A constant literal IS a row. `logger.info("credential={}", "sk-live-...")` is
 the one shape where the secret is written into the source, so it is the last
@@ -119,6 +137,75 @@ VALID_CLASSES = (
 
 SITE_KEYS = ("path", "qualname", "method", "message", "arg_index", "expr")
 
+# ---------------------------------------------------------------- chain inputs
+
+# Naming the KEY is never enough: `exception=<anything>` would sail through a
+# key-only allowlist. Each accepted option carries a frozen value vocabulary,
+# so a new dynamic value has to be reviewed into this table.
+TRUE_DUMP = "Constant(value=True)"
+ALLOWED_OPT_SHAPES: dict[str, frozenset[str]] = {
+    "exception": frozenset({
+        TRUE_DUMP,
+        "Tuple(elts=[Name(id='exc_type', ctx=Load()), Name(id='exc', ctx=Load()), "
+        "Name(id='tb', ctx=Load())], ctx=Load())",
+        "Name(id='exc', ctx=Load())",
+        "Attribute(value=Name(id='record', ctx=Load()), attr='exc_info', ctx=Load())",
+    }),
+    "depth": frozenset({"Name(id='depth', ctx=Load())"}),
+}
+
+# Schema selectors, not payload. `channel` is handled separately because a
+# CONSTANT channel must additionally name a real one.
+SCHEMA_BIND_KEYS = frozenset({"channel", "schema_version", "evt", "**"})
+ALLOWED_BIND_SHAPES: dict[str, frozenset[str]] = {
+    "schema_version": frozenset({"Name(id='SCHEMA_VERSION', ctx=Load())"}),
+    "evt": frozenset({"Name(id='evt', ctx=Load())"}),
+    "**": frozenset({"Name(id='fields', ctx=Load())"}),
+}
+# The dynamic form is accepted only in this shape, and only at the site pinned
+# below - the factory that validates membership before binding.
+CHANNEL_NAME_DUMP = "Name(id='channel', ctx=Load())"
+
+# Mirrors `log.py`. `external` is RESERVED: selectable for filtering and bound
+# by the stdlib bridge, but deliberately rejected by `get_logger`. Verified
+# against the live source whenever `log.py` is in the scanned tree.
+CHANNELS_FROZEN = ("llm", "tool", "agent", "context", "plugin", "ui", "core")
+RESERVED_CHANNELS_FROZEN = ("external",)
+SELECTABLE_CHANNELS_FROZEN = CHANNELS_FROZEN + RESERVED_CHANNELS_FROZEN
+
+# Live control sites, pinned by (path, enclosing qualname, method, key) ->
+# (value shape, count). A control that MOVES deletes one identity and creates
+# another, so relocating it reports two findings rather than passing silently.
+# `bind lib=record.name` is deliberately absent: it is data, and it is pinned as
+# an ordinary baseline row instead.
+FROZEN_CHAIN_SITES: dict[tuple[str, str, str, str], tuple[str, int]] = {
+    ("diagnostics.py", "_handle_uncaught", "opt", "exception"): (
+        "Tuple(elts=[Name(id='exc_type', ctx=Load()), Name(id='exc', ctx=Load()), "
+        "Name(id='tb', ctx=Load())], ctx=Load())", 1),
+    ("diagnostics.py", "_handle_asyncio", "opt", "exception"): (
+        "Name(id='exc', ctx=Load())", 1),
+    ("logging_config.py", "_InterceptHandler.emit", "opt", "exception"): (
+        "Attribute(value=Name(id='record', ctx=Load()), attr='exc_info', ctx=Load())",
+        1),
+    ("logging_config.py", "_InterceptHandler.emit", "opt", "depth"): (
+        "Name(id='depth', ctx=Load())", 1),
+    ("logging_config.py", "_InterceptHandler.emit", "bind", "channel"): (
+        "Constant(value='external')", 1),
+    ("log.py", "get_logger", "bind", "channel"): (CHANNEL_NAME_DUMP, 1),
+    ("log.py", "emit_event", "bind", "schema_version"): (
+        "Name(id='SCHEMA_VERSION', ctx=Load())", 1),
+    ("log.py", "emit_event", "bind", "evt"): ("Name(id='evt', ctx=Load())", 1),
+    ("log.py", "emit_event", "bind", "**"): ("Name(id='fields', ctx=Load())", 1),
+}
+
+# The 93 `exception=True` inputs are homogeneous, so they are governed as one
+# package-wide shape/count rule rather than 93 site identities - their per-site
+# discipline is C10's.
+FROZEN_EXCEPTION_TRUE = 93
+
+# Live chain inputs, counted per method. Printed on every run.
+CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 97, "patch": 0}
+
 # The reviewed composition of THE COMMITTED baseline, frozen by the Phase 5
 # census: 252 retained non-path + 22 paths + 2 deferred interpolated rows, plus
 # two separately inventoried dynamic messages. Row-by-row diffing alone cannot
@@ -138,7 +225,7 @@ FROZEN_TALLY: dict[str, int] = {
     "content-deferred:5-04": 0,
     "dynamic-trusted": 1,
     "dynamic-deferred:5-04": 0,
-    "dynamic-residual:known-shape-masked": 1,
+    "dynamic-residual:known-shape-masked": 2,
 }
 
 # Same conversion set as the %-style gate; `%%` is stripped before matching.
@@ -578,6 +665,32 @@ def _message_kind(node: ast.AST) -> str:
     return "dynamic"
 
 
+def _check_channel_bind(findings: list[str], path: str, node: ast.Call,
+                        qualname: str, keyword: ast.keyword, dump: str) -> None:
+    """A bound channel must be a real channel, constant or validated.
+
+    The dynamic form is accepted only as the factory's own parameter, whose
+    membership guard is what makes it safe; a constant must name a member of
+    the frozen selectable vocabulary, `external` included - it is the reserved
+    channel the stdlib bridge binds.
+    """
+    if dump == CHANNEL_NAME_DUMP:
+        return
+    value = keyword.value
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        if value.value not in SELECTABLE_CHANNELS_FROZEN:
+            findings.append(
+                f"CHAIN-CHANNEL {path}:{node.lineno} {qualname} "
+                f".bind(channel={value.value!r}) is not one of "
+                f"{list(SELECTABLE_CHANNELS_FROZEN)}")
+        return
+    findings.append(
+        f"CHAIN-SHAPE {path}:{node.lineno} {qualname} "
+        f".bind(channel=...) carries an unvalidated value "
+        f"`{ast.unparse(value)}`; only a frozen constant or the validating "
+        f"factory's own parameter is accepted")
+
+
 def scan_module(path: str, tree: ast.Module) -> dict:
     """Enumerate the logging calls, rows and findings of one parsed module."""
     analysis = ModuleAnalysis(path, tree)
@@ -588,6 +701,12 @@ def scan_module(path: str, tree: ast.Module) -> dict:
     findings: list[str] = []
     # (canonical star row, message): reported only when unclassified.
     star_findings: list[tuple[str, str]] = []
+    # Chain rows are appended AFTER the message-argument rows so the two census
+    # arithmetics stay separable in the report.
+    chain_rows: list[dict] = []
+    chain_row_lines: list[int] = []
+    chain_sites: list[dict] = []
+    chain_counts: dict[str, int] = {"bind": 0, "opt": 0, "patch": 0}
     level_calls = 0
     facade_calls = 0
     dynamic_rows = 0
@@ -657,6 +776,71 @@ def scan_module(path: str, tree: ast.Module) -> dict:
             row_lines.extend([node.lineno] * len(call_rows))
             if call_rows:
                 sites_with_args += 1
+            continue
+
+        # -- chain inputs: .bind() / .opt() / .patch() -------------------
+        if isinstance(func, ast.Attribute) and func.attr in CHAIN_METHODS:
+            if analysis.kind_of(func.value, scope, cls) != LOGGER:
+                continue                      # somebody else's bind/opt/patch
+            method = func.attr
+            chain_counts[method] += len(node.keywords) or (1 if method == "patch"
+                                                           else 0)
+            if method == "patch":
+                findings.append(
+                    f"CHAIN-PATCH {path}:{node.lineno} {qualname} .patch() "
+                    f"rewrites the record itself, which no baseline row can "
+                    f"describe; the frozen census is zero uses")
+                continue
+            if node.args:
+                findings.append(
+                    f"CHAIN-POSITIONAL {path}:{node.lineno} {qualname} "
+                    f".{method}() takes keyword inputs only; a positional "
+                    f"argument is a shape this gate refuses to guess at")
+                continue
+            for keyword in node.keywords:
+                key = keyword.arg if keyword.arg is not None else "**"
+                dump = ast.dump(keyword.value)
+                chain_sites.append({
+                    "path": path, "qualname": qualname, "method": method,
+                    "key": key, "dump": dump, "line": node.lineno,
+                })
+
+                if method == "opt":
+                    allowed = ALLOWED_OPT_SHAPES.get(key)
+                    if allowed is None:
+                        findings.append(
+                            f"CHAIN-OPTION {path}:{node.lineno} {qualname} "
+                            f".opt({key}=...) is outside the reviewed option "
+                            f"set {sorted(ALLOWED_OPT_SHAPES)}")
+                    elif dump not in allowed:
+                        findings.append(
+                            f"CHAIN-SHAPE {path}:{node.lineno} {qualname} "
+                            f".opt({key}=...) carries an unreviewed value "
+                            f"`{ast.unparse(keyword.value)}`; naming the option "
+                            f"does not classify what it is handed")
+                    continue
+
+                if key == "channel":
+                    _check_channel_bind(findings, path, node, qualname, keyword,
+                                        dump)
+                    continue
+                if key in SCHEMA_BIND_KEYS:
+                    if dump not in ALLOWED_BIND_SHAPES[key]:
+                        findings.append(
+                            f"CHAIN-SHAPE {path}:{node.lineno} {qualname} "
+                            f".bind({key}=...) carries an unreviewed value "
+                            f"`{ast.unparse(keyword.value)}`; the C11 schema "
+                            f"selectors are frozen")
+                    continue
+
+                # Data. It reaches record["extra"], so it is reviewed exactly
+                # like a message argument - and a new one surfaces as NEW.
+                chain_rows.append({
+                    "path": path, "qualname": qualname, "method": method,
+                    "message": None, "arg_index": f"bind:{key}",
+                    "expr": ast.unparse(keyword.value),
+                })
+                chain_row_lines.append(node.lineno)
             continue
 
         # -- logger level methods ----------------------------------------
@@ -815,11 +999,16 @@ def scan_module(path: str, tree: ast.Module) -> dict:
         if call_rows:
             sites_with_args += 1
 
+    rows.extend(chain_rows)
+    row_lines.extend(chain_row_lines)
+
     return {
         "rows": rows,
         "row_lines": row_lines,
         "findings": findings,
         "star_findings": star_findings,
+        "chain_sites": chain_sites,
+        "chain_counts": chain_counts,
         "level_calls": level_calls,
         "facade_calls": facade_calls,
         "dynamic_rows": dynamic_rows,
@@ -891,6 +1080,108 @@ def load_baseline(path: pathlib.Path) -> tuple[dict[str, str], list[str]]:
     return table, findings
 
 
+# ------------------------------------------------- committed-tree chain facts
+
+def _live_channel_vocabulary(py_files, root) -> dict[str, tuple] | None:
+    """`CHANNELS` / `RESERVED_CHANNELS` as the scanned `log.py` declares them."""
+    for path in py_files:
+        if _display(path, root) != "log.py":
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            return None
+        found: dict[str, tuple] = {}
+        for node in ast.walk(tree):
+            targets = ([node.target] if isinstance(node, ast.AnnAssign)
+                       else getattr(node, "targets", []))
+            for target in targets:
+                if (isinstance(target, ast.Name)
+                        and target.id in {"CHANNELS", "RESERVED_CHANNELS"}
+                        and isinstance(node.value, ast.Tuple)):
+                    try:
+                        found[target.id] = ast.literal_eval(node.value)
+                    except ValueError:
+                        return None
+        return found or None
+    return None
+
+
+def _committed_chain_findings(chain_sites: list[dict], chain_counts: dict,
+                              py_files, root) -> list[str]:
+    """Site identities and aggregate counts - facts about THE committed tree.
+
+    Value shapes and membership are checked everywhere; only these locations
+    and totals are specific to the package, so a caller-supplied baseline over
+    a synthetic tree is exempt exactly as it is for CLASS-TALLY.
+    """
+    findings: list[str] = []
+
+    observed: dict[tuple, list[str]] = {}
+    exception_true = 0
+    for site in chain_sites:
+        key = (site["path"], site["qualname"], site["method"], site["key"])
+        if (site["method"] == "opt" and site["key"] == "exception"
+                and site["dump"] == TRUE_DUMP):
+            exception_true += 1        # the homogeneous package-wide rule
+            continue
+        if site["method"] == "bind" and site["key"] not in SCHEMA_BIND_KEYS:
+            continue                   # data: reconciled as a baseline row
+        observed.setdefault(key, []).append(site["dump"])
+
+    for key in sorted(set(observed) | set(FROZEN_CHAIN_SITES)):
+        dumps = observed.get(key, [])
+        frozen = FROZEN_CHAIN_SITES.get(key)
+        where = f"{key[0]} {key[1]} .{key[2]}({key[3]}=...)"
+        if frozen is None:
+            findings.append(
+                f"CHAIN-SITE unreviewed dynamic control at {where}; every "
+                f"control site is pinned by path, enclosing qualname, method "
+                f"and key, so moving or adding one needs a reviewed table edit")
+            continue
+        shape, count = frozen
+        if not dumps:
+            findings.append(
+                f"CHAIN-SITE the reviewed control at {where} is gone; its "
+                f"classification cannot cover code that moved")
+            continue
+        if len(dumps) != count:
+            findings.append(
+                f"CHAIN-SITE {where} occurs {len(dumps)} time(s); the frozen "
+                f"census is {count}")
+        for dump in dumps:
+            if dump != shape:
+                findings.append(
+                    f"CHAIN-SITE {where} carries an unreviewed value shape; "
+                    f"the frozen shape is `{shape}`")
+
+    if exception_true != FROZEN_EXCEPTION_TRUE:
+        findings.append(
+            f"CHAIN-SITE the tree carries {exception_true} `opt(exception=True)` "
+            f"input(s); the frozen census is {FROZEN_EXCEPTION_TRUE}")
+
+    for method in sorted(CHAIN_TALLY):
+        want, have = CHAIN_TALLY[method], chain_counts.get(method, 0)
+        if want != have:
+            findings.append(
+                f"CHAIN-TALLY the tree carries {have} `.{method}()` chain "
+                f"input(s); the frozen census is {want}")
+
+    live = _live_channel_vocabulary(py_files, root)
+    if live is not None:
+        if tuple(live.get("CHANNELS", ())) != CHANNELS_FROZEN:
+            findings.append(
+                f"CHAIN-CHANNEL this gate's frozen CHANNELS "
+                f"{list(CHANNELS_FROZEN)} no longer matches log.py's "
+                f"{list(live.get('CHANNELS', ()))}")
+        if tuple(live.get("RESERVED_CHANNELS", ())) != RESERVED_CHANNELS_FROZEN:
+            findings.append(
+                f"CHAIN-CHANNEL this gate's frozen RESERVED_CHANNELS "
+                f"{list(RESERVED_CHANNELS_FROZEN)} no longer matches log.py's "
+                f"{list(live.get('RESERVED_CHANNELS', ()))}")
+    return findings
+
+
 # ---------------------------------------------------------------- main
 
 def main(argv: list[str] | None = None) -> int:
@@ -924,6 +1215,8 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict] = []
     row_lines: list[int] = []
     star_findings: list[tuple[str, str]] = []
+    chain_sites: list[dict] = []
+    chain_counts: dict[str, int] = {"bind": 0, "opt": 0, "patch": 0}
     scanned = 0
     totals = {"level_calls": 0, "facade_calls": 0, "dynamic_rows": 0,
               "raw_args": 0, "splats": 0, "splat_keys": 0, "sites_with_args": 0}
@@ -940,6 +1233,9 @@ def main(argv: list[str] | None = None) -> int:
         row_lines.extend(result["row_lines"])
         findings.extend(result["findings"])
         star_findings.extend(result["star_findings"])
+        chain_sites.extend(result["chain_sites"])
+        for method, count in result["chain_counts"].items():
+            chain_counts[method] += count
         for key in totals:
             totals[key] += result[key]
 
@@ -960,6 +1256,8 @@ def main(argv: list[str] | None = None) -> int:
     findings.extend(baseline_findings)
 
     if baseline_path.resolve() == BASELINE.resolve():
+        findings.extend(_committed_chain_findings(chain_sites, chain_counts,
+                                                  py_files, root))
         tally: dict[str, int] = {}
         for tag in baseline.values():
             tally[tag] = tally.get(tag, 0) + 1
@@ -1009,10 +1307,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{totals['sites_with_args']} call site(s) with >=1 interpolated "
           f"argument")
     dynamic_live = sum(1 for s in live.values() if s["arg_index"] is None)
-    print(f"{len(live) - dynamic_live} interpolated argument(s) after static "
-          f"splat expansion ({totals['raw_args']} raw, {totals['splats']} "
-          f"splat(s) -> {totals['splat_keys']} key(s))")
+    chain_live = sum(1 for s in live.values()
+                     if (s["arg_index"] or "").startswith("bind:"))
+    print(f"{len(live) - dynamic_live - chain_live} interpolated argument(s) "
+          f"after static splat expansion ({totals['raw_args']} raw, "
+          f"{totals['splats']} splat(s) -> {totals['splat_keys']} key(s))")
     print(f"{dynamic_live} dynamic message row(s)")
+    print(f"{sum(chain_counts.values())} chain input(s): "
+          f"{chain_counts['bind']} bind + {chain_counts['opt']} opt + "
+          f"{chain_counts['patch']} patch, {chain_live} data row(s)")
     print(f"{len(baseline)} baseline row(s) from {baseline_path}")
 
     for old, fresh in changed:

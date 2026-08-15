@@ -188,7 +188,8 @@ def test_live_tree_is_clean_and_fully_reconciled():
     assert "276 interpolated argument(s) after static splat expansion" in out, out
     assert "(264 raw, 4 splat(s) -> 16 key(s))" in out, out
     assert "2 dynamic message row(s)" in out, out
-    assert "278 baseline row(s)" in out, out
+    assert "103 chain input(s): 6 bind + 97 opt + 0 patch, 1 data row(s)" in out, out
+    assert "279 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
 
@@ -206,7 +207,7 @@ def test_committed_baseline_is_ordered_and_collision_free():
 FROZEN_TALLY = {
     "R-name": 93, "R-id": 36, "R-count": 88, "R-status": 27, "R-class": 10,
     "R-path": 22, "dynamic-trusted": 1,
-    "dynamic-residual:known-shape-masked": 1,
+    "dynamic-residual:known-shape-masked": 2,
 }
 
 
@@ -233,7 +234,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     # otherwise the mutation below would be proving nothing.
     code, out = _run(*invocation, cwd=tmp_path, gate=gate)
     assert code == 0, out
-    assert "278 baseline row(s)" in out, out
+    assert "279 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
     rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
@@ -278,7 +279,7 @@ def test_tally_new_vocabulary_mutation(tmp_path):
     code, out = _run(cwd=tmp_path, gate=gate)
     assert code == 1, out
     assert "CLASS-TALLY" in out, out
-    assert "0 'dynamic-residual:known-shape-masked'" in out, out
+    assert "1 'dynamic-residual:known-shape-masked'" in out, out
     assert "2 'dynamic-trusted'" in out, out
     assert BASELINE.read_bytes() == repo_baseline_before
 
@@ -292,7 +293,7 @@ def test_caller_supplied_baselines_are_exempt_from_the_frozen_tally(tmp_path):
 
 def test_committed_baseline_classification_tally():
     """The seeded classes reconcile with the frozen census arithmetic:
-    254 retained non-path + 22 paths + 2 dynamic. Step 5-04 closed both
+    254 retained non-path + 22 paths + 2 dynamic + 1 chain extra. Step 5-04 closed both
     `:5-04` deferrals - the two asyncio rows became R-status once they
     interpolate the B2-prime normalized value, and the bridge's dynamic
     message carries the permanent known-shape-masked residual tag."""
@@ -307,7 +308,7 @@ def test_committed_baseline_classification_tally():
     assert retained == 254, tally
     assert "content-deferred:5-04" not in tally, "5-04 content deferral is closed"
     assert "dynamic-deferred:5-04" not in tally, "5-04 dynamic deferral is closed"
-    assert sum(tally.values()) == 278, tally
+    assert sum(tally.values()) == 279, tally
     assert "ident" not in tally, "the forbidden generic tag is in the baseline"
 
 
@@ -358,7 +359,9 @@ def test_local_factory_function_is_resolved(tmp_path):
         sink = _channel()
         sink.info('a {}', x)
     """)
-    assert [s["expr"] for s in sites] == ["x"]
+    # `.bind(area='x')` is a data extra and gets its own row now; this control
+    # is about receiver RESOLUTION, so it reads the message arguments only.
+    assert [s["expr"] for s in sites if s["arg_index"].startswith("pos:")] == ["x"]
 
 
 def test_class_attribute_and_instance_attribute_are_resolved(tmp_path):
@@ -375,21 +378,42 @@ def test_class_attribute_and_instance_attribute_are_resolved(tmp_path):
                 self.shared.info('one {}', a)
                 self.own.warning('two {}', b)
     """)
-    assert sorted(s["expr"] for s in sites) == ["a", "b"]
-    assert {s["qualname"] for s in sites} == {"Worker.run"}
+    message_args = [s for s in sites if s["arg_index"].startswith("pos:")]
+    assert sorted(s["expr"] for s in message_args) == ["a", "b"]
+    assert {s["qualname"] for s in message_args} == {"Worker.run"}
+    # The constructor's `.bind(w=1)` is a data extra, enumerated separately.
+    assert [s["arg_index"] for s in sites if s["arg_index"] == "bind:w"] == ["bind:w"]
 
 
-def test_bind_opt_patch_chain_is_traversed(tmp_path):
+def test_bind_opt_patch_chain_is_traversed_and_policed(tmp_path):
+    """The chain is still traversed to its message - and now judged on the way.
+
+    `.opt(lazy=True)` is outside the reviewed option set and `.patch()` rewrites
+    the record itself, so neither can be described by a baseline row. Both are
+    findings on ANY tree: these are shape rules, not facts about the package.
+    """
+    code, out = _scan(tmp_path, PRELUDE + textwrap.dedent("""
+        logger.bind(a=1).opt(lazy=True).patch(lambda r: r).error('x {}', v)
+    """))
+    assert code == 1, out
+    assert "CHAIN-OPTION" in out and "lazy" in out, out
+    assert "CHAIN-PATCH" in out, out
+
     sites = _sites(tmp_path, PRELUDE + textwrap.dedent("""
         logger.bind(a=1).opt(lazy=True).patch(lambda r: r).error('x {}', v)
     """))
-    assert [s["expr"] for s in sites] == ["v"]
+    assert [s["expr"] for s in sites if s["arg_index"].startswith("pos:")] == ["v"]
 
 
-def test_chain_keywords_are_not_argument_rows(tmp_path):
-    """`.bind()` populates record['extra'], not record['message']."""
+def test_data_bearing_bind_keyword_is_a_row(tmp_path):
+    """`.bind()` populates record['extra'] - which a serializing sink writes.
+
+    That makes a data extra payload, so it is reviewed exactly like a message
+    argument instead of being waved through as "not the message".
+    """
     sites = _sites(tmp_path, PRELUDE + "logger.bind(lib=name).info('flat')\n")
-    assert sites == []
+    assert [(s["method"], s["arg_index"], s["expr"]) for s in sites] == [
+        ("bind", "bind:lib", "name")]
 
 
 def test_stdlib_bridge_shaped_chain_is_a_dynamic_row(tmp_path):
@@ -403,11 +427,15 @@ def test_stdlib_bridge_shaped_chain_is_a_dynamic_row(tmp_path):
                     depth=depth, exception=record.exc_info
                 ).log(level, record.getMessage())
     """)
-    assert len(sites) == 1, sites
-    assert sites[0]["method"] == "log"
-    assert sites[0]["message"] is None
-    assert sites[0]["arg_index"] is None
-    assert sites[0]["expr"] == "record.getMessage()"
+    dynamic = [s for s in sites if s["arg_index"] is None]
+    assert len(dynamic) == 1, sites
+    assert dynamic[0]["method"] == "log"
+    assert dynamic[0]["message"] is None
+    assert dynamic[0]["expr"] == "record.getMessage()"
+    # `channel='external'` is a schema selector and validates without a row;
+    # `lib=record.name` is data and gets one.
+    assert [(s["arg_index"], s["expr"]) for s in sites
+            if s["method"] == "bind"] == [("bind:lib", "record.name")]
 
 
 def test_trusted_dynamic_trace_facade_shape(tmp_path):
@@ -1068,3 +1096,285 @@ def test_moving_a_call_within_a_file_is_free(tmp_path):
     code, out = _run("--root", str(tmp_path / "src"),
                      "--baseline", str(tmp_path / "classified.txt"))
     assert code == 0, out
+
+
+# -- chain inputs: control, schema and data -----------------------------------
+
+def _patch_gate(gate: Path, snippet: str) -> None:
+    """Append a module-level mutation to a COPIED gate, before its entrypoint.
+
+    Mutating the frozen tables in a replica is how each pinned cell is proven
+    to be consulted: remove one and the live tree must immediately disagree.
+    """
+    text = gate.read_text()
+    marker = '\nif __name__ == "__main__":'
+    assert marker in text
+    gate.write_text(text.replace(marker, f"\n{snippet}\n{marker}"))
+
+
+def _mutate_corpus(root: Path, name: str, old: str, new: str) -> None:
+    target = root / name
+    text = target.read_text()
+    assert old in text, f"{name} no longer contains {old!r}"
+    target.write_text(text.replace(old, new, 1))
+
+
+@pytest.mark.parametrize("value", [
+    pytest.param("exc_value", id="unreviewed-name"),
+    pytest.param("build_exc_info()", id="unreviewed-call"),
+    pytest.param("(a, b, c)", id="unreviewed-tuple"),
+    pytest.param("False", id="unreviewed-constant"),
+])
+def test_opt_value_shape_allowlist_mutations(tmp_path, value):
+    """Naming the option is not classifying what it is handed.
+
+    `exception=` is an accepted KEY, so a key-only allowlist would pass every
+    one of these unreviewed.
+    """
+    code, out = _scan(tmp_path, PRELUDE
+                      + f"logger.opt(exception={value}).error('boom')\n")
+    assert code == 1, out
+    assert "CHAIN-SHAPE" in out, out
+
+
+@pytest.mark.parametrize("chain", [
+    pytest.param("opt(lazy=True)", id="lazy"),
+    pytest.param("opt(colors=True)", id="colors"),
+    pytest.param("opt(raw=True)", id="raw"),
+    pytest.param("opt(record=True)", id="record"),
+])
+def test_unknown_chain_option_fails_closed(tmp_path, chain):
+    code, out = _scan(tmp_path, PRELUDE + f"logger.{chain}.error('boom')\n")
+    assert code == 1, out
+    assert "CHAIN-OPTION" in out, out
+
+
+def test_patch_is_always_a_finding(tmp_path):
+    """`.patch()` rewrites the record itself; no baseline row can describe it."""
+    code, out = _scan(tmp_path, PRELUDE
+                      + "logger.patch(lambda r: r).error('boom')\n")
+    assert code == 1, out
+    assert "CHAIN-PATCH" in out, out
+
+
+def test_accepted_opt_shapes_pass_on_any_tree(tmp_path):
+    """The reviewed shapes are shapes, not locations: they hold everywhere."""
+    code, out = _scan(tmp_path, PRELUDE + textwrap.dedent("""
+        logger.opt(exception=True).error('a')
+        logger.opt(exception=exc).error('b')
+        logger.opt(exception=record.exc_info).error('c')
+        logger.opt(depth=depth).error('d')
+    """))
+    assert "CHAIN-SHAPE" not in out, out
+    assert "CHAIN-OPTION" not in out, out
+
+
+@pytest.mark.parametrize("channel, ok", [
+    pytest.param("'core'", True, id="plain-channel"),
+    pytest.param("'external'", True, id="reserved-channel"),
+    pytest.param("'made-up'", False, id="not-a-channel"),
+    pytest.param("'sk-abcdefghij'", False, id="credential-shaped"),
+])
+def test_channel_constant_must_be_member(tmp_path, channel, ok):
+    """A constant channel must name a real one - `external` included, because
+    the stdlib bridge legitimately binds the reserved channel."""
+    code, out = _scan(tmp_path, PRELUDE
+                      + f"logger.bind(channel={channel}).info('m')\n")
+    assert ("CHAIN-CHANNEL" not in out) is ok, out
+
+
+def test_unvalidated_channel_bind_fails(tmp_path):
+    """The dynamic form is accepted only as the validating factory's parameter."""
+    code, out = _scan(tmp_path, PRELUDE
+                      + "logger.bind(channel=user_input).info('m')\n")
+    assert code == 1, out
+    assert "CHAIN-SHAPE" in out and "unvalidated" in out, out
+
+
+@pytest.mark.parametrize("bind, marker", [
+    pytest.param("schema_version=2", "CHAIN-SHAPE", id="schema-version"),
+    pytest.param("evt=f'{name}'", "CHAIN-SHAPE", id="evt"),
+    pytest.param("**payload", "CHAIN-SHAPE", id="splat"),
+])
+def test_bind_schema_keys_validated(tmp_path, bind, marker):
+    """Schema selectors are frozen: they select C11's shape, not payload."""
+    code, out = _scan(tmp_path, PRELUDE + f"logger.bind({bind}).info('m')\n")
+    assert code == 1, out
+    assert marker in out, out
+
+
+def test_facade_splat_not_double_counted(tmp_path):
+    """`**fields` is recognized at the facade, where the 16 splat rows already
+    classify it - a per-keyword chain row would fail closed on the very splat
+    the argument census already covers."""
+    sites = _sites(tmp_path, """
+        from ayder_cli.log import get_logger
+
+        def emit_event(channel, evt, **fields):
+            return get_logger(channel).bind(
+                schema_version=SCHEMA_VERSION, evt=evt, **fields
+            ).trace(evt)
+    """)
+    assert [s["arg_index"] for s in sites] == [None], sites
+
+
+def test_new_bind_key_enumerates_as_new(tmp_path):
+    """A new data extra is NEW evidence through reconciliation - not a shape
+    rejection. The reviewer classifies it; the gate does not guess."""
+    code, out = _scan(tmp_path, PRELUDE
+                      + "logger.bind(prompt=text).info('m')\n")
+    assert code == 1, out
+    assert "NEW unclassified argument" in out and "bind:prompt" in out, out
+    assert "CHAIN-SHAPE" not in out, out
+
+
+# -- committed-tree facts: exact locations and aggregate counts ----------------
+
+def test_chain_tally_visible_and_pinned(tmp_path):
+    """The census is printed on every run and pinned on the committed one."""
+    code, out = _run()
+    assert code == 0, out
+    assert "103 chain input(s): 6 bind + 97 opt + 0 patch, 1 data row(s)" in out
+
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _patch_gate(gate, 'CHAIN_TALLY["opt"] = 96')
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHAIN-TALLY" in out and "97 `.opt()`" in out, out
+
+
+def test_exception_true_count_is_pinned(tmp_path):
+    """The 93 homogeneous controls are governed as one shape/count rule."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _patch_gate(gate, "FROZEN_EXCEPTION_TRUE = 92")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "93 `opt(exception=True)` input(s)" in out, out
+
+
+FROZEN_SITE_KEYS = [
+    ("diagnostics.py", "_handle_uncaught", "opt", "exception"),
+    ("diagnostics.py", "_handle_asyncio", "opt", "exception"),
+    ("logging_config.py", "_InterceptHandler.emit", "opt", "exception"),
+    ("logging_config.py", "_InterceptHandler.emit", "opt", "depth"),
+    ("logging_config.py", "_InterceptHandler.emit", "bind", "channel"),
+    ("log.py", "get_logger", "bind", "channel"),
+    ("log.py", "emit_event", "bind", "schema_version"),
+    ("log.py", "emit_event", "bind", "evt"),
+    ("log.py", "emit_event", "bind", "**"),
+]
+
+
+@pytest.mark.parametrize("site", FROZEN_SITE_KEYS,
+                         ids=[f"{p}:{q}:{m}:{k}" for p, q, m, k in FROZEN_SITE_KEYS])
+def test_site_identity_each_row_mutations(tmp_path, site):
+    """Every pinned cell must actually be consulted.
+
+    Dropping one entry from the frozen table has to make the live control it
+    describes unreviewed - otherwise that row was decoration.
+    """
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _patch_gate(gate, f"FROZEN_CHAIN_SITES.pop({site!r})")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHAIN-SITE unreviewed dynamic control" in out, out
+    assert f"{site[0]} {site[1]} .{site[2]}({site[3]}=...)" in out, out
+
+
+def test_site_identity_move_within_file_fails(tmp_path):
+    """Identity includes the enclosing qualname, so relocating a control inside
+    its own file deletes one identity and creates another - two findings."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _mutate_corpus(root, "diagnostics.py",
+                   "def _handle_asyncio(loop, context: dict) -> None:",
+                   "def _handle_asyncio_relocated(loop, context: dict) -> None:")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHAIN-SITE the reviewed control at diagnostics.py _handle_asyncio" in out
+    assert "CHAIN-SITE unreviewed dynamic control at diagnostics.py " \
+           "_handle_asyncio_relocated" in out, out
+
+
+def test_site_identity_shape_change_fails(tmp_path):
+    """Same site, different value: the granted review no longer covers it."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _mutate_corpus(root, "diagnostics.py", "_log.opt(exception=exc)",
+                   "_log.opt(exception=exc.__cause__)")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "unreviewed value shape" in out, out
+
+
+def test_site_identity_count_change_fails(tmp_path):
+    """A second control at a reviewed site is a second thing to review."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _mutate_corpus(root, "logging_config.py",
+                   "            forwarded_no = _level_no_of(level)",
+                   "            forwarded_no = _level_no_of(level)\n"
+                   "            logger.opt(depth=depth).info('extra')")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "occurs 2 time(s); the frozen census is 1" in out, out
+
+
+def test_lib_row_via_baseline_reconciliation(tmp_path):
+    """Row 6 is DATA, so it flows through ordinary reconciliation - never
+    through the exemption checks. Deleting its baseline row makes it NEW."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
+            if ln.strip()]
+    kept = [r for r in rows if r["site"]["arg_index"] != "bind:lib"]
+    assert len(kept) == len(rows) - 1
+    _write_rows(baseline, kept)
+
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "NEW unclassified argument" in out and "bind:lib" in out, out
+    assert "CHAIN-SITE" not in out, "a data row must not touch the exemptions"
+
+
+def test_lib_row_value_change_reports_changed(tmp_path):
+    """And editing what it binds reports CHANGED, like any reviewed argument."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _mutate_corpus(root, "logging_config.py", "lib=record.name",
+                   "lib=record.getMessage()")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHANGED" in out and "bind:lib" in out, out
+    assert "CHAIN-SITE" not in out, out
+
+
+# -- Ruling A: `external` is selectable, and NOT a plain channel ---------------
+
+def test_gate_channel_vocabulary_matches_log_py():
+    """The gate's copy of the vocabulary must track the code it gates."""
+    source = (REPO / "src" / "ayder_cli" / "log.py").read_text()
+    assert 'CHANNELS: tuple[str, ...] = ("llm", "tool", "agent", "context", ' \
+           '"plugin", "ui", "core")' in source
+    assert 'RESERVED_CHANNELS: tuple[str, ...] = ("external",)' in source
+    gate_source = GATE.read_text()
+    assert 'CHANNELS_FROZEN = ("llm", "tool", "agent", "context", "plugin", ' \
+           '"ui", "core")' in gate_source
+    assert 'RESERVED_CHANNELS_FROZEN = ("external",)' in gate_source
+
+
+def test_removing_external_from_the_selectable_set_fails(tmp_path):
+    """`external` is bound by the stdlib bridge: drop it and the live tree must
+    immediately report the bind as an unknown channel."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _patch_gate(gate, "RESERVED_CHANNELS_FROZEN = ()\n"
+                      "SELECTABLE_CHANNELS_FROZEN = CHANNELS_FROZEN")
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out, out
+    assert "'external' is not one of" in out or "no longer matches" in out, out
+
+
+def test_treating_external_as_a_plain_channel_fails(tmp_path):
+    """It is RESERVED: `get_logger` rejects it deliberately, so the gate may not
+    quietly promote it to an ordinary channel."""
+    gate, baseline, root = _isolated_layout(tmp_path)
+    _patch_gate(gate, 'CHANNELS_FROZEN = CHANNELS_FROZEN + ("external",)')
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CHAIN-CHANNEL" in out and "no longer matches log.py" in out, out

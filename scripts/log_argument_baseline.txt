@@ -1,3 +1,4 @@
+{"class":"dynamic-residual:known-shape-masked","site":{"arg_index":"bind:lib","expr":"record.name","message":null,"method":"bind","path":"logging_config.py","qualname":"_InterceptHandler.emit"}}
 {"class":"R-name","site":{"arg_index":"kw:agent","expr":"run.agent_name","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
 {"class":"R-count","site":{"arg_index":"kw:args_len","expr":"len(str(args or ''))","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-count","site":{"arg_index":"kw:content_len","expr":"len(final_content)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
