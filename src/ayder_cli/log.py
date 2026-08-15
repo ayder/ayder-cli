@@ -28,3 +28,17 @@ def flush() -> None:
     """Drain queued records. Required before asserting on sink contents,
     and before process exit — sinks use enqueue=True."""
     logger.complete()
+
+
+SCHEMA_VERSION = 1
+
+
+def emit_event(channel: str, evt: str, **fields):
+    """Emit one structured event to trace.jsonl.
+
+    Routed by the presence of `evt`: the trace sink admits only records that
+    carry it, and the main sink excludes them. Never appears in ayder.log.
+    """
+    return get_logger(channel).bind(
+        schema_version=SCHEMA_VERSION, evt=evt, **fields
+    ).trace(evt)
