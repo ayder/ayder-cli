@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from ayder_cli.application.validation import ToolRequest, ValidationError  # noqa: F401
+from ayder_cli.core.result import ToolError
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 @dataclass
@@ -180,7 +181,10 @@ class ExecutionPolicy:
                 return ExecutionResult(success=False, error=perm_err)
 
         raw = registry.execute(request.name, request.arguments)
-        return ExecutionResult(success=True, was_confirmed=pre_approved, result=str(raw))
+        if isinstance(raw, ToolError):
+            # A tool that ran and failed is NOT a successful execution.
+            return ExecutionResult(success=False, was_confirmed=pre_approved, error=raw)
+        return ExecutionResult(success=True, was_confirmed=pre_approved, result=raw)
 
     def format_error_for_llm(self, error: ToolExecutionError) -> dict:
         """Format a tool error as an LLM-consumable message."""

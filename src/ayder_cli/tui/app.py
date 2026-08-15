@@ -948,6 +948,12 @@ class AyderApp(App):
             chat_view.add_system_message(error)
             self._callbacks.on_tool_complete(call_id, error)
             self._callbacks.on_tools_cleanup()
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": self._format_shell_context_message(command, error),
+                }
+            )
             return False
 
         result = str(exec_result.result or "")
