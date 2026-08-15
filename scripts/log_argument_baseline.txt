@@ -58,8 +58,6 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"manifest.name","message":"Dependency install failed for plugin {!r}; rolling back","method":"error","path":"cli.py","qualname":"main"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"manifest.name","message":"Installed plugin '{}' v{}","method":"info","path":"tools/plugin_manager.py","qualname":"install_plugin_from_github"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"manifest.name","message":"Installed plugin '{}' v{}","method":"info","path":"tools/plugin_manager.py","qualname":"install_plugin_from_local"}}
-{"class":"content-deferred:5-04","site":{"arg_index":"pos:0","expr":"message","message":"Unhandled asyncio error: {}","method":"error","path":"diagnostics.py","qualname":"_handle_asyncio"}}
-{"class":"content-deferred:5-04","site":{"arg_index":"pos:0","expr":"message","message":"Unhandled asyncio exception: {}","method":"critical","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"model","message":"/api/show failed for {!r}; using default","method":"warning","path":"providers/impl/ollama_drivers/registry.py","qualname":"DriverRegistry.resolve"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"model","message":"Claude Stream Request: model={}, tools={}","method":"debug","path":"providers/impl/claude.py","qualname":"ClaudeProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"model","message":"Gemini Stream Request: model={}, tools={}","method":"debug","path":"providers/impl/gemini.py","qualname":"GeminiProvider.stream_with_tools"}}
@@ -79,6 +77,8 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"Uninstalled plugin '{}'","method":"info","path":"tools/plugin_manager.py","qualname":"uninstall_plugin"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"cancel: agent='{}' \u2014 no running/queued instances","method":"debug","path":"agents/registry.py","qualname":"AgentRegistry.cancel"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"cancel: agent='{}' cancelled {} instance(s): {}","method":"debug","path":"agents/registry.py","qualname":"AgentRegistry.cancel"}}
+{"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio error: {}","method":"error","path":"diagnostics.py","qualname":"_handle_asyncio"}}
+{"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio exception: {}","method":"critical","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"num_ctx","message":"Context budget: {} tokens (derived from num_ctx; max_context_tokens unset)","method":"info","path":"core/default_context_manager.py","qualname":"DefaultContextManager.__init__"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"panel_id","message":"Panel lookup failed for {}","method":"debug","path":"tui/app.py","qualname":"AyderApp._scroll_open_panel"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"path","message":"Failed to read note file {}","method":"error","path":"tui/commands.py","qualname":"_open_note_in_editor"}}
@@ -275,4 +275,4 @@
 {"class":"R-id","site":{"arg_index":"splat:self._correlation():session_id","expr":"self._correlation()['session_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-id","site":{"arg_index":"splat:self._correlation():session_id","expr":"self._correlation()['session_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"dynamic-trusted","site":{"arg_index":null,"expr":"evt","message":null,"method":"trace","path":"log.py","qualname":"emit_event"}}
-{"class":"dynamic-deferred:5-04","site":{"arg_index":null,"expr":"record.getMessage()","message":null,"method":"log","path":"logging_config.py","qualname":"_InterceptHandler.emit"}}
+{"class":"dynamic-residual:known-shape-masked","site":{"arg_index":null,"expr":"message","message":null,"method":"log","path":"logging_config.py","qualname":"_InterceptHandler.emit"}}

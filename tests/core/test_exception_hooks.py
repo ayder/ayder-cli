@@ -142,7 +142,12 @@ def test_asyncio_handler_chains_and_installs_once(tmp_path):
     logger.complete()
 
     assert prior == ["chained"], "the pre-existing handler must still run, exactly once"
-    assert (tmp_path / "errors.log").read_text().count("chained") == 1
+    # The custom handler receives the ORIGINAL context (asserted above), while
+    # our own record carries the B2-prime normalized message - `chained` is an
+    # unknown string, so it degrades to type/length metadata.
+    text = (tmp_path / "errors.log").read_text()
+    assert text.count("Unhandled asyncio exception") == 1, text
+    assert "<str, 7 chars>" in text, text
 
 
 def test_keyboard_interrupt_is_not_logged_as_a_crash(tmp_path, monkeypatch):

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import contextvars
 import inspect
 import logging
+import sys
 import tempfile
+import threading
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
@@ -198,23 +202,136 @@ class _MaskingStream:
         return self._stream.isatty()
 
 
+# ------------------------------------------------- diagnostics of last resort
+
+# Content-free ON PURPOSE. A reentrant record is one whose own formatting is
+# already inside this handler, so touching `record` again - even `.name` or
+# `.levelname`, both arbitrary caller text - is how a hostile record gets a
+# second chance to run its formatter or inject a newline.
+_REENTRANT_NOTICE = "ayder logging: reentrant stdlib record dropped\n"
+_FALLBACK_LAST = "ayder logging: diagnostic record unavailable\n"
+_UNFORMATTABLE = "<unformattable stdlib record>"
+
+_STD_LEVEL_NAMES = frozenset(
+    {"NOTSET", "TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
+
+# Thread-local, not a global flag: two threads bridging at once are ordinary,
+# and a shared flag would make one thread silently drop the other's records.
+_bridge_latch = threading.local()
+
+# Set ONLY around `loop.default_exception_handler(context)` in the no-previous
+# branch, so it identifies exactly one record: CPython's raw copy of an event
+# this process already logged in normalized form.
+_in_default_asyncio_handler: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "ayder_in_default_asyncio_handler", default=False)
+
+
+def _bound_label(record: logging.LogRecord) -> str:
+    """A level name for output. Custom stdlib level names are caller text."""
+    name = record.levelname
+    return name if name in _STD_LEVEL_NAMES else f"LEVEL {int(record.levelno)}"
+
+
+def _bound_token(value: str) -> str:
+    """Bound an unbounded caller-supplied name to one printable, short token.
+
+    `isprintable()` is False for \\r, \\n and \\t, so a logger name cannot forge
+    a second line of output.
+    """
+    return "".join(ch if ch.isprintable() else "?" for ch in str(value)[:200])
+
+
+def _stderr_fallback(label: str, name: str, message: str,
+                     exc_info: Any) -> None:
+    """Render one DIAGNOSTIC to stderr when no prose sink would receive it.
+
+    Callers decide what counts as a diagnostic; this only renders. Deliberately
+    silenced low-severity traffic must never be routed here - see the bridge's
+    `is_diagnostic` gate.
+
+    Exception-total by design: this is the path that exists BECAUSE logging is
+    already broken, so every stage degrades to fixed safe text instead of
+    raising. It never calls stdlib logging and `mask()` is pure regex, so it
+    cannot recurse back through the bridge.
+    """
+    try:
+        text = f"{label} {name}: {message}\n"
+        if exc_info:
+            try:
+                text += "".join(traceback.format_exception(*exc_info))
+            except Exception:  # noqa: BLE001 - AYDER-EXC hostile traceback object; degrade to fixed text, never raise
+                text += "<traceback unavailable>\n"
+        out = mask(text)
+    except Exception:  # noqa: BLE001 - AYDER-EXC hostile message/mask failure; degrade to the fixed last resort
+        out = _FALLBACK_LAST
+    try:
+        sys.stderr.write(out)
+    except Exception:  # noqa: BLE001 - AYDER-EXC closed/encoding-broken stderr; diagnostics never crash the process
+        pass
+
+
+def _level_no_of(level: str | int) -> int:
+    """Resolve exactly as the forward does: a known name, else the raw number."""
+    return logger.level(level).no if isinstance(level, str) else int(level)
+
+
 class _InterceptHandler(logging.Handler):
     """Bridge stdlib logging records into loguru on the `external` channel."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        if getattr(_bridge_latch, "active", False):
+            # Re-entry means a sink, filter or formatter below us logged through
+            # stdlib. Forwarding again would recurse until the stack blew.
+            try:
+                sys.stderr.write(_REENTRANT_NOTICE)
+            except Exception:  # noqa: BLE001 - AYDER-EXC closed stderr on the drop path; nothing left to try
+                pass
+            return
+
+        _bridge_latch.active = True
         try:
-            level: str | int = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
+            if _in_default_asyncio_handler.get():
+                # CPython's raw copy of an asyncio event we already logged in
+                # normalized form. It carries unnormalized context reprs, so it
+                # is dropped rather than forwarded - never used as a fallback.
+                return
 
-        frame, depth = inspect.currentframe(), 0
-        while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
-            frame = frame.f_back
-            depth += 1
+            try:
+                level: str | int = logger.level(record.levelname).name
+            except ValueError:
+                level = record.levelno
+            forwarded_no = _level_no_of(level)      # resolved ONCE, reused below
 
-        logger.bind(channel="external", lib=record.name).opt(
-            depth=depth, exception=record.exc_info
-        ).log(level, record.getMessage())
+            frame, depth = inspect.currentframe(), 0
+            while frame and (depth == 0
+                             or frame.f_code.co_filename == logging.__file__):
+                frame = frame.f_back
+                depth += 1
+
+            # Called EXACTLY once: a hostile `getMessage` must not get a second
+            # run, and the fallback below reuses this same value.
+            try:
+                message = record.getMessage()
+            except Exception:  # noqa: BLE001 - AYDER-EXC hostile record formatter; degrade to fixed text, keep the record
+                message = _UNFORMATTABLE
+
+            logger.bind(channel="external", lib=record.name).opt(
+                depth=depth, exception=record.exc_info
+            ).log(level, message)
+
+            # The fallback protects DIAGNOSTICS, not everything unrouted. A
+            # below-WARNING record with no exception that no sink accepts was
+            # deliberately silenced - by level NONE, by the channel allowlist,
+            # or by a threshold - and surfacing it would turn the default run
+            # into stderr noise, straight through Textual in the TUI.
+            is_diagnostic = (forwarded_no >= logger.level("WARNING").no
+                             or record.exc_info is not None)
+            if is_diagnostic and not would_reach_prose(
+                    "external", forwarded_no, record.exc_info is not None):
+                _stderr_fallback(_bound_label(record), _bound_token(record.name),
+                                 message, record.exc_info)
+        finally:
+            _bridge_latch.active = False
 
 
 def _normalize_level(level: str | None) -> str:

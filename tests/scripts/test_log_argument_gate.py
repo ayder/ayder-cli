@@ -204,9 +204,9 @@ def test_committed_baseline_is_ordered_and_collision_free():
 
 
 FROZEN_TALLY = {
-    "R-name": 93, "R-id": 36, "R-count": 88, "R-status": 25, "R-class": 10,
-    "R-path": 22, "content-deferred:5-04": 2, "dynamic-trusted": 1,
-    "dynamic-deferred:5-04": 1,
+    "R-name": 93, "R-id": 36, "R-count": 88, "R-status": 27, "R-class": 10,
+    "R-path": 22, "dynamic-trusted": 1,
+    "dynamic-residual:known-shape-masked": 1,
 }
 
 
@@ -258,6 +258,31 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
         repo_baseline_before, "the control wrote to the repository baseline"
 
 
+def test_tally_new_vocabulary_mutation(tmp_path):
+    """The permanent 5-04 residual tag is counted, not merely spelled.
+
+    A tag added to the vocabulary without a pinned count would let any row be
+    quietly relabelled into it - which is exactly the review this gate exists
+    to freeze.
+    """
+    repo_baseline_before = BASELINE.read_bytes()
+    gate, baseline, root = _isolated_layout(tmp_path)
+
+    rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
+            if ln.strip()]
+    victim = next(i for i, r in enumerate(rows)
+                  if r["class"] == "dynamic-residual:known-shape-masked")
+    rows[victim]["class"] = "dynamic-trusted"     # a real tag, the wrong claim
+    _write_rows(baseline, rows)
+
+    code, out = _run(cwd=tmp_path, gate=gate)
+    assert code == 1, out
+    assert "CLASS-TALLY" in out, out
+    assert "0 'dynamic-residual:known-shape-masked'" in out, out
+    assert "2 'dynamic-trusted'" in out, out
+    assert BASELINE.read_bytes() == repo_baseline_before
+
+
 def test_caller_supplied_baselines_are_exempt_from_the_frozen_tally(tmp_path):
     """The tally is a fact about one committed file, not about the format."""
     code, out, _ = _classified(tmp_path, PRELUDE + "logger.info('a {}', x)\n")
@@ -267,7 +292,10 @@ def test_caller_supplied_baselines_are_exempt_from_the_frozen_tally(tmp_path):
 
 def test_committed_baseline_classification_tally():
     """The seeded classes reconcile with the frozen census arithmetic:
-    252 retained non-path + 22 paths + 2 deferred + 2 dynamic."""
+    254 retained non-path + 22 paths + 2 dynamic. Step 5-04 closed both
+    `:5-04` deferrals - the two asyncio rows became R-status once they
+    interpolate the B2-prime normalized value, and the bridge's dynamic
+    message carries the permanent known-shape-masked residual tag."""
     rows = [json.loads(ln) for ln in BASELINE.read_text().splitlines()
             if ln.strip()]
     tally: dict[str, int] = {}
@@ -276,7 +304,9 @@ def test_committed_baseline_classification_tally():
     assert tally == FROZEN_TALLY, tally
     retained = sum(tally.get(t, 0) for t in
                    ("R-name", "R-id", "R-count", "R-status", "R-class"))
-    assert retained == 252, tally
+    assert retained == 254, tally
+    assert "content-deferred:5-04" not in tally, "5-04 content deferral is closed"
+    assert "dynamic-deferred:5-04" not in tally, "5-04 dynamic deferral is closed"
     assert sum(tally.values()) == 278, tally
     assert "ident" not in tally, "the forbidden generic tag is in the baseline"
 

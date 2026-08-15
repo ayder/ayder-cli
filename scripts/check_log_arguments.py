@@ -108,9 +108,13 @@ VALID_CLASSES = (
     "R-status",   # enum-like status/mode/protocol/strategy constants
     "R-class",    # type(x).__name__ - never the value
     "R-path",     # filesystem locations, retained as operational diagnostics
-    "content-deferred:5-04",   # known content risk, owned by step 5-04
+    "content-deferred:5-04",   # known content risk, owned by step 5-04 - CLOSED
     "dynamic-trusted",         # dynamic message from a frozen code constant
-    "dynamic-deferred:5-04",   # dynamic message content risk, owned by 5-04
+    "dynamic-deferred:5-04",   # dynamic message content risk, owned by 5-04 - CLOSED
+    # Permanent (§F5-R15). Claims only what is true: the KNOWN credential
+    # shapes in this value are masked by the prose sinks. Arbitrary
+    # third-party text is never called accepted.
+    "dynamic-residual:known-shape-masked",
 )
 
 SITE_KEYS = ("path", "qualname", "method", "message", "arg_index", "expr")
@@ -125,12 +129,16 @@ FROZEN_TALLY: dict[str, int] = {
     "R-name": 93,
     "R-id": 36,
     "R-count": 88,
-    "R-status": 25,
+    "R-status": 27,
     "R-class": 10,
     "R-path": 22,
-    "content-deferred:5-04": 2,
+    # Both 5-04 deferrals are closed: the two asyncio rows now interpolate the
+    # B2-prime normalized value, and the bridge's dynamic message is masked by
+    # the prose sinks it reaches.
+    "content-deferred:5-04": 0,
     "dynamic-trusted": 1,
-    "dynamic-deferred:5-04": 1,
+    "dynamic-deferred:5-04": 0,
+    "dynamic-residual:known-shape-masked": 1,
 }
 
 # Same conversion set as the %-style gate; `%%` is stripped before matching.
