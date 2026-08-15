@@ -39,7 +39,7 @@ def get_project_structure(project_ctx: ProjectContext, max_depth: int = 3) -> st
             )
             if result.returncode == 0:
                 return ToolSuccess(result.stdout.strip())
-        except Exception:
+        except Exception:  # noqa: BLE001 - optional `tree` binary: any spawn failure must fall through to the manual walker
             logger.opt(exception=True).debug(
                 "`tree` command failed; falling back to manual tree"
             )
@@ -303,7 +303,7 @@ def manage_environment_vars(
 
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: any .env read or write failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error managing environment variables: {str(e)}", "execution")
 
     # Fallback return to satisfy type checker

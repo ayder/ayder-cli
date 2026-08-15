@@ -105,5 +105,5 @@ def bash(
         return ToolSuccess(_bound_output(output, cap))
     except subprocess.TimeoutExpired:
         return ToolError(f"Error: Command timed out after {eff_timeout}s.", "execution")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - subprocess boundary: model-supplied commands must fail as a ToolError, never as a crash
         return ToolError(f"Error executing command: {str(e)}", "execution")

@@ -193,5 +193,5 @@ def _load_project_plugins(reg: ToolRegistry, project_path: Path) -> None:
             logger.info(
                 "Loaded project plugin '{}' ({} tools)", plugin_dir.name, len(defs)
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - plugin sandbox: loading a project plugin executes third-party module code
             logger.opt(exception=True).warning("Skipping project plugin '{}'", plugin_dir.name)

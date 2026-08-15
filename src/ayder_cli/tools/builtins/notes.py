@@ -106,7 +106,7 @@ def write_agent_note(
             body += f"\n\n## Error\n{error}"
         path = _write_note(notes_dir, filename, frontmatter, body, exclusive=True)
         return project_ctx.to_relative(path)
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort agent note: a failed write must not fail the agent run it records
         logger.opt(exception=True).warning(
             "write_agent_note failed for agent '{}' run {}", agent_name, run_id
         )
@@ -159,7 +159,7 @@ def create_note(
         rel_path = project_ctx.to_relative(path)
         return ToolSuccess(f"Note created: {rel_path}")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: any note-write failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error creating note: {str(e)}", "execution")
 
 

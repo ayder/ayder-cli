@@ -124,7 +124,7 @@ def read_file(
 
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: any read failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error reading file: {str(e)}", "execution")
 
 
@@ -156,7 +156,7 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
                 try:
                     with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                         line_count = sum(1 for _ in f)
-                except Exception:
+                except Exception:  # noqa: BLE001 - best-effort metadata: line count is optional, so a failure must omit it, not fail the listing
                     logger.opt(exception=True).debug(
                         "Line count failed for {}", rel_path
                     )
@@ -179,7 +179,7 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
             
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: any stat or path failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error exploring path: {str(e)}", "execution")
 
 
@@ -216,7 +216,7 @@ def _finalize(
         if abs_path.exists():
             os.chmod(tmp_name, os.stat(abs_path).st_mode)
         os.replace(tmp_name, str(abs_path))
-    except BaseException:  # noqa: AYDER-EXC temporary-file cleanup then unconditional re-raise
+    except BaseException:  # AYDER-EXC - temporary-file cleanup then unconditional re-raise
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise
@@ -382,5 +382,5 @@ def file_editor(
 
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: model-supplied edit arguments must fail as a ToolError, never as a crash
         return ToolError(f"Error executing file_editor: {str(e)}", "execution")

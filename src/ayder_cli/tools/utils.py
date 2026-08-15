@@ -106,6 +106,6 @@ def prepare_new_content(fname, args, project_ctx=None):
     except json.JSONDecodeError:
         logger.exception("JSON decode error")
         return ""
-    except Exception:
+    except Exception:  # noqa: BLE001 - residual after JSONDecodeError: preview rendering must degrade to an empty string
         logger.opt(exception=True).error("Unexpected error in prepare_new_content")
         return ""

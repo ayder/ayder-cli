@@ -101,7 +101,7 @@ def search_codebase(
             )
     except ValueError as e:
         return ToolError(f"Security Error: {str(e)}", "security")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: model-supplied search arguments must fail as a ToolError, never as a crash
         return ToolError(f"Error during search: {str(e)}", "execution")
 
 
@@ -189,7 +189,7 @@ def _search_with_ripgrep(
             )
     except subprocess.TimeoutExpired:
         return ToolError("Error: Search timed out after 60 seconds.", "execution")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - subprocess boundary: ripgrep spawn and decode failures become a ToolError
         return ToolError(f"Error executing ripgrep: {str(e)}", "execution")
 
 
@@ -274,7 +274,7 @@ def _search_with_grep(
             )
     except subprocess.TimeoutExpired:
         return ToolError("Error: Search timed out after 60 seconds.", "execution")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - subprocess boundary: grep spawn and decode failures become a ToolError
         return ToolError(f"Error executing grep: {str(e)}", "execution")
 
 

@@ -262,6 +262,63 @@ def test_unparseable_file_is_a_finding(tmp_path):
     assert "UNPARSEABLE" in out
 
 
+# -- plain-marker controls ----------------------------------------------------
+#
+# `AYDER-EXC` is not a Ruff rule code, so spelling the marker `# noqa: AYDER-EXC`
+# makes Ruff emit "Invalid `# noqa` directive" on every run. Step 5-02 normalized
+# the one live use (the filesystem temp-file re-raiser) to a plain reasoned
+# comment. Both halves of that change need a durable control: the gate must still
+# honour the plain form, and Ruff must stay quiet about it.
+
+
+def test_plain_marker_without_noqa_prefix_suppresses(tmp_path):
+    """The C10 marker is the token plus a reason — the `# noqa:` prefix is not
+    part of it, and must not be required to suppress."""
+    out = _verdict(tmp_path, """
+        try:
+            x()
+        except BaseException:  # AYDER-EXC - cleanup then unconditional re-raise
+            pass
+    """)
+    assert "FAIL" not in out, out
+    assert "findings=0" in out, out
+    # Suppressed findings are still counted broad — only the finding is hidden.
+    assert "broad=1" in out, out
+
+
+def test_plain_marker_draws_no_ruff_noqa_warning(tmp_path):
+    """Ruff must report a real BLE001 violation in the fixture while saying
+    nothing about the plain marker. Asserting only "no warning" would also pass
+    if Ruff never looked at the file at all, so the violation is the coverage
+    proof and the absent warning is the claim under test."""
+    (tmp_path / "sample.py").write_text(textwrap.dedent("""
+        import contextlib
+
+        def reraiser(cleanup):
+            try:
+                pass
+            except BaseException:  # AYDER-EXC - cleanup then unconditional re-raise
+                with contextlib.suppress(OSError):
+                    cleanup()
+                raise
+
+        def swallower():
+            try:
+                pass
+            except Exception:
+                return None
+    """))
+    r = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "--isolated",
+         "--select=BLE001", "--output-format=concise", str(tmp_path)],
+        capture_output=True, text=True, cwd=REPO,
+    )
+    out = r.stdout + r.stderr
+    assert "panicked" not in out, out
+    assert "BLE001" in out, out
+    assert "Invalid `# noqa` directive" not in out, out
+
+
 def test_full_tree_census_is_frozen():
     """119 is the §C10 census. A different number means the gate is reading the
     wrong tree, or the census moved without the plan being updated."""

@@ -165,7 +165,7 @@ def _set_status_skill(app: Any, skill_name: str | None) -> None:
         from ayder_cli.tui.widgets import StatusBar
 
         app.query_one("#status-bar", StatusBar).set_skill(skill_name)
-    except Exception:
+    except Exception:  # noqa: BLE001 - TUI status-bar update: a widget lookup failure must not fail the skill invocation
         logger.opt(exception=True).debug("Failed to update status bar skill indicator")
 
 
@@ -174,7 +174,7 @@ def _new_agent_generation(app: Any) -> None:
     if agent_registry is not None:
         try:
             agent_registry.new_generation()
-        except Exception:
+        except Exception:  # noqa: BLE001 - agent registry callback: failing to advance the generation must not fail the skill invocation
             logger.opt(exception=True).warning("Failed to advance agent generation")
 
 

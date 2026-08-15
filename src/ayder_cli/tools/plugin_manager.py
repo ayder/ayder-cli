@@ -501,7 +501,7 @@ def discover_global_plugins() -> tuple[tuple, dict[str, Callable]]:
                 e,
                 plugin_dir,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - plugin sandbox: loading a plugin executes third-party module code
             logger.opt(exception=True).warning("Skipping plugin '{}'", plugin_dir.name)
 
     return tuple(all_defs), all_handlers

@@ -122,7 +122,7 @@ def _discover_definitions() -> Tuple["ToolDefinition", ...]:
                     )
             except ImportError as e:
                 logger.warning("Failed to import {}: {}", name, e)
-            except Exception:
+            except Exception:  # noqa: BLE001 - tool discovery boundary: importing a definitions module executes third-party code
                 logger.opt(exception=True).error("Error loading definitions from {}", name)
 
     # Validate: Detect duplicate tool names (with accurate source tracking)
@@ -188,7 +188,7 @@ try:
     from ayder_cli.tools.plugin_manager import discover_global_plugins
 
     _GLOBAL_PLUGIN_DEFS, _PLUGIN_HANDLERS = discover_global_plugins()
-except Exception:
+except Exception:  # noqa: BLE001 - import-time plugin discovery: a failing plugin must not make this module unimportable
     logger.opt(exception=True).warning("Failed to load global plugins")
 
 TOOL_DEFINITIONS = _BUILTIN_DEFINITIONS + _GLOBAL_PLUGIN_DEFS

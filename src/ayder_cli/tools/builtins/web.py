@@ -153,5 +153,5 @@ def fetch_web(
         return ToolError(f"Error: {e}", "validation")
     except httpx.RequestError as e:
         return ToolError(f"Error fetching URL: {e}", "execution")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: residual after ValueError and httpx.RequestError; any fetch or parse failure becomes a ToolError
         return ToolError(f"Error during fetch_web: {e}", "execution")

@@ -263,7 +263,7 @@ def _show(
         return ToolError(f"Task not found: {identifier}", "not_found")
     try:
         content = path.read_text(encoding="utf-8")
-    except Exception as exc:  # pragma: no cover - unexpected IO
+    except Exception as exc:  # noqa: BLE001 - tool boundary: any task-file read failure becomes a ToolError  # pragma: no cover
         return ToolError(f"Error reading task file: {exc}", "execution")
 
     if meta_only:

@@ -292,7 +292,7 @@ def snapshot_conversation_for_clear(
             json.dumps(snapshot, indent=2),
             overwrite=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort recovery snapshot: a failed save must never break the turn it protects
         logger.opt(exception=True).warning("Recovery snapshot failed")
         return None
     if isinstance(result, ToolError):

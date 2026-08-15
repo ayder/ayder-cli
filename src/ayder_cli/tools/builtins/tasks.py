@@ -113,7 +113,7 @@ def _parse_status(filepath):
             match = re.match(r"-\s+\*\*Status:\*\*\s+(.+)", line)
             if match:
                 return match.group(1).strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort parse: an unreadable or malformed task file yields "unknown", not an error
         logger.opt(exception=True).debug("Failed to parse status from {}", filepath)
     return "unknown"
 
@@ -125,7 +125,7 @@ def _parse_title(filepath):
         for line in content.splitlines():
             if line.startswith("# "):
                 return line[2:].strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort parse: an unreadable or malformed task file falls back to the filename
         logger.opt(exception=True).debug("Failed to parse title from {}", filepath)
     return Path(filepath).name
 
@@ -221,7 +221,7 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
         candidate = project_ctx.root / identifier
         if candidate.exists() and candidate.is_file():
             return candidate
-    except Exception:
+    except Exception:  # noqa: BLE001 - resolver strategy 1 of several: any failure must fall through to the next strategy
         logger.opt(exception=True).debug(
             "Strategy 1 (relative path) failed ({} chars)", len(identifier)
         )
@@ -260,7 +260,7 @@ def read_task(project_ctx: ProjectContext, identifier: str):
         return None
     try:
         content = path.read_text(encoding="utf-8")
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort read: an unreadable task file yields no signature rather than raising
         logger.opt(exception=True).warning("Failed to read task file {}", path)
         return None
     tid = _extract_id(path.name)
@@ -304,7 +304,7 @@ def show_task(project_ctx: ProjectContext, identifier: str):
 
     try:
         return ToolSuccess(path.read_text(encoding="utf-8"))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: any task-file read failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error reading task file: {str(e)}", "execution")
 
 
@@ -348,5 +348,5 @@ def update_task_temporal_metadata(
 
         path.write_text(updated, encoding="utf-8")
         return ToolSuccess("Task temporal metadata updated")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool boundary: rewriting a model-supplied task file must fail as a ToolError, never as a crash
         return ToolError(f"Error updating task temporal metadata: {e}", "execution")

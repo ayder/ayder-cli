@@ -114,7 +114,7 @@ def execute_tool(
         result = tool_func(**call_args)
         status = ToolExecutionStatus.SUCCESS
         error = None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - tool dispatch boundary: every tool failure must become a ToolError result for the model
         logger.opt(exception=True).error("Tool '{}' raised during execution", tool_name)
         result = ToolError(f"Error executing {tool_name}: {str(e)}", "execution")
         status = ToolExecutionStatus.ERROR

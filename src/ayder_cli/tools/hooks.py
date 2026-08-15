@@ -103,7 +103,7 @@ class HookManager:
         for cb in self._pre_callbacks:
             try:
                 cb(tool_name, args)
-            except Exception:
+            except Exception:  # noqa: BLE001 - callback boundary: a registered pre-execute callback must not abort tool execution
                 logger.opt(exception=True).warning(
                     "Pre-execute callback failed for {}", tool_name
                 )
@@ -115,7 +115,7 @@ class HookManager:
                 mw(tool_name, args)
             except PermissionError:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 - middleware boundary: PermissionError is re-raised above; nothing else may abort tool execution
                 logger.opt(exception=True).warning("Middleware failed for {}", tool_name)
 
     def run_post_callbacks(self, result: ToolExecutionResult) -> None:
@@ -123,7 +123,7 @@ class HookManager:
         for cb in self._post_callbacks:
             try:
                 cb(result)
-            except Exception:
+            except Exception:  # noqa: BLE001 - callback boundary: a registered post-execute callback must not abort tool execution
                 logger.opt(exception=True).warning(
                     "Post-execute callback failed for {}", result.tool_name
                 )
