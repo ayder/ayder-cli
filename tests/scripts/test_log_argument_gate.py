@@ -162,6 +162,53 @@ def test_committed_baseline_is_ordered_and_collision_free():
     assert not any("line" in json.loads(ln)["site"] for ln in lines)
 
 
+FROZEN_TALLY = {
+    "R-name": 93, "R-id": 36, "R-count": 88, "R-status": 25, "R-class": 10,
+    "R-path": 22, "content-deferred:5-04": 2, "dynamic-trusted": 1,
+    "dynamic-deferred:5-04": 1,
+}
+
+
+@pytest.mark.parametrize("invocation", [
+    pytest.param((), id="default-path"),
+    pytest.param(("--root", str(SRC_ROOT), "--baseline", str(BASELINE)),
+                 id="explicit-resolved-path"),
+])
+def test_gate_itself_enforces_the_frozen_tally(tmp_path, invocation):
+    """Row-by-row diffing cannot see a silent retag: the identity is unchanged,
+    so NEW/REMOVED/CHANGED all stay quiet. Only the composition catches it -
+    and the gate, not a test, has to be the one that catches it."""
+    original = BASELINE.read_bytes()
+    rows = [json.loads(ln) for ln in original.decode().splitlines() if ln.strip()]
+    victim = next(i for i, r in enumerate(rows) if r["class"] == "R-path")
+    rows[victim]["class"] = "R-name"          # allowed tag, wrong provenance
+    try:
+        BASELINE.write_bytes("".join(
+            json.dumps(r, sort_keys=True, ensure_ascii=True,
+                       separators=(",", ":")) + "\n" for r in rows).encode())
+        code, out = _run(*invocation)
+        assert code == 1, out
+        assert "CLASS-TALLY" in out, out
+        assert "94 'R-name'" in out and "is 93" in out, out
+        assert "21 'R-path'" in out and "is 22" in out, out
+        # The retag is invisible to every row-level report - that is the point.
+        assert "NEW unclassified" not in out, out
+        assert "REMOVED" not in out, out
+        assert "CHANGED" not in out, out
+    finally:
+        BASELINE.write_bytes(original)
+    assert BASELINE.read_bytes() == original
+    code, out = _run()
+    assert code == 0, out
+
+
+def test_caller_supplied_baselines_are_exempt_from_the_frozen_tally(tmp_path):
+    """The tally is a fact about one committed file, not about the format."""
+    code, out, _ = _classified(tmp_path, PRELUDE + "logger.info('a {}', x)\n")
+    assert code == 0, out
+    assert "CLASS-TALLY" not in out, out
+
+
 def test_committed_baseline_classification_tally():
     """The seeded classes reconcile with the frozen census arithmetic:
     252 retained non-path + 22 paths + 2 deferred + 2 dynamic."""
@@ -170,13 +217,10 @@ def test_committed_baseline_classification_tally():
     tally: dict[str, int] = {}
     for row in rows:
         tally[row["class"]] = tally.get(row["class"], 0) + 1
+    assert tally == FROZEN_TALLY, tally
     retained = sum(tally.get(t, 0) for t in
                    ("R-name", "R-id", "R-count", "R-status", "R-class"))
     assert retained == 252, tally
-    assert tally["R-path"] == 22, tally
-    assert tally["content-deferred:5-04"] == 2, tally
-    assert tally["dynamic-trusted"] == 1, tally
-    assert tally["dynamic-deferred:5-04"] == 1, tally
     assert sum(tally.values()) == 278, tally
     assert "ident" not in tally, "the forbidden generic tag is in the baseline"
 
@@ -439,6 +483,74 @@ def test_named_field_without_an_argument_is_a_finding(tmp_path):
     assert "named field(s) with no argument: ['who']" in out, out
 
 
+def test_named_arguments_that_match_their_fields_are_accepted(tmp_path):
+    """The non-vacuous half of the surplus rule: an exactly-matching set of
+    named arguments must stay clean, so the rule cannot be satisfied by simply
+    rejecting every keyword."""
+    src = PRELUDE + "logger.info('{who} left at {when}', who=name, when=t)\n"
+    code, out = _scan(tmp_path, src)
+    assert "ARITY" not in out, out
+    code, out, sites = _classified(tmp_path, src)
+    assert code == 0, out
+    assert sorted(s["arg_index"] for s in sites) == ["kw:when", "kw:who"], sites
+
+
+def test_surplus_explicit_keyword_is_a_finding(tmp_path):
+    """Loguru captures an unused kwarg into record['extra'], where it reaches
+    the trace sink without ever appearing in the message a reviewer reads."""
+    code, out = _scan(tmp_path,
+                      PRELUDE + "logger.info('{who}', who=name, secret=secret)\n")
+    assert code == 1, out
+    assert "surplus keyword argument(s) with no named field: ['secret']" in out, out
+
+
+def test_surplus_splat_key_is_a_finding(tmp_path):
+    """Statically expanded `**` keys are held to the same rule as explicit
+    ones: expansion is what makes them checkable."""
+    code, out = _scan(tmp_path, PRELUDE + textwrap.dedent("""
+        def go(who, extra):
+            fields = {'who': who, 'leaked': extra}
+            logger.info('{who}', **fields)
+    """))
+    assert code == 1, out
+    assert "surplus keyword argument(s) with no named field: ['leaked']" in out, out
+
+
+def test_surplus_keyword_is_not_suppressible_by_baselining(tmp_path):
+    """The row being reviewed says the VALUE is acceptable; it says nothing
+    about the keyword having no field to land in."""
+    src = PRELUDE + "logger.info('{who}', who=name, secret=secret)\n"
+    code, out, _ = _classified(tmp_path, src)
+    assert code == 1, out
+    assert "NEW unclassified" not in out, out
+    assert "surplus keyword argument(s)" in out, out
+
+
+@pytest.mark.parametrize("message", [
+    pytest.param("'{!s}'", id="str-conversion"),
+    pytest.param("'{!r}'", id="repr-conversion"),
+    pytest.param("'{!a}'", id="ascii-conversion"),
+])
+def test_valid_conversions_are_accepted(tmp_path, message):
+    code, out = _scan(tmp_path, PRELUDE + f"logger.info({message}, a)\n")
+    assert "BAD-FORMAT" not in out, out
+    assert "ARITY" not in out, out
+
+
+@pytest.mark.parametrize("message,args", [
+    pytest.param("'{!z}'", "a", id="top-level"),
+    pytest.param("'{:{width!z}}'", "a, width=w", id="nested-in-spec"),
+])
+def test_invalid_conversion_is_a_finding(tmp_path, message, args):
+    """`str.format` raises "Unknown conversion specifier" at runtime, but
+    `Formatter.parse` hands the flag back without complaint - and hands nested
+    specs back verbatim, so the check has to recurse."""
+    code, out = _scan(tmp_path, PRELUDE + f"logger.info({message}, {args})\n")
+    assert code == 1, out
+    assert "BAD-FORMAT" in out, out
+    assert "unknown conversion specifier(s) ['z']" in out, out
+
+
 @pytest.mark.parametrize("message", [
     pytest.param("'{} {0}'", id="auto-then-manual"),
     pytest.param("'{0} {}'", id="manual-then-auto"),
@@ -515,13 +627,53 @@ def test_adjacent_string_literals_are_one_literal_message(tmp_path):
     assert [s["arg_index"] for s in sites] == ["pos:0"]
 
 
-def test_constant_arguments_are_not_rows(tmp_path):
-    """A literal argument carries no runtime value, so it is not a content
-    question - but it still counts towards the placeholder arity."""
+def test_constant_positional_argument_is_a_row(tmp_path):
+    """The hardcoded-secret shape. A literal is the ONE argument whose value a
+    reviewer can read off the diff, so it is the last thing that may
+    auto-pass: it is enumerated, and unclassified until someone says what it
+    is."""
+    src = PRELUDE + "logger.info('credential={}', 'sk-hardcoded-secret')\n"
+    code, out = _scan(tmp_path, src)
+    assert code == 1, out
+    assert "NEW unclassified" in out, out
+    assert "ARITY" not in out, out
+
+    sites = _sites(tmp_path, src)
+    assert [s["expr"] for s in sites] == ["'sk-hardcoded-secret'"], sites
+    assert [s["arg_index"] for s in sites] == ["pos:0"], sites
+
+    code, out, _ = _classified(tmp_path, src, tag="R-status")
+    assert code == 0, out
+
+
+def test_constant_keyword_argument_is_a_row(tmp_path):
+    src = PRELUDE + "logger.info('token={token}', token='sk-hardcoded')\n"
+    code, out = _scan(tmp_path, src)
+    assert code == 1, out
+    assert "NEW unclassified" in out, out
+
+    sites = _sites(tmp_path, src)
+    assert [s["arg_index"] for s in sites] == ["kw:token"], sites
+    assert [s["expr"] for s in sites] == ["'sk-hardcoded'"], sites
+
+    code, out, _ = _classified(tmp_path, src, tag="R-status")
+    assert code == 0, out
+
+
+def test_constant_arguments_still_count_towards_arity(tmp_path):
+    """Being a row and being an argument are different questions."""
     code, out = _scan(tmp_path, PRELUDE + "logger.info('a {} {}', 'lit', v)\n")
     assert "ARITY" not in out, out
     sites = _sites(tmp_path, PRELUDE + "logger.info('a {} {}', 'lit', v)\n")
-    assert [s["expr"] for s in sites] == ["v"]
+    assert sorted(s["expr"] for s in sites) == ["'lit'", "v"], sites
+
+
+def test_constant_expressions_are_deterministic(tmp_path):
+    """`ast.unparse` normalises the literal, so re-formatting the source does
+    not invalidate the classification."""
+    first = _sites(tmp_path, PRELUDE + 'logger.info("v={}", "lit")\n')
+    second = _sites(tmp_path, PRELUDE + "logger.info('v={}', 'lit')\n")
+    assert first == second, (first, second)
 
 
 # -- `**` splat expansion -----------------------------------------------------
@@ -598,14 +750,47 @@ def test_dict_literal_splat_with_a_dynamic_key_fails_closed(tmp_path):
     assert "dict literal with a dynamic key" in out, out
 
 
-def test_emit_event_constants_are_not_rows(tmp_path):
-    """`channel` and `evt` are frozen schema constants, not interpolation."""
+def test_emit_event_schema_selectors_are_not_rows_but_fields_are(tmp_path):
+    """`channel` and `evt` select the frozen C11 schema; everything after them
+    is payload. A CONSTANT field is payload too - that is exactly where a
+    hardcoded secret would sit unreviewed."""
+    src = ("from ayder_cli.log import emit_event\n"
+           "emit_event('core', 'evt', run_id=rid, ok=True, note='fixed-text')\n")
+    sites = _sites(tmp_path, src)
+    assert sorted(s["arg_index"] for s in sites) == [
+        "kw:note", "kw:ok", "kw:run_id"], sites
+    assert {s["method"] for s in sites} == {"emit_event"}
+    assert "'core'" not in [s["expr"] for s in sites], sites
+    assert "'evt'" not in [s["expr"] for s in sites], sites
+
+    code, out = _scan(tmp_path, src)
+    assert code == 1, out
+    assert "NEW unclassified" in out, out
+    code, out, _ = _classified(tmp_path, src, tag="R-status")
+    assert code == 0, out
+
+
+def test_emit_event_computed_schema_selector_is_a_row(tmp_path):
+    """The exemption is for constants, not for the position: a computed
+    channel or event name is a runtime value like any other."""
     sites = _sites(tmp_path, """
         from ayder_cli.log import emit_event
-        emit_event('core', 'evt', run_id=rid)
+
+        def go(channel, rid):
+            emit_event(channel, 'evt', run_id=rid)
     """)
-    assert [s["arg_index"] for s in sites] == ["kw:run_id"]
-    assert sites[0]["method"] == "emit_event"
+    assert sorted(s["arg_index"] for s in sites) == ["kw:run_id", "pos:0"], sites
+
+
+def test_emit_event_exemption_stops_after_the_two_schema_positions(tmp_path):
+    """The exemption is bounded by position as well as by constness: a third
+    positional is not part of the schema, constant or not."""
+    sites = _sites(tmp_path, """
+        from ayder_cli.log import emit_event
+        emit_event('core', 'evt', 'stray-constant')
+    """)
+    assert [s["arg_index"] for s in sites] == ["pos:2"], sites
+    assert [s["expr"] for s in sites] == ["'stray-constant'"], sites
 
 
 # -- baseline integrity -------------------------------------------------------

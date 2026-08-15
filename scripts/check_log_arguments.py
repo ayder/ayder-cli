@@ -18,9 +18,16 @@ Scope of an "interpolated argument" (the frozen census boundary):
   * the event fields handed to the `emit_event` facade,
 
 but NOT `.bind()/.opt()/.patch()` keywords, which populate `record["extra"]`
-rather than `record["message"]`. Constant literals are not rows: they carry no
-runtime value. Extra-field exposure is a sink question, not an argument
-question, and is deliberately out of this gate's frame.
+rather than `record["message"]`. Extra-field exposure is a sink question, not
+an argument question, and is deliberately out of this gate's frame.
+
+A constant literal IS a row. `logger.info("credential={}", "sk-live-...")` is
+the one shape where the secret is written into the source, so it is the last
+thing that may pass unreviewed. The only constants outside the count are
+`emit_event`'s first two positionals, which select the frozen C11 channel and
+event schema - and only while they really are constants; a computed channel or
+event name is a runtime value and gets a row like anything else. A constant
+event FIELD is payload and is always a row.
 
 Receivers are RESOLVED, never name-matched. A binding counts as a logger
 because its right-hand side is one - a `get_logger` factory call, `from loguru
@@ -37,9 +44,13 @@ Fail-closed coverage. Every one of these exits nonzero:
   * a logging call whose receiver, message position or `**` splat cannot be
     resolved statically - including `.log(level=..., message=...)` keyword
     forms and an unresolvable `.bind(...)...` chain;
-  * a format string whose placeholders do not match the supplied arguments,
-    including Python's illegal automatic/manual field mixing;
+  * a format string whose placeholders do not match the supplied arguments -
+    missing or surplus positionals, missing or SURPLUS keywords (explicit or
+    statically expanded from `**`), an unknown conversion specifier at any
+    nesting depth, or Python's illegal automatic/manual field mixing;
   * a `%`-style placeholder in a logging literal (legacy-format violation);
+  * a committed baseline whose classification composition has drifted from the
+    frozen census tally (CLASS-TALLY), which row diffing alone cannot see;
   * an argument row that is NEW, REMOVED, CHANGED or RECLASSIFIED.
 
 Baseline format - JSONL, one object per line:
@@ -104,6 +115,24 @@ VALID_CLASSES = (
 
 SITE_KEYS = ("path", "qualname", "method", "message", "arg_index", "expr")
 
+# The reviewed composition of THE COMMITTED baseline, frozen by the Phase 5
+# census: 252 retained non-path + 22 paths + 2 deferred interpolated rows, plus
+# two separately inventoried dynamic messages. Row-by-row diffing alone cannot
+# see a silent retag from, say, R-path to R-name, because the identity is
+# unchanged - so the composition is gated too. Caller-supplied baselines (the
+# gate's own synthetic fixtures) are exempt: this is a fact about one file.
+FROZEN_TALLY: dict[str, int] = {
+    "R-name": 93,
+    "R-id": 36,
+    "R-count": 88,
+    "R-status": 25,
+    "R-class": 10,
+    "R-path": 22,
+    "content-deferred:5-04": 2,
+    "dynamic-trusted": 1,
+    "dynamic-deferred:5-04": 1,
+}
+
 # Same conversion set as the %-style gate; `%%` is stripped before matching.
 PCT = re.compile(r"%(?:\([^)]*\))?[-#0 +]*[\d.*]*[hlL]?[scdrfgeixXou]")
 
@@ -147,14 +176,22 @@ def _base_field(name: str) -> str:
     return name
 
 
-def _collect_fields(fmt: str, out: list[str]) -> None:
-    """Every replacement field in `fmt`, recursing into nested format specs."""
-    for _literal, field_name, spec, _conv in string.Formatter().parse(fmt):
+# `str.format` accepts these and raises "Unknown conversion specifier" on
+# anything else - including inside a nested format spec, which `parse` hands
+# back verbatim rather than validating.
+VALID_CONVERSIONS = frozenset({"s", "r", "a"})
+
+
+def _collect_fields(fmt: str, out: list[str], conversions: list[str]) -> None:
+    """Every replacement field and conversion in `fmt`, recursing into specs."""
+    for _literal, field_name, spec, conv in string.Formatter().parse(fmt):
         if field_name is None:
             continue
         out.append(field_name)
+        if conv is not None:
+            conversions.append(conv)
         if spec:
-            _collect_fields(spec, out)
+            _collect_fields(spec, out, conversions)
 
 
 class FormatError(Exception):
@@ -164,14 +201,21 @@ class FormatError(Exception):
 def format_arity(fmt: str) -> tuple[int, set[str]]:
     """(required positional count, required keyword names) for `fmt`.
 
-    Raises FormatError for a malformed template or for Python's illegal mixing
-    of automatic and manual field numbering.
+    Raises FormatError for a malformed template, for an unknown conversion
+    specifier, or for Python's illegal mixing of automatic and manual field
+    numbering.
     """
     fields: list[str] = []
+    conversions: list[str] = []
     try:
-        _collect_fields(fmt, fields)
+        _collect_fields(fmt, fields, conversions)
     except ValueError as e:
         raise FormatError(f"malformed format string: {e}") from e
+
+    bad = sorted({c for c in conversions if c not in VALID_CONVERSIONS})
+    if bad:
+        raise FormatError(
+            f"unknown conversion specifier(s) {bad}; only !s, !r and !a exist")
 
     auto = 0
     numbered: set[int] = set()
@@ -561,7 +605,12 @@ def scan_module(path: str, tree: ast.Module) -> dict:
                 for index, arg in enumerate(node.args):
                     if isinstance(arg, ast.Starred):
                         raise _Unsupported("`*args` into emit_event")
-                    if isinstance(arg, ast.Constant):
+                    # `emit_event(channel, evt, **fields)`: the first two
+                    # positionals are the frozen C11 schema selectors, not
+                    # payload - but only while they really are constants. A
+                    # computed channel or event name is a runtime value and
+                    # gets a row like anything else.
+                    if index < 2 and isinstance(arg, ast.Constant):
                         continue
                     raw_args += 1
                     call_rows.append({
@@ -584,8 +633,8 @@ def scan_module(path: str, tree: ast.Module) -> dict:
                                 "expr": f"{rendered}[{key!r}]",
                             })
                         continue
-                    if isinstance(keyword.value, ast.Constant):
-                        continue
+                    # A constant event FIELD is payload, not schema: it is
+                    # exactly where a hardcoded secret would sit unreviewed.
                     raw_args += 1
                     call_rows.append({
                         "path": path, "qualname": qualname, "method": method,
@@ -673,8 +722,9 @@ def scan_module(path: str, tree: ast.Module) -> dict:
                     call_rows.append(star_row)
                     continue
                 supplied_positional += 1
-                if isinstance(arg, ast.Constant):
-                    continue
+                # Constants are rows too. `logger.info("credential={}",
+                # "sk-live-...")` is the one shape where the secret is in the
+                # source itself, so it is the last thing that may auto-pass.
                 raw_args += 1
                 call_rows.append({
                     "path": path, "qualname": qualname, "method": method,
@@ -698,8 +748,6 @@ def scan_module(path: str, tree: ast.Module) -> dict:
                         })
                     continue
                 supplied_keywords.add(keyword.arg)
-                if isinstance(keyword.value, ast.Constant):
-                    continue
                 raw_args += 1
                 call_rows.append({
                     "path": path, "qualname": qualname, "method": method,
@@ -743,6 +791,16 @@ def scan_module(path: str, tree: ast.Module) -> dict:
                     findings.append(
                         f"ARITY {path}:{node.lineno} {qualname} .{method}() "
                         f"named field(s) with no argument: {absent}")
+                # Loguru captures unused kwargs into record["extra"], where
+                # they reach the trace sink without ever appearing in the
+                # message a reviewer reads. Baselining the row does not make
+                # the surplus keyword intended, so this is not suppressible.
+                surplus = sorted(supplied_keywords - named)
+                if surplus:
+                    findings.append(
+                        f"ARITY {path}:{node.lineno} {qualname} .{method}() "
+                        f"surplus keyword argument(s) with no named field: "
+                        f"{surplus}")
 
         rows.extend(call_rows)
         row_lines.extend([node.lineno] * len(call_rows))
@@ -892,6 +950,19 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline, baseline_findings = load_baseline(baseline_path)
     findings.extend(baseline_findings)
+
+    if baseline_path.resolve() == BASELINE.resolve():
+        tally: dict[str, int] = {}
+        for tag in baseline.values():
+            tally[tag] = tally.get(tag, 0) + 1
+        for tag in sorted(set(FROZEN_TALLY) | set(tally)):
+            want, have = FROZEN_TALLY.get(tag, 0), tally.get(tag, 0)
+            if want != have:
+                findings.append(
+                    f"CLASS-TALLY committed baseline carries {have} {tag!r} "
+                    f"row(s); the frozen census composition is {want}. Either "
+                    f"the reclassification is wrong or the census must be "
+                    f"re-ratified and FROZEN_TALLY updated with it.")
 
     # `*args` cannot be counted against a placeholder count. The row is still a
     # row: classifying it is the reviewer's explicit acceptance of the gap.
