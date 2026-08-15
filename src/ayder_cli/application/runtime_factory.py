@@ -87,7 +87,7 @@ def create_runtime(
     try:
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
         macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
-    except Exception:
+    except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so runtime construction continues without it
         logger.opt(exception=True).warning(
             "Project-structure macro unavailable; continuing without it"
         )
