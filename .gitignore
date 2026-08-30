@@ -24,7 +24,6 @@ htmlcov/
 .venv
 TODO
 .env
-uv.lock
 
 # Project Spesific
 .ayder
