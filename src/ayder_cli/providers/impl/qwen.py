@@ -4,7 +4,7 @@ Qwen Native Provider implementation using DashScope SDK.
 
 import asyncio
 import os
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, cast
 
 from ayder_cli.core.config import Config
 from ayder_cli.log import get_logger
@@ -13,6 +13,11 @@ from ayder_cli.providers.base import (
     NormalizedStreamChunk,
     ToolCallDef,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from dashscope import GenerationResponse, Message
 
 logger = get_logger("llm")
 
@@ -40,14 +45,20 @@ class QwenNativeProvider(AIProvider):
         # Lazy import DashScope
         from dashscope import Generation
         
-        # Qwen prefers 'result_format="message"' for tool calling
-        response = await asyncio.to_thread(
-            Generation.call,
-            model=model,
-            api_key=self.api_key,
-            messages=messages,
-            tools=tools,
-            result_format='message',
+        # Qwen prefers 'result_format="message"' for tool calling.
+        # dashscope types `messages` as List[Message] (a dict subclass; plain
+        # dicts are accepted at runtime) and returns a response|generator
+        # union with no overload on `stream`, so narrow at the boundary.
+        response = cast(
+            "GenerationResponse",
+            await asyncio.to_thread(
+                Generation.call,
+                model=model,
+                api_key=self.api_key,
+                messages=cast("List[Message]", messages),
+                tools=tools,
+                result_format='message',
+            ),
         )
         
         if response.status_code != 200:
@@ -65,15 +76,18 @@ class QwenNativeProvider(AIProvider):
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         from dashscope import Generation
         
-        responses = await asyncio.to_thread(
-            Generation.call,
-            model=model,
-            api_key=self.api_key,
-            messages=messages,
-            tools=tools,
-            result_format='message',
-            stream=True,
-            incremental_output=True,  # Qwen specific streaming
+        responses = cast(
+            "Generator[GenerationResponse, None, None]",
+            await asyncio.to_thread(
+                Generation.call,
+                model=model,
+                api_key=self.api_key,
+                messages=cast("List[Message]", messages),
+                tools=tools,
+                result_format='message',
+                stream=True,
+                incremental_output=True,  # Qwen specific streaming
+            ),
         )
 
         for response in responses:
