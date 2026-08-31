@@ -283,6 +283,16 @@ def file_editor(
 ) -> str:
     """Modify files with specific operations."""
     try:
+        # The same ceiling read_file enforces, applied to what we write. It is
+        # advertised in the tool description, so it has to be true.
+        if content is not None and len(content.encode("utf-8")) > MAX_FILE_SIZE:
+            return ToolError(
+                f"Error: Content is too large "
+                f"({len(content.encode('utf-8')) / (1024 * 1024):.1f}MB). "
+                f"Maximum allowed size is {MAX_FILE_SIZE / (1024 * 1024):.0f}MB.",
+                "validation",
+            )
+
         abs_path = project_ctx.validate_path(file_path)
         rel_path = project_ctx.to_relative(abs_path)
 

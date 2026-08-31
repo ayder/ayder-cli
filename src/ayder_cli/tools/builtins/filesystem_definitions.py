@@ -83,14 +83,16 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="file_editor",
         description=(
-            "Modify files. Operations: 'write' (overwrite entirely, for new/small files), "
+            "Modify files. Operations: 'write' (replace the file's entire contents with "
+            "`content`, creating it if absent; send the complete file in one call), "
             "'replace' (literal byte-exact substring match, never normalized: a shorter "
             "old_string matches inside a longer line and leaves the surrounding whitespace "
             "untouched, while an old_string containing whitespace the file lacks fails to "
             "match; unique by default, pass replace_all=true for multiple matches or "
             "regex=true for pattern mode), 'insert' (add a line), and 'delete' (remove a "
             "line). Pass dry_run=true on any operation to preview a unified diff without "
-            "writing (recommended when whitespace is ambiguous)."
+            "writing (recommended when whitespace is ambiguous). Content is accepted up "
+            "to 10MB per call."
         ),
         description_template="File {file_path} will be modified ({operation})",
         tags=("core",),
@@ -112,7 +114,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content for 'write' or 'insert' operations",
+                    "description": (
+                        "Content for 'write' (the complete file) or 'insert' (the line). "
+                        "Accepted up to 10MB."
+                    ),
                 },
                 "old_string": {
                     "type": "string",
