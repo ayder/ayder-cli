@@ -324,6 +324,7 @@ class TestRunTuiPermissions:
                 system_prompt_override=None,
                 initial_messages=None,
                 resume_session_id=None,
+                session_name=None,
                 log_settings=None,
             )
 
@@ -343,6 +344,7 @@ class TestRunTuiPermissions:
                 system_prompt_override=None,
                 initial_messages=None,
                 resume_session_id=None,
+                session_name=None,
                 log_settings=None,
             )
 

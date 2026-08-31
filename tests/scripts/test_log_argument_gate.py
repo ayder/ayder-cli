@@ -183,13 +183,13 @@ def test_live_tree_is_clean_and_fully_reconciled():
     code, out = _run()
     assert code == 0, out
     assert f"scanned {_live_py_count()} file(s)" in out, out
-    assert "210 logging call site(s): 205 level-method + 5 emit_event" in out, out
-    assert "137 call site(s) with >=1 interpolated argument" in out, out
-    assert "276 interpolated argument(s) after static splat expansion" in out, out
-    assert "(264 raw, 4 splat(s) -> 16 key(s))" in out, out
+    assert "225 logging call site(s): 220 level-method + 5 emit_event" in out, out
+    assert "141 call site(s) with >=1 interpolated argument" in out, out
+    assert "280 interpolated argument(s) after static splat expansion" in out, out
+    assert "(268 raw, 4 splat(s) -> 16 key(s))" in out, out
     assert "2 dynamic message row(s)" in out, out
-    assert "103 chain input(s): 6 bind + 97 opt + 0 patch, 1 data row(s)" in out, out
-    assert "279 baseline row(s)" in out, out
+    assert "106 chain input(s): 6 bind + 100 opt + 0 patch, 1 data row(s)" in out, out
+    assert "283 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
 
@@ -205,8 +205,8 @@ def test_committed_baseline_is_ordered_and_collision_free():
 
 
 FROZEN_TALLY = {
-    "R-name": 93, "R-id": 36, "R-count": 88, "R-status": 27, "R-class": 10,
-    "R-path": 22, "dynamic-trusted": 1,
+    "R-name": 93, "R-id": 37, "R-count": 89, "R-status": 27, "R-class": 10,
+    "R-path": 24, "dynamic-trusted": 1,
     "dynamic-residual:known-shape-masked": 2,
 }
 
@@ -234,7 +234,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     # otherwise the mutation below would be proving nothing.
     code, out = _run(*invocation, cwd=tmp_path, gate=gate)
     assert code == 0, out
-    assert "279 baseline row(s)" in out, out
+    assert "283 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
     rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
@@ -247,7 +247,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     assert code == 1, out
     assert "CLASS-TALLY" in out, out
     assert "94 'R-name'" in out and "is 93" in out, out
-    assert "21 'R-path'" in out and "is 22" in out, out
+    assert "23 'R-path'" in out and "is 24" in out, out
     # The retag is invisible to every row-level report - that is the point.
     assert "NEW unclassified" not in out, out
     assert "REMOVED" not in out, out
@@ -305,10 +305,10 @@ def test_committed_baseline_classification_tally():
     assert tally == FROZEN_TALLY, tally
     retained = sum(tally.get(t, 0) for t in
                    ("R-name", "R-id", "R-count", "R-status", "R-class"))
-    assert retained == 254, tally
+    assert retained == 256, tally
     assert "content-deferred:5-04" not in tally, "5-04 content deferral is closed"
     assert "dynamic-deferred:5-04" not in tally, "5-04 dynamic deferral is closed"
-    assert sum(tally.values()) == 279, tally
+    assert sum(tally.values()) == 283, tally
     assert "ident" not in tally, "the forbidden generic tag is in the baseline"
 
 
@@ -1234,22 +1234,22 @@ def test_chain_tally_visible_and_pinned(tmp_path):
     """The census is printed on every run and pinned on the committed one."""
     code, out = _run()
     assert code == 0, out
-    assert "103 chain input(s): 6 bind + 97 opt + 0 patch, 1 data row(s)" in out
+    assert "106 chain input(s): 6 bind + 100 opt + 0 patch, 1 data row(s)" in out
 
     gate, baseline, root = _isolated_layout(tmp_path)
-    _patch_gate(gate, 'CHAIN_TALLY["opt"] = 96')
+    _patch_gate(gate, 'CHAIN_TALLY["opt"] = 99')
     code, out = _run(cwd=tmp_path, gate=gate)
     assert code == 1, out
-    assert "CHAIN-TALLY" in out and "97 `.opt()`" in out, out
+    assert "CHAIN-TALLY" in out and "100 `.opt()`" in out, out
 
 
 def test_exception_true_count_is_pinned(tmp_path):
-    """The 93 homogeneous controls are governed as one shape/count rule."""
+    """The 96 homogeneous controls are governed as one shape/count rule."""
     gate, baseline, root = _isolated_layout(tmp_path)
     _patch_gate(gate, "FROZEN_EXCEPTION_TRUE = 92")
     code, out = _run(cwd=tmp_path, gate=gate)
     assert code == 1, out
-    assert "93 `opt(exception=True)` input(s)" in out, out
+    assert "96 `opt(exception=True)` input(s)" in out, out
 
 
 FROZEN_SITE_KEYS = [

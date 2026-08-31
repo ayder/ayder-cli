@@ -320,7 +320,7 @@ def test_plain_marker_draws_no_ruff_noqa_warning(tmp_path):
 
 
 def test_full_tree_census_is_frozen():
-    """131 is the §C10 census. A different number means the gate is reading the
+    """134 is the §C10 census. A different number means the gate is reading the
     wrong tree, or the census moved without the plan being updated.
 
     Step 5-04 moved it from 119/113 in two measured steps. Commit 1 reached
@@ -330,10 +330,18 @@ def test_full_tree_census_is_frozen():
     A/B failure boundaries. Commit 2 reached 131: the exception-total stderr
     fallback contributes three, the bridge adds the reentrant-drop write and
     the single guarded `getMessage()`, and B2-prime adds the guarded `str()`.
+
+    The messaging inbox moved it from 131 to 134, one file larger. Three are
+    process boundaries that must not be narrowed: `MessagingInbox.start` (an
+    inbox that cannot bind must still leave the session usable),
+    `_handle_client` (one hostile or broken peer must not take the server
+    down), and the chat-view echo in `_on_peer_message` (a failed echo must
+    not drop the turn, mirroring `handle_input_submitted`). Everything else in
+    that module catches a named error.
     """
     code, out = _run()
-    assert "broad=131" in out, out
-    assert "files=114/114" in out, out
-    code, out = _run("--expect-broad", "130")
+    assert "broad=134" in out, out
+    assert "files=115/115" in out, out
+    code, out = _run("--expect-broad", "133")
     assert code == 1
-    assert "census: found 131" in out
+    assert "census: found 134" in out

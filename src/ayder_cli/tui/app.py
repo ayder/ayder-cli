@@ -54,6 +54,8 @@ from ayder_cli.tui.widgets import (
 )
 from ayder_cli.tui.commands import COMMAND_MAP, do_clear
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig, new_session_id
+from ayder_cli.services.messaging_inbox import MessagingInbox
+from ayder_cli import __version__ as ayder_version
 
 logger = get_logger("ui")
 
@@ -274,6 +276,8 @@ class AyderApp(App):
         # A resumed session keeps its persisted id so its events stay one
         # thread; a fresh session gets an event-correlation id (C11b).
         self._session_id = resume_session_id or new_session_id()
+        self._inbox: MessagingInbox | None = None
+        self._session_name: str = kwargs.pop("session_name", "") or ""
         self._log_settings = log_settings
         self._resuming = bool(
             initial_messages and initial_messages[0].get("role") == "system"
@@ -763,6 +767,10 @@ class AyderApp(App):
         # Start the single serial turn consumer (owns the turn lifecycle)
         self._engine_task = asyncio.create_task(self._turn_consumer())
 
+        # Publish the peer inbox so other processes can send this session work.
+        if self._messaging_enabled():
+            asyncio.create_task(self._start_inbox())
+
         # Set the event loop on the agent registry now that it's running (Part 3)
         if self._agent_registry:
             self._agent_registry.set_loop(asyncio.get_running_loop())
@@ -832,6 +840,7 @@ class AyderApp(App):
             callbacks = getattr(self, "_callbacks", None)
             if callbacks is not None:
                 callbacks._cancel_event = self._cancel_event
+            self._set_inbox_status("busy")
             self._run_task = asyncio.create_task(self.chat_loop.run(no_tools=req.no_tools))
             try:
                 await self._run_task
@@ -1029,8 +1038,85 @@ class AyderApp(App):
 
         self.request_turn(prepare=_prepare)
 
+    def _messaging_enabled(self) -> bool:
+        """Whether the peer inbox should be published for this session."""
+        cfg = self.config
+        if isinstance(cfg, dict):
+            section = cfg.get("messaging")
+            if isinstance(section, dict):
+                return bool(section.get("enabled", True))
+            return bool(cfg.get("messaging_enabled", True))
+        return bool(getattr(cfg, "messaging_enabled", True))
+
+    async def _start_inbox(self) -> None:
+        """Bind the peer inbox; a failure leaves the session running without one."""
+        inbox = MessagingInbox(
+            self._on_peer_message,
+            session_id=self._session_id,
+            name=self._session_name or f"ayder-{Path.cwd().name}",
+            name_source="user" if self._session_name else "auto",
+            cwd=Path.cwd(),
+            version=ayder_version,
+        )
+        if await inbox.start():
+            self._inbox = inbox
+
+    async def on_unmount(self) -> None:
+        """Remove this session's inbox and discovery files on exit."""
+        if self._inbox is not None:
+            await self._inbox.stop()
+            self._inbox = None
+
+    def _on_peer_message(self, text: str) -> None:
+        """Run a prompt received from a peer as an ordinary user turn.
+
+        Enqueued exactly like a typed message, so it never interrupts an
+        in-flight turn — it runs when the consumer is next quiescent.
+        """
+        try:
+            self.query_one("#chat-view", ChatView).add_user_message(text)
+        except Exception:  # noqa: BLE001 - echo guard: a failed echo must not drop the turn
+            logger.opt(exception=True).debug("Could not echo a peer message")
+
+        def _prepare(msg=text):
+            self.messages.append({"role": "user", "content": msg})
+
+        logger.info("Peer message accepted; enqueued as a user turn")
+        self.request_turn(prepare=_prepare)
+
+    def rename_session(self, name: str) -> str:
+        """Set the handle peers address this session by.
+
+        Returns the name actually in effect, so a caller can report it even
+        when no inbox is published.
+        """
+        self._session_name = name
+        inbox = getattr(self, "_inbox", None)
+        if inbox is not None:
+            inbox.set_name(name)
+            return inbox.name
+        return name
+
+    def session_name(self) -> str:
+        """The handle currently published, falling back to the cwd default."""
+        inbox = getattr(self, "_inbox", None)
+        if inbox is not None and inbox.name:
+            return inbox.name
+        return getattr(self, "_session_name", "") or f"ayder-{Path.cwd().name}"
+
+    def _set_inbox_status(self, status: str) -> None:
+        """Publish busy/idle so peers can see whether this session is working.
+
+        Tolerates a partially constructed app: the turn consumer runs in tests
+        against instances built with ``__new__``.
+        """
+        inbox = getattr(self, "_inbox", None)
+        if inbox is not None:
+            inbox.set_status(status)
+
     def _after_turn_finished(self) -> None:
         """UI teardown after a turn fully exits; the consumer pulls the next one."""
+        self._set_inbox_status("idle")
         self._maybe_stop_activity_timer()
         try:
             self.query_one("#activity-bar", ActivityBar).clear()

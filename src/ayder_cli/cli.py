@@ -105,6 +105,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Auto-approve web/network tools (fetch_web)",
     )
     parser.add_argument(
+        "--name",
+        metavar="NAME",
+        help="Handle other processes address this session by on the messaging "
+        "inbox (default: the working directory's name). Change it later with "
+        "/rename",
+    )
+    parser.add_argument(
         "--agent",
         action="store_true",
         help="Agent harness mode: inject the AGENTIC orchestrator system prompt so the "
@@ -449,6 +456,7 @@ def main():
             agent_mode=sess.agent_mode,
             initial_messages=sess.messages,
             resume_session_id=sess.session_id,
+            session_name=getattr(args, "name", None),
             log_settings=log_settings,
         )
         return
@@ -549,6 +557,7 @@ def main():
             permissions=granted,
             agent_mode=args.agent,
             system_prompt_override=system_prompt_override,
+            session_name=getattr(args, "name", None),
             log_settings=log_settings,
         )
         return

@@ -206,10 +206,10 @@ FROZEN_CHAIN_SITES: dict[tuple[str, str, str, str], tuple[str, int]] = {
 # The 93 `exception=True` inputs are homogeneous, so they are governed as one
 # package-wide shape/count rule rather than 93 site identities - their per-site
 # discipline is C10's.
-FROZEN_EXCEPTION_TRUE = 93
+FROZEN_EXCEPTION_TRUE = 96
 
 # Live chain inputs, counted per method. Printed on every run.
-CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 97, "patch": 0}
+CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 100, "patch": 0}
 
 # The reviewed composition of THE COMMITTED baseline, frozen by the Phase 5
 # census: 252 retained non-path + 22 paths + 2 deferred interpolated rows, plus
@@ -219,11 +219,11 @@ CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 97, "patch": 0}
 # gate's own synthetic fixtures) are exempt: this is a fact about one file.
 FROZEN_TALLY: dict[str, int] = {
     "R-name": 93,
-    "R-id": 36,
-    "R-count": 88,
+    "R-id": 37,
+    "R-count": 89,
     "R-status": 27,
     "R-class": 10,
-    "R-path": 22,
+    "R-path": 24,
     # Both 5-04 deferrals are closed: the two asyncio rows now interpolate the
     # B2-prime normalized value, and the bridge's dynamic message is masked by
     # the prose sinks it reaches.

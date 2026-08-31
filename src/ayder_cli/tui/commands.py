@@ -310,6 +310,24 @@ def handle_tools(app: AyderApp, args: str, chat_view: ChatView) -> None:
         chat_view.add_system_message(f"Error listing tools: {e}")
 
 
+def handle_rename(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Rename this session's messaging handle (/rename <name>)."""
+    name = args.strip()
+    if not name:
+        chat_view.add_system_message(
+            f"Session name: {app.session_name()}\nUsage: /rename <name>"
+        )
+        return
+    # The name is published to peers and appears inside their message envelope,
+    # which cannot carry quotes, angle brackets or newlines.
+    if len(name) > 64 or any(ch in name for ch in '"<>\n\r'):
+        chat_view.add_system_message(
+            "Invalid name: up to 64 characters, no quotes, angle brackets or newlines."
+        )
+        return
+    chat_view.add_system_message(f"Session renamed to: {app.rename_session(name)}")
+
+
 def handle_verbose(app: AyderApp, args: str, chat_view: ChatView) -> None:
     """Handle /verbose command."""
     # Loop-safe scalar mutation: apply immediately (NOT deferred), same as
@@ -1237,4 +1255,5 @@ COMMAND_MAP: dict[str, Callable] = {
     "/skill": handle_skill,
     "/plugin": handle_plugin,
     "/agent": handle_agent,
+    "/rename": handle_rename,
 }

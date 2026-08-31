@@ -107,6 +107,10 @@ file_path = "{logging_file_path}"
 rotation = "{logging_rotation}"
 retention = "{logging_retention}"
 
+[messaging]
+# Accept prompts from peer processes over a local Unix socket.
+enabled = true
+
 [temporal]
 enabled = {temporal_enabled}
 host = "{temporal_host}"
@@ -321,6 +325,8 @@ class Config(BaseModel):
     logging_retention: str = Field(default="7 days")
     logging_channels: dict[str, str] = Field(default_factory=dict)
     max_background_processes: int = Field(default=5)
+    # Local Unix-socket inbox that accepts prompts from peer processes.
+    messaging_enabled: bool = Field(default=True)
     max_output_tokens: int = Field(default=4096)
     # 0 = unlimited: let the context manager's token budget + compaction be the
     # bound. The old fixed 30 predates large-context models and thrashes a tiny
@@ -400,6 +406,14 @@ class Config(BaseModel):
             section_data = new_data.pop("logging")
             for key, value in section_data.items():
                 field_name = key if key.startswith("logging_") else f"logging_{key}"
+                new_data[field_name] = value
+
+        if "messaging" in data and isinstance(data["messaging"], dict):
+            section_data = new_data.pop("messaging")
+            for key, value in section_data.items():
+                field_name = (
+                    key if key.startswith("messaging_") else f"messaging_{key}"
+                )
                 new_data[field_name] = value
 
         # Keep temporal section as nested config object
