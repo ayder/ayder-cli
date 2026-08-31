@@ -740,17 +740,37 @@ def _repair_truncated_json(raw: str) -> dict | None:
 
 
 def _check_required_args(tool_name: str, parsed_args: dict) -> list[str]:
-    """Return list of missing or empty required arguments for a tool."""
+    """Return list of missing or empty required arguments for a tool.
+
+    A declared parameter alias satisfies its canonical argument. Aliases are
+    resolved by ``normalize_arguments`` during execution, so a gate that read
+    only the raw schema would reject a call the tool handles correctly - e.g.
+    ``read_file {"path": "."}``, which declares ``("path", "file_path")``.
+
+    Precedence mirrors ``normalize_arguments``: when the canonical key is
+    present it wins, and aliases are consulted in declaration order.
+    """
     from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
 
     tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if not tool_def or not tool_def.parameters:
         return []
     required = tool_def.parameters.get("required", [])
+    aliases = dict(tool_def.parameter_aliases)  # alias -> canonical
+
+    def _effective(name: str):
+        """The value the tool will actually receive for ``name``."""
+        if name in parsed_args:
+            return parsed_args[name]
+        for alias, canonical in aliases.items():
+            if canonical == name and alias in parsed_args:
+                return parsed_args[alias]
+        return None
+
     # Check both missing keys and empty-string values
     missing = []
     for r in required:
-        val = parsed_args.get(r)
+        val = _effective(r)
         if val is None or (isinstance(val, str) and not val.strip()):
             missing.append(r)
     return missing
