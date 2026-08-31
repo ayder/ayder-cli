@@ -1,6 +1,8 @@
 {"class":"dynamic-residual:known-shape-masked","site":{"arg_index":"bind:lib","expr":"record.name","message":null,"method":"bind","path":"logging_config.py","qualname":"_InterceptHandler.emit"}}
 {"class":"R-name","site":{"arg_index":"kw:agent","expr":"run.agent_name","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
+{"class":"R-count","site":{"arg_index":"kw:arg_chars","expr":"arg_chars","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-count","site":{"arg_index":"kw:args_len","expr":"len(str(args or ''))","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
+{"class":"R-id","site":{"arg_index":"kw:call_id","expr":"call_id","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-count","site":{"arg_index":"kw:content_len","expr":"len(final_content)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-class","site":{"arg_index":"kw:err_type","expr":"None if ok else type(exec_result.error).__name__","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-count","site":{"arg_index":"kw:hist_tokens","expr":"self._total_tokens","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
@@ -9,6 +11,7 @@
 {"class":"R-count","site":{"arg_index":"kw:ms","expr":"int((time.perf_counter() - started) * 1000)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-count","site":{"arg_index":"kw:n","expr":"iteration_n","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-name","site":{"arg_index":"kw:name","expr":"name","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
+{"class":"R-name","site":{"arg_index":"kw:name","expr":"name","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-status","site":{"arg_index":"kw:ok","expr":"ok","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-count","site":{"arg_index":"kw:reasoning_len","expr":"len(final_reasoning)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-id","site":{"arg_index":"kw:run_id","expr":"run.run_id","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
@@ -39,6 +42,7 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"driver.name","message":"Ollama driver={} mode={} for {!r}","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"driver.name","message":"{} ({}) failed mid-stream (error_type={}); transparently retrying with {} ({})","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"err_name","message":"Appending Tool Error [{}] to history: {} chars","method":"trace","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"existing_tc['function']['name']","message":"Tool call id reused by a different tool ({} then {}); calls would merge","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Diff preview generation failed for {}","method":"debug","path":"ui.py","qualname":"generate_diff_preview"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Failed to render file panel for {}","method":"warning","path":"ui.py","qualname":"print_file_content"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Failed to render file panel for {}","method":"warning","path":"ui.py","qualname":"print_file_content_rich"}}
@@ -215,6 +219,7 @@
 {"class":"R-id","site":{"arg_index":"pos:1","expr":"self.run_id","message":"run timeout: agent='{}' run_id={} after {}s","method":"debug","path":"agents/runner.py","qualname":"AgentRunner.run"}}
 {"class":"R-id","site":{"arg_index":"pos:1","expr":"self.run_id","message":"run vacuous: agent='{}' run_id={}","method":"error","path":"agents/runner.py","qualname":"AgentRunner.run"}}
 {"class":"R-path","site":{"arg_index":"pos:1","expr":"source","message":"Source path for '{}' no longer exists: {}","method":"warning","path":"tools/plugin_manager.py","qualname":"update_plugin"}}
+{"class":"R-name","site":{"arg_index":"pos:1","expr":"tc.name","message":"Tool call id reused by a different tool ({} then {}); calls would merge","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"think","message":"Ollama model {!r} rejected think={!r}; retrying with think=False","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider._stream_in_content"}}
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"think","message":"Ollama model {!r} rejected think={!r}; retrying with think=False","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider._stream_native"}}
 {"class":"R-class","site":{"arg_index":"pos:1","expr":"type(exc).__name__","message":"Provider retry budget exhausted after {} attempts; raising {}","method":"warning","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
@@ -276,8 +281,10 @@
 {"class":"R-status","site":{"arg_index":"splat:fields:strategy","expr":"fields['strategy']","message":null,"method":"emit_event","path":"core/default_context_manager.py","qualname":"DefaultContextManager._emit_trim"}}
 {"class":"R-status","site":{"arg_index":"splat:fields:strategy","expr":"fields['strategy']","message":null,"method":"emit_event","path":"core/ollama_context_manager.py","qualname":"OllamaContextManager._emit_trim"}}
 {"class":"R-id","site":{"arg_index":"splat:self._correlation():run_id","expr":"self._correlation()['run_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
+{"class":"R-id","site":{"arg_index":"splat:self._correlation():run_id","expr":"self._correlation()['run_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-id","site":{"arg_index":"splat:self._correlation():run_id","expr":"self._correlation()['run_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-id","site":{"arg_index":"splat:self._correlation():session_id","expr":"self._correlation()['session_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
+{"class":"R-id","site":{"arg_index":"splat:self._correlation():session_id","expr":"self._correlation()['session_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-id","site":{"arg_index":"splat:self._correlation():session_id","expr":"self._correlation()['session_id']","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"dynamic-trusted","site":{"arg_index":null,"expr":"evt","message":null,"method":"trace","path":"log.py","qualname":"emit_event"}}
 {"class":"dynamic-residual:known-shape-masked","site":{"arg_index":null,"expr":"message","message":null,"method":"log","path":"logging_config.py","qualname":"_InterceptHandler.emit"}}

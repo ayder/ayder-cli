@@ -145,6 +145,26 @@ class ChatLoop:
             **self._correlation(),
         )
 
+    def _emit_tool_call_received(self, name, call_id, arg_chars) -> None:
+        """One event per tool call as ASSEMBLED, before it is validated.
+
+        `_emit_tool_call` fires only for calls that reached ExecutionPolicy, so
+        a call rejected by the required-argument gate leaves no trace of its
+        shape. Recording name, id and argument SIZE here makes a mismatched
+        call obvious — three calls all named read_file with 91/781/1507
+        argument chars stands out, where an aggregate count hides it.
+
+        Metadata only: argument values and keys are caller-controlled and may
+        carry secrets, so they are never recorded.
+        """
+        emit_event(
+            "llm", "tool_call_received",
+            name=name,
+            call_id=call_id,
+            arg_chars=arg_chars,
+            **self._correlation(),
+        )
+
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
         # Lazy init: detect real context length for Ollama models
@@ -295,6 +315,22 @@ class ChatLoop:
                                         existing_tc["id"] = tc.id
 
                                     # Append arguments to existing tool call
+                                    # An id reused by a different tool means two
+                                    # distinct calls are about to merge into one
+                                    # entry, concatenating their arguments and
+                                    # dropping the later name. Never silent again.
+                                    if (
+                                        tc.name
+                                        and existing_tc["function"]["name"]
+                                        and tc.name != existing_tc["function"]["name"]
+                                    ):
+                                        tool_log.warning(
+                                            "Tool call id reused by a different tool "
+                                            "({} then {}); calls would merge",
+                                            existing_tc["function"]["name"],
+                                            tc.name,
+                                        )
+
                                     # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
                                     if tc.name and not existing_tc["function"]["name"]:
                                         existing_tc["function"]["name"] = tc.name
@@ -312,6 +348,11 @@ class ChatLoop:
 
                     # Now that streaming is done, build the normalized objects for execution
                     for raw_tc in raw_tool_calls_for_history:
+                        self._emit_tool_call_received(
+                            raw_tc["function"]["name"],
+                            raw_tc["id"],
+                            len(raw_tc["function"]["arguments"]),
+                        )
                         tool_call_obj = _ToolCall(
                             id=raw_tc["id"],
                             type="function",
