@@ -242,6 +242,14 @@ class OllamaProvider(AIProvider):
             stream=True,
         )
 
+        # Tool-call ids must be unique across the WHOLE stream. Ollama sends
+        # each parallel tool call complete in its own chunk, and the chat loop
+        # falls back to matching by id when a chunk carries no stream index.
+        # Enumerating per chunk made every chunk's first call "call_0", so
+        # distinct calls merged into one entry: their arguments were
+        # concatenated and the later names discarded.
+        call_seq = 0
+
         async for chunk in stream:
             msg = chunk.message
             usage = None
@@ -258,16 +266,17 @@ class OllamaProvider(AIProvider):
 
             tool_calls = []
             if msg.tool_calls:
-                for i, tc in enumerate(msg.tool_calls):
+                for tc in msg.tool_calls:
                     raw_args = tc.function.arguments
                     args = raw_args if isinstance(raw_args, str) else json.dumps(raw_args)
                     tool_calls.append(
                         ToolCallDef(
-                            id=f"call_{i}",
+                            id=f"call_{call_seq}",
                             name=tc.function.name,
                             arguments=args,
                         )
                     )
+                    call_seq += 1
 
             yield NormalizedStreamChunk(
                 content=msg.content or "",
