@@ -320,7 +320,7 @@ def test_plain_marker_draws_no_ruff_noqa_warning(tmp_path):
 
 
 def test_full_tree_census_is_frozen():
-    """134 is the §C10 census. A different number means the gate is reading the
+    """135 is the §C10 census. A different number means the gate is reading the
     wrong tree, or the census moved without the plan being updated.
 
     Step 5-04 moved it from 119/113 in two measured steps. Commit 1 reached
@@ -338,10 +338,14 @@ def test_full_tree_census_is_frozen():
     down), and the chat-view echo in `_on_peer_message` (a failed echo must
     not drop the turn, mirroring `handle_input_submitted`). Everything else in
     that module catches a named error.
+
+    The thinking-panel flush in `on_thinking_stop` added one more: rendering
+    buffered reasoning is cosmetic, and a failure there must not abort the
+    turn that just finished thinking.
     """
     code, out = _run()
-    assert "broad=134" in out, out
+    assert "broad=135" in out, out
     assert "files=115/115" in out, out
-    code, out = _run("--expect-broad", "133")
+    code, out = _run("--expect-broad", "134")
     assert code == 1
-    assert "census: found 134" in out
+    assert "census: found 135" in out

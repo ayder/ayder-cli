@@ -89,6 +89,12 @@ class AppCallbacks:
         self._app._start_activity_timer()
 
     def on_thinking_stop(self) -> None:
+        # Reasoning was buffered without rendering while it streamed; show the
+        # tail now that the phase is over (a no-op while the panel is hidden).
+        try:
+            self._app.query_one("#thinking-panel", ThinkingPanel).flush()
+        except Exception:  # noqa: BLE001 - panel flush is cosmetic and must not stop the turn
+            logger.opt(exception=True).debug("Could not flush the thinking panel")
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_thinking(False)
         # Transition to "Generating" so the user sees activity while content streams

@@ -61,6 +61,7 @@ class TestThinkingPanelStreaming:
     @patch.object(ThinkingPanel, "mount")
     def test_first_delta_mounts_content_widget(self, mock_mount, _mock_scroll):
         panel = ThinkingPanel()
+        panel._user_visible = True          # rendering only happens when open
         panel.add_thinking("Let me think")
         assert panel._widget is not None
         assert panel._buffer == "Let me think"
@@ -71,11 +72,15 @@ class TestThinkingPanelStreaming:
     @patch.object(ThinkingPanel, "mount")
     def test_deltas_accumulate_into_buffer(self, mock_mount, mock_update, _mock_scroll):
         panel = ThinkingPanel()
+        panel._user_visible = True
         panel.add_thinking("Hello ")
         panel.add_thinking("world")
         assert panel._buffer == "Hello world"
-        # Mounted once; subsequent deltas update the same widget.
+        # Mounted once. The second delta lands inside the coalescing window, so
+        # it is buffered rather than re-rendered; flush shows it.
         mock_mount.assert_called_once()
+        assert mock_update.call_count == 0
+        panel.flush()
         assert mock_update.call_count == 1
 
     @patch.object(ThinkingPanel, "scroll_end")
@@ -90,6 +95,7 @@ class TestThinkingPanelStreaming:
     @patch.object(ThinkingPanel, "mount")
     def test_malformed_markup_falls_back_to_plain_text(self, mock_mount, _mock_scroll):
         panel = ThinkingPanel()
+        panel._user_visible = True
         content = '[agent-result name="reviewer" run="3" status="completed"]'
 
         try:
@@ -111,11 +117,13 @@ class TestThinkingPanelStreaming:
         self, mock_mount, _mock_scroll
     ):
         panel = ThinkingPanel()
+        panel._user_visible = True
         malformed = '[calls call_agent: name="code-reviewer", task="Review src/auth.py"]'
         expected = f"safe prefix {malformed}"
 
         panel.add_thinking("safe prefix ")
         panel.add_thinking(malformed)
+        panel.flush()          # second delta was coalesced
 
         assert panel._widget is not None
         assert panel._widget.render().plain == expected
@@ -296,3 +304,97 @@ class TestAgentPanelDataModel:
         panel.add_agent("agent_50", run_id=51)
         assert len(panel._entries) == 50
         assert oldest_run_id not in panel._entries
+
+
+class TestThinkingPanelDoesNotBlockTheUI:
+    """Reasoning must never cost a render per delta.
+
+    Rendering re-parses and re-lays-out the whole accumulated buffer, so doing
+    it per delta is quadratic in reasoning length and runs on the UI event
+    loop. A model that emits a lot of reasoning (e.g. glm-5.3:cloud on Ollama's
+    default think setting) froze the interface, spinner included, while the
+    panel was hidden and nobody could even see the output.
+    """
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(ThinkingPanel, "mount")
+    def test_hidden_panel_never_renders(self, mock_mount, mock_update, _mock_scroll):
+        panel = ThinkingPanel()          # hidden by default
+        for _ in range(500):
+            panel.add_thinking("reasoning ")
+
+        assert panel._widget is None, "hidden panel mounted a widget"
+        mock_mount.assert_not_called()
+        mock_update.assert_not_called()
+        assert len(panel._buffer) == 5000, "buffer must still accumulate"
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_flush_on_a_hidden_panel_is_a_noop(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel.add_thinking("buffered while hidden")
+        panel.flush()
+        assert panel._widget is None
+        mock_mount.assert_not_called()
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_opening_the_panel_catches_up_in_one_render(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        for _ in range(200):
+            panel.add_thinking("x")
+        assert panel._widget is None
+
+        panel.toggle()                    # user hits Ctrl+T
+
+        assert panel._widget is not None
+        mock_mount.assert_called_once()   # one render, not 200
+        assert panel._buffer == "x" * 200
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(ThinkingPanel, "mount")
+    def test_open_panel_coalesces_a_burst(self, mock_mount, mock_update, _mock_scroll):
+        panel = ThinkingPanel()
+        panel._user_visible = True
+        for _ in range(500):
+            panel.add_thinking("y")
+
+        # First delta renders (mount); the rest land inside the window.
+        mock_mount.assert_called_once()
+        assert mock_update.call_count == 0, "a burst must not re-render per delta"
+        assert panel._buffer == "y" * 500
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(ThinkingPanel, "mount")
+    def test_render_resumes_after_the_interval(self, mock_mount, mock_update, _mock_scroll):
+        panel = ThinkingPanel()
+        panel._user_visible = True
+        panel.add_thinking("first")
+        panel._last_render -= panel.RENDER_INTERVAL_S * 2   # pretend time passed
+        panel.add_thinking("second")
+        assert mock_update.call_count == 1
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch("ayder_cli.tui.widgets.Static.update")
+    @patch.object(ThinkingPanel, "mount")
+    def test_flush_is_idempotent(self, mock_mount, mock_update, _mock_scroll):
+        panel = ThinkingPanel()
+        panel._user_visible = True
+        panel.add_thinking("a")
+        panel.flush()
+        panel.flush()
+        assert mock_update.call_count == 0, "nothing new to draw"
+
+    @patch.object(ThinkingPanel, "scroll_end")
+    @patch.object(ThinkingPanel, "mount")
+    def test_clear_resets_the_render_state(self, mock_mount, _mock_scroll):
+        panel = ThinkingPanel()
+        panel._user_visible = True
+        panel.add_thinking("something")
+        panel._widget = MagicMock()   # remove() needs a running app otherwise
+        panel.clear()
+        assert panel._dirty is False
+        assert panel._last_render == 0.0

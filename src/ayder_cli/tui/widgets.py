@@ -1,5 +1,6 @@
 """TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar, AgentPanel."""
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -301,12 +302,19 @@ class ThinkingPanel(Container):
     and shows the complete accumulated text (scrollable) rather than a tail.
     """
 
+    # Minimum seconds between re-renders while the panel is open. Reasoning
+    # arrives far faster than anyone can read it; coalescing keeps the event
+    # loop responsive without a visible lag.
+    RENDER_INTERVAL_S = 0.1
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._user_visible: bool = False
         self._buffer: str = ""
         self._widget: Static | None = None
         self._needs_separator: bool = False
+        self._dirty: bool = False
+        self._last_render: float = 0.0
 
     def compose(self) -> ComposeResult:
         """Compose starts empty; the content widget is mounted on first stream."""
@@ -321,6 +329,9 @@ class ThinkingPanel(Container):
         """Toggle panel visibility. Returns new visibility state."""
         self._user_visible = not self._user_visible
         self.display = self._user_visible
+        if self._user_visible:
+            # Catch up on everything buffered while hidden, in one render.
+            self._render_buffer()
         return self._user_visible
 
     def start_phase(self) -> None:
@@ -333,13 +344,40 @@ class ThinkingPanel(Container):
             self._needs_separator = True
 
     def add_thinking(self, text: str) -> None:
-        """Append a streamed reasoning delta and re-render. Never auto-shows."""
+        """Buffer a streamed reasoning delta. Never auto-shows.
+
+        Rendering re-parses and re-lays-out the WHOLE accumulated buffer, so
+        doing it per delta is quadratic in reasoning length and runs on the UI
+        event loop — a model that emits a lot of reasoning freezes the
+        interface, spinner included. The buffer always grows, but rendering is
+        skipped entirely while the panel is hidden (the default) and coalesced
+        while it is open. ``toggle`` and ``flush`` catch up.
+        """
         if not text:
             return
         if self._needs_separator:
             self._buffer += "\n\n"
             self._needs_separator = False
         self._buffer += text
+        self._dirty = True
+
+        if not self._user_visible:
+            return
+        if time.monotonic() - self._last_render < self.RENDER_INTERVAL_S:
+            return
+        self._render_buffer()
+
+    def flush(self) -> None:
+        """Render whatever is buffered — called when a reasoning phase ends."""
+        if self._user_visible:
+            self._render_buffer()
+
+    def _render_buffer(self) -> None:
+        """Re-render the accumulated buffer. Cost scales with total length."""
+        if not self._dirty:
+            return
+        self._dirty = False
+        self._last_render = time.monotonic()
 
         content = self._buffer.strip()
         renderable = markup_or_plain(content)
@@ -354,6 +392,8 @@ class ThinkingPanel(Container):
         """Reset the panel for a new turn (does not change visibility)."""
         self._buffer = ""
         self._needs_separator = False
+        self._dirty = False
+        self._last_render = 0.0
         if self._widget is not None:
             self._widget.remove()
             self._widget = None
