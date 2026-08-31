@@ -26,6 +26,11 @@ logger = get_logger("tool")
 # ---------------------------------------------------------------------------
 
 
+_INJECTED_PARAMS = frozenset(
+    {"project_ctx", "process_manager", "context_manager", "app"}
+)
+
+
 def execute_tool(
     tool_name: str,
     arguments: Any,
@@ -95,6 +100,8 @@ def execute_tool(
     # Step 6: Dependency injection
     sig = inspect.signature(tool_func)
     call_args = args.copy()
+    # Names supplied by the harness, not by the model — excluded from the
+    # "valid arguments" hint so the model is not told to pass them.
     if "project_ctx" in sig.parameters:
         call_args["project_ctx"] = project_ctx
     if "process_manager" in sig.parameters and process_manager is not None:
@@ -103,6 +110,32 @@ def execute_tool(
         call_args["context_manager"] = context_manager
     if "app" in sig.parameters and app is not None:
         call_args["app"] = app
+
+    # Step 6b: Reject arguments the tool cannot accept.
+    # Models improvise parameter names. Without this they reach
+    # tool_func(**call_args) and surface as a Python TypeError from inside
+    # execution, instead of a validation error naming the tool's real
+    # arguments. A **kwargs signature accepts anything, so it is exempt.
+    takes_var_kwargs = any(
+        param.kind is inspect.Parameter.VAR_KEYWORD
+        for param in sig.parameters.values()
+    )
+    if not takes_var_kwargs:
+        unexpected = sorted(set(call_args) - set(sig.parameters))
+        if unexpected:
+            accepted = sorted(
+                pname
+                for pname, param in sig.parameters.items()
+                if pname not in _INJECTED_PARAMS
+                and param.kind is not inspect.Parameter.VAR_POSITIONAL
+            )
+            return ToolError(
+                f"Error: tool '{tool_name}' received unexpected argument(s): "
+                f"{', '.join(unexpected)}. Valid arguments: "
+                f"{', '.join(accepted)}. "
+                "Use only arguments defined in the tool's schema.",
+                "validation",
+            )
 
     # Step 7: Execute with timing
     # Never log argument values or keys here: keys are caller-controlled and
