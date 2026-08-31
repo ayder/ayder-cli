@@ -243,6 +243,8 @@ class AyderApp(App):
                 When None, resolved from config via build_logging_settings (e.g.
                 when AyderApp is constructed directly in tests).
         """
+        # Pop before super(): Textual's App.__init__ rejects unknown kwargs.
+        session_name = str(kwargs.pop("session_name", "") or "")
         super().__init__(**kwargs)
         # Register our ANSI palettes (ayder-dark / ayder-light) and paint the
         # active layout with the resolved palette ([ui] palette). The default
@@ -273,11 +275,17 @@ class AyderApp(App):
         self.permissions = permissions or {"r"}
         self._system_prompt_override = system_prompt_override
         self.resume_session_id = resume_session_id
+        # Reserve the transcript id up front so the handle peers address
+        # this session by is the same id `ayder --resume` takes. Generated
+        # here rather than at save time; an unused reservation writes no
+        # file, because an empty conversation is never persisted.
+        from ayder_cli.core.session import new_session_id as _new_transcript_id
+        self._transcript_id: str = resume_session_id or _new_transcript_id()
         # A resumed session keeps its persisted id so its events stay one
         # thread; a fresh session gets an event-correlation id (C11b).
         self._session_id = resume_session_id or new_session_id()
         self._inbox: MessagingInbox | None = None
-        self._session_name: str = kwargs.pop("session_name", "") or ""
+        self._session_name: str = session_name
         self._log_settings = log_settings
         self._resuming = bool(
             initial_messages and initial_messages[0].get("role") == "system"
@@ -1053,7 +1061,7 @@ class AyderApp(App):
         inbox = MessagingInbox(
             self._on_peer_message,
             session_id=self._session_id,
-            name=self._session_name or f"ayder-{Path.cwd().name}",
+            name=self._session_name or f"ayder-{self._transcript_id}",
             name_source="user" if self._session_name else "auto",
             cwd=Path.cwd(),
             version=ayder_version,
@@ -1102,7 +1110,7 @@ class AyderApp(App):
         inbox = getattr(self, "_inbox", None)
         if inbox is not None and inbox.name:
             return inbox.name
-        return getattr(self, "_session_name", "") or f"ayder-{Path.cwd().name}"
+        return getattr(self, "_session_name", "") or f"ayder-{self._transcript_id}"
 
     def _set_inbox_status(self, status: str) -> None:
         """Publish busy/idle so peers can see whether this session is working.

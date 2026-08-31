@@ -22,6 +22,7 @@ def _app(monkeypatch):
     app._run_task = None
     app._agent_registry = None
     app._inbox = None
+    app._transcript_id = "0000-0000"
     app.messages = []
     monkeypatch.setattr(app, "query_one", lambda *a, **k: _Boom(), raising=False)
     return app
@@ -82,12 +83,10 @@ def test_status_hook_forwards_to_the_inbox(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_session_name_falls_back_to_cwd(monkeypatch):
-    from pathlib import Path
-
+def test_session_name_falls_back_to_the_transcript_id(monkeypatch):
     app = _app(monkeypatch)
     app._session_name = ""
-    assert app.session_name() == f"ayder-{Path.cwd().name}"
+    assert app.session_name() == "ayder-0000-0000"
 
 
 def test_rename_without_an_inbox_still_takes_effect(monkeypatch):
@@ -156,3 +155,48 @@ def test_rename_is_discoverable_in_help():
 
     assert "/rename" in COMMAND_MAP
     assert COMMAND_MAP["/rename"].__doc__.strip().startswith("Rename this session")
+
+
+# ---------------------------------------------------------------------------
+# Real construction — session_name must never reach Textual's App.__init__
+# ---------------------------------------------------------------------------
+
+
+def test_app_constructs_with_a_session_name():
+    """Regression: session_name leaked to super() and raised
+
+        TypeError: App.__init__() got an unexpected keyword argument 'session_name'
+
+    which made `ayder` unstartable. Every other test builds the app with
+    __new__ or mocks it, so only real construction catches this.
+    """
+    from ayder_cli.tui.app import AyderApp
+
+    app = AyderApp(session_name="probe-name")
+    assert app.session_name() == "probe-name"
+
+
+def test_app_constructs_without_a_session_name():
+    """The name is optional; a handle is still produced."""
+    import re
+
+    from ayder_cli.tui.app import AyderApp
+
+    app = AyderApp()
+    assert re.fullmatch(r"ayder-[0-9a-f]{4}-[0-9a-f]{4}", app.session_name())
+
+
+def test_the_default_handle_is_the_resumable_id():
+    """The handle a peer addresses is the id `ayder --resume` takes."""
+    from ayder_cli.tui.app import AyderApp
+
+    app = AyderApp()
+    assert app.session_name() == f"ayder-{app._transcript_id}"
+
+
+def test_resuming_keeps_the_handle_stable():
+    from ayder_cli.tui.app import AyderApp
+
+    app = AyderApp(resume_session_id="6fa2-b71b")
+    assert app._transcript_id == "6fa2-b71b"
+    assert app.session_name() == "ayder-6fa2-b71b"

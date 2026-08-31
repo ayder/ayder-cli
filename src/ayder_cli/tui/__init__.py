@@ -94,7 +94,7 @@ def run_tui(
         try:
             persist_and_announce(
                 app.messages,
-                session_id=app.resume_session_id,
+                session_id=app.resume_session_id or getattr(app, "_transcript_id", None),
                 model=app.model,
                 agent_mode=agent_mode,
                 safe_mode=app.safe_mode,
