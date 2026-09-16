@@ -627,9 +627,46 @@ RECOMMENDATIONS: Parameterize all DB queries; add Pydantic validators to all end
 
 This summary is injected into the main LLM's context as a system message so the main agent can act on it, summarize it for you, or chain it to further work.
 
+## MCP servers
+
+MCP support is built in and installed with Ayder. Add `.ayder/mcp.json` in your
+project root, then start Ayder:
+
+```json
+{
+  "mcpServers": {
+    "local-tools": {
+      "command": "python",
+      "args": ["server.py"],
+      "env": {"EXAMPLE_SETTING": "value"}
+    },
+    "remote-tools": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+Local servers use stdio and run from the project root; remote servers use
+Streamable HTTP. Their tools automatically join the standard `core` toolset in
+the CLI, TUI, and delegated agents. No plugin installation or `/plugin` toggle
+is needed. Tool calls retain the usual permissions: `x` for stdio servers and
+`http` for HTTP servers. Configure only servers you intend Ayder to connect to:
+local server commands start during runtime initialization to discover tools.
+
+Tools keep their server-provided names unless they conflict with an existing
+tool; conflicting names receive a `server__` prefix (and a numeric suffix if
+needed). Unreachable servers are skipped so other tools remain available.
+Connections are shared by agents in the same project and closed on process
+exit. Restart Ayder after changing `mcp.json`.
+
+Existing `mcp-tool` plugin installations are automatically skipped in favor of
+built-in support; your existing `.ayder/mcp.json` continues to work. The legacy
+`ayder-cli[mcp]` installation extra is still accepted.
+
 ## Plugins
 
-Official plugins (venv, python, dbs, mcp, temporal) are maintained in the **[ayder/ayder-plugins](https://github.com/ayder/ayder-plugins)** repository. Install any plugin directly from GitHub:
+Official plugins (venv, python, dbs, temporal) are maintained in the **[ayder/ayder-plugins](https://github.com/ayder/ayder-plugins)** repository. Install any plugin directly from GitHub:
 
 ```bash
 ayder install-plugin https://github.com/ayder/ayder-plugins/tree/main/venv-tools

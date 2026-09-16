@@ -422,6 +422,10 @@ def load_plugin_definitions(
     """
     manifest = parse_plugin_toml(plugin_dir)
 
+    if manifest.name == "mcp-tool":
+        logger.info("MCP is built in; skipping the legacy mcp-tool plugin")
+        return (), {}
+
     # Check API compatibility
     err = check_api_compatibility(manifest.api_version)
     if err:

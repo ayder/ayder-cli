@@ -183,12 +183,12 @@ def test_live_tree_is_clean_and_fully_reconciled():
     code, out = _run()
     assert code == 0, out
     assert f"scanned {_live_py_count()} file(s)" in out, out
-    assert "228 logging call site(s): 222 level-method + 6 emit_event" in out, out
+    assert "234 logging call site(s): 228 level-method + 6 emit_event" in out, out
     assert "143 call site(s) with >=1 interpolated argument" in out, out
     assert "287 interpolated argument(s) after static splat expansion" in out, out
     assert "(274 raw, 5 splat(s) -> 18 key(s))" in out, out
     assert "2 dynamic message row(s)" in out, out
-    assert "107 chain input(s): 6 bind + 101 opt + 0 patch, 1 data row(s)" in out, out
+    assert "110 chain input(s): 6 bind + 104 opt + 0 patch, 1 data row(s)" in out, out
     assert "290 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
@@ -1234,22 +1234,22 @@ def test_chain_tally_visible_and_pinned(tmp_path):
     """The census is printed on every run and pinned on the committed one."""
     code, out = _run()
     assert code == 0, out
-    assert "107 chain input(s): 6 bind + 101 opt + 0 patch, 1 data row(s)" in out
+    assert "110 chain input(s): 6 bind + 104 opt + 0 patch, 1 data row(s)" in out
 
     gate, baseline, root = _isolated_layout(tmp_path)
     _patch_gate(gate, 'CHAIN_TALLY["opt"] = 100')
     code, out = _run(cwd=tmp_path, gate=gate)
     assert code == 1, out
-    assert "CHAIN-TALLY" in out and "101 `.opt()`" in out, out
+    assert "CHAIN-TALLY" in out and "104 `.opt()`" in out, out
 
 
 def test_exception_true_count_is_pinned(tmp_path):
-    """The 97 homogeneous controls are governed as one shape/count rule."""
+    """The 100 homogeneous controls are governed as one shape/count rule."""
     gate, baseline, root = _isolated_layout(tmp_path)
     _patch_gate(gate, "FROZEN_EXCEPTION_TRUE = 92")
     code, out = _run(cwd=tmp_path, gate=gate)
     assert code == 1, out
-    assert "97 `opt(exception=True)` input(s)" in out, out
+    assert "100 `opt(exception=True)` input(s)" in out, out
 
 
 FROZEN_SITE_KEYS = [

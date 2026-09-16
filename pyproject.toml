@@ -26,6 +26,7 @@ dependencies = [
     # Message / StreamSink shapes (§F5-R6), guarded by `_shape_guard()`.
     "loguru>=0.7,<0.8",
     "httpx",
+    "mcp>=1.19,<2",
     "rich>=13.0.0",
     # Pinned exactly to match the runtime: 8.2.5+ replaced the single
     # "textual-ansi" builtin with per-theme `ansi` flags and ansi-dark/
@@ -39,9 +40,12 @@ dependencies = [
 anthropic = ["anthropic"]
 google = ["google-genai"]
 qwen = ["dashscope"]
-glm = ["zhipuai"]
+# The provider uses the v2 client; do not let MCP's shared PyJWT dependency
+# make the resolver select the incompatible v1 SDK.
+glm = ["zhipuai>=2"]
 all = ["ayder-cli[anthropic,google,qwen,glm]"]
-mcp = ["mcp"]
+# Compatibility extra: MCP is now included in every installation.
+mcp = []
 # Optional: required only by plugins that do CST-based code transforms.
 libcst = ["libcst>=1.0.0"]
 
@@ -71,7 +75,7 @@ dev = [
     "anthropic",
     "google-genai",
     "dashscope",
-    "zhipuai",
+    "zhipuai>=2",
 ]
 
 [tool.poe.tasks]

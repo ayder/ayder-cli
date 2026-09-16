@@ -47,13 +47,16 @@ class ToolRegistry:
 
         Adds the ToolDefinition to a per-instance list (included in schema
         queries), the handler to _registry (for execution dispatch), and
-        the definition to the global name lookup (for SchemaValidator).
+        the definition to the global name lookup (for SchemaValidator), and
+        its permission to the execution policy's lookup.
         """
         from ayder_cli.tools.definition import register_dynamic_definition
+        from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
         self._dynamic_definitions.append(tool_def)
         self._registry[tool_def.name] = handler
         register_dynamic_definition(tool_def)
+        TOOL_PERMISSIONS[tool_def.name] = tool_def.permission
 
     def get_schemas(self, tags: frozenset | None = None) -> List[Dict[str, Any]]:
         all_defs = list(TOOL_DEFINITIONS) + self._dynamic_definitions
@@ -144,6 +147,12 @@ def create_default_registry(
     # Phase 2: Load project-local plugins
     project_path = project_ctx.root
     _load_project_plugins(reg, project_path)
+
+    # MCP is a built-in capability, loaded per project after ordinary tools so
+    # remote names cannot replace builtins or installed plugin tools.
+    from ayder_cli.tools.mcp import register_mcp_tools
+
+    register_mcp_tools(reg)
 
     return reg
 

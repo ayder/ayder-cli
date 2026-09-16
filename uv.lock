@@ -196,6 +196,7 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "loguru" },
+    { name = "mcp" },
     { name = "ollama" },
     { name = "openai" },
     { name = "python-dotenv" },
@@ -222,9 +223,6 @@ google = [
 ]
 libcst = [
     { name = "libcst" },
-]
-mcp = [
-    { name = "mcp" },
 ]
 qwen = [
     { name = "dashscope" },
@@ -257,14 +255,14 @@ requires-dist = [
     { name = "httpx" },
     { name = "libcst", marker = "extra == 'libcst'", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7,<0.8" },
-    { name = "mcp", marker = "extra == 'mcp'" },
+    { name = "mcp", specifier = ">=1.19,<2" },
     { name = "ollama", specifier = ">=0.6.2" },
     { name = "openai" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "textual", specifier = "==8.2.7" },
     { name = "tiktoken", specifier = ">=0.7.0" },
-    { name = "zhipuai", marker = "extra == 'glm'" },
+    { name = "zhipuai", marker = "extra == 'glm'", specifier = ">=2" },
 ]
 provides-extras = ["anthropic", "google", "qwen", "glm", "all", "mcp", "libcst"]
 
@@ -283,7 +281,7 @@ dev = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.15.12" },
-    { name = "zhipuai" },
+    { name = "zhipuai", specifier = ">=2" },
 ]
 
 [[package]]
