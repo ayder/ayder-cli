@@ -1,8 +1,9 @@
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Any, Callable, Dict, Literal
+from typing import Any, Callable, Dict
 
+from ayder_cli.core.reasoning import ReasoningEffort, ThinkOption, validate_effort
 from ayder_cli.log import get_logger
 
 logger = get_logger("core")
@@ -134,6 +135,8 @@ base_url = "{openai_base_url}"
 api_key = "{openai_api_key}"
 model = "{openai_model}"
 num_ctx = {openai_num_ctx}
+# Use the model default unless an explicit effort is selected.
+reasoning_effort = "default"
 
 [llm.anthropic]
 driver = "anthropic"
@@ -146,6 +149,18 @@ driver = "google"
 api_key = "{gemini_api_key}"
 model = "{gemini_model}"
 num_ctx = {gemini_num_ctx}
+
+# Ollama profile example:
+# [llm.ollama]
+# driver = "ollama"
+# base_url = "http://localhost:11434"
+# model = "gpt-oss:20b"
+# reasoning_effort = "medium"
+
+# Agents inherit the selected LLM profile's effort unless overridden:
+# [agents.reviewer]
+# reasoning_effort = "high"
+# system_prompt = "Review code and report findings."
 """
 
 
@@ -337,7 +352,8 @@ class Config(BaseModel):
     # Ollama thinking mode. Defaults on because most local models in the
     # primary path support it; set ``think = false`` in an [llm.*] profile for
     # models that do not. Ollama also accepts "low", "medium", and "high".
-    think: bool | Literal["low", "medium", "high"] | None = Field(default=True)
+    think: ThinkOption = Field(default=True)
+    reasoning_effort: ReasoningEffort = None
     stop_sequences: list[str] = Field(default_factory=list)
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
@@ -486,24 +502,10 @@ class Config(BaseModel):
             raise ValueError("max_history_messages must be non-negative (0 = unlimited)")
         return v
 
-    @field_validator("think", mode="before")
-    @classmethod
-    def validate_think(cls, v: Any) -> bool | Literal["low", "medium", "high"] | None:
-        if v is None or isinstance(v, bool):
-            return v
-        if isinstance(v, str):
-            normalized = v.strip().lower()
-            if normalized in {"true", "yes", "on", "1"}:
-                return True
-            if normalized in {"false", "no", "off", "0"}:
-                return False
-            if normalized == "low":
-                return "low"
-            if normalized == "medium":
-                return "medium"
-            if normalized == "high":
-                return "high"
-        raise ValueError("think must be true, false, low, medium, high, or null")
+    @model_validator(mode="after")
+    def validate_reasoning_settings(self) -> "Config":
+        validate_effort(self.driver, self.reasoning_effort)
+        return self
 
     @field_validator("agent_timeout")
     @classmethod

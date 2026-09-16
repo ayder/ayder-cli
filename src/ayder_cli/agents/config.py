@@ -4,13 +4,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from ayder_cli.core.reasoning import ReasoningEffort, ThinkOption
+
 
 class AgentConfig(BaseModel):
     """Configuration for a single agent, parsed from [agents.<name>] TOML sections.
 
     Connection-level fields (base_url, api_key, num_ctx, temperature, think,
-    driver) are optional; when set they override the values pulled from the
-    parent provider profile. This lets one agent target an entirely different
+    reasoning_effort, driver) are optional; when set they override values from
+    the parent provider profile. This lets one agent target an entirely different
     endpoint than the main session without needing a separate [llm.<name>]
     profile.
     """
@@ -28,7 +30,8 @@ class AgentConfig(BaseModel):
     num_ctx: int | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
-    think: str | None = None
+    think: ThinkOption = None
+    reasoning_effort: ReasoningEffort = None
 
     @model_validator(mode="before")
     @classmethod
@@ -56,7 +59,7 @@ class AgentConfig(BaseModel):
         return new_data
 
     def overrides(self) -> dict[str, Any]:
-        """Return non-None connection-level fields suitable for cfg.model_copy()."""
+        """Return profile overrides, including an explicitly reset effort."""
         out: dict[str, Any] = {}
         for field in (
             "model",
@@ -71,4 +74,10 @@ class AgentConfig(BaseModel):
             value = getattr(self, field)
             if value is not None:
                 out[field] = value
+        if "reasoning_effort" in self.model_fields_set:
+            # Explicit "default" clears a profile's effort; omission inherits it.
+            out["reasoning_effort"] = self.reasoning_effort
+        elif self.think is not None:
+            # An explicit legacy think override must beat an inherited effort.
+            out["reasoning_effort"] = None
         return out

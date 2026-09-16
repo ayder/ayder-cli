@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Callable
 
 from ayder_cli.core.config import list_provider_profiles, load_config_for_provider
 from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.reasoning import get_effort_label
 from ayder_cli.log import LOG_LEVELS, get_logger
 from ayder_cli.logging_config import setup_logging
 from ayder_cli.providers import provider_orchestrator, ProviderUnavailableError
@@ -121,10 +122,12 @@ def _apply_provider_switch(
         app.update_system_prompt_model()
         _agent_reg = getattr(app, "_agent_registry", None)
         if _agent_reg is not None:
+            _agent_reg.set_parent_config(new_config)
             _agent_reg.new_generation()
 
         status_bar = app.query_one("#status-bar", StatusBar)
         status_bar.set_model(new_config.model)
+        status_bar.set_effort(get_effort_label(new_config))
 
         chat_view.add_system_message(
             f"Switched to provider: {provider} (model: {new_config.model})"
@@ -193,6 +196,86 @@ def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:
             chat_view.add_system_message(f"Switched to model: {new_model}")
 
         app.request_turn(prepare=_prepare, run_loop=False)
+
+
+def handle_effort(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Set reasoning effort for this session, or open the effort picker."""
+    from ayder_cli.core.reasoning import OPENAI_EFFORTS, OLLAMA_EFFORTS, validate_effort
+    from ayder_cli.providers.impl.ollama import OllamaProvider
+    from ayder_cli.providers.impl.openai import OpenAIProvider
+    from ayder_cli.providers.retry import RetryingProvider
+
+    def choices(driver: str) -> tuple[str, ...]:
+        if driver == "openai":
+            return ("default", *OPENAI_EFFORTS)
+        if driver == "ollama":
+            return ("default", "on", "off", *OLLAMA_EFFORTS[1:])
+        return ()
+
+    def apply(value: str) -> None:
+        def prepare() -> None:
+            # Resolve the active driver here: a provider switch may be queued
+            # ahead of this change while the current turn is still running.
+            driver = app.config.driver
+            selected = value.strip().lower()
+            if driver == "ollama":
+                selected = {"true": "on", "false": "off", "none": "off"}.get(
+                    selected, selected
+                )
+            available = choices(driver)
+            if selected not in available:
+                chat_view.add_system_message(
+                    f"Unsupported effort for {driver}: {value}. "
+                    f"Choose from: {', '.join(available) or 'not supported'}."
+                )
+                return
+            updates: dict = {
+                "reasoning_effort": None if selected == "default" else selected
+            }
+            if driver == "ollama" and selected in {"on", "off"}:
+                updates = {"reasoning_effort": None, "think": selected == "on"}
+            if driver == "ollama" and selected == "default":
+                updates["think"] = None
+            config = app.config.model_copy(update=updates)
+            validate_effort(config.driver, config.reasoning_effort)
+            provider = app.llm
+            while isinstance(provider, RetryingProvider):
+                provider = provider._inner
+            if not isinstance(provider, (OpenAIProvider, OllamaProvider)):
+                chat_view.add_system_message(
+                    "The active provider does not support /effort."
+                )
+                return
+            provider.config = config
+            app.config = config
+            app.query_one("#status-bar", StatusBar).set_effort(get_effort_label(config))
+            agent_registry = getattr(app, "_agent_registry", None)
+            if agent_registry is not None:
+                agent_registry.set_parent_config(config)
+            chat_view.add_system_message(f"Reasoning effort: {selected} ({driver}).")
+
+        app.request_turn(prepare=prepare, run_loop=False)
+
+    available = choices(app.config.driver)
+    if not available:
+        chat_view.add_system_message(
+            "/effort is supported by the openai and ollama drivers."
+        )
+        return
+    if args.strip():
+        apply(args)
+        return
+
+    current = get_effort_label(app.config)
+    app.push_screen(
+        CLISelectScreen(
+            title="Reasoning effort",
+            items=[(value, value) for value in available],
+            current=current,
+            description=f"Current: {current}. Model support varies.",
+        ),
+        lambda selected: apply(selected) if selected is not None else None,
+    )
 
 
 def handle_tasks(app: AyderApp, args: str, chat_view: ChatView) -> None:
@@ -1236,6 +1319,7 @@ COMMAND_MAP: dict[str, Callable] = {
     "/help": handle_help,
     "/provider": handle_provider,
     "/model": handle_model,
+    "/effort": handle_effort,
     "/tasks": handle_tasks,
     "/tools": handle_tools,
     "/verbose": handle_verbose,

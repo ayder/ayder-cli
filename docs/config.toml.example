@@ -48,12 +48,15 @@
 #      `export OLLAMA_API_KEY="<key>"`. The api_key config field is INERT on the
 #      native path, so a missing env var ⇒ 401 Unauthorized.
 #
-# NOTE on `think`: on the native `ollama` driver, ayder defaults thinking ON
-#       (think = true) and forwards either a boolean or Ollama's "low",
-#       "medium", "high" levels. If a selected model rejects thinking mode,
-#       ayder retries that request once with think=false. Set `think = false`
-#       in an [llm.*] profile for known non-thinking models. The `openai`
-#       driver sends no reasoning-effort parameter at all.
+# Reasoning defaults can be set in [llm.*] and overridden in [agents.*].
+# reasoning_effort = "default" uses existing think behavior on Ollama and omits
+# the effort parameter on OpenAI. Explicit effort overrides legacy `think`.
+# OpenAI: none, minimal, low, medium, high, xhigh, max (model-dependent).
+# Ollama SDK: none (= think=false), low, medium, high. To enable/disable
+# boolean thinking explicitly, the legacy think = true/false still works.
+# Use /effort in the TUI for a session-only override or interactive picker.
+# Explicit unsupported efforts report a server error; only legacy `think`
+# retains the automatic retry with think=false for non-thinking models.
 #
 # NOTE on tuning knobs — which actually take effect depends on the DRIVER. These
 #       agents run on the native `ollama` driver, which ignores most of them:
@@ -69,8 +72,8 @@
 #                               path it sizes the context-manager budget.
 #                               Default 65536.
 #       The per-agent temperature / max_output_tokens values below are largely
-#       INERT on this Ollama pipeline; per-agent `think` is applied when the
-#       agent uses the native ollama driver.
+#       INERT on this Ollama pipeline; per-agent reasoning_effort takes
+#       precedence over the selected profile.
 # =============================================================================
 
 config_version = "2.0"
@@ -167,6 +170,7 @@ driver = "ollama"
 base_url = "http://localhost:11434"  # route :cloud models through the LOCAL daemon (auth via ~/.ollama/id_ed25519, one-time `ollama signin`)
 model = "deepseek-v4-pro:cloud"    # orchestrator default; per-agent `model` overrides this
 num_ctx = 131072
+reasoning_effort = "default"
 think = true                       # default; set false for known non-thinking models
 # To hit ollama.com directly instead, swap the line above for:
 #   base_url = "https://ollama.com"   # no /v1; then `export OLLAMA_API_KEY=<key>` (the api_key field is inert on this path)
@@ -176,6 +180,7 @@ driver = "ollama"
 base_url = "http://localhost:11434"
 model = "qwen3.6:35b-a3b-coding-nvfp4"
 num_ctx = 32768                     # keep modest: local VRAM is the constraint
+reasoning_effort = "default"
 think = true                        # default; set false if the selected model rejects thinking
 
 # Budget/throughput alternative — swap any cloud agent's `provider` to this, or
@@ -198,7 +203,8 @@ think = true                        # default; set false if the selected model r
 # num_ctx = 65536            # sizes the context-manager budget (default 65536); NOT sent to the API
 # max_output_tokens = 8192   # -> max_tokens / max_completion_tokens (default 4096); keep WELL below num_ctx
 # stop_sequences = []        # -> stop (default [])
-# # temperature / think are NOT applied by the openai driver today (no-ops) — omitted on purpose.
+# reasoning_effort = "medium" # choose a value supported by the selected model
+# # temperature / think are NOT applied by the openai driver.
 
 # =============================================================================
 # Agents
@@ -211,7 +217,7 @@ provider = "ollama_cloud"
 model = "glm-5.2:cloud"
 temperature = 0.4
 max_output_tokens = 8192
-think = "high"
+reasoning_effort = "high"
 system_prompt = """
 You are Project Manager #1 — the requirements analyst and spec author.
 
@@ -239,7 +245,7 @@ provider = "ollama_cloud"
 model = "deepseek-v4-pro:cloud"
 temperature = 0.2
 max_output_tokens = 4096
-think = "high"
+reasoning_effort = "high"
 system_prompt = """
 You are Project Manager #2 — the independent spec reviewer.
 
@@ -268,7 +274,7 @@ provider = "ollama_cloud"
 model = "deepseek-v4-pro:cloud"
 temperature = 0.3
 max_output_tokens = 8192
-think = "high"
+reasoning_effort = "high"
 num_ctx = 262144                   # long window: hold the whole spec while splitting it into tasks (delays compaction)
 system_prompt = """
 You are the Architect — you turn an APPROVED spec into an implementation plan.
@@ -296,7 +302,7 @@ provider = "ollama_cloud"
 model = "kimi-k2.7-code:cloud"
 temperature = 0.2
 max_output_tokens = 8192
-think = "high"
+reasoning_effort = "high"
 system_prompt = """
 You are the Architecture Reviewer — independent of the Architect.
 
@@ -398,7 +404,7 @@ provider = "ollama_cloud"
 model = "kimi-k2.7-code:cloud"
 temperature = 0.1
 max_output_tokens = 4096
-think = "high"
+reasoning_effort = "high"
 system_prompt = """
 You are the Code Reviewer. You review a diff for correctness and quality.
 
@@ -424,7 +430,7 @@ provider = "ollama_cloud"
 model = "minimax-m3:cloud"
 temperature = 0.1
 max_output_tokens = 4096
-think = "high"
+reasoning_effort = "high"
 num_ctx = 262144                   # long window: holds spec + all criteria + diff + test output at once
 system_prompt = """
 You are the Acceptance Gate — the final, independent check before "done".

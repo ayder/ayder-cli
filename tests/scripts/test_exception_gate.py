@@ -347,7 +347,7 @@ def test_full_tree_census_is_frozen():
     # server session, tool dispatch, and per-server discovery.
     code, out = _run()
     assert "broad=138" in out, out
-    assert "files=117/117" in out, out
+    assert "files=118/118" in out, out
     code, out = _run("--expect-broad", "134")
     assert code == 1
     assert "census: found 138" in out

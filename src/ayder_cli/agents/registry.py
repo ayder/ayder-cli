@@ -154,6 +154,10 @@ class AgentRegistry:
     def current_generation(self) -> int:
         return self._current_generation
 
+    def set_parent_config(self, config: Any) -> None:
+        """Update defaults for future runs without mutating active agents."""
+        self._parent_config = config
+
     def new_generation(self) -> int:
         """Bump the conversation generation and reset the re-dispatch guard.
         Does NOT drop _runs: active agents keep running and are simply filtered

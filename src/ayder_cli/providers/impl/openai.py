@@ -6,6 +6,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from openai import AsyncOpenAI
 
 from ayder_cli.core.config import Config
+from ayder_cli.core.reasoning import OPENAI_EFFORTS
 from ayder_cli.log import get_logger
 from ayder_cli.providers.base import (
     AIProvider,
@@ -59,6 +60,9 @@ class OpenAIProvider(AIProvider):
             "messages": messages,
             "stream": False,
         }
+        effort = getattr(self.config, "reasoning_effort", None)
+        if isinstance(effort, str) and effort in OPENAI_EFFORTS:
+            kwargs["reasoning_effort"] = effort
         if tools:
             kwargs["tools"] = tools
         if options:
@@ -126,6 +130,9 @@ class OpenAIProvider(AIProvider):
         if getattr(self, "_STREAM_OPTIONS", True):
             kwargs["stream_options"] = {"include_usage": True}
 
+        effort = getattr(self.config, "reasoning_effort", None)
+        if isinstance(effort, str) and effort in OPENAI_EFFORTS:
+            kwargs["reasoning_effort"] = effort
         if tools:
             kwargs["tools"] = tools
 

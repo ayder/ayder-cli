@@ -223,6 +223,50 @@ num_ctx = 1000000
 
 Please adjust `num_ctx` context size window according to your local computer RAM. If Ollama crashes, decrease the value.
 
+### Reasoning Effort (`/effort`)
+
+Use `/effort` to open a picker, or `/effort high` to change the active session.
+Changes apply between turns and are inherited by future agents that use the
+session's profile; explicit agent settings take precedence. They do not change
+`config.toml`. `/effort default` restores the provider's default behavior
+(omits OpenAI effort and Ollama's `think` parameter).
+
+| Driver | Runtime values |
+|--------|----------------|
+| `openai` | `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `ollama` | `default`, `on`, `off`, `low`, `medium`, `high` (`true`/`false` and `none` are also accepted) |
+
+Support varies by model. OpenAI values follow its
+[Chat Completions API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
+Ollama uses the installed Python SDK's boolean and three-level `think` options;
+its SDK does not yet accept the server API's newer `max` value. GPT-OSS expects
+`low`, `medium`, or `high`, and cannot disable thinking. See
+[Ollama thinking](https://docs.ollama.com/capabilities/thinking).
+
+Set persistent defaults per LLM profile and agent:
+
+```toml
+[llm.openai]
+driver = "openai"
+reasoning_effort = "medium"
+
+[llm.ollama]
+driver = "ollama"
+reasoning_effort = "high"
+
+[agents.reviewer]
+provider = "openai"
+reasoning_effort = "high"
+system_prompt = "Review code and report findings."
+```
+
+Omit an agent's `reasoning_effort` to inherit its profile, or set it to
+`"default"` to clear an inherited effort. On Ollama, `"none"` maps to
+`think = false`; an explicit effort overrides the legacy `think` setting.
+Existing `think = true/false/"low"/"medium"/"high"` profile and agent settings
+remain supported. OpenAI omits reasoning effort by default, preserving
+compatibility with models and endpoints that do not support it.
+
 ### Changing Models on the Fly (`/model`)
 
 You do **not** need a separate profile for every model. The profile defines the *connection* (driver, base URL, API key).
@@ -349,6 +393,7 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/help` | Show available commands and keyboard shortcuts |
 | `/provider` | Switch LLM provider (interactive selector or direct name) |
 | `/model` | List available models or switch model (e.g., `/model qwen3-coder`) |
+| `/effort` | Pick reasoning effort or set it directly (e.g., `/effort high`) |
 | `/plugin` | Toggle tool plugins by tag (e.g., venv, http, background, python, dbs) |
 | `/tools` | List currently enabled tools and descriptions |
 | `/permission` | Toggle permission levels (r/w/x/http) interactively |

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ayder_cli.core.config import Config, load_config, load_config_for_provider
+from ayder_cli.core.reasoning import validate_effort
 from ayder_cli.core.context_manager_factory import context_manager_factory
 
 if TYPE_CHECKING:
@@ -182,6 +183,8 @@ def create_agent_runtime(
     overrides = agent_config.overrides()
     if overrides:
         cfg = cfg.model_copy(update=overrides)
+
+    validate_effort(cfg.driver, cfg.reasoning_effort)
 
     # 3. Create isolated AIProvider
     llm_provider = provider_orchestrator.create(cfg)

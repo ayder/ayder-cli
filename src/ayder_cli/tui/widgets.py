@@ -1152,9 +1152,16 @@ class StatusBar(Horizontal):
     CLI-style status bar showing context info.
     """
 
-    def __init__(self, model: str = "default", permissions: set | None = None, **kwargs):
+    def __init__(
+        self,
+        model: str = "default",
+        permissions: set | None = None,
+        effort: str = "default",
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.model = model
+        self.effort = effort
         self.token_count = 0
         self.active_files: list[str] = []
         self._permissions = permissions or {"r"}
@@ -1162,6 +1169,7 @@ class StatusBar(Horizontal):
     def compose(self) -> ComposeResult:
         mode_str = "".join(sorted(self._permissions))
         yield Label(markup_or_plain(f"model: {self.model}"), id="model-label")
+        yield Label(f" | effort: {self.effort}", id="effort-label")
         yield Label(markup_or_plain(f" | mode: {mode_str}"), id="mode-label")
         yield Label(" | ctx: —", id="token-label")
         yield Label(" | files: 0", id="files-label")
@@ -1180,6 +1188,11 @@ class StatusBar(Horizontal):
         self.model = model
         label = self.query_one("#model-label", Label)
         label.update(markup_or_plain(f"model: {model}"))
+
+    def set_effort(self, effort: str) -> None:
+        """Update the effort displayed immediately after the model."""
+        self.effort = effort
+        self.query_one("#effort-label", Label).update(f" | effort: {effort}")
 
     def update_context_usage(self, used: int, total: int) -> None:
         """Update the live context-window usage: current tokens / window size.

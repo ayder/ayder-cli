@@ -5,6 +5,7 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from ollama import AsyncClient
 
+from ayder_cli.core.reasoning import validate_effort
 from ayder_cli.log import get_logger
 from ayder_cli.providers.base import (
     AIProvider,
@@ -129,6 +130,17 @@ class OllamaProvider(AIProvider):
         ``Config`` defaults this to True. Tests often pass loose mocks without a
         real ``think`` field; those should behave like the real default.
         """
+        effort = getattr(self.config, "reasoning_effort", None)
+        if isinstance(effort, str):
+            validate_effort("ollama", effort)
+            if effort == "none":
+                return False
+            if effort == "low":
+                return "low"
+            if effort == "medium":
+                return "medium"
+            if effort == "high":
+                return "high"
         value = getattr(self.config, "think", True)
         if value is None or isinstance(value, bool):
             return value
@@ -209,7 +221,12 @@ class OllamaProvider(AIProvider):
                 yield chunk
         except Exception as exc:
             logger.opt(exception=True).debug("Ollama native stream raised; evaluating fallback")
-            if committed or think is False or not self._is_unsupported_thinking_error(exc):
+            if (
+                committed
+                or think is False
+                or isinstance(getattr(self.config, "reasoning_effort", None), str)
+                or not self._is_unsupported_thinking_error(exc)
+            ):
                 raise
             logger.info(
                 "Ollama model {!r} rejected think={!r}; retrying with think=False",
@@ -305,7 +322,12 @@ class OllamaProvider(AIProvider):
                 yield chunk
         except Exception as exc:
             logger.opt(exception=True).debug("Ollama in-content stream raised; evaluating fallback")
-            if committed or think is False or not self._is_unsupported_thinking_error(exc):
+            if (
+                committed
+                or think is False
+                or isinstance(getattr(self.config, "reasoning_effort", None), str)
+                or not self._is_unsupported_thinking_error(exc)
+            ):
                 raise
             logger.info(
                 "Ollama model {!r} rejected think={!r}; retrying with think=False",

@@ -148,3 +148,16 @@ def test_apply_provider_switch_rolls_back_on_invalid_driver():
     assert app.config is old_config
     chat_view.add_system_message.assert_called_once()
     assert "Cannot switch to broken" in chat_view.add_system_message.call_args[0][0]
+
+
+def test_provider_switch_updates_inherited_agent_effort():
+    app = _make_app()
+    app._agent_registry = MagicMock()
+    new_config = Config(driver="ollama", reasoning_effort="low")
+    with (
+        patch("ayder_cli.tui.commands.load_config_for_provider", return_value=new_config),
+        patch("ayder_cli.tui.commands.provider_orchestrator.create"),
+    ):
+        _apply_provider_switch(app, "ollama", MagicMock())
+    app._agent_registry.set_parent_config.assert_called_once_with(new_config)
+    assert app.config.reasoning_effort == "low"

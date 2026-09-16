@@ -22,6 +22,7 @@ import uuid
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.application.runtime_factory import create_runtime
 from ayder_cli.core.config import Config
+from ayder_cli.core.reasoning import get_effort_label
 from ayder_cli.diagnostics import install_asyncio_handler
 from ayder_cli.log import get_logger
 from ayder_cli.logging_config import (
@@ -771,7 +772,12 @@ class AyderApp(App):
         yield AgentPanel(id="agent-panel")
         yield ActivityBar(id="activity-bar")
         yield CLIInputBar(commands=self.commands, id="input-bar")
-        yield StatusBar(model=self.model, permissions=self.permissions, id="status-bar")
+        yield StatusBar(
+            model=self.model,
+            permissions=self.permissions,
+            effort=get_effort_label(self.config),
+            id="status-bar",
+        )
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
