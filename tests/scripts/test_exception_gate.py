@@ -345,10 +345,12 @@ def test_full_tree_census_is_frozen():
     """
     # Built-in MCP adds two modules and three remote failure boundaries:
     # server session, tool dispatch, and per-server discovery.
-    # providers/evren.py (evren terms acceptance) adds one module.
+    # providers/evren.py (evren terms acceptance) adds one module. The OpenAI
+    # driver's list_models no longer swallows server errors (one fewer), and
+    # the evren terms paths catch named errors only.
     code, out = _run()
-    assert "broad=138" in out, out
+    assert "broad=137" in out, out
     assert "files=119/119" in out, out
     code, out = _run("--expect-broad", "134")
     assert code == 1
-    assert "census: found 138" in out
+    assert "census: found 137" in out
