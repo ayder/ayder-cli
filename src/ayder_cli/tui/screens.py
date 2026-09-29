@@ -1,12 +1,13 @@
-"""Modal screens for the TUI: confirm, permission, safe mode, select, task edit, help."""
+"""Modal screens for the TUI: confirm, permission, safe mode, select, task edit, help, evren terms."""
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.widgets import Static, Input, Label, TextArea
+from textual.widgets import Button, Input, Label, Markdown, Static, TextArea
 from textual.screen import ModalScreen
 from rich.text import Text
 
+from ayder_cli.providers.evren import EvrenTerms
 from ayder_cli.tui.keybindings import get_keybindings_by_category
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.log import get_logger
@@ -767,3 +768,18 @@ class CLIHelpScreen(ModalScreen[None]):
 
     def action_dismiss_help(self) -> None:
         self.dismiss(None)
+
+
+class EvrenTermsScreen(ModalScreen[bool]):
+    """Shows the evren terms of use; dismisses True on Approve, False on Deny."""
+
+    def __init__(self, terms: EvrenTerms) -> None:
+        super().__init__()
+        self.terms = terms
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            with VerticalScroll():
+                yield Markdown(self.terms.content, id="terms-content")
+            yield Button("Approve", id="terms-approve")
+            yield Button("Deny", id="terms-deny")

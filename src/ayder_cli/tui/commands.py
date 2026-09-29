@@ -136,7 +136,9 @@ def _apply_provider_switch(
     app.request_turn(prepare=_prepare, run_loop=False)
 
 
-async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
+async def _list_and_show_models(
+    app: AyderApp, chat_view: ChatView, *, terms_prompted: bool = False
+) -> None:
     """Async helper to list models and show selector."""
     try:
         models = await app.llm.list_models()
