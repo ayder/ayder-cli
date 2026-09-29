@@ -385,6 +385,22 @@ uv run poe test-cov      # With coverage report
 - **Coverage**: Maintain existing coverage levels
 - **Timeout**: Use `--timeout=30` to prevent hanging tests
 
+### Test Definitions
+
+Plans and reviews use these values.
+
+- **Kinds**
+  - `baseline regression` — fails on the parent commit for a named reason, passes on the fix.
+  - `new interface` — fails at its assertion once a minimal callable version exists (never on an `ImportError`).
+  - `preservation` — passes before and after the change; its assertion depends on the behaviour it preserves.
+- **Layers**
+  - `unit` — a function or class, without a Textual app.
+  - `tui` — a Textual app driven under `App.run_test()`.
+- **Environment**
+  - `local-faked` — the only one. No network: HTTP is faked with `httpx.MockTransport` passed to the SDK client; other I/O uses `unittest.mock`. No test reaches a real provider.
+
+The gate procedure lives in [docs/GATE.md](docs/GATE.md).
+
 ### Writing Tests
 
 ```python
