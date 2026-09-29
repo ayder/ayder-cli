@@ -206,6 +206,15 @@ think = true                        # default; set false if the selected model r
 # reasoning_effort = "medium" # choose a value supported by the selected model
 # # temperature / think are NOT applied by the openai driver.
 
+# evren gateway (OpenAI-compatible). A fresh config.toml ships this profile with
+# an empty api_key. The first `/model` asks you to accept evren's terms of use.
+# [llm.evren]
+# driver = "openai"
+# base_url = "https://evren-llmapi.ssyz.org.tr/v1"
+# api_key = ""               # your evren key
+# model = "deepseek-v4-flash"
+# num_ctx = 131072
+
 # =============================================================================
 # Agents
 # =============================================================================

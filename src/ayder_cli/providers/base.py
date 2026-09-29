@@ -56,7 +56,8 @@ class AIProvider(ABC):
         List available models from the provider.
         
         Returns:
-            List of model name strings. Empty list if not supported or on error.
+            List of model name strings. Empty list if the driver does not
+            support listing; drivers may raise on server errors.
         """
         return []
     

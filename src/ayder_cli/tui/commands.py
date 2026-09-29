@@ -15,11 +15,14 @@ from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.reasoning import get_effort_label
 from ayder_cli.log import LOG_LEVELS, get_logger
 from ayder_cli.logging_config import setup_logging
-from ayder_cli.providers import provider_orchestrator, ProviderUnavailableError
+import openai
+
+from ayder_cli.providers import evren, provider_orchestrator, ProviderUnavailableError
 from ayder_cli.tools.builtins.skill import SkillInfo, discover_skills, skill
 from ayder_cli.tui.screens import (
     AgentListScreen,
     CLISelectScreen,
+    EvrenTermsScreen,
     CLIMultiSelectScreen,
     CLIPermissionScreen,
     TaskEditScreen,
@@ -136,7 +139,9 @@ def _apply_provider_switch(
     app.request_turn(prepare=_prepare, run_loop=False)
 
 
-async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
+async def _list_and_show_models(
+    app: AyderApp, chat_view: ChatView, *, terms_prompted: bool = False
+) -> None:
     """Async helper to list models and show selector."""
     try:
         models = await app.llm.list_models()
@@ -173,7 +178,41 @@ async def _list_and_show_models(app: AyderApp, chat_view: ChatView) -> None:
         )
     except Exception as e:  # noqa: BLE001 - slash-command guard: /model reports listing failures in chat rather than killing the app
         logger.opt(exception=True).error("Model listing failed")
+        if not terms_prompted and evren.is_evren_terms_error(app.config.base_url, e):
+            await _prompt_evren_terms(app, chat_view)
+            return
         chat_view.add_system_message(f"Error listing models: {e}")
+
+
+async def _prompt_evren_terms(app: AyderApp, chat_view: ChatView) -> None:
+    """Show the evren terms; on Approve accept them and list models again."""
+    client = evren.make_client(app.config)
+    try:
+        terms = await evren.fetch_terms(client)
+    except (openai.APIError, ValueError) as e:
+        logger.opt(exception=True).warning("Fetching evren terms failed")
+        chat_view.add_system_message(f"Could not load evren terms: {e}")
+        return
+
+    async def _accept_and_relist() -> None:
+        try:
+            accepted = await evren.accept_terms(client, terms.version)
+        except openai.APIError as e:
+            logger.opt(exception=True).warning("Accepting evren terms failed")
+            chat_view.add_system_message(f"Could not accept evren terms: {e}")
+            return
+        chat_view.add_system_message(f"Accepted evren terms v{accepted}.")
+        await _list_and_show_models(app, chat_view, terms_prompted=True)
+
+    def on_decision(approved: bool | None) -> None:
+        if approved:
+            app.run_worker(_accept_and_relist(), exclusive=False)
+        else:
+            chat_view.add_system_message(
+                "evren terms not accepted; models cannot be listed until they are."
+            )
+
+    app.push_screen(EvrenTermsScreen(terms), on_decision)
 
 
 def handle_model(app: AyderApp, args: str, chat_view: ChatView) -> None:

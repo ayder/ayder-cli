@@ -177,6 +177,22 @@ async def test_list_models():
 
 
 @pytest.mark.asyncio
+async def test_list_models_failure_returns_empty():
+    """A failing Ollama listing still yields [] (only the OpenAI driver raises)."""
+    cfg = make_config()
+
+    with patch("ayder_cli.providers.impl.ollama.AsyncClient") as MockClient:
+        instance = AsyncMock()
+        instance.list.side_effect = ConnectionError("connection refused")
+        MockClient.return_value = instance
+
+        provider = OllamaProvider(cfg)
+        models = await provider.list_models()
+
+    assert models == []
+
+
+@pytest.mark.asyncio
 async def test_keep_alive_set_to_infinite():
     """Every chat call should set keep_alive=-1."""
     cfg = make_config()

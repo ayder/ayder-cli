@@ -112,6 +112,8 @@ in the core install.
 
 ayder-cli uses a flexible profile-based configuration system. On the first run, it creates a config file at `~/.ayder/config.toml`.
 
+The generated file includes an `[llm.evren]` profile for the evren gateway (`https://evren-llmapi.ssyz.org.tr/v1`) with an empty `api_key`. Fill in your key and switch to it with `/provider evren`.
+
 **Key Concepts:**
 - **Profile Name:** A custom named section (e.g., `[llm.my_ollama]`). You can define as many profiles as you want.
 - **Driver:** The underlying native SDK or adapter used by the profile (`ollama`, `openai`, `anthropic`, `google`, `deepseek`, `qwen`, or `glm`). Each driver guarantees full support for native tool calling and streaming.
@@ -275,6 +277,10 @@ Once a profile is active, use `/model` in the TUI to swap models on the fly:
 
 - **Interactive Picker:** `/model` with no arguments queries the active driver for available models and opens a picker.
 - **Direct Switch:** `/model <model-name>` immediately switches to that model.
+
+If the provider rejects the listing request, `/model` shows the server's error.
+
+For the evren gateway (`evren-llmapi.ssyz.org.tr`), if your account has not accepted the current terms of use, `/model` shows them and asks you to Approve or Deny; Approve accepts them on the server.
 
 Changes made with `/model` apply to the current session only. To make a model the permanent default, update `model = "..."` in your `config.toml`.
 

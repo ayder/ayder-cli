@@ -220,7 +220,7 @@ cli.py:main()
 | `tui/adapter.py` | Adapter glue between `AyderApp` and `ChatLoop` | callback wiring helpers |
 | `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()` |
 | `tui/widgets.py` | Custom widgets | `ChatView`, `ToolPanel`, `CLIInputBar`, `StatusBar`, `AutoCompleteInput` |
-| `tui/screens.py` | Modal screens | `AgentListScreen`, `CLIConfirmScreen`, `CLIHelpScreen`, `CLIMultiSelectScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `TaskEditScreen` |
+| `tui/screens.py` | Modal screens | `AgentListScreen`, `CLIConfirmScreen`, `CLIHelpScreen`, `CLIMultiSelectScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `EvrenTermsScreen`, `TaskEditScreen` |
 | `tui/parser.py` | TUI-specific parsing | `content_processor()` |
 | `tui/helpers.py` | UI helpers | `create_tui_banner()` |
 | `tui/keybindings.py` | Keybinding declarations | `BINDINGS` |
@@ -242,6 +242,7 @@ All LLM provider implementations live here. Previously some sat under `services/
 | `providers/__init__.py` | Re-exports | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `provider_orchestrator` |
 | `providers/base.py` | Provider protocol + shared DTOs | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `_ToolCall`, `_FunctionCall` |
 | `providers/orchestrator.py` | Driver-keyed provider factory | `ProviderOrchestrator`, `provider_orchestrator` |
+| `providers/evren.py` | evren gateway terms-of-use acceptance (used by `/model`) | `EVREN_HOST`, `EvrenTerms`, `is_evren_terms_error`, `fetch_terms`, `accept_terms` |
 | `providers/impl/ollama.py` | Native Ollama provider (ollama SDK) | `OllamaProvider` |
 | `providers/impl/ollama_inspector.py` | Ollama model introspection | `OllamaInspector`, `ModelInfo`, `RuntimeState` |
 | `providers/impl/openai.py` | OpenAI / OpenAI-compatible backend | `OpenAIProvider` |

@@ -74,6 +74,8 @@ def render_v2_config(
         section = dict(defaults.get(provider, {}))
         section.setdefault("driver", _DRIVER_BY_PROVIDER[provider])
         llm_profiles[provider] = section
+    for name, section in defaults.get("extra_llm_profiles", {}).items():
+        llm_profiles[name] = dict(section)
     if llm_overrides:
         for name, section in llm_overrides.items():
             merged = dict(llm_profiles.get(name, {}))
