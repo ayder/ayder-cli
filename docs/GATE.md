@@ -12,7 +12,7 @@ Input: the candidate SHA.
    gates and the test suite, and stops at the first failing task.
 4. Copy the final pytest summary line (`=== N passed, M skipped in …s ===`) verbatim.
 
-Last measured: `2492 passed, 2 skipped` at `bdf44f5` (2026-09-29).
+Last measured: `2494 passed, 2 skipped` on `feat/evren-terms` with the evren default profile (2026-09-29).
 
 ## Report format
 

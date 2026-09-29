@@ -45,6 +45,16 @@ DEFAULTS: Dict[str, Any] = {
         "model": "gemini-3-flash",
         "num_ctx": 65536,
     },
+    # Extra [llm.<name>] profiles written into a freshly created config.toml.
+    "extra_llm_profiles": {
+        "evren": {
+            "driver": "openai",
+            "base_url": "https://evren-llmapi.ssyz.org.tr/v1",
+            "api_key": "",
+            "model": "deepseek-v4-flash",
+            "num_ctx": 131072,
+        },
+    },
     "editor": "vim",
     "verbose": False,
     "logging": {

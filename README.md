@@ -112,6 +112,8 @@ in the core install.
 
 ayder-cli uses a flexible profile-based configuration system. On the first run, it creates a config file at `~/.ayder/config.toml`.
 
+The generated file includes an `[llm.evren]` profile for the evren gateway (`https://evren-llmapi.ssyz.org.tr/v1`) with an empty `api_key`. Fill in your key and switch to it with `/provider evren`.
+
 **Key Concepts:**
 - **Profile Name:** A custom named section (e.g., `[llm.my_ollama]`). You can define as many profiles as you want.
 - **Driver:** The underlying native SDK or adapter used by the profile (`ollama`, `openai`, `anthropic`, `google`, `deepseek`, `qwen`, or `glm`). Each driver guarantees full support for native tool calling and streaming.
