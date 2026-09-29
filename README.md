@@ -276,6 +276,10 @@ Once a profile is active, use `/model` in the TUI to swap models on the fly:
 - **Interactive Picker:** `/model` with no arguments queries the active driver for available models and opens a picker.
 - **Direct Switch:** `/model <model-name>` immediately switches to that model.
 
+If the provider rejects the listing request, `/model` shows the server's error.
+
+For the evren gateway (`evren-llmapi.ssyz.org.tr`), if your account has not accepted the current terms of use, `/model` shows them and asks you to Approve or Deny; Approve accepts them on the server.
+
 Changes made with `/model` apply to the current session only. To make a model the permanent default, update `model = "..."` in your `config.toml`.
 
 ## Usage
