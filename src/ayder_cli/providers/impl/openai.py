@@ -36,16 +36,11 @@ class OpenAIProvider(AIProvider):
     async def list_models(self) -> List[str]:
         """
         List available models from the OpenAI-compatible API.
-        
-        Returns empty list if the API doesn't support model listing.
+
+        Server and transport errors propagate so the caller can report them.
         """
-        try:
-            response = await self.client.models.list()
-            # Extract model IDs from the response
-            return [model.id for model in response.data if hasattr(model, "id")]
-        except Exception:  # noqa: BLE001 - OpenAI SDK boundary: servers that omit model listing raise arbitrary client errors
-            logger.opt(exception=True).warning("Failed to list models")
-            return []
+        response = await self.client.models.list()
+        return [model.id for model in response.data if hasattr(model, "id")]
 
     async def chat(
         self,

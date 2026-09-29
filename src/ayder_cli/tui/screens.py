@@ -1,7 +1,7 @@
 """Modal screens for the TUI: confirm, permission, safe mode, select, task edit, help, evren terms."""
 
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, Markdown, Static, TextArea
 from textual.screen import ModalScreen
@@ -771,7 +771,12 @@ class CLIHelpScreen(ModalScreen[None]):
 
 
 class EvrenTermsScreen(ModalScreen[bool]):
-    """Shows the evren terms of use; dismisses True on Approve, False on Deny."""
+    """Shows the evren terms of use; dismisses True on Approve, False on Deny.
+
+    Deny holds focus when the modal opens so a stray Enter never accepts.
+    """
+
+    BINDINGS = [("escape", "deny", "Deny")]
 
     def __init__(self, terms: EvrenTerms) -> None:
         super().__init__()
@@ -779,7 +784,21 @@ class EvrenTermsScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            with VerticalScroll():
+            yield Label(
+                f"evren — Terms of Use v{self.terms.version}", classes="prompt", markup=False
+            )
+            with VerticalScroll(id="terms-scroll"):
                 yield Markdown(self.terms.content, id="terms-content")
-            yield Button("Approve", id="terms-approve")
-            yield Button("Deny", id="terms-deny")
+            with Horizontal(id="terms-buttons"):
+                yield Button("Approve", id="terms-approve", variant="success")
+                yield Button("Deny", id="terms-deny", variant="error")
+
+    def on_mount(self) -> None:
+        self.query_one("#terms-deny", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "terms-approve")
+
+    def action_deny(self) -> None:
+        self.dismiss(False)

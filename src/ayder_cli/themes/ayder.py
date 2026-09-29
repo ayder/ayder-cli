@@ -358,6 +358,43 @@ CLIHelpScreen #help-content {
     height: auto;
 }
 
+/* EvrenTermsScreen - evren terms-of-use modal with Approve / Deny.
+   Targets 'EvrenTermsScreen' in screens.py. */
+EvrenTermsScreen {
+    align: center middle;
+}
+
+EvrenTermsScreen > Vertical {
+    width: 90%;
+    height: 85%;
+    background: ansi_black;
+    border: solid ansi_bright_blue;
+    padding: 1 2;
+}
+
+EvrenTermsScreen .prompt {
+    text-style: bold;
+    color: ansi_bright_blue;
+    text-align: center;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+EvrenTermsScreen #terms-scroll {
+    height: 1fr;
+    color: ansi_white;
+}
+
+EvrenTermsScreen #terms-buttons {
+    height: auto;
+    align: center middle;
+    margin-top: 1;
+}
+
+EvrenTermsScreen Button {
+    margin: 0 2;
+}
+
 /* Generic text selection highlight color. */
 .selection {
     background: ansi_blue;
