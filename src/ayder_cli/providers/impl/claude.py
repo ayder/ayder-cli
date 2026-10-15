@@ -109,21 +109,35 @@ class ClaudeProvider(AIProvider):
             if self.interaction_sink:
                 self.interaction_sink.on_llm_request_debug(messages, model, tools, options)
 
+        # Anthropic identifies an argument delta only by its content-block index;
+        # map each tool_use block's index to its id so every delta carries it.
+        block_ids: Dict[int, str] = {}
         try:
             async with self.client.messages.stream(**kwargs) as stream:
                 async for chunk in stream:
                     if verbose:
                         logger.trace("Claude Chunk: type={}", chunk.type)
-                    yield self._normalize_chunk(chunk)
+                    yield self._normalize_chunk(chunk, block_ids)
         except Exception:
             logger.exception("Claude streaming failed")
             raise
 
-    def _normalize_chunk(self, chunk: Any) -> NormalizedStreamChunk:
-        """Map Anthropic stream events to our normalized format."""
+    def _normalize_chunk(
+        self, chunk: Any, block_ids: Optional[Dict[int, str]] = None
+    ) -> NormalizedStreamChunk:
+        """Map Anthropic stream events to our normalized format.
+
+        ``block_ids`` maps a content-block index to its tool_use id. It is owned
+        by one stream: filled on ``content_block_start`` and read on every
+        ``input_json_delta``, so the chat loop's id match appends each delta to
+        its own call. Block indices also count text blocks, so they are not
+        usable as the loop's ``_stream_index``.
+        """
         content = ""
         tool_calls = []
         usage = None
+        if block_ids is None:
+            block_ids = {}
 
         if chunk.type == "content_block_delta":
             if chunk.delta.type == "text_delta":
@@ -131,12 +145,17 @@ class ClaudeProvider(AIProvider):
             elif chunk.delta.type == "input_json_delta":
                 # Anthropic sends tool arguments as a continuous JSON string delta
                 tool_calls.append(
-                    ToolCallDef(id="", name="", arguments=chunk.delta.partial_json)
+                    ToolCallDef(
+                        id=block_ids.get(chunk.index, ""),
+                        name="",
+                        arguments=chunk.delta.partial_json,
+                    )
                 )
-                
+
         elif chunk.type == "content_block_start":
             if chunk.content_block.type == "tool_use":
                 # Start of a new tool call. We grab the ID and Name here.
+                block_ids[chunk.index] = chunk.content_block.id
                 tool_calls.append(
                     ToolCallDef(
                         id=chunk.content_block.id,
