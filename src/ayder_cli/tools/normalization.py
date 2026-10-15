@@ -84,3 +84,8 @@ def normalize_arguments(
                     pass  # keep as string; validation will catch it later
 
     return normalized
+
+
+def canonicalize_arguments(tool_name: str, arguments: dict) -> dict:
+    """Stub (test commit): replaced by the real canonicalizer in the fix."""
+    return dict(arguments)
