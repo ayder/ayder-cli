@@ -410,3 +410,97 @@ def test_normal_batch_history_unchanged():
         {"role": "tool", "tool_call_id": "id_b", "name": "read_file",
          "content": "result:b"},
     ]
+
+
+# --- raised worker outcomes (MR 02 review) ---------------------------------------
+
+
+class _RaisingMiddleware:
+    """A real middleware that holds the worker, then raises PermissionError.
+
+    ``HookManager.run_middlewares`` re-raises PermissionError, so the error
+    escapes through the real registry and ``execute_with_registry``.
+    """
+
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.finished = threading.Event()
+
+    def __call__(self, tool_name, args):
+        self.entered.set()
+        self.release.wait(WAIT)
+        self.finished.set()
+        raise PermissionError(f"blocked by policy middleware: {tool_name}")
+
+
+def _real_registry(tmp_path, middleware):
+    from ayder_cli.core.context import ProjectContext
+    from ayder_cli.tools.registry import create_default_registry
+
+    (tmp_path / "a.txt").write_text("a\n")
+    registry = create_default_registry(ProjectContext(str(tmp_path)))
+    registry.add_middleware(middleware)
+    return registry
+
+
+def _record_emits(chat):
+    emitted: list[tuple[str, bool]] = []
+    chat._emit_tool_call = (
+        lambda name, args, started, result: emitted.append((name, bool(result.success)))
+    )
+    return emitted
+
+
+@pytest.mark.parametrize("path", ["parallel", "confirmed"])
+def test_raised_worker_outcome_is_kept_when_cancelled_before_collection(tmp_path, path):
+    """Baseline regression: a worker that already raised is settled as
+    'interrupted' and its real error is lost; its completion event is lost
+    on the confirmed path."""
+    mw = _RaisingMiddleware()
+    cb = _Callbacks()
+    chat = _chat(_real_registry(tmp_path, mw), cb)
+    emitted = _record_emits(chat)
+    call = _call("a.txt", "id_a") if path == "parallel" else _call(
+        "a.txt", "id_a", name="file_editor")
+
+    async def body():
+        task = asyncio.create_task(chat._execute_tool_calls([call]))
+        await _until(mw.entered)
+        mw.release.set()
+        # Block the event loop so the raised outcome cannot be collected.
+        assert mw.finished.wait(WAIT)
+        time.sleep(0.2)  # let the worker thread finish raising
+        await _cancel(chat, cb, task)
+        result = _by_id(chat)["id_a"]
+        assert "blocked by policy middleware" in result
+        assert "interrupted" not in result
+        history_len, ui_len = len(chat.messages), len(cb.completed)
+        await asyncio.sleep(0.2)
+        assert len(chat.messages) == history_len and len(cb.completed) == ui_len
+
+    _scenario(body)
+    assert emitted == [(call.function.name, False)]
+
+
+def test_late_raise_after_settlement_emits_once_and_writes_nothing(tmp_path):
+    """Baseline regression: a raise after settlement emits no completion event
+    today. It must emit exactly once and never reach history or the UI."""
+    mw = _RaisingMiddleware()
+    cb = _Callbacks()
+    chat = _chat(_real_registry(tmp_path, mw), cb)
+    emitted = _record_emits(chat)
+
+    async def body():
+        task = asyncio.create_task(
+            chat._execute_tool_calls([_call("a.txt", "id_a", name="file_editor")]))
+        await _until(mw.entered)
+        await _cancel(chat, cb, task)
+        assert "interrupted" in _by_id(chat)["id_a"]
+        history_len, ui_len = len(chat.messages), len(cb.completed)
+        mw.release.set()
+        await asyncio.sleep(0.3)
+        assert len(chat.messages) == history_len and len(cb.completed) == ui_len
+
+    _scenario(body)
+    assert emitted == [("file_editor", False)]
