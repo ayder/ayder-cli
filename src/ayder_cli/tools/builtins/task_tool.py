@@ -37,6 +37,7 @@ from .tasks import (
     _get_tasks_dir,
     _ID_LOCK,
     _next_id,
+    _confined_task_files,
     _parse_status,
     _title_to_slug,
     resolve_task_path,
@@ -220,7 +221,7 @@ def _list(
     off = max(0, int(offset or 0))
 
     rows: list[tuple[int, str, str]] = []
-    for path in _get_tasks_dir(project_ctx).glob("*.md"):
+    for path in _confined_task_files(_get_tasks_dir(project_ctx)):
         tid = _extract_id(path.name)
         if tid is None:
             continue
@@ -382,6 +383,33 @@ def task(
     content: str | None = None,
 ) -> ToolResult:
     """Dispatch a task action. See module docstring for the per-action contract."""
+    try:
+        _get_tasks_dir(project_ctx)  # refuse an unconfined dir for every action
+        return _dispatch(
+            project_ctx, action, title, body, dependencies, branch, status,
+            identifier, section, meta_only, max_chars, offset, limit, content,
+        )
+    except ValueError as exc:
+        # An unconfined .ayder/tasks (e.g. a symlink leaving the project).
+        return ToolError(f"Security Error: {exc}", "security")
+
+
+def _dispatch(
+    project_ctx: ProjectContext,
+    action: str,
+    title: str | None,
+    body: str | None,
+    dependencies: str | None,
+    branch: str | None,
+    status: str | None,
+    identifier: str | None,
+    section: str | None,
+    meta_only: bool,
+    max_chars: int | None,
+    offset: int | None,
+    limit: int | None,
+    content: str | None,
+) -> ToolResult:
     act = (action or "").strip().lower()
     if act == "create":
         return _create(project_ctx, title, body, dependencies, branch, status)

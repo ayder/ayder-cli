@@ -502,6 +502,8 @@ ayder-cli includes a built-in task system:
 
 Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames (e.g., `TASK-001-add-auth-middleware.md`).
 
+The `task` tool resolves identifiers (a path, filename, ID or slug) only to files inside `.ayder/tasks/`. An identifier that points elsewhere, including through a symlink, is not resolved. If `.ayder/tasks/`, `.ayder/context/` or `.ayder/notes/` itself resolves outside the project, those tools return a security error.
+
 ```
 > /tasks            # Interactive task browser
 > /task-edit 1      # Open TASK-001 in the in-app editor

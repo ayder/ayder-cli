@@ -19,9 +19,26 @@ logger = get_logger("tool")
 _ID_LOCK = threading.Lock()
 
 
-def _get_tasks_dir(project_ctx: ProjectContext):
-    """Return the tasks directory path for the current project context."""
-    return project_ctx.root / ".ayder" / "tasks"
+def _get_tasks_dir(project_ctx: ProjectContext) -> Path:
+    """Return the tasks directory, refusing one that resolves outside the root.
+
+    Raises:
+        ValueError: If ``.ayder/tasks`` resolves outside the project root.
+    """
+    return project_ctx.harness_dir("tasks")
+
+
+def _confined_task_files(tasks_dir: Path):
+    """Yield ``tasks_dir/*.md`` in sorted order, skipping any that resolve outside.
+
+    An outward symlink is omitted before it is read or stat-ed. Yielded paths
+    keep their own names, so ids and relative paths stay stable.
+    """
+    for path in sorted(tasks_dir.glob("*.md")):
+        try:
+            yield ProjectContext.within(tasks_dir, path)
+        except ValueError:
+            continue
 
 
 def _ensure_tasks_dir(project_ctx: ProjectContext):
@@ -60,12 +77,19 @@ def _get_task_path_by_id(project_ctx: ProjectContext, task_id: int):
     """Find a task file by its numeric ID using glob pattern."""
     tasks_dir = _get_tasks_dir(project_ctx)
     pattern = f"TASK-{task_id:03d}-*.md"
-    matches = list(tasks_dir.glob(pattern))
-    if matches:
-        return matches[0]
+    for match in sorted(tasks_dir.glob(pattern)):
+        try:
+            return ProjectContext.within(tasks_dir, match)
+        except ValueError:
+            continue
     # Fallback: check legacy format
     legacy = tasks_dir / f"TASK-{task_id:03d}.md"
-    return legacy if legacy.exists() else None
+    if not legacy.exists():
+        return None
+    try:
+        return ProjectContext.within(tasks_dir, legacy)
+    except ValueError:
+        return None
 
 
 def _next_id(project_ctx: ProjectContext):
@@ -146,7 +170,7 @@ def list_tasks(
     """
     _ensure_tasks_dir(project_ctx)
 
-    files = sorted(_get_tasks_dir(project_ctx).glob("*.md"))
+    files = list(_confined_task_files(_get_tasks_dir(project_ctx)))
     if not files:
         return ToolSuccess("No tasks found.")
 
@@ -213,23 +237,41 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
     numeric ID lookup ("001"/"1"/"TASK-001"), then slug substring match. Shared
     by the `task` tool and the agent harness (which resolves the agent tool's
     task_id), so both accept identifiers in the same flexible forms.
+
+    Every result must resolve inside ``.ayder/tasks``. A path-form identifier
+    that exists but escapes ends resolution with ``None`` instead of falling
+    through to the fuzzy id and slug strategies. An unconfined tasks dir
+    yields ``None``.
     """
-    tasks_dir = _get_tasks_dir(project_ctx)
+    try:
+        tasks_dir = _get_tasks_dir(project_ctx)
+    except ValueError:
+        return None
+
+    def _confined(path: Path) -> Path | None:
+        try:
+            return ProjectContext.within(tasks_dir, path)
+        except ValueError:
+            return None
 
     # Strategy 1: Try as relative path from project root
+    found: Path | None = None
     try:
         candidate = project_ctx.root / identifier
         if candidate.exists() and candidate.is_file():
-            return candidate
+            found = candidate
     except Exception:  # noqa: BLE001 - resolver strategy 1 of several: any failure must fall through to the next strategy
         logger.opt(exception=True).debug(
             "Strategy 1 (relative path) failed ({} chars)", len(identifier)
         )
 
+    if found is not None:
+        return _confined(found)
+
     # Strategy 2: Try as filename in tasks dir
     candidate = tasks_dir / identifier
     if candidate.exists() and candidate.is_file():
-        return candidate
+        return _confined(candidate)
 
     # Strategy 3: Try to extract numeric ID and lookup ("001", "1", "TASK-001", ...)
     id_match = re.search(r"(\d+)", identifier)
@@ -241,7 +283,7 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
     # Strategy 4: Try as slug substring match
     slug_pattern = identifier.lower().strip()
     if slug_pattern:
-        for candidate in tasks_dir.glob("*.md"):
+        for candidate in _confined_task_files(tasks_dir):
             if slug_pattern in candidate.stem.lower():
                 return candidate
 
@@ -275,7 +317,11 @@ def read_task(project_ctx: ProjectContext, identifier: str):
 def list_task_ids(project_ctx: ProjectContext) -> list[str]:
     """Return the canonical IDs ("TASK-NNN") of every task file, sorted."""
     ids: list[str] = []
-    for path in sorted(_get_tasks_dir(project_ctx).glob("*.md")):
+    try:
+        tasks_dir = _get_tasks_dir(project_ctx)
+    except ValueError:
+        return ids
+    for path in _confined_task_files(tasks_dir):
         tid = _extract_id(path.name)
         if tid is not None:
             ids.append(f"TASK-{tid:03d}")

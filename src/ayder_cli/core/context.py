@@ -44,6 +44,35 @@ class ProjectContext:
 
         return target_path
 
+    def harness_dir(self, *parts: str) -> Path:
+        """Return ``<root>/.ayder/<parts>``, refusing a location outside the root.
+
+        ``validate_path`` resolves symlinks, so a ``.ayder/<parts>`` symlink that
+        points outside the project raises instead of redirecting writes.
+        The directory is not created.
+
+        Raises:
+            ValueError: If the resolved directory is outside the project root.
+        """
+        return self.validate_path(str(Path(".ayder", *parts)))
+
+    @staticmethod
+    def within(directory: Path, path: Path | str) -> Path:
+        """Return ``path`` unchanged if it resolves inside ``directory``.
+
+        The resolved form is only checked, never returned, so names and
+        relative paths stay stable when an in-directory symlink is followed.
+
+        Raises:
+            ValueError: If ``path`` resolves outside ``directory``.
+        """
+        resolved = Path(path).resolve()
+        if not resolved.is_relative_to(Path(directory).resolve()):
+            raise ValueError(
+                f"Security Alert: Path '{resolved}' is outside '{directory}'"
+            )
+        return Path(path)
+
     def to_relative(self, absolute_path: Path) -> str:
         """Convert an absolute path to relative path for LLM output.
 
