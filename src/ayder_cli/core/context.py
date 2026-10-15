@@ -62,12 +62,14 @@ class ProjectContext:
 
         The resolved form is only checked, never returned, so names and
         relative paths stay stable when an in-directory symlink is followed.
+        ``os.path.realpath`` is used rather than ``Path.resolve``, which also
+        stats the final target: an outward entry is never followed or stat-ed.
 
         Raises:
             ValueError: If ``path`` resolves outside ``directory``.
         """
-        resolved = Path(path).resolve()
-        if not resolved.is_relative_to(Path(directory).resolve()):
+        resolved = Path(os.path.realpath(path))
+        if not resolved.is_relative_to(Path(os.path.realpath(directory))):
             raise ValueError(
                 f"Security Alert: Path '{resolved}' is outside '{directory}'"
             )
