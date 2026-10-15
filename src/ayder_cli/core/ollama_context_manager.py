@@ -420,6 +420,10 @@ class OllamaContextManager:
                 parts.append(f"Tool {name} returned result")
         return "[Previous conversation summary]\n" + "\n".join(parts)
 
+    def _merge_summary(self, previous: str | None, new_lines: list[str]) -> str:
+        """Stub (test commit): replaced by the real merge in the fix."""
+        return "\n".join(new_lines)
+
     def _compact(
         self, history: list[dict]
     ) -> tuple[list[dict], dict]:
