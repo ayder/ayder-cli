@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
 
-from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
+from ayder_cli.application.execution_policy import (
+    ExecutionPolicy,
+    ExecutionResult,
+    ToolRequest,
+)
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
@@ -775,11 +780,29 @@ class ChatLoop:
                     return {"tool_call_id": tc.id, "name": name, "result": _CANCELLED_BEFORE_RUN}
                 state.started.add(tc.id)
             started = time.perf_counter()
-            exec_result = policy.execute_with_registry(
-                ToolRequest(name, args),
-                self.registry,
-                pre_approved=True,
-            )
+            returned = False
+            try:
+                exec_result = policy.execute_with_registry(
+                    ToolRequest(name, args),
+                    self.registry,
+                    pre_approved=True,
+                )
+                returned = True
+            finally:
+                if not returned:
+                    # The policy call raised (e.g. a middleware's
+                    # PermissionError). Record the terminal outcome and emit
+                    # its completion event here, in the worker, so neither is
+                    # lost if the waiter is cancelled; the exception still
+                    # propagates unchanged to the waiter.
+                    raised = sys.exc_info()[1]
+                    failed = ExecutionResult(success=False, error=raised)
+                    failure = _truncate_for_tool(name, f"Error: {raised}")
+                    with state.lock:
+                        state.results[tc.id] = {
+                            "tool_call_id": tc.id, "name": name, "result": failure,
+                        }
+                    self._emit_tool_call(name, args, started, failed)
             result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
             rd = {"tool_call_id": tc.id, "name": name, "result": result}
             with state.lock:
