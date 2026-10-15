@@ -18,8 +18,23 @@ logger = get_logger("tool")
 
 
 def _get_notes_dir(project_ctx: ProjectContext) -> Path:
-    """Return the notes directory path for the current project context."""
-    return project_ctx.root / ".ayder" / "notes"
+    """Return ``.ayder/notes``, refusing one that resolves outside the root.
+
+    Raises:
+        ValueError: If the directory resolves outside the project root.
+    """
+    return project_ctx.harness_dir("notes")
+
+
+def _note_path(project_ctx: ProjectContext, slug: str) -> Path:
+    """Return ``.ayder/notes/<slug>.md``, refusing a target that escapes it.
+
+    Raises:
+        ValueError: If the notes dir or the note (e.g. an outward symlink)
+            resolves outside ``.ayder/notes``.
+    """
+    notes_dir = _get_notes_dir(project_ctx)
+    return ProjectContext.within(notes_dir, notes_dir / f"{slug}.md")
 
 
 def _title_to_slug(title: str) -> str:
@@ -89,7 +104,8 @@ def write_agent_note(
     (a note failure must never fail the agent run).
     """
     try:
-        notes_dir = _get_notes_dir(project_ctx) / "runs"
+        notes_root = _get_notes_dir(project_ctx)
+        notes_dir = ProjectContext.within(notes_root, notes_root / "runs")
         slug = _title_to_slug(agent_name)
         filename = f"{timestamp}-{slug}-run{run_id}.md"
         frontmatter = [
@@ -132,8 +148,7 @@ def create_note(
         notes_dir.mkdir(parents=True, exist_ok=True)
 
         slug = _title_to_slug(title)
-        filename = f"{slug}.md"
-        path = notes_dir / filename
+        path = _note_path(project_ctx, slug)
 
         # Parse tags
         tag_list = []
@@ -159,6 +174,9 @@ def create_note(
         rel_path = project_ctx.to_relative(path)
         return ToolSuccess(f"Note created: {rel_path}")
 
+    except ValueError as e:
+        # An unconfined notes dir or note target (e.g. an outward symlink).
+        return ToolError(f"Security Error: {e}", "security")
     except Exception as e:  # noqa: BLE001 - tool boundary: any note-write failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error creating note: {str(e)}", "execution")
 
@@ -201,7 +219,7 @@ def write_note_file(
     slug = _title_to_slug(note_id)
     rendered = _render_note(slug, content, tags)
     if exclusive:
-        path = notes_dir / f"{slug}.md"
+        path = _note_path(project_ctx, slug)
         with open(path, "x", encoding="utf-8") as fh:  # raises FileExistsError
             fh.write(rendered)
         return slug
@@ -218,7 +236,7 @@ def write_note_file(
 
 def read_note_file(project_ctx: ProjectContext, note_id: str) -> str | None:
     """Return the note body (frontmatter stripped), or None if absent."""
-    path = _get_notes_dir(project_ctx) / f"{_title_to_slug(note_id)}.md"
+    path = _note_path(project_ctx, _title_to_slug(note_id))
     if not path.exists():
         return None
     return _split_frontmatter(path.read_text(encoding="utf-8"))[1]
@@ -228,7 +246,7 @@ def update_note_file(
     project_ctx: ProjectContext, note_id: str, content: str, *, mode: str = "append"
 ) -> bool:
     """Append a dated entry (default) or replace the body. False if absent."""
-    path = _get_notes_dir(project_ctx) / f"{_title_to_slug(note_id)}.md"
+    path = _note_path(project_ctx, _title_to_slug(note_id))
     if not path.exists():
         return False
     fm, body = _split_frontmatter(path.read_text(encoding="utf-8"))
@@ -247,7 +265,12 @@ def list_note_ids(project_ctx: ProjectContext, prefix: str | None = None) -> lis
     notes_dir = _get_notes_dir(project_ctx)
     if not notes_dir.exists():
         return []
-    ids = sorted(p.stem for p in notes_dir.glob("*.md"))
+    ids: list[str] = []
+    for path in sorted(notes_dir.glob("*.md")):
+        try:
+            ids.append(ProjectContext.within(notes_dir, path).stem)
+        except ValueError:
+            continue  # an outward symlink is omitted, never read
     if prefix:
         norm = _title_to_slug(prefix)
         ids = [i for i in ids if i.startswith(norm)]
@@ -256,7 +279,7 @@ def list_note_ids(project_ctx: ProjectContext, prefix: str | None = None) -> lis
 
 def delete_note_file(project_ctx: ProjectContext, note_id: str) -> bool:
     """Delete a note. False if absent."""
-    path = _get_notes_dir(project_ctx) / f"{_title_to_slug(note_id)}.md"
+    path = _note_path(project_ctx, _title_to_slug(note_id))
     if not path.exists():
         return False
     path.unlink()

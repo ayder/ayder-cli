@@ -31,7 +31,12 @@ _RECOVERY_CONTENT_CAP = 4000
 
 
 def _get_context_dir(project_ctx: ProjectContext) -> Path:
-    return project_ctx.root / ".ayder" / "context"
+    """Return ``.ayder/context``, refusing one that resolves outside the root.
+
+    Raises:
+        ValueError: If the directory resolves outside the project root.
+    """
+    return project_ctx.harness_dir("context")
 
 
 def _iso_dashed_timestamp() -> str:
@@ -70,7 +75,26 @@ def context(
             f"unknown action {action!r}; expected one of {sorted(_VALID_ACTIONS)}",
             "validation",
         )
+    try:
+        return _dispatch(
+            project_ctx, action, name, content, overwrite, keep_last_n,
+            context_manager, app,
+        )
+    except ValueError as exc:
+        # An unconfined context dir or slot (e.g. a symlink leaving the project).
+        return ToolError(f"Security Error: {exc}", "security")
 
+
+def _dispatch(
+    project_ctx: ProjectContext,
+    action: str,
+    name: str | None,
+    content: str | None,
+    overwrite: bool,
+    keep_last_n: int,
+    context_manager: Any,
+    app: Any,
+) -> str:
     if action == "save":
         return _save(project_ctx, name, content, overwrite)
     if action == "load":
@@ -100,10 +124,12 @@ def _save(
     ctx_dir = _get_context_dir(project_ctx)
     ctx_dir.mkdir(parents=True, exist_ok=True)
 
-    target = ctx_dir / f"{name}.json"
+    target = ProjectContext.within(ctx_dir, ctx_dir / f"{name}.json")
     versioned_path: Path | None = None
     if target.exists() and not overwrite:
-        versioned_path = ctx_dir / f"{name}.{_iso_dashed_timestamp()}.json"
+        versioned_path = ProjectContext.within(
+            ctx_dir, ctx_dir / f"{name}.{_iso_dashed_timestamp()}.json"
+        )
         target.rename(versioned_path)
 
     payload = {
@@ -123,7 +149,7 @@ def _load(project_ctx: ProjectContext, name: str | None) -> str:
         return ToolError(err, "validation")
 
     ctx_dir = _get_context_dir(project_ctx)
-    target = ctx_dir / f"{name}.json"
+    target = ProjectContext.within(ctx_dir, ctx_dir / f"{name}.json")
     if target.exists():
         payload = json.loads(target.read_text(encoding="utf-8"))
         return ToolSuccess(payload.get("content", ""))
@@ -146,13 +172,18 @@ def _scan_context_dir(ctx_dir: Path) -> tuple[list[tuple[str, dict, Path]], list
       - unreadable files: paths to `<name>.json` files that exist but cannot
         be parsed. Versioned predecessor files are excluded from both lists.
 
-    Each file is read at most once.
+    Each file is read at most once. An entry that resolves outside
+    ``ctx_dir`` (an outward symlink) is omitted before it is read or stat-ed.
     """
     if not ctx_dir.exists():
         return [], []
     current: list[tuple[str, dict, Path]] = []
     unreadable: list[Path] = []
     for path in sorted(ctx_dir.iterdir()):
+        try:
+            ProjectContext.within(ctx_dir, path)
+        except ValueError:
+            continue
         if not path.is_file() or path.suffix != ".json":
             continue
         try:
