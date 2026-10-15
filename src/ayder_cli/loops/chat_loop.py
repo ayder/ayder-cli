@@ -109,6 +109,13 @@ class ChatLoop:
         self.context_manager.session_id = self.config.session_id
         self.context_manager.run_id = self.config.run_id
 
+        # Stub (test commit): retained worker tasks; replaced in the fix.
+        self._inflight_tasks: set[asyncio.Task] = set()
+
+    def _reap_task(self, task: asyncio.Task) -> None:
+        """Stub (test commit): replaced by the real done-callback in the fix."""
+        self._inflight_tasks.discard(task)
+
     # -- public API ----------------------------------------------------------
 
     @property
