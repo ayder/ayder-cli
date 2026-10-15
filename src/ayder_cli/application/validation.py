@@ -101,6 +101,12 @@ class SchemaValidator:
                     field=param_name,
                     message=f"'{param_name}' must be integer, got {type(value).__name__}",
                 )
+            if expected_type == "boolean" and not isinstance(value, bool):
+                return False, ValidationError(
+                    tool_name=request.name,
+                    field=param_name,
+                    message=f"'{param_name}' must be boolean, got {type(value).__name__}",
+                )
             if expected_type == "string" and not isinstance(value, str):
                 return False, ValidationError(
                     tool_name=request.name,

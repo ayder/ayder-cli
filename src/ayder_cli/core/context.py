@@ -63,7 +63,9 @@ class ProjectContext:
         The resolved form is only checked, never returned, so names and
         relative paths stay stable when an in-directory symlink is followed.
         ``os.path.realpath`` is used rather than ``Path.resolve``, which also
-        stats the final target: an outward entry is never followed or stat-ed.
+        stats the final target. Resolving still lstats and reads links along
+        the path, including outside components; what it never does is read or
+        follow-stat the target's content, so a refused entry stays unread.
 
         Raises:
             ValueError: If ``path`` resolves outside ``directory``.

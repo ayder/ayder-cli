@@ -158,19 +158,40 @@ class ExecutionPolicy:
         *,
         pre_approved: bool = False,
     ) -> ExecutionResult:
-        """Single shared execution path: validate → check permission → execute.
+        """Single shared execution path: canonicalize → validate → permission → execute.
 
         Both CLI and TUI route through this method so registry.execute is never
         called directly from interface-specific code.
+
+        Order:
+        1. Arguments that are not a JSON object are a validation error.
+        2. ``canonicalize_arguments``: aliases, integer and boolean coercion.
+        3. ``ValidationAuthority`` on the canonical arguments.
+        4. Permission check (unless pre-approved), then ``registry.execute``
+           with the canonical arguments.
 
         Args:
             pre_approved: If True, skip the permission check (user already
                 confirmed via the confirmation dialog).
         """
         from ayder_cli.application.validation import ValidationAuthority
+        from ayder_cli.tools.normalization import canonicalize_arguments
+
+        if not isinstance(request.arguments, dict):
+            return ExecutionResult(
+                success=False,
+                error=ValidationError(
+                    tool_name=request.name,
+                    message=(
+                        "arguments must be a JSON object, got "
+                        f"{type(request.arguments).__name__}"
+                    ),
+                ),
+            )
+        canonical = canonicalize_arguments(request.name, request.arguments)
 
         authority = ValidationAuthority()
-        v_request = ToolRequest(name=request.name, arguments=request.arguments)
+        v_request = ToolRequest(name=request.name, arguments=canonical)
         valid, err = authority.validate(v_request)
         if not valid:
             return ExecutionResult(success=False, error=err)
@@ -180,7 +201,7 @@ class ExecutionPolicy:
             if perm_err is not None:
                 return ExecutionResult(success=False, error=perm_err)
 
-        raw = registry.execute(request.name, request.arguments)
+        raw = registry.execute(request.name, v_request.arguments)
         if isinstance(raw, ToolError):
             # A tool that ran and failed is NOT a successful execution.
             return ExecutionResult(success=False, was_confirmed=pre_approved, error=raw)
