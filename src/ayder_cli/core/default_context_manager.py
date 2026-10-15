@@ -371,39 +371,45 @@ class DefaultContextManager:
         overhead = effective_system_tokens + effective_schema_tokens
         available = self._available_budget(overhead)
 
-        if available <= 0:
-            # Overhead ate the whole budget: every history message is dropped.
-            kept = 1 if system_msg else 0
-            self._emit_trim(len(self._messages), kept, "budget_exhausted")
-            return [system_msg] if system_msg else []
-
         start_idx = 1 if system_msg else 0
         history_msgs = self._messages[start_idx:]
 
         units = self._group_into_units(history_msgs)
 
         result: List[Dict[str, Any]] = []
-        used = 0
-        messages_count = 0
-        reason: str | None = None
-        for unit in reversed(units):
-            if max_history > 0 and messages_count + len(unit) > max_history:
-                reason = "max_history"
-                break
+        if available <= 0:
+            # Overhead ate the whole budget: every history message is dropped
+            # except the newest unit, the request the model must see (F8).
+            if units:
+                result = list(units[-1])
+            kept = (1 if system_msg else 0) + len(result)
+            self._emit_trim(len(self._messages), kept, "budget_exhausted")
+        else:
+            used = 0
+            messages_count = 0
+            reason: str | None = None
+            for unit in reversed(units):
+                # The newest unit is always kept, even when it alone exceeds
+                # the budget or max_history: dropping it would send a request
+                # the model never saw (F8). If it truly exceeds the model's
+                # window, the provider's error reaches the user.
+                if result and max_history > 0 and messages_count + len(unit) > max_history:
+                    reason = "max_history"
+                    break
 
-            cost = self._counter.count_messages(unit)
-            if used + cost > available:
-                reason = "token_budget"
-                break
+                cost = self._counter.count_messages(unit)
+                if result and used + cost > available:
+                    reason = "token_budget"
+                    break
 
-            result = unit + result
-            used += cost
-            messages_count += len(unit)
+                result = unit + result
+                used += cost
+                messages_count += len(unit)
 
-        # Emitted BEFORE the truncation marker below: that marker ADDS a
-        # message, and counting after it would under-report `dropped` by one.
-        if reason is not None:
-            self._emit_trim(len(history_msgs), len(result), reason)
+            # Emitted BEFORE the truncation marker below: that marker ADDS a
+            # message, and counting after it would under-report `dropped` by one.
+            if reason is not None:
+                self._emit_trim(len(history_msgs), len(result), reason)
 
         if result and result[0].get("role") != "user":
             result.insert(

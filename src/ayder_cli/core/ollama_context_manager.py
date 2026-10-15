@@ -23,6 +23,10 @@ from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
 logger = get_logger("context")
 
+SUMMARY_HEADER = "[Previous conversation summary]"
+# Cap on the accumulated summary body. Oldest lines are evicted first.
+_SUMMARY_MAX_CHARS = 8000
+
 
 @dataclass
 class OllamaContextStats(ContextStats):
@@ -46,6 +50,22 @@ class OllamaContextManager:
     3. Tool results are truncated at insertion time (immutable after that).
     4. Compaction is the only mutation — oldest units replaced with a heuristic
        text summary, never an LLM call.
+
+    Compaction persists. The caller's history is never mutated; the manager
+    remembers the folded message objects and one summary dict, and every later
+    call replaces exactly those objects with that same summary. Between two
+    compactions or resets, each request's message list therefore extends the
+    previous one, provided the model, tools and rendering are unchanged,
+    ``max_history`` is 0, and the history is append-only with no sent message
+    dict edited in place. That last point is an assumption of this manager's
+    history contract (object identity cannot see an in-place edit). The
+    system message is exempt: the frozen copy is always sent.
+
+    A history that is not an identity extension of the previous call's input
+    (``/clear``, a pending compact, a session load, a removed skill message)
+    is a new generation: the summary is dropped and compaction waits for a
+    fresh ``prompt_tokens`` measurement, since the stale one described the old
+    history. Every compaction or reset is an intentional prefix change.
     """
 
     def __init__(
@@ -84,6 +104,12 @@ class OllamaContextManager:
 
         self._compaction_count: int = 0
         self._messages_compacted: int = 0
+
+        # Persistent compaction state for the current history generation.
+        self._summary_msg: dict | None = None  # sent verbatim on every call
+        self._folded: list[dict] = []  # caller objects the summary replaces
+        self._last_seen: list[dict] = []  # previous call's untrimmed input
+        self._awaiting_measurement: bool = False  # block until fresh prompt_tokens
 
         self._cache_monitor: CacheMonitor = CacheMonitor()
 
@@ -211,21 +237,43 @@ class OllamaContextManager:
             history = list(messages)
 
         if not history:
+            self._reset_generation()
+            self._last_seen = []
             return [system_msg] if system_msg else []
 
-        # Compact if threshold exceeded
-        compaction_summary: dict | None = None
-        if self.should_compact() and history:
-            before_compact = len(history)
-            history, compaction_summary = self._compact(history)
-            self._emit_trim(before_compact, len(history), "compaction")
+        # A history that does not extend the previous call's input is a new
+        # generation: the old summary and the old measurement do not apply.
+        if not self._extends_last_seen(history):
+            self._reset_generation()
+        self._last_seen = list(history)
+
+        # Re-apply the current summary in place of the messages it folded.
+        surviving = history[len(self._folded):] if self._summary_msg else history
+        if not surviving:
+            self._reset_generation()
+            surviving = history
+
+        # Compact at most once per fresh measurement of this generation.
+        if not self._awaiting_measurement and self.should_compact():
+            surviving, newly_folded = self._compact(surviving)
+            if newly_folded:
+                previous = self._summary_msg["content"] if self._summary_msg else None
+                self._summary_msg = {
+                    "role": "user",
+                    "content": self._merge_summary(
+                        previous, self._summary_lines(newly_folded)
+                    ),
+                }
+                self._folded = self._folded + newly_folded
+                self._awaiting_measurement = True
+                self._emit_trim(len(history), len(surviving), "compaction")
 
         # Apply max_history cap — trim from the head on unit boundaries so
         # assistant+tool_calls stays atomic with its tool_result responses.
         # See opus47.md finding #3.
-        if max_history > 0 and len(history) > max_history:
-            before_trim = len(history)
-            units = self._group_into_units(history)
+        if max_history > 0 and len(surviving) > max_history:
+            before_trim = len(surviving)
+            units = self._group_into_units(surviving)
             kept: list[list[dict]] = []
             msg_count = 0
             for unit in reversed(units):
@@ -233,16 +281,16 @@ class OllamaContextManager:
                     break
                 kept.insert(0, unit)
                 msg_count += len(unit)
-            history = [m for unit in kept for m in unit]
-            self._emit_trim(before_trim, len(history), "max_history")
+            surviving = [m for unit in kept for m in unit]
+            self._emit_trim(before_trim, len(surviving), "max_history")
 
         # Build the output — stable prefix order
         result: list[dict] = []
         if system_msg:
             result.append(system_msg)
-        if compaction_summary is not None:
-            result.append(compaction_summary)
-        result.extend(history)
+        if self._summary_msg is not None:
+            result.append(self._summary_msg)
+        result.extend(surviving)
         self._estimated_prompt_tokens = self._counter.count_messages(result)
         return result
 
@@ -256,6 +304,9 @@ class OllamaContextManager:
         self._real_completion_tokens = usage.get(
             "completion_tokens", self._real_completion_tokens
         )
+        if "prompt_tokens" in usage:
+            # A fresh measurement of the history that was just sent.
+            self._awaiting_measurement = False
         self._last_prompt_eval_ns = usage.get("prompt_eval_ns", self._last_prompt_eval_ns)
         self._last_eval_ns = usage.get("eval_ns", self._last_eval_ns)
 
@@ -398,8 +449,21 @@ class OllamaContextManager:
 
         return units
 
-    def _heuristic_summarize(self, messages: list[dict]) -> str:
-        """Produce a compact text summary of messages without calling an LLM."""
+    def _extends_last_seen(self, history: list[dict]) -> bool:
+        """True if the previous call's input is an identity prefix of ``history``."""
+        last = self._last_seen
+        if len(history) < len(last):
+            return False
+        return all(history[i] is last[i] for i in range(len(last)))
+
+    def _reset_generation(self) -> None:
+        """Forget the summary; wait for a measurement of the new history."""
+        self._summary_msg = None
+        self._folded = []
+        self._awaiting_measurement = True
+
+    def _summary_lines(self, messages: list[dict]) -> list[str]:
+        """One heuristic summary line per message, without calling an LLM."""
         parts: list[str] = []
         for msg in messages:
             role = msg["role"]
@@ -418,29 +482,57 @@ class OllamaContextManager:
             elif role == "tool":
                 name = msg.get("name", "unknown")
                 parts.append(f"Tool {name} returned result")
-        return "[Previous conversation summary]\n" + "\n".join(parts)
+        return parts
+
+    def _heuristic_summarize(self, messages: list[dict]) -> str:
+        """Produce a compact text summary of messages without calling an LLM."""
+        return SUMMARY_HEADER + "\n" + "\n".join(self._summary_lines(messages))
+
+    def _merge_summary(self, previous: str | None, new_lines: list[str]) -> str:
+        """Fold ``new_lines`` into the previous summary under one header.
+
+        The body keeps the newest lines whose total length, newlines
+        included, is at most ``_SUMMARY_MAX_CHARS``. If the newest line alone
+        is longer, it is kept as its first ``_SUMMARY_MAX_CHARS - 1``
+        characters plus an ellipsis.
+        """
+        lines: list[str] = []
+        if previous:
+            body = previous.split("\n", 1)[1] if "\n" in previous else ""
+            lines = body.split("\n") if body else []
+        lines += new_lines
+
+        kept: list[str] = []
+        total = 0
+        for line in reversed(lines):
+            cost = len(line) + (1 if kept else 0)
+            if total + cost > _SUMMARY_MAX_CHARS:
+                break
+            kept.append(line)
+            total += cost
+        if not kept and lines:
+            kept = [lines[-1][: _SUMMARY_MAX_CHARS - 1] + "…"]
+        return SUMMARY_HEADER + "\n" + "\n".join(reversed(kept))
 
     def _compact(
         self, history: list[dict]
-    ) -> tuple[list[dict], dict]:
-        """Replace the oldest half of message units with a heuristic summary.
+    ) -> tuple[list[dict], list[dict]]:
+        """Fold the oldest half of message units, never the newest unit.
 
-        Returns the surviving history and the summary message dict.
+        Returns ``(surviving, folded)``. With fewer than two units nothing is
+        folded: the newest unit is the request the model must see.
         """
         units = self._group_into_units(history)
+        if len(units) < 2:
+            return history, []
 
-        # Compact the oldest half of units (at least 1)
-        compact_count = max(1, len(units) // 2)
+        # Compact the oldest half of units (at least 1, never the newest)
+        compact_count = min(max(1, len(units) // 2), len(units) - 1)
         units_to_compact = units[:compact_count]
         units_to_keep = units[compact_count:]
 
-        # Flatten compacted units for summarisation
-        msgs_to_compact = [msg for unit in units_to_compact for msg in unit]
-        compacted_msg_count = len(msgs_to_compact)
-
-        summary_text = self._heuristic_summarize(msgs_to_compact)
-        summary_msg = {"role": "user", "content": summary_text}
-
+        folded = [msg for unit in units_to_compact for msg in unit]
+        compacted_msg_count = len(folded)
         surviving = [msg for unit in units_to_keep for msg in unit]
 
         self._compaction_count += 1
@@ -453,4 +545,4 @@ class OllamaContextManager:
             self._compaction_count,
         )
 
-        return surviving, summary_msg
+        return surviving, folded
