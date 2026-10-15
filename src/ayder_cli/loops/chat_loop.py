@@ -756,6 +756,11 @@ def _parse_arguments(arguments) -> dict:
     return {}
 
 
+def _parse_tool_arguments(arguments) -> tuple[dict, str]:
+    """Stub (test commit): replaced by the real parser in the fix."""
+    return _parse_arguments(arguments), "ok"
+
+
 def _repair_truncated_json(raw: str) -> dict | None:
     """Best-effort repair of a truncated JSON object.
 
