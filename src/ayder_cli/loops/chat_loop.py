@@ -21,6 +21,7 @@ from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
+from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 llm_log = get_logger("llm")
 tool_log = get_logger("tool")
@@ -429,7 +430,11 @@ class ChatLoop:
                         raw_args = tc_entry["function"].get("arguments", "")
                         if isinstance(raw_args, str):
                             try:
-                                json.loads(raw_args)
+                                decoded = json.loads(raw_args)
+                                if not isinstance(decoded, dict):
+                                    # e.g. "null": never send it back to the
+                                    # provider; the call is refused anyway.
+                                    tc_entry["function"]["arguments"] = "{}"
                             except (json.JSONDecodeError, ValueError):
                                 llm_log.warning(
                                     "Malformed tool arguments for '{}': "
@@ -510,7 +515,18 @@ class ChatLoop:
             # Validate that arguments parsed correctly — some providers
             # (e.g. DeepSeek) send empty/malformed arguments in the native
             # tool call while putting the real content in reasoning.
-            args = _parse_arguments(tc.function.arguments)
+            args, arg_status = _parse_tool_arguments(tc.function.arguments)
+            refusal = _argument_refusal(tc.function.name, arg_status)
+            if refusal is not None:
+                rd = {
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "result": refusal,
+                }
+                tool_results_map[tc.id] = rd
+                self.cb.on_tool_start(tc.id, tc.function.name, args)
+                self.cb.on_tool_complete(tc.id, refusal)
+                continue
             missing = _check_required_args(tc.function.name, args)
             if missing:
                 err_msg = (
@@ -706,6 +722,27 @@ class ChatLoop:
         return policy.get_confirmation_requirement(tool_name).requires_confirmation
 
 
+def _argument_refusal(tool_name: str, status: str) -> str | None:
+    """The tool result for a call that must not run, or None if it may run.
+
+    Non-object arguments never run (F11). Arguments repaired after being cut
+    off run only for a tool registered explicitly as read-only (``"r"``):
+    unknown, MCP and plugin tools are not assumed safe (F2).
+    """
+    if status == "invalid":
+        return (
+            f"Error: arguments for '{tool_name}' must be a JSON object. "
+            "Nothing was executed."
+        )
+    if status == "repaired" and TOOL_PERMISSIONS.get(tool_name) != "r":
+        return (
+            f"Error: the arguments for '{tool_name}' were cut off (likely the "
+            "output token limit), so nothing was executed. Resend the call, "
+            "splitting large content across several smaller calls."
+        )
+    return None
+
+
 def _truncate_for_tool(tool_name: str, content: str) -> str:
     """Truncate a tool result, honoring the per-tool ``max_result_chars`` override.
 
@@ -723,42 +760,71 @@ def _truncate_for_tool(tool_name: str, content: str) -> str:
     return truncate_tool_result(content, max_chars=override)
 
 
-def _parse_arguments(arguments) -> dict:
-    """Safely parse tool call arguments (str or dict).
+def _parse_tool_arguments(arguments) -> tuple[dict, str]:
+    """Parse tool call arguments and say how trustworthy the result is.
+
+    Returns ``(args, status)``:
+
+    - ``"ok"``: a dict; empty or whitespace text (providers send ``""`` for a
+      call with no arguments); JSON text that decodes to an object; a complete
+      leading object recovered with ``raw_decode`` (``'{...}{...}'``); or
+      unrecoverable text, which yields ``{}`` as before.
+    - ``"repaired"``: the text was cut off, typically at the output token
+      limit, and ``_repair_truncated_json`` closed it. The values may be
+      partial, so only explicitly read-only tools may run on them.
+    - ``"invalid"``: any value that is not an object, whether a raw non-text
+      value (``None``, a list, a number) or JSON text that decodes to one
+      (``"null"``, ``"[]"``, ``"1"``). The call must not run.
+    """
+    status: list[str] = []
+    args = _parse_arguments(arguments, status)
+    return args, status[0]
+
+
+def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
+    """Safely parse tool call arguments (str or dict) to a dict.
 
     When the LLM hits its output token limit, the streamed JSON may be
     truncated (e.g. ``{"file_path": "foo", "content": "abc...``).
     We attempt ``json.loads`` first; on failure we try to repair the
     truncated JSON by closing open strings/braces before giving up.
+
+    When ``status`` is given, the parse status (see ``_parse_tool_arguments``)
+    is appended to it. Non-object values yield ``{}``.
     """
+    def _done(args: dict, outcome: str) -> dict:
+        if status is not None:
+            status.append(outcome)
+        return args
+
     if isinstance(arguments, dict):
-        return arguments
-    if isinstance(arguments, str):
+        return _done(arguments, "ok")
+    if not isinstance(arguments, str):
+        return _done({}, "invalid")
+    if not arguments.strip():
+        return _done({}, "ok")
+    try:
+        decoded = json.loads(arguments)
+    except (json.JSONDecodeError, ValueError):
+        tool_log.warning("Tool arguments JSON parse failed ({} chars)", len(arguments))
+        # Try extracting just the first JSON object (handles concatenated
+        # JSON like '{...}{...}' that slipped past expansion).
         try:
-            return json.loads(arguments)
+            obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
+            if isinstance(obj, dict):
+                tool_log.warning("Recovered tool arguments via raw_decode")
+                return _done(obj, "ok")
         except (json.JSONDecodeError, ValueError):
-            tool_log.warning("Tool arguments JSON parse failed ({} chars)", len(arguments))
-            # Try extracting just the first JSON object (handles concatenated
-            # JSON like '{...}{...}' that slipped past expansion).
-            try:
-                obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
-                if isinstance(obj, dict):
-                    tool_log.warning("Recovered tool arguments via raw_decode")
-                    return obj
-            except (json.JSONDecodeError, ValueError):
-                pass
-            repaired = _repair_truncated_json(arguments)
-            if repaired is not None:
-                tool_log.warning("Recovered tool arguments via truncated JSON repair")
-                return repaired
-            tool_log.warning("Could not recover tool arguments — using empty dict")
-            return {}
-    return {}
-
-
-def _parse_tool_arguments(arguments) -> tuple[dict, str]:
-    """Stub (test commit): replaced by the real parser in the fix."""
-    return _parse_arguments(arguments), "ok"
+            pass
+        repaired = _repair_truncated_json(arguments)
+        if repaired is not None:
+            tool_log.warning("Recovered tool arguments via truncated JSON repair")
+            return _done(repaired, "repaired")
+        tool_log.warning("Could not recover tool arguments — using empty dict")
+        return _done({}, "ok")
+    if isinstance(decoded, dict):
+        return _done(decoded, "ok")
+    return _done({}, "invalid")
 
 
 def _repair_truncated_json(raw: str) -> dict | None:
@@ -797,26 +863,22 @@ def _check_required_args(tool_name: str, parsed_args: dict) -> list[str]:
     present it wins, and aliases are consulted in declaration order.
     """
     from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+    from ayder_cli.tools.normalization import canonicalize_arguments
 
     tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if not tool_def or not tool_def.parameters:
         return []
     required = tool_def.parameters.get("required", [])
-    aliases = dict(tool_def.parameter_aliases)  # alias -> canonical
-
-    def _effective(name: str):
-        """The value the tool will actually receive for ``name``."""
-        if name in parsed_args:
-            return parsed_args[name]
-        for alias, canonical in aliases.items():
-            if canonical == name and alias in parsed_args:
-                return parsed_args[alias]
-        return None
+    if not isinstance(parsed_args, dict):
+        return list(required)
+    # The same canonicalizer the execution policy runs, so aliases and
+    # coercions resolve identically in this gate and in the policy.
+    canonical = canonicalize_arguments(tool_name, parsed_args)
 
     # Check both missing keys and empty-string values
     missing = []
     for r in required:
-        val = _effective(r)
+        val = canonical.get(r)
         if val is None or (isinstance(val, str) and not val.strip()):
             missing.append(r)
     return missing
