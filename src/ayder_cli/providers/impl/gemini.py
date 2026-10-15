@@ -3,6 +3,7 @@ Gemini Provider implementation using google-genai.
 """
 
 import json
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from ayder_cli.core.config import Config
@@ -61,19 +62,13 @@ class GeminiProvider(AIProvider):
         if not response.candidates:
             return NormalizedStreamChunk(raw_chunk=response)
             
-        for part in response.candidates[0].content.parts:
+        for part in response.candidates[0].content.parts or []:
             if part.text:
                 content += part.text
             elif part.function_call:
-                args_dict = type(part.function_call.args).to_dict(part.function_call.args)
-                tool_calls.append(
-                    ToolCallDef(
-                        id=part.function_call.name,
-                        name=part.function_call.name,
-                        arguments=json.dumps(args_dict)
-                    )
-                )
-                
+                tool_calls.append(self._function_call_def(part.function_call))
+
+
         usage = {"total_tokens": getattr(response.usage_metadata, "total_token_count", 0)}
         return NormalizedStreamChunk(
             content=content,
@@ -136,21 +131,14 @@ class GeminiProvider(AIProvider):
         if not chunk.candidates:
             return NormalizedStreamChunk(raw_chunk=chunk)
 
-        part = chunk.candidates[0].content.parts[0] if chunk.candidates[0].content.parts else None
-        
-        if part:
+        candidate_content = chunk.candidates[0].content
+        parts = (candidate_content.parts if candidate_content else None) or []
+        for part in parts:
             if part.text:
-                content = part.text
+                content += part.text
             elif part.function_call:
                 # Gemini emits complete function calls, not deltas
-                args_dict = type(part.function_call.args).to_dict(part.function_call.args)
-                tool_calls.append(
-                    ToolCallDef(
-                        id=part.function_call.name,  # Gemini doesn't use unique IDs per call
-                        name=part.function_call.name,
-                        arguments=json.dumps(args_dict)
-                    )
-                )
+                tool_calls.append(self._function_call_def(part.function_call))
 
         # Usage info is often attached to the final chunk
         if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
@@ -163,6 +151,22 @@ class GeminiProvider(AIProvider):
             tool_calls=tool_calls,
             raw_chunk=chunk,
             usage=usage
+        )
+
+    @staticmethod
+    def _function_call_def(fc: Any) -> ToolCallDef:
+        """Normalize one SDK ``FunctionCall``.
+
+        ``args`` is a plain dict in google-genai. The id is the SDK's own call id
+        when present, else a generated one: the tool name alone would merge two
+        calls to the same tool in the chat loop's id match. Results map back by
+        tool name in ``_convert_messages``, so a generated id is safe.
+        """
+        call_id = getattr(fc, "id", None) or f"{fc.name}_{uuid.uuid4().hex[:8]}"
+        return ToolCallDef(
+            id=call_id,
+            name=fc.name,
+            arguments=json.dumps(dict(fc.args or {})),
         )
 
     @staticmethod
