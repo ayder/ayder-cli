@@ -345,3 +345,24 @@ def active_skills(messages: list[dict[str, Any]]) -> list[SkillLoad]:
             for name in _UNLOADED_RE.findall(content):
                 active.pop(name, None)
     return sorted(active.values(), key=lambda load: load.index)
+
+
+def resupply_message(loads: list[SkillLoad], *, names_only: bool = False) -> str:
+    """Text that re-supplies active skills a trim or compaction removed.
+
+    ``names_only`` is the fallback when the bodies alone do not fit: the model
+    learns which skills are still active and how to see one again.
+    """
+    if names_only:
+        names = ", ".join(load.name for load in loads)
+        return (
+            f"### SKILLS ACTIVE BUT TRIMMED: {names}\n"
+            "Their instructions no longer fit in this context. To see one again, "
+            'call skill(action="unload", name=...) and then skill(action="load", name=...).'
+        )
+    return "\n\n".join([RESUPPLY_HEADER] + [load.block for load in loads])
+
+
+def is_skill_block(content: object) -> bool:
+    """True for a load block (content that starts with LOADED_MARKER)."""
+    return isinstance(content, str) and content.startswith(LOADED_MARKER)

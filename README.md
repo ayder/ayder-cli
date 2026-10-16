@@ -439,6 +439,9 @@ provider's KV cache) are unchanged. Several skills can be active; other files
 in a skill's directory are read on demand with `skill(action="read")`.
 A skill directory or `SKILL.md` that links outside its skills directory is
 listed but never read or loaded; copy the skill instead of symlinking it.
+A loaded skill stays in context for the whole session: when trimming or
+compaction removes it, ayder adds it back right after the system prompt, or
+inside the Ollama summary.
 
 ### Logging
 
