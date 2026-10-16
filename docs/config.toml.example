@@ -201,7 +201,7 @@ think = true                        # default; set false if the selected model r
 # api_key = "sk-..."                        # your key (or "ollama"/"none" for local servers)
 # model = "gpt-5.5"
 # num_ctx = 65536            # sizes the context-manager budget (default 65536); NOT sent to the API
-# max_output_tokens = 8192   # -> max_tokens / max_completion_tokens (default 4096); keep WELL below num_ctx
+# max_output_tokens = 8192   # -> max_tokens / max_completion_tokens (default 32768); keep WELL below num_ctx
 # stop_sequences = []        # -> stop (default [])
 # reasoning_effort = "medium" # choose a value supported by the selected model
 # # temperature / think are NOT applied by the openai driver.
