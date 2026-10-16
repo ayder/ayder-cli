@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Literal
 
 from ayder_cli.core.reasoning import ReasoningEffort, ThinkOption, validate_effort
 from ayder_cli.log import get_logger
@@ -315,6 +315,23 @@ class TemporalConfig(BaseModel):
         return v
 
 
+def _coerce_skills_setting(value: Any) -> Any:
+    """Accept None, a list of names, or "none" (any case). [] means "none"."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if value.strip().lower() == "none":
+            return "none"
+        raise ValueError('skills must be "none" or a list of skill names')
+    if isinstance(value, list):
+        if not value:
+            return "none"
+        if not all(isinstance(item, str) and item.strip() for item in value):
+            raise ValueError("skills must list non-empty skill names")
+        return [item.strip() for item in value]
+    raise ValueError('skills must be "none" or a list of skill names')
+
+
 class Config(BaseModel):
     """Unified configuration model with validation."""
 
@@ -366,6 +383,12 @@ class Config(BaseModel):
     reasoning_effort: ReasoningEffort = None
     stop_sequences: list[str] = Field(default_factory=list)
     tool_tags: list[str] = Field(default_factory=lambda: ["core", "metadata"])
+    # Skills the model may use: None = the built-in skills, "none" = no skill
+    # tool, or a strict list of names. `skills` comes from [app];
+    # `profile_skills` from the active [llm.<provider>] profile and wins over
+    # it. Agents read [agents.<name>].skills, then their own profile_skills.
+    skills: list[str] | Literal["none"] | None = Field(default=None)
+    profile_skills: list[str] | Literal["none"] | None = Field(default=None)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
     retry: RetryConfigSection = Field(default_factory=RetryConfigSection)
@@ -422,6 +445,11 @@ class Config(BaseModel):
                         provider, provider, DEFAULTS["provider"], available, provider,
                     )
             if isinstance(profile, dict):
+                profile = dict(profile)
+                if "skills" in profile:
+                    # Kept apart from [app]'s value so agents can tell a
+                    # provider's setting from the session's (spec 4.10).
+                    new_data["profile_skills"] = profile.pop("skills")
                 new_data.update(profile)
             new_data.pop("llm", None)
 
@@ -459,6 +487,15 @@ class Config(BaseModel):
             new_data["agents"] = parsed_agents
 
         return new_data
+
+    @field_validator("skills", "profile_skills", mode="before")
+    @classmethod
+    def validate_skills(cls, v: Any) -> Any:
+        return _coerce_skills_setting(v)
+
+    def session_skills(self) -> list[str] | Literal["none"] | None:
+        """The main session's setting: the profile's, else [app]'s."""
+        return self.profile_skills if self.profile_skills is not None else self.skills
 
     @field_validator("provider")
     @classmethod
