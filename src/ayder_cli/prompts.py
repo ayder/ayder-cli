@@ -227,26 +227,6 @@ def get_system_prompt(prompt_name: str) -> str:
 
 
 # =============================================================================
-# PROJECT STRUCTURE MACRO
-# =============================================================================
-# Used by: cli_runner.py::_build_services()
-# REASON: Provide the LLM with an overview of the project structure at startup
-# so it knows what files and directories exist. This helps the LLM understand
-# the codebase layout before starting work and guides it to use search_codebase
-# to locate specific code rather than blindly exploring.
-
-PROJECT_STRUCTURE_MACRO_TEMPLATE = """
-
-### PROJECT STRUCTURE:
-```
-{project_structure}
-```
-
-This is the current project structure.
-"""
-
-
-# =============================================================================
 # TASK PLANNING PROMPTS
 # =============================================================================
 # Used by: commands/system.py::PlanCommand.execute()

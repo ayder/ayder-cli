@@ -311,7 +311,7 @@ ayder -f instructions.txt
 ayder --stdin < prompt.txt
 
 # Override the main LLM system prompt with a file
-# (tool instructions + project structure are still appended)
+# (tool instructions are still appended)
 ayder --system-prompt prompt-file.md "refactor this code"
 ```
 

@@ -24,7 +24,6 @@ from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
 from ayder_cli.prompts import (
     get_system_prompt,
-    PROJECT_STRUCTURE_MACRO_TEMPLATE,
 )
 from ayder_cli.log import get_logger
 
@@ -81,7 +80,7 @@ def create_runtime(
             (e.g. "AGENTIC" for `ayder-cli --agent`). See prompts.get_system_prompt.
         system_prompt_override: When set, use this text as the system-prompt base
             instead of prompts.get_system_prompt (ayder --system-prompt FILE). Tool
-            prompts and the project-structure macro are still appended.
+            prompts are still appended.
 
     Returns:
         RuntimeComponents with all dependencies wired.
@@ -107,15 +106,6 @@ def create_runtime(
     )
     apply_skill_setting(tool_registry, project_ctx, cfg.session_skills())
 
-    try:
-        structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
-        macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
-    except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so runtime construction continues without it
-        logger.opt(exception=True).warning(
-            "Project-structure macro unavailable; continuing without it"
-        )
-        macro = ""
-
     # Format the final prompt (protocol injection now handled dynamically by chat_loop and protocols)
     if system_prompt_override is not None:
         base_prompt = system_prompt_override
@@ -123,7 +113,7 @@ def create_runtime(
         base_prompt = get_system_prompt(cfg.prompt)
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    system_prompt = base_prompt + tool_prompts + macro
+    system_prompt = base_prompt + tool_prompts
 
     # Freeze system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)

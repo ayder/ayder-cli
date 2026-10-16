@@ -307,7 +307,7 @@ the design rationale.
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `process_manager.py` | Background processes | `ProcessManager`, `background_process()` |
-| `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()`, `PROJECT_STRUCTURE_MACRO_TEMPLATE` |
+| `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()` |
 | `parser.py` | XML tool-call parsing | `parse_custom_tool_calls()` |
 
 ### Theme Modules
@@ -594,7 +594,7 @@ AyderApp is the main Textual application implementing a chat-style interface:
 The application manages:
 - LLM provider setup and configuration
 - Tool registry initialization with middleware
-- System prompt construction with project structure
+- System prompt construction (base prompt + tool prompts + skill catalog; no project tree)
 - Process manager for background operations
 
 ### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)
