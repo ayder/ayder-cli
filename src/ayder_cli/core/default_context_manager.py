@@ -13,6 +13,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from ayder_cli.core.skills import active_skills, is_skill_block, resupply_message
 from ayder_cli.log import emit_event, get_logger
 
 if TYPE_CHECKING:
@@ -23,6 +24,9 @@ logger = get_logger("context")
 # Fallback context budget used only when neither an explicit max_context_tokens
 # nor a model num_ctx is available (e.g. a bare config section in tests).
 DEFAULT_MAX_CONTEXT_TOKENS = 65536
+
+# The user message that stands in for trimmed history.
+TRUNCATION_MARKER = "[... history truncated for context efficiency ...]"
 
 
 class MessageTier(Enum):
@@ -376,48 +380,81 @@ class DefaultContextManager:
 
         units = self._group_into_units(history_msgs)
 
-        result: List[Dict[str, Any]] = []
+        resupply: str | None = None
         if available <= 0:
             # Overhead ate the whole budget: every history message is dropped
             # except the newest unit, the request the model must see (F8).
-            if units:
-                result = list(units[-1])
+            result = list(units[-1]) if units else []
             kept = (1 if system_msg else 0) + len(result)
             self._emit_trim(len(self._messages), kept, "budget_exhausted")
+            dropped = self._dropped_skills(history_msgs, len(result))
+            if dropped:
+                resupply = resupply_message(dropped, names_only=True)
         else:
-            used = 0
-            messages_count = 0
-            reason: str | None = None
-            for unit in reversed(units):
-                # The newest unit is always kept, even when it alone exceeds
-                # the budget or max_history: dropping it would send a request
-                # the model never saw (F8). If it truly exceeds the model's
-                # window, the provider's error reaches the user.
-                if result and max_history > 0 and messages_count + len(unit) > max_history:
-                    reason = "max_history"
-                    break
-
-                cost = self._counter.count_messages(unit)
-                if result and used + cost > available:
-                    reason = "token_budget"
-                    break
-
-                result = unit + result
-                used += cost
-                messages_count += len(unit)
-
-            # Emitted BEFORE the truncation marker below: that marker ADDS a
-            # message, and counting after it would under-report `dropped` by one.
+            result, reason = self._select_units(units, available, max_history)
+            if reason is not None and self._dropped_skills(history_msgs, len(result)):
+                # Trimming already changes the prefix this turn, and it removed an
+                # active skill. Reserve room for every active skill's block (a
+                # superset of what can be dropped) and select again, so the
+                # re-supply never pushes the request over the budget. When the
+                # blocks alone do not fit, only the names are re-supplied.
+                every = active_skills(history_msgs)
+                names_only = self._text_cost(resupply_message(every)) >= available
+                reserve = self._text_cost(resupply_message(every, names_only=names_only))
+                result, reason = self._select_units(units, max(available - reserve, 0), max_history)
+                dropped = self._dropped_skills(history_msgs, len(result))
+                if dropped:
+                    resupply = resupply_message(dropped, names_only=names_only)
+            # Emitted BEFORE any marker or re-supply below: those ADD a message,
+            # and counting after them would under-report `dropped` by one.
             if reason is not None:
                 self._emit_trim(len(history_msgs), len(result), reason)
 
-        if result and result[0].get("role") != "user":
-            result.insert(
-                0,
-                {"role": "user", "content": "[... history truncated for context efficiency ...]"},
-            )
+        if resupply is not None:
+            first = result[0] if result else None
+            if first is not None and first.get("role") == "user" and isinstance(first.get("content"), str):
+                # Merge into a copy of the first kept user message: no two user
+                # messages become adjacent, and the caller's history is untouched.
+                result = [{**first, "content": f"{resupply}\n\n{first['content']}"}] + result[1:]
+            else:
+                result.insert(0, {"role": "user", "content": f"{resupply}\n\n{TRUNCATION_MARKER}"})
+        elif result and result[0].get("role") != "user":
+            result.insert(0, {"role": "user", "content": TRUNCATION_MARKER})
 
         return ([system_msg] if system_msg else []) + result
+
+    def _select_units(
+        self,
+        units: list[list[dict]],
+        available: int,
+        max_history: int,
+    ) -> tuple[list[dict], str | None]:
+        """The newest units that fit, and why selection stopped (None: all fit).
+
+        The newest unit is always kept, even when it alone exceeds the budget
+        or max_history (F8).
+        """
+        result: list[dict] = []
+        used = 0
+        messages_count = 0
+        for unit in reversed(units):
+            if result and max_history > 0 and messages_count + len(unit) > max_history:
+                return result, "max_history"
+            cost = self._counter.count_messages(unit)
+            if result and used + cost > available:
+                return result, "token_budget"
+            result = unit + result
+            used += cost
+            messages_count += len(unit)
+        return result, None
+
+    def _dropped_skills(self, history: list[dict], kept: int) -> list:
+        """Active skills whose block lies before the kept suffix of ``history``."""
+        first_kept = len(history) - kept
+        return [load for load in active_skills(history) if load.index < first_kept]
+
+    def _text_cost(self, text: str) -> int:
+        return self._counter.count_messages([{"role": "user", "content": text}])
 
     def truncate_tool_result(self, content: str, max_tokens: int = 2048) -> str:
         """Truncate a tool result. Delegates to module-level utility."""
@@ -478,6 +515,8 @@ class DefaultContextManager:
 
             if msg.get("role") != "tool":
                 continue
+            if is_skill_block(msg.get("content")):
+                continue  # an active skill's instructions are never summarized
 
             age = len(self._messages) - i
             if age <= threshold:
