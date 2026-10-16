@@ -17,7 +17,7 @@ from ayder_cli.core.context_manager_factory import context_manager_factory
 if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.skills import SkillScope
+from ayder_cli.core.skills import build_scope
 from ayder_cli.providers import AIProvider, provider_orchestrator
 from ayder_cli.providers.retry import RetryConfig, RetryingProvider
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
@@ -42,6 +42,13 @@ class RuntimeComponents:
     tool_registry: ToolRegistry
     system_prompt: str
     context_manager: Any = field(default=None)  # ContextManagerProtocol
+
+
+def _apply_skill_setting(tool_registry: ToolRegistry, project_ctx: ProjectContext, setting: Any) -> None:
+    """Scope the registry's skills; hide the skill tool for "none"."""
+    tool_registry.skill_scope = build_scope(Path(project_ctx.root), setting)
+    if setting == "none":
+        tool_registry.excluded_tools.add("skill")
 
 
 def create_runtime(
@@ -86,7 +93,7 @@ def create_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
-    tool_registry.skill_scope = SkillScope(project_root=Path(project_ctx.root))
+    _apply_skill_setting(tool_registry, project_ctx, cfg.session_skills())
 
     try:
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
@@ -199,7 +206,9 @@ def create_agent_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
-    tool_registry.skill_scope = SkillScope(project_root=Path(project_ctx.root))
+    # An agent reads its own setting, then its provider profile's; never [app].
+    skills_setting = agent_config.skills if agent_config.skills is not None else cfg.profile_skills
+    _apply_skill_setting(tool_registry, project_ctx, skills_setting)
 
     # 5. Build agent system prompt
     identity_prefix = (

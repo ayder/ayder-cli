@@ -83,6 +83,7 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"Uninstalled plugin '{}'","method":"info","path":"tools/plugin_manager.py","qualname":"uninstall_plugin"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"cancel: agent='{}' \u2014 no running/queued instances","method":"debug","path":"agents/registry.py","qualname":"AgentRegistry.cancel"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"cancel: agent='{}' cancelled {} instance(s): {}","method":"debug","path":"agents/registry.py","qualname":"AgentRegistry.cancel"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"skills lists {!r}, but no skill directory provides it","method":"warning","path":"core/skills.py","qualname":"build_scope"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio error: {}","method":"error","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio exception: {}","method":"critical","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"num_ctx","message":"Context budget: {} tokens (derived from num_ctx; max_context_tokens unset)","method":"info","path":"core/default_context_manager.py","qualname":"DefaultContextManager.__init__"}}

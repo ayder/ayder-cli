@@ -449,3 +449,40 @@ def resupply_message(loads: list[SkillLoad], *, names_only: bool = False) -> str
 def is_skill_block(content: object) -> bool:
     """True for a load block (content that starts with LOADED_MARKER)."""
     return isinstance(content, str) and content.startswith(LOADED_MARKER)
+
+
+# -- Session filter and catalog -----------------------------------------------
+
+
+def resolve_enabled(setting: SkillsSetting) -> frozenset[str]:
+    """The enabled names for a `skills` setting (spec 4.10).
+
+    None (not set): the built-in names. "none" or []: nothing. A list: exactly
+    those names, from any layer.
+    """
+    if setting is None:
+        return builtin_names()
+    if setting == "none":
+        return frozenset()
+    return frozenset(setting)
+
+
+def build_scope(project_root: Path, setting: SkillsSetting) -> SkillScope:
+    """A SkillScope for one runtime; warns once per unknown listed name."""
+    enabled = resolve_enabled(setting)
+    if isinstance(setting, list) and setting:
+        known = {info.name for info in discover_all(project_root)}
+        for name in sorted(enabled - known):
+            logger.warning("skills lists {!r}, but no skill directory provides it", name)
+    return SkillScope(project_root=Path(project_root), enabled=enabled)
+
+
+def format_catalog(skills: list[SkillInfo]) -> str:
+    """The `### Skills` catalog appended to the system prompt ("" if empty)."""
+    if not skills:
+        return ""
+    lines = [
+        f"- {info.name}: {info.description}" if info.description else f"- {info.name}"
+        for info in skills
+    ]
+    return "\n\n### Skills\n" + "\n".join(lines) + "\n"
