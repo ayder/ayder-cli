@@ -9,14 +9,20 @@ SKILL_TOOL_PROMPT = """
 ### Skill Tool
 The catalog under "### Skills" lists the skills enabled for this session, one
 per line as `name: the kinds of requests it is for`.
-- Match by the kind of work, not by its size. "Plan a multi-step web project"
-  matches an entry for planning multi-step technical work; "fix the failing
-  test" matches an entry for debugging code.
-- When a request matches and needs more than one reply, call
-  `skill(action="load", name="<name>")` before you start the work, then follow
-  the instructions it returns.
-- A request you can fully answer in one reply without tools needs no skill.
-- If no entry matches, do the work without a skill.
+
+Before you start a request, decide in two steps:
+1. Which entry fits? Compare the kind of work the request asks for with each
+   entry. "Plan a multi-step web project" fits an entry for planning
+   multi-step technical work; "fix the failing test" fits an entry for
+   debugging code. If no entry fits, work without a skill.
+2. Is it worth loading? Load the fitting skill when the work takes several
+   steps: investigating, changing files, verifying or planning. Do not load
+   one when a single reply covers the request, even if that reply needs a
+   tool call or two (for example, explaining a concept, or reading one file
+   to answer a question about it).
+
+To load a skill, call `skill(action="load", name="<name>")` before you start
+the work, then follow the instructions it returns.
 - Do not ask the user to choose a mode or a role. Reason about what the
   request needs, and load the skill whose guidance will help you deliver it.
 - Load more than one skill only when the request needs both. A loaded skill
