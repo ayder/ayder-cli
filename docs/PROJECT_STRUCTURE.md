@@ -722,6 +722,8 @@ Schema-driven tool definitions with auto-discovery:
 - `OllamaContextManager` (`core/ollama_context_manager.py`) — stable-prefix + real-token accounting, uses `prompt_eval_count` / `prompt_eval_duration` directly.
 - `CacheMonitor` (`core/cache_monitor.py`) — timing-based KV-cache hit detection driving adaptive compaction thresholds.
 
+Both managers re-supply active skills that a trim or compaction removed (`core/skills.py` `active_skills`).
+
 Selection lives in `core/context_manager_factory.py` (driver → class path registry). `create_runtime()` owns instantiation and calls `freeze_system_prompt()` once.
 
 ### Phase — opus47 critical fixes (2026-04-16)
