@@ -409,7 +409,7 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/tasks` | Browse and implement tasks from `.ayder/tasks/` |
 | `/implement [id]` | Interactive task picker, or implement by ID (e.g., `/implement 1`) |
 | `/notes` | Browse and edit markdown notes |
-| `/skill` | Activate a domain skill from `.ayder/skills/` via the shared `skill` tool backend |
+| `/skill` | Load a skill as a user message: `/skill <name> [request]`, or pick one |
 | `/verbose` | Toggle verbose mode |
 | `/logging` | Set log level for current session (NONE, ERROR, WARNING, INFO, DEBUG, TRACE) |
 | `/compact` | Summarize conversation, save a context snapshot, clear, and reload |
@@ -423,10 +423,22 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/agent <name> <task>` | Dispatch an agent to run a task in the background |
 | `/agent cancel <name>` | Cancel a running agent |
 
-### Logging
+### Skills
 
-The LLM can also call `skill(action="list" | "load" | "unload")`
-automatically when a request clearly matches an available project skill.
+A skill is a directory with a `SKILL.md` file, optionally starting with
+`name:` and `description:` frontmatter. ayder looks in three places, and a
+later one overrides an earlier one with the same name:
+
+1. built-in skills shipped with ayder
+2. your skills in `~/.ayder/skills/<name>/`
+3. project skills in `<project>/.ayder/skills/<name>/`
+
+The model loads one with `skill(action="load", name=...)`; the instructions
+come back as the tool result, so the conversation's earlier messages (and the
+provider's KV cache) are unchanged. Several skills can be active; other files
+in a skill's directory are read on demand with `skill(action="read")`.
+
+### Logging
 
 - Errors are always captured to `.ayder/log/errors.log`, even when
   `logging_level` is `NONE`. Set `file_enabled = false` under `[logging]` to
