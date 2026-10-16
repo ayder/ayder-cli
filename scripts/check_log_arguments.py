@@ -222,8 +222,8 @@ FROZEN_TALLY: dict[str, int] = {
     "R-id": 40,
     "R-count": 90,
     "R-status": 27,
-    "R-class": 10,
-    "R-path": 24,
+    "R-class": 11,
+    "R-path": 25,
     # Both 5-04 deferrals are closed: the two asyncio rows now interpolate the
     # B2-prime normalized value, and the bridge's dynamic message is masked by
     # the prose sinks it reaches.

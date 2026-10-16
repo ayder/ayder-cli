@@ -14,11 +14,14 @@ derived from those blocks in the history, so nothing else stores it.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ayder_cli.core.config import CONFIG_DIR
 from ayder_cli.core.context import ProjectContext
@@ -31,6 +34,7 @@ logger = get_logger("core")
 # directories (tests/conftest.py does this for every test).
 PACKAGED_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 USER_SKILLS_DIR = CONFIG_DIR / "skills"
+BUILTIN_HOME = CONFIG_DIR / "builtin"
 
 SKILL_FILE = "SKILL.md"
 MAX_SKILL_BYTES = 64 * 1024
@@ -146,9 +150,88 @@ def read_skill_info(skill_dir: Path, layer: str) -> SkillInfo:
 # -- Discovery -------------------------------------------------------------------
 
 
+SkillsSetting = list[str] | Literal["none"] | None
+
+# Directory the builtin layer is read from, once synced in this process.
+_builtin_root: Path | None = None
+
+
 def builtin_skills_root() -> Path:
-    """Directory the builtin layer is read from. MR C replaces this body."""
-    return PACKAGED_SKILLS_DIR
+    """Directory the builtin layer is read from.
+
+    The first call syncs the packaged skills into BUILTIN_HOME; later calls
+    in the same process reuse the result.
+    """
+    global _builtin_root
+    if _builtin_root is None:
+        _builtin_root = _sync_builtin_skills()
+    return _builtin_root
+
+
+def _packaged_stamp() -> str:
+    """ayder version plus a SHA-256 of every packaged skill file."""
+    from ayder_cli import __version__
+
+    digest = hashlib.sha256()
+    if PACKAGED_SKILLS_DIR.is_dir():
+        for path in sorted(p for p in PACKAGED_SKILLS_DIR.rglob("*") if p.is_file()):
+            if "__pycache__" in path.parts:
+                continue
+            digest.update(path.relative_to(PACKAGED_SKILLS_DIR).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return f"{__version__} {digest.hexdigest()}\n"
+
+
+def _sync_builtin_skills() -> Path:
+    """Copy the packaged skills to BUILTIN_HOME/skills when they changed.
+
+    Returns the directory to read the builtin layer from: the synced copy, or
+    the packaged directory itself when syncing fails (read-only home, disk
+    full). Startup never fails because of a sync.
+    """
+    target = BUILTIN_HOME / "skills"
+    stamp_path = BUILTIN_HOME / "STAMP"
+    if not PACKAGED_SKILLS_DIR.is_dir():
+        return PACKAGED_SKILLS_DIR  # nothing ships, so there is nothing to sync
+    try:
+        stamp = _packaged_stamp()
+        if target.is_dir() and stamp_path.is_file() and stamp_path.read_text(encoding="utf-8") == stamp:
+            return target
+        BUILTIN_HOME.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".sync-", dir=BUILTIN_HOME))
+        try:
+            shutil.copytree(
+                PACKAGED_SKILLS_DIR,
+                staging / "skills",
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            if target.exists():
+                os.replace(target, staging / "retired")
+            os.replace(staging / "skills", target)
+            stamp_path.write_text(stamp, encoding="utf-8")
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return target
+    except OSError as exc:
+        logger.warning(
+            "Built-in skills were not synced to {} ({}); reading the packaged copy",
+            target,
+            type(exc).__name__,
+        )
+        return PACKAGED_SKILLS_DIR
+
+
+def builtin_names() -> frozenset[str]:
+    """Names of the packaged skills: the default `skills` filter."""
+    if not PACKAGED_SKILLS_DIR.is_dir():
+        return frozenset()
+    return frozenset(
+        path.name
+        for path in PACKAGED_SKILLS_DIR.iterdir()
+        if path.is_dir() and (path / SKILL_FILE).is_file()
+    )
 
 
 def layer_roots(project_root: Path) -> list[tuple[str, Path]]:
