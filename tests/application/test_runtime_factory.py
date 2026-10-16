@@ -86,8 +86,8 @@ class TestRuntimeFactoryAssembly:
 class TestFactorySystemPromptOverride:
     """Test the --system-prompt override path in create_runtime."""
 
-    def test_system_prompt_override_replaces_base_keeps_tools_and_macro(self):
-        """Override replaces the prompts.py base but tool prompts + project macro remain."""
+    def test_system_prompt_override_replaces_base_keeps_tools(self):
+        """Override replaces the prompts.py base; tool prompts remain, no project tree."""
         with patch('ayder_cli.application.runtime_factory.create_default_registry') as mock_create, \
              patch('ayder_cli.application.runtime_factory.get_system_prompt') as mock_get_prompt:
             mock_registry = Mock()
@@ -100,10 +100,10 @@ class TestFactorySystemPromptOverride:
 
             # prompts.py base prompt is NOT consulted when an override is given
             mock_get_prompt.assert_not_called()
-            # override is the base; tool prompts + project structure macro still appended
+            # override is the base; tool prompts are appended, the project tree is not
             assert components.system_prompt.startswith("CUSTOM_BASE")
             assert "[TOOLS]" in components.system_prompt
-            assert "PROJECT STRUCTURE" in components.system_prompt
+            assert "PROJECT STRUCTURE" not in components.system_prompt
 
     def test_no_override_uses_prompts_py_base(self):
         """Without an override, the base prompt comes from prompts.py.get_system_prompt."""
@@ -271,33 +271,15 @@ class TestFactoryCompositionParity:
         assert len(components.system_prompt) > 100  # Substantial prompt
         assert "model" in components.system_prompt.lower() or "ayder" in components.system_prompt.lower()
 
-    def test_factory_project_structure_macro(self):
-        """Factory includes project structure macro in system prompt when available."""
+    def test_factory_prompt_has_no_project_structure(self):
+        """The system prompt carries no project tree; the model lists files with its tools."""
         components = create_runtime()
 
-        # Should attempt to include project structure
-        # (may be empty if structure tool fails, but should not error)
-        assert isinstance(components.system_prompt, str)
+        assert "PROJECT STRUCTURE" not in components.system_prompt
 
 
 class TestFactoryEdgeCases:
     """Test factory edge cases and error handling."""
-
-    def test_factory_handles_structure_macro_failure(self):
-        """Factory handles failure to get project structure gracefully."""
-        with patch('ayder_cli.application.runtime_factory.create_default_registry') as mock_create:
-            mock_registry = Mock()
-            mock_registry.execute.side_effect = Exception("Structure error")
-            mock_registry.get_system_prompts.return_value = ""
-            mock_registry.get_schemas.return_value = []
-            mock_create.return_value = mock_registry
-
-            # Should not raise
-            components = create_runtime()
-
-            # System prompt should still be valid (without structure macro)
-            assert isinstance(components.system_prompt, str)
-            assert "PROJECT STRUCTURE" not in components.system_prompt
 
     def test_factory_default_values(self):
         """Factory uses sensible defaults when optional args omitted."""
