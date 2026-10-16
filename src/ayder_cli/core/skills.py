@@ -34,6 +34,7 @@ USER_SKILLS_DIR = CONFIG_DIR / "skills"
 
 SKILL_FILE = "SKILL.md"
 MAX_SKILL_BYTES = 64 * 1024
+LINK_PROBLEM = "it links outside its skills directory"
 
 LOADED_MARKER = "### SKILL LOADED: "
 END_MARKER = "### END SKILL: "
@@ -159,14 +160,42 @@ def layer_roots(project_root: Path) -> list[tuple[str, Path]]:
     ]
 
 
+def _links_outside(skill_dir: Path, root: Path) -> bool:
+    """True when the skill directory, or its SKILL.md, resolves outside.
+
+    The boundary is the layer directory, not the skill directory: a symlinked
+    skill directory would otherwise become its own trusted boundary.
+    """
+    real_root = os.path.realpath(root)
+    real_dir = os.path.realpath(skill_dir)
+    real_file = os.path.realpath(skill_dir / SKILL_FILE)
+    return (
+        os.path.commonpath([real_root, real_dir]) != real_root
+        or os.path.commonpath([real_dir, real_file]) != real_dir
+    )
+
+
 def discover_all(project_root: Path) -> list[SkillInfo]:
-    """Every skill in every layer, overrides applied, sorted by name."""
+    """Every skill in every layer, overrides applied, sorted by name.
+
+    A skill that links outside its layer directory is listed with a problem
+    and is never read.
+    """
     merged: dict[str, SkillInfo] = {}
     for layer, root in layer_roots(project_root):
         if not root.is_dir():
             continue
         for skill_dir in sorted(root.iterdir()):
-            if skill_dir.is_dir() and (skill_dir / SKILL_FILE).is_file():
+            if not (skill_dir.is_dir() and (skill_dir / SKILL_FILE).is_file()):
+                continue
+            if _links_outside(skill_dir, root):
+                merged[skill_dir.name] = SkillInfo(
+                    name=skill_dir.name,
+                    path=skill_dir / SKILL_FILE,
+                    layer=layer,
+                    problem=LINK_PROBLEM,
+                )
+            else:
                 merged[skill_dir.name] = read_skill_info(skill_dir, layer)
     return [merged[name] for name in sorted(merged)]
 
@@ -231,6 +260,10 @@ def skill_resources(info: SkillInfo) -> list[str]:
 
 def render_skill_block(info: SkillInfo) -> str | ToolError:
     """The text a load appends: header, source, file list, body, end marker."""
+    if info.problem:
+        return ToolError(
+            f"SKILL.md for '{info.name}' cannot be loaded: {info.problem}.", "validation"
+        )
     text, problem = _read_text(info.path)
     if problem:
         return ToolError(
@@ -264,6 +297,8 @@ def resolve_resource(info: SkillInfo, rel_path: str) -> Path:
             the skill directory (including through a symlink).
         FileNotFoundError: no such file.
     """
+    if info.problem == LINK_PROBLEM:
+        raise ValueError(f"Security Alert: skill '{info.name}' {LINK_PROBLEM}")
     skill_dir = info.path.parent
     candidate = Path(rel_path)
     if candidate.is_absolute():

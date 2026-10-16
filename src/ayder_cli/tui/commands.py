@@ -20,7 +20,7 @@ import openai
 from ayder_cli.providers import evren, provider_orchestrator, ProviderUnavailableError
 from ayder_cli.core.result import ToolError
 from ayder_cli.core.skills import SkillInfo, active_skills, render_skill_block
-from ayder_cli.tools.builtins.skill import _set_status_skill, discover_skills, status_text
+from ayder_cli.tools.builtins.skill import _after_change, discover_skills
 from ayder_cli.tui.screens import (
     AgentListScreen,
     CLISelectScreen,
@@ -943,11 +943,19 @@ def _load_skill_for_user(
     command: str,
     chat_view: ChatView,
 ) -> bool:
-    """Append ``info``'s block (plus an optional command) as a user message."""
+    """Append ``info``'s block (plus an optional command) as a user message.
+
+    Returns True when a user message was appended, so a command can run. With
+    the skill already active, the command alone is appended.
+    """
     active = [load.name for load in active_skills(app.messages)]
     if info.name in active:
         chat_view.add_system_message(f"Skill '{info.name}' is already active.")
-        return False
+        if not command:
+            return False
+        app.messages.append({"role": "user", "content": command})
+        chat_view.add_user_message(command)
+        return True
     block = render_skill_block(info)
     if isinstance(block, ToolError):
         chat_view.add_system_message(str(block))
@@ -957,7 +965,7 @@ def _load_skill_for_user(
     chat_view.add_system_message(f"Activated skill: {info.name}")
     if command:
         chat_view.add_user_message(command)
-    _set_status_skill(app, status_text(active + [info.name]))
+    _after_change(app, active + [info.name])
     return True
 
 

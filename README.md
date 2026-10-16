@@ -437,6 +437,8 @@ The model loads one with `skill(action="load", name=...)`; the instructions
 come back as the tool result, so the conversation's earlier messages (and the
 provider's KV cache) are unchanged. Several skills can be active; other files
 in a skill's directory are read on demand with `skill(action="read")`.
+A skill directory or `SKILL.md` that links outside its skills directory is
+listed but never read or loaded; copy the skill instead of symlinking it.
 
 ### Logging
 
