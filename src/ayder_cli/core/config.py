@@ -352,7 +352,7 @@ class Config(BaseModel):
     max_background_processes: int = Field(default=5)
     # Local Unix-socket inbox that accepts prompts from peer processes.
     messaging_enabled: bool = Field(default=True)
-    max_output_tokens: int = Field(default=4096)
+    max_output_tokens: int = Field(default=32768)
     # 0 = unlimited: let the context manager's token budget + compaction be the
     # bound. The old fixed 30 predates large-context models and thrashes a tiny
     # history window on a big context.
