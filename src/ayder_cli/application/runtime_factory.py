@@ -7,6 +7,7 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ayder_cli.core.config import Config, load_config, load_config_for_provider
@@ -16,6 +17,7 @@ from ayder_cli.core.context_manager_factory import context_manager_factory
 if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
 from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.skills import SkillScope
 from ayder_cli.providers import AIProvider, provider_orchestrator
 from ayder_cli.providers.retry import RetryConfig, RetryingProvider
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
@@ -84,6 +86,7 @@ def create_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
+    tool_registry.skill_scope = SkillScope(project_root=Path(project_ctx.root))
 
     try:
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
@@ -196,6 +199,7 @@ def create_agent_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
+    tool_registry.skill_scope = SkillScope(project_root=Path(project_ctx.root))
 
     # 5. Build agent system prompt
     identity_prefix = (

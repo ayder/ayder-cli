@@ -35,6 +35,7 @@ class ToolRegistry:
         self.process_manager = process_manager
         self.context_manager = context_manager
         self.app = app
+        self.skill_scope: Any = None  # SkillScope; the runtime factory sets it
         self._registry: Dict[str, Callable] = {}
         self._dynamic_definitions: list = []
         self.hooks = HookManager()
@@ -75,6 +76,7 @@ class ToolRegistry:
             process_manager=self.process_manager,
             context_manager=self.context_manager,
             app=self.app,
+            skill_scope=self.skill_scope,
         )
 
     def get_system_prompts(self, tags: frozenset | None = None) -> str:

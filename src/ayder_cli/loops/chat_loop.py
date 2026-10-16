@@ -126,6 +126,10 @@ class ChatLoop:
         self.llm = llm
         self.registry = registry
         self.messages = messages
+        # The skill tool derives the active skills from the history it sends.
+        scope = getattr(registry, "skill_scope", None)
+        if scope is not None:
+            scope.messages = messages
         self.config = config
         self.cb = callbacks
         self._total_tokens = 0

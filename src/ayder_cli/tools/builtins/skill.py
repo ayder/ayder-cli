@@ -1,163 +1,43 @@
-"""Project skill discovery, bundling, and activation."""
+"""The ``skill`` tool: list, load, read and unload skills.
+
+Kept from the old file, unchanged, so the log-argument baseline (keyed by
+qualname) does not move: ``_set_status_skill`` and ``_new_agent_generation``
+with their logger calls and broad handlers. Their callers pass a display
+string instead of one skill name.
+"""
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
 
 from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context_manager import truncate_tool_result
 from ayder_cli.core.result import ToolError, ToolSuccess
+from ayder_cli.core.skills import (
+    SkillInfo,
+    SkillScope,
+    discover_all,
+    list_line,
+    render_skill_block,
+    resolve_resource,
+    unload_notice,
+)
 from ayder_cli.log import get_logger
 
 logger = get_logger("tool")
 
-
-@dataclass(frozen=True)
-class SkillInfo:
-    name: str
-    path: Path
-
-
-@dataclass(frozen=True)
-class SkillResource:
-    path: Path
-    content: str
-
-
-@dataclass(frozen=True)
-class SkillBundle:
-    name: str
-    skill_path: Path
-    skill_content: str
-    resources: list[SkillResource]
-
-
-_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-_BACKTICK_PATH_RE = re.compile(r"`([^`\n]+)`")
-
-
-def skills_dir(project_ctx: ProjectContext) -> Path:
-    """Return the project skill directory."""
-    return project_ctx.root / ".ayder" / "skills"
+__all__ = ["SkillInfo", "discover_skills", "skill", "status_text"]
 
 
 def discover_skills(project_ctx: ProjectContext) -> list[SkillInfo]:
-    """Return skills that have a non-directory SKILL.md file."""
-    root = skills_dir(project_ctx)
-    if not root.is_dir():
-        return []
-    return [
-        SkillInfo(name=path.name, path=path / "SKILL.md")
-        for path in sorted(root.iterdir())
-        if path.is_dir() and (path / "SKILL.md").is_file()
-    ]
+    """Every discovered skill, unfiltered (the user's ``/skill`` view)."""
+    return discover_all(Path(project_ctx.root))
 
 
-def find_skill(project_ctx: ProjectContext, name: str) -> SkillInfo | None:
-    """Find a skill by exact directory name."""
-    return next(
-        (skill_info for skill_info in discover_skills(project_ctx) if skill_info.name == name),
-        None,
-    )
-
-
-def _normalize_ref(raw_ref: str) -> str | None:
-    ref = raw_ref.strip()
-    if not ref:
-        return None
-    if ref.startswith("<") and ref.endswith(">"):
-        ref = ref[1:-1].strip()
-    ref = unquote(ref)
-    parsed = urlsplit(ref)
-    if parsed.scheme or parsed.netloc or ref.startswith("#"):
-        return None
-    ref = ref.split("#", 1)[0].strip()
-    if not ref:
-        return None
-    if any(ch.isspace() for ch in ref):
-        ref = ref.split(None, 1)[0]
-    return ref
-
-
-def _resolve_resource_path(skill_dir: Path, raw_ref: str) -> Path | None:
-    ref = _normalize_ref(raw_ref)
-    if ref is None:
-        return None
-    candidate = Path(ref)
-    if candidate.is_absolute():
-        return None
-    try:
-        resolved = (skill_dir / candidate).resolve()
-        resolved.relative_to(skill_dir.resolve())
-    except (OSError, ValueError):
-        return None
-    if not resolved.is_file():
-        return None
-    return resolved
-
-
-def extract_skill_resource_refs(skill_path: Path, content: str) -> list[Path]:
-    """Extract direct local file references from a SKILL.md body."""
-    skill_dir = skill_path.parent
-    refs: list[Path] = []
-    seen: set[Path] = set()
-
-    raw_refs = [match.group(1) for match in _MARKDOWN_LINK_RE.finditer(content)]
-    raw_refs.extend(match.group(1) for match in _BACKTICK_PATH_RE.finditer(content))
-
-    for raw_ref in raw_refs:
-        resolved = _resolve_resource_path(skill_dir, raw_ref)
-        if resolved is None or resolved in seen:
-            continue
-        seen.add(resolved)
-        refs.append(resolved)
-    return refs
-
-
-def load_skill_bundle(project_ctx: ProjectContext, name: str) -> SkillBundle | ToolError:
-    """Load SKILL.md and its directly referenced local files."""
-    skill_info = find_skill(project_ctx, name)
-    if skill_info is None:
-        available = ", ".join(info.name for info in discover_skills(project_ctx))
-        suffix = f" Available: {available}" if available else " No skills found."
-        return ToolError(f"Unknown skill: '{name}'.{suffix}", "validation")
-
-    try:
-        skill_content = skill_info.path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        return ToolError(f"Error reading SKILL.md for '{name}': {exc}", "execution")
-    if not skill_content:
-        return ToolError(f"SKILL.md for '{name}' is empty, skipping.", "validation")
-
-    resources: list[SkillResource] = []
-    for resource_path in extract_skill_resource_refs(skill_info.path, skill_content):
-        try:
-            content = resource_path.read_text(encoding="utf-8").strip()
-        except UnicodeDecodeError:
-            continue
-        except OSError:
-            continue
-        resources.append(SkillResource(path=resource_path, content=content))
-
-    return SkillBundle(
-        name=name,
-        skill_path=skill_info.path,
-        skill_content=skill_content,
-        resources=resources,
-    )
-
-
-def format_skill_bundle(bundle: SkillBundle) -> str:
-    """Format a loaded skill bundle for system-message injection."""
-    parts = [bundle.skill_content]
-    skill_dir = bundle.skill_path.parent
-    for resource in bundle.resources:
-        rel_path = resource.path.relative_to(skill_dir).as_posix()
-        parts.append(f"### Referenced File: {rel_path}\n\n{resource.content}")
-    return "\n\n".join(parts)
+def status_text(names: list[str]) -> str | None:
+    """Status-bar text for the active skills, or None when there are none."""
+    return ", ".join(names) or None
 
 
 def _set_status_skill(app: Any, skill_name: str | None) -> None:
@@ -178,61 +58,93 @@ def _new_agent_generation(app: Any) -> None:
             logger.opt(exception=True).warning("Failed to advance agent generation")
 
 
+def _after_change(app: Any, active_names: list[str]) -> None:
+    if app is None:
+        return
+    _new_agent_generation(app)
+    _set_status_skill(app, status_text(active_names))
+
+
+def _default_scope(project_ctx: ProjectContext, app: Any) -> SkillScope:
+    """Scope for a call without an injected one (direct calls and tests)."""
+    return SkillScope(
+        project_root=Path(project_ctx.root),
+        messages=getattr(app, "messages", None),
+    )
+
+
+def _not_found(scope: SkillScope, name: str) -> ToolError:
+    enabled = ", ".join(info.name for info in scope.enabled_skills())
+    suffix = f" Enabled: {enabled}" if enabled else " No skills are enabled."
+    return ToolError(f"Unknown or disabled skill: '{name}'.{suffix}", "validation")
+
+
 def skill(
     project_ctx: ProjectContext,
     action: str,
     name: str | None = None,
+    path: str | None = None,
     app: Any = None,
+    skill_scope: SkillScope | None = None,
 ) -> ToolSuccess | ToolError:
-    """List, load, or unload project skills."""
+    """List, load, read or unload skills."""
+    scope = skill_scope if skill_scope is not None else _default_scope(project_ctx, app)
+    name = name.strip() if name else None
+    active_names = [load.name for load in scope.active()]
+
     match action:
         case "list":
-            skills = discover_skills(project_ctx)
+            skills = scope.enabled_skills()
             if not skills:
-                return ToolSuccess("No skills found in .ayder/skills/")
-            return ToolSuccess(
-                "Available skills:\n"
-                + "\n".join(f"- {skill_info.name}" for skill_info in skills)
-            )
-        case "load":
-            if not name or not name.strip():
-                return ToolError("Skill name is required for action=load.", "validation")
-            if app is None:
-                return ToolError(
-                    "Skill loading requires an active TUI app session.",
-                    "unsupported",
-                )
-            bundle = load_skill_bundle(project_ctx, name.strip())
-            if isinstance(bundle, ToolError):
-                return bundle
+                return ToolSuccess("No skills are enabled for this session.")
+            return ToolSuccess("Available skills:\n" + "\n".join(list_line(s) for s in skills))
 
-            formatted = format_skill_bundle(bundle)
-            app.inject_skill(bundle.name, formatted)
-            _new_agent_generation(app)
-            _set_status_skill(app, bundle.name)
-            if bundle.resources:
-                files = ", ".join(
-                    resource.path.relative_to(bundle.skill_path.parent).as_posix()
-                    for resource in bundle.resources
-                )
-                return ToolSuccess(
-                    f"Activated skill: {bundle.name}\nLoaded referenced files: {files}"
-                )
-            return ToolSuccess(f"Activated skill: {bundle.name}")
+        case "load":
+            if not name:
+                return ToolError("Skill name is required for action=load.", "validation")
+            if name in active_names:
+                return ToolSuccess(f"Skill '{name}' is already active.")
+            info = scope.find(name)
+            if info is None:
+                return _not_found(scope, name)
+            block = render_skill_block(info)
+            if isinstance(block, ToolError):
+                return block
+            _after_change(app, active_names + [name])
+            return ToolSuccess(block)
+
+        case "read":
+            if not name or not path:
+                return ToolError("action=read needs both name and path.", "validation")
+            info = scope.find(name)
+            if info is None and name in active_names:
+                # Loaded by the user with /skill, which the filter does not limit.
+                info = next((s for s in discover_all(scope.project_root) if s.name == name), None)
+            if info is None:
+                return _not_found(scope, name)
+            try:
+                target = resolve_resource(info, path)
+            except ValueError as exc:
+                return ToolError(f"Security Error: {exc}", "security")
+            except FileNotFoundError:
+                return ToolError(f"Skill '{name}' has no file '{path}'.", "validation")
+            try:
+                content = target.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return ToolError(f"Error reading '{path}' of skill '{name}': {exc}", "execution")
+            return ToolSuccess(truncate_tool_result(content))
+
         case "unload":
-            if app is None:
-                return ToolError(
-                    "Skill unloading requires an active TUI app session.",
-                    "unsupported",
-                )
-            previous = app.unload_skill()
-            _new_agent_generation(app)
-            _set_status_skill(app, None)
-            if previous:
-                return ToolSuccess(f"Unloaded skill: {previous}")
-            return ToolSuccess("No active skill to unload.")
+            if name and name not in active_names:
+                return ToolSuccess(f"Skill '{name}' is not active.")
+            targets = [name] if name else active_names
+            if not targets:
+                return ToolSuccess("No active skill to unload.")
+            _after_change(app, [n for n in active_names if n not in targets])
+            return ToolSuccess(unload_notice(targets))
+
         case _:
             return ToolError(
-                "Unknown skill action. Expected one of: list, load, unload.",
+                "Unknown skill action. Expected one of: list, load, read, unload.",
                 "validation",
             )
