@@ -17,7 +17,6 @@ Use this workflow for software work in the current project. Act as an experience
 ## Workflow
 
 1. Orient: read `AGENTS.md` and `README.md` if they exist, then the code the task touches.
-   Use `search_codebase` to locate code before reading files.
 2. Align: restate the goal and surface ambiguities before acting.
 3. Approve: present the approach and wait for the user's approval before executing.
 4. Plan: break the work into steps. Track them with the `task()` tool and refer to them
