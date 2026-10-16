@@ -115,3 +115,5 @@ def _isolated_skill_layers(tmp_path_factory, monkeypatch):
     base = tmp_path_factory.mktemp("skill-layers")
     monkeypatch.setattr(skills, "PACKAGED_SKILLS_DIR", base / "packaged")
     monkeypatch.setattr(skills, "USER_SKILLS_DIR", base / "user")
+    monkeypatch.setattr(skills, "BUILTIN_HOME", base / "builtin")
+    monkeypatch.setattr(skills, "_builtin_root", None)

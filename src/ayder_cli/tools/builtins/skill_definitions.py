@@ -7,11 +7,16 @@ from ..definition import ToolDefinition
 SKILL_TOOL_PROMPT = """
 
 ### Skill Tool
-`skill(action="list")` shows the skills enabled for this session.
-`skill(action="load", name="<name>")` returns a skill's instructions; follow
-them from then on. `skill(action="read", name="<name>", path="<file>")` reads
-one of the files a loaded skill lists. `skill(action="unload", name="<name>")`
-stops a skill (omit `name` to stop all).
+Skills hold the workflows for larger kinds of work. The catalog under "### Skills" lists
+the ones enabled for this session.
+- When a request matches a catalog entry, call `skill(action="load", name="<name>")`
+  before you start the work, then follow the instructions it returns.
+- Do not ask the user to choose a mode or a role; choose the skill yourself.
+- Load more than one skill only when the request needs both. A skill stays loaded for
+  the rest of the session; do not load it again unless you unloaded it.
+- If no entry matches, continue without a skill.
+- `skill(action="read", name="<name>", path="<file>")` reads a file the loaded skill lists.
+- `skill(action="unload", name="<name>")` stops a skill when the work changes kind.
 """
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (

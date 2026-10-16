@@ -155,7 +155,8 @@ cli.py:main()
 | `core/config_migration.py` | TOML config migration helpers | migration routines for schema changes |
 | `core/context.py` | Project sandboxing | `ProjectContext` |
 | `core/result.py` | Tool result types | `ToolSuccess`, `ToolError` |
-| `core/skills.py` | Skill discovery and delivery | `SkillInfo`, `SkillScope`, `discover_all()`, `render_skill_block()`, `active_skills()` |
+| `core/skills.py` | Skill discovery, delivery, built-in sync and the session filter | `SkillInfo`, `SkillScope`, `discover_all()`, `render_skill_block()`, `active_skills()`, `builtin_skills_root()`, `build_scope()`, `format_catalog()` |
+| `skills/<name>/SKILL.md` | Packaged built-in skills (data only, shipped in the wheel); synced to `~/.ayder/builtin/skills` when `~/.ayder/builtin/STAMP` (version + SHA-256) differs | - |
 | `core/context_manager.py` | ContextManager Protocol + shared utilities | `ContextManagerProtocol`, `ContextStats`, `truncate_tool_result()` |
 | `core/default_context_manager.py` | Tiered context manager for non-Ollama providers | `DefaultContextManager`, `TokenCounter`, `MessageTier` |
 | `core/ollama_context_manager.py` | KV-cache-aware context manager for Ollama | `OllamaContextManager`, `OllamaContextStats` |

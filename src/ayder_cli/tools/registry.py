@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolResult
+from ayder_cli.core.result import ToolError, ToolResult
 from ayder_cli.log import get_logger
 from ayder_cli.tools.definition import TOOL_DEFINITIONS
 from ayder_cli.tools.execution import execute_tool
@@ -36,6 +36,7 @@ class ToolRegistry:
         self.context_manager = context_manager
         self.app = app
         self.skill_scope: Any = None  # SkillScope; the runtime factory sets it
+        self.excluded_tools: set[str] = set()  # names hidden from the model
         self._registry: Dict[str, Callable] = {}
         self._dynamic_definitions: list = []
         self.hooks = HookManager()
@@ -59,13 +60,21 @@ class ToolRegistry:
         register_dynamic_definition(tool_def)
         TOOL_PERMISSIONS[tool_def.name] = tool_def.permission
 
-    def get_schemas(self, tags: frozenset | None = None) -> List[Dict[str, Any]]:
+    def _selected_definitions(self, tags: frozenset | None) -> list:
+        """Definitions the model may see: tag-selected and not excluded."""
         all_defs = list(TOOL_DEFINITIONS) + self._dynamic_definitions
-        if tags is None:
-            return [td.to_openai_schema() for td in all_defs]
-        return [td.to_openai_schema() for td in all_defs if set(td.tags) & tags]
+        return [
+            td
+            for td in all_defs
+            if td.name not in self.excluded_tools and (tags is None or set(td.tags) & tags)
+        ]
+
+    def get_schemas(self, tags: frozenset | None = None) -> List[Dict[str, Any]]:
+        return [td.to_openai_schema() for td in self._selected_definitions(tags)]
 
     def execute(self, name: str, arguments: Any) -> ToolResult:
+        if name in self.excluded_tools:
+            return ToolError(f"Error: Unknown tool '{name}'", "validation")
         tool_func = self._registry.get(name)
         return execute_tool(
             tool_name=name,
@@ -80,10 +89,15 @@ class ToolRegistry:
         )
 
     def get_system_prompts(self, tags: frozenset | None = None) -> str:
-        """Return concatenated system_prompt blocks for enabled tools."""
-        all_defs = list(TOOL_DEFINITIONS) + self._dynamic_definitions
-        defs = all_defs if tags is None else [td for td in all_defs if set(td.tags) & tags]
-        return "".join(td.system_prompt for td in defs if td.system_prompt)
+        """Concatenated system_prompt blocks for enabled tools, then the
+        skill catalog when the skill tool is enabled."""
+        defs = self._selected_definitions(tags)
+        prompts = "".join(td.system_prompt for td in defs if td.system_prompt)
+        if self.skill_scope is not None and any(td.name == "skill" for td in defs):
+            from ayder_cli.core.skills import format_catalog
+
+            prompts += format_catalog(self.skill_scope.enabled_skills())
+        return prompts
 
     def get_registered_tools(self) -> list:
         return list(self._registry.keys())

@@ -23,6 +23,9 @@ def _make_app() -> SimpleNamespace:
         query_one=MagicMock(return_value=status_bar),
         update_system_prompt_model=MagicMock(),
         request_turn=request_turn,
+        # The switch re-applies the profile's skills to the live registry.
+        registry=MagicMock(excluded_tools=set()),
+        messages=[],
         chat_loop=SimpleNamespace(
             llm=MagicMock(),
             config=SimpleNamespace(model="qwen3-coder:latest", num_ctx=65536),
