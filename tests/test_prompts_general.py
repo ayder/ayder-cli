@@ -28,7 +28,11 @@ def test_standard_prompt_states_the_harness():
     assert STANDARD_SYSTEM_PROMPT.startswith("You are ayder, the agent of ayder-cli, a terminal harness.")
     assert EXTENDED_SYSTEM_PROMPT is STANDARD_SYSTEM_PROMPT
     text = _flat(STANDARD_SYSTEM_PROMPT)
-    assert "acting through the tools provided with each request" in text
+    assert "You act through the tools provided with each request" in text
+    # Nothing in the identity points the model at the project: a greeting
+    # gets a greeting, not a tour of the files.
+    identity = STANDARD_SYSTEM_PROMPT.split("\n\n")[0].lower()
+    assert "project" not in identity and "directory" not in identity
     assert "Skills are workflows and project guidelines provided by the harness" in text
 
 
