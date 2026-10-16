@@ -399,7 +399,10 @@ class DefaultContextManager:
                 # re-supply never pushes the request over the budget. When the
                 # blocks alone do not fit, only the names are re-supplied.
                 every = active_skills(history_msgs)
-                names_only = self._text_cost(resupply_message(every)) >= available
+                # The newest unit is kept whatever it costs (F8), so the blocks
+                # must fit beside it; otherwise only the names are re-supplied.
+                newest = self._counter.count_messages(units[-1])
+                names_only = self._text_cost(resupply_message(every)) + newest > available
                 reserve = self._text_cost(resupply_message(every, names_only=names_only))
                 result, reason = self._select_units(units, max(available - reserve, 0), max_history)
                 dropped = self._dropped_skills(history_msgs, len(result))

@@ -174,4 +174,5 @@ def test_names_only_when_the_newest_unit_leaves_no_room_for_the_blocks():
     out = _default().prepare_messages(history, max_history=1)
     assert out[1]["content"].startswith("### SKILLS ACTIVE BUT TRIMMED: eng\n")
     assert "r" * 2000 not in out[1]["content"]
-    assert out[-1] == history[-1]
+    # The newest request is the only kept message, so the names merge into it.
+    assert len(out) == 2 and out[1]["content"].endswith("\n\n" + "q" * 2000)

@@ -18,7 +18,7 @@ from typing import Any, Optional
 from ayder_cli.core.cache_monitor import CacheMonitor
 from ayder_cli.core.context_manager import ContextStats
 from ayder_cli.core.default_context_manager import TokenCounter
-from ayder_cli.core.skills import active_skills, resupply_message
+from ayder_cli.core.skills import active_skills, resupply_message, unload_notice
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
@@ -112,6 +112,7 @@ class OllamaContextManager:
         # Persistent compaction state for the current history generation.
         self._summary_msg: dict | None = None  # sent verbatim on every call
         self._summary_text: str | None = None  # the merged summary, without re-supply
+        self._summary_skills: list[str] = []  # skills the summary re-supplies
         self._folded: list[dict] = []  # caller objects the summary replaces
         self._last_seen: list[dict] = []  # previous call's untrimmed input
         self._awaiting_measurement: bool = False  # block until fresh prompt_tokens
@@ -268,7 +269,7 @@ class OllamaContextManager:
                 self._folded = self._folded + newly_folded
                 self._summary_msg = {
                     "role": "user",
-                    "content": self._summary_with_skills(history),
+                    "content": self._summary_with_skills(history, system_msg, surviving),
                 }
                 self._awaiting_measurement = True
                 self._emit_trim(len(history), len(surviving), "compaction")
@@ -288,6 +289,15 @@ class OllamaContextManager:
                 msg_count += len(unit)
             surviving = [m for unit in kept for m in unit]
             self._emit_trim(before_trim, len(surviving), "max_history")
+            # The cap already changes the prefix every turn, so re-supplying
+            # what it removed costs no cache that was not already lost.
+            extra = self._cap_resupply(history, len(surviving))
+            if extra is not None:
+                first = surviving[0]
+                if first.get("role") == "user" and isinstance(first.get("content"), str):
+                    surviving = [{**first, "content": f"{extra}\n\n{first['content']}"}] + surviving[1:]
+                else:
+                    surviving = [{"role": "user", "content": extra}] + surviving
 
         # Build the output — stable prefix order
         result: list[dict] = []
@@ -465,6 +475,7 @@ class OllamaContextManager:
         """Forget the summary; wait for a measurement of the new history."""
         self._summary_msg = None
         self._summary_text = None
+        self._summary_skills = []
         self._folded = []
         self._awaiting_measurement = True
 
@@ -520,24 +531,55 @@ class OllamaContextManager:
             kept = [lines[-1][: _SUMMARY_MAX_CHARS - 1] + "…"]
         return SUMMARY_HEADER + "\n" + "\n".join(reversed(kept))
 
-    def _summary_with_skills(self, history: list[dict]) -> str:
+    def _summary_with_skills(
+        self, history: list[dict], system_msg: dict | None, surviving: list[dict]
+    ) -> str:
         """The summary text plus the blocks of active skills it folded.
 
         Built only at compaction time and stored in ``_summary_msg``, so it is
         part of the persistent prefix and changes only when compaction runs
         again. A skill unloaded later keeps its block here until then; the
-        unload notice later in the history tells the model to stop.
+        unload notice later in the history tells the model to stop. The
+        blocks are re-supplied in full only when the composed request (system,
+        summary, surviving history) still fits the budget; otherwise only the
+        names are.
         """
         text = self._summary_text or ""
         folded = len(self._folded)
         loads = [load for load in active_skills(history) if load.index < folded]
+        self._summary_skills = [load.name for load in loads]
         if not loads:
             return text
-        resupply = resupply_message(loads)
+        content = f"{text}\n\n{resupply_message(loads)}"
         budget = self._actual_context_length * (1 - self._reserve_ratio)
-        if self._counter.count_messages([{"role": "user", "content": resupply}]) > budget / 2:
-            resupply = resupply_message(loads, names_only=True)
-        return f"{text}\n\n{resupply}"
+        head = [system_msg] if system_msg else []
+        composed = head + [{"role": "user", "content": content}] + surviving
+        if self._counter.count_messages(composed) > budget:
+            content = f"{text}\n\n{resupply_message(loads, names_only=True)}"
+        return content
+
+    def _cap_resupply(self, history: list[dict], kept: int) -> str | None:
+        """What a max_history cap removed that the model must still see.
+
+        The blocks of active skills whose load the cap dropped (and that the
+        summary does not carry), and the unload notice of any skill the
+        summary still carries but that is no longer active.
+        """
+        first_kept = len(history) - kept
+        active = active_skills(history)
+        active_names = {load.name for load in active}
+        dropped = [
+            load
+            for load in active
+            if load.index < first_kept and load.name not in self._summary_skills
+        ]
+        stale = [name for name in self._summary_skills if name not in active_names]
+        parts = []
+        if dropped:
+            parts.append(resupply_message(dropped))
+        if stale:
+            parts.append(unload_notice(stale))
+        return "\n\n".join(parts) if parts else None
 
     def _compact(
         self, history: list[dict]
