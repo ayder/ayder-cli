@@ -165,3 +165,13 @@ def test_max_history_trim_resupplies():
     history = _long_history([_load_unit("eng", "c1")], filler=4)
     out = _default(100_000).prepare_messages(history, max_history=3)
     assert out[1]["content"].startswith(RESUPPLY_HEADER)
+
+
+def test_names_only_when_the_newest_unit_leaves_no_room_for_the_blocks():
+    """Review B1: the block fits alone, but not beside the mandatory newest unit."""
+    history = _long_history([_load_unit("eng", "c1", size=2000)], filler=4)
+    history[-1] = {"role": "user", "content": "q" * 2000}
+    out = _default().prepare_messages(history, max_history=1)
+    assert out[1]["content"].startswith("### SKILLS ACTIVE BUT TRIMMED: eng\n")
+    assert "r" * 2000 not in out[1]["content"]
+    assert out[-1] == history[-1]
