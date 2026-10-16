@@ -7,11 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ayder_cli.prompts import (
-    EXTENDED_SYSTEM_PROMPT,
-    PROJECT_STRUCTURE_MACRO_TEMPLATE,
-    STANDARD_SYSTEM_PROMPT,
-)
+from ayder_cli import prompts
+from ayder_cli.prompts import EXTENDED_SYSTEM_PROMPT, STANDARD_SYSTEM_PROMPT
 from ayder_cli.providers.impl.ollama_drivers.generic_xml import _XML_INSTRUCTION
 from ayder_cli.tools.builtins.skill_definitions import SKILL_TOOL_PROMPT
 
@@ -52,8 +49,8 @@ def test_skill_decision_is_one_sentence():
 
 @pytest.mark.parametrize(
     "text",
-    [STANDARD_SYSTEM_PROMPT, SKILL_TOOL_PROMPT, PROJECT_STRUCTURE_MACRO_TEMPLATE, _XML_INSTRUCTION, ENGINEERING],
-    ids=["standard", "skill-tool", "project-structure", "xml-driver", "engineering-skill"],
+    [STANDARD_SYSTEM_PROMPT, SKILL_TOOL_PROMPT, _XML_INSTRUCTION, ENGINEERING],
+    ids=["standard", "skill-tool", "xml-driver", "engineering-skill"],
 )
 def test_no_completion_token_and_no_tool_forcing(text):
     assert "Perfect!" not in text
@@ -71,3 +68,8 @@ def test_no_patch_wording(text):
 def test_prompt_text_rules(text):
     assert text.isascii()
     assert len(text.splitlines()) < 30  # few words: both stay short
+
+
+def test_no_project_structure_template():
+    """The project tree is not part of any system prompt."""
+    assert not hasattr(prompts, "PROJECT_STRUCTURE_MACRO_TEMPLATE")
