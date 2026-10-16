@@ -5,6 +5,7 @@ Kind: new interface (the parent has no sync and ships no skill).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from ayder_cli.core import skills as sk
@@ -97,3 +98,50 @@ def test_pycache_does_not_change_the_stamp():
     cache.mkdir()
     (cache / "x.pyc").write_bytes(b"\0")
     assert sk._packaged_stamp() == first
+
+
+def test_symlinked_stamp_never_writes_through(tmp_path):
+    """Review C2: STAMP linked to a user skill must not overwrite it."""
+    _packaged()
+    sk.builtin_skills_root()
+    user = sk.USER_SKILLS_DIR / "mine"
+    user.mkdir(parents=True)
+    (user / "SKILL.md").write_text("MY USER SKILL", encoding="utf-8")
+    stamp = sk.BUILTIN_HOME / "STAMP"
+    stamp.unlink()
+    stamp.symlink_to(user / "SKILL.md")
+    _packaged(text="---\ndescription: Build\n---\nRules v2")
+    _reset()
+    assert sk.builtin_skills_root() == sk.BUILTIN_HOME / "skills"
+    assert (user / "SKILL.md").read_text(encoding="utf-8") == "MY USER SKILL"
+    assert not stamp.is_symlink()
+    assert stamp.read_text(encoding="utf-8") == sk._packaged_stamp()
+
+
+def test_failed_publish_keeps_the_previous_copy(monkeypatch):
+    """Review C3: a failed rename must not delete the only managed copy."""
+    _packaged()
+    sk.builtin_skills_root()
+    _packaged(text="---\ndescription: Build\n---\nRules v2")
+    real_replace = os.replace
+
+    def failing_publish(src, dst):
+        if Path(src).name == "skills" and Path(src).parent.name.startswith(".sync-"):
+            raise PermissionError("busy")  # publishing the new copy, after retiring the old
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(sk.os, "replace", failing_publish)
+    _reset()
+    assert sk.builtin_skills_root() == sk.PACKAGED_SKILLS_DIR
+    kept = sk.BUILTIN_HOME / "skills" / "engineering" / "SKILL.md"
+    assert kept.read_text(encoding="utf-8").endswith("Rules v1")
+
+
+def test_undecodable_stamp_resyncs():
+    """Review C5: a garbled STAMP is stale, not a startup failure."""
+    _packaged()
+    sk.builtin_skills_root()
+    (sk.BUILTIN_HOME / "STAMP").write_bytes(b"\xff")
+    _reset()
+    assert sk.builtin_skills_root() == sk.BUILTIN_HOME / "skills"
+    assert (sk.BUILTIN_HOME / "STAMP").read_text(encoding="utf-8") == sk._packaged_stamp()
