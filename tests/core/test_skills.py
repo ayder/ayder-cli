@@ -158,6 +158,32 @@ def test_resource_symlink_out_is_refused(tmp_path):
         sk.resolve_resource(sk.read_skill_info(skill_dir, "user"), "link.md")
 
 
+def test_symlinked_skill_dir_is_refused_unread(tmp_path):
+    outside = _skill(tmp_path / "outside", "linked", "---\ndescription: OUTSIDE\n---\nOUTSIDE BODY",
+                     files={"ref.md": "OUTSIDE RESOURCE"})
+    root = _project_skills(tmp_path)
+    root.mkdir(parents=True)
+    os.symlink(outside, root / "linked")
+
+    (info,) = sk.discover_all(_project(tmp_path))
+    assert info.name == "linked" and info.problem
+    assert info.description == ""  # the external SKILL.md was never read
+    assert isinstance(sk.render_skill_block(info), sk.ToolError)
+    with pytest.raises(ValueError):
+        sk.resolve_resource(info, "ref.md")
+
+
+def test_skill_md_symlink_out_is_refused(tmp_path):
+    (tmp_path / "outside.md").write_text("OUTSIDE BODY", encoding="utf-8")
+    skill_dir = _project_skills(tmp_path) / "eng"
+    skill_dir.mkdir(parents=True)
+    os.symlink(tmp_path / "outside.md", skill_dir / "SKILL.md")
+
+    (info,) = sk.discover_all(_project(tmp_path))
+    assert info.problem
+    assert isinstance(sk.render_skill_block(info), sk.ToolError)
+
+
 def test_missing_resource_raises_file_not_found(tmp_path):
     info = sk.read_skill_info(_skill(tmp_path, "eng"), "user")
     with pytest.raises(FileNotFoundError):

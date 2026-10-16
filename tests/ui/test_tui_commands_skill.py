@@ -102,6 +102,33 @@ def test_second_load_reports_already_active(tmp_path):
     chat_view.add_system_message.assert_called_with("Skill 'alpha' is already active.")
 
 
+def test_request_with_an_active_skill_still_runs(tmp_path):
+    _write_skill(tmp_path, "alpha")
+    app = _app(tmp_path)
+    chat_view = MagicMock()
+
+    handle_skill(app, "alpha", chat_view)
+    handle_skill(app, "alpha fix the next failure", chat_view)
+
+    assert len(app.messages) == 3
+    assert app.messages[2] == {"role": "user", "content": "fix the next failure"}
+    assert app.messages[2]["content"].count("### SKILL LOADED") == 0
+    chat_view.add_user_message.assert_called_once_with("fix the next failure")
+    assert app._last_request["run_loop"]() is True
+
+
+def test_user_load_advances_the_agent_generation(tmp_path):
+    _write_skill(tmp_path, "alpha")
+    app = _app(tmp_path)
+    app._agent_registry = MagicMock()
+    chat_view = MagicMock()
+
+    handle_skill(app, "alpha", chat_view)
+    handle_skill(app, "alpha", chat_view)  # already active: no second bump
+
+    app._agent_registry.new_generation.assert_called_once()
+
+
 def test_picker_selection_appends_the_block(tmp_path):
     _write_skill(tmp_path, "alpha")
     app = _app(tmp_path)
