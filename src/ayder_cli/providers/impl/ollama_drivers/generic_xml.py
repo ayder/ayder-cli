@@ -29,7 +29,7 @@ The system will execute your tool calls and return the results within `<tool_res
 
 CRITICAL RULES:
 1. DO NOT use these XML tags (like <function=> or <parameter=>) in your prose, descriptions, or summaries. Only use them when you intend to call a tool.
-2. If you have completed the task and output "Perfect!", you MUST NOT include any tool calls in the same response. "Perfect!" signifies the absolute end of your activity for that task.
+2. When the task is complete, reply without tool calls.
 3. Use only one tool call at a time unless the task clearly requires parallel execution of independent tools.
 """
 
