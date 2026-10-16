@@ -18,6 +18,7 @@ from typing import Any, Optional
 from ayder_cli.core.cache_monitor import CacheMonitor
 from ayder_cli.core.context_manager import ContextStats
 from ayder_cli.core.default_context_manager import TokenCounter
+from ayder_cli.core.skills import active_skills, resupply_message
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.impl.ollama_inspector import OllamaInspector
 
@@ -61,8 +62,11 @@ class OllamaContextManager:
     history contract (object identity cannot see an in-place edit). The
     system message is exempt: the frozen copy is always sent.
 
+    Active skills folded into the summary are re-supplied inside the summary
+    message (see ``_summary_with_skills``), so a long session keeps them.
+
     A history that is not an identity extension of the previous call's input
-    (``/clear``, a pending compact, a session load, a removed skill message)
+    (``/clear``, a pending compact, a session load, an edited or removed message)
     is a new generation: the summary is dropped and compaction waits for a
     fresh ``prompt_tokens`` measurement, since the stale one described the old
     history. Every compaction or reset is an intentional prefix change.
@@ -107,6 +111,7 @@ class OllamaContextManager:
 
         # Persistent compaction state for the current history generation.
         self._summary_msg: dict | None = None  # sent verbatim on every call
+        self._summary_text: str | None = None  # the merged summary, without re-supply
         self._folded: list[dict] = []  # caller objects the summary replaces
         self._last_seen: list[dict] = []  # previous call's untrimmed input
         self._awaiting_measurement: bool = False  # block until fresh prompt_tokens
@@ -257,14 +262,14 @@ class OllamaContextManager:
         if not self._awaiting_measurement and self.should_compact():
             surviving, newly_folded = self._compact(surviving)
             if newly_folded:
-                previous = self._summary_msg["content"] if self._summary_msg else None
+                self._summary_text = self._merge_summary(
+                    self._summary_text, self._summary_lines(newly_folded)
+                )
+                self._folded = self._folded + newly_folded
                 self._summary_msg = {
                     "role": "user",
-                    "content": self._merge_summary(
-                        previous, self._summary_lines(newly_folded)
-                    ),
+                    "content": self._summary_with_skills(history),
                 }
-                self._folded = self._folded + newly_folded
                 self._awaiting_measurement = True
                 self._emit_trim(len(history), len(surviving), "compaction")
 
@@ -459,6 +464,7 @@ class OllamaContextManager:
     def _reset_generation(self) -> None:
         """Forget the summary; wait for a measurement of the new history."""
         self._summary_msg = None
+        self._summary_text = None
         self._folded = []
         self._awaiting_measurement = True
 
@@ -513,6 +519,25 @@ class OllamaContextManager:
         if not kept and lines:
             kept = [lines[-1][: _SUMMARY_MAX_CHARS - 1] + "…"]
         return SUMMARY_HEADER + "\n" + "\n".join(reversed(kept))
+
+    def _summary_with_skills(self, history: list[dict]) -> str:
+        """The summary text plus the blocks of active skills it folded.
+
+        Built only at compaction time and stored in ``_summary_msg``, so it is
+        part of the persistent prefix and changes only when compaction runs
+        again. A skill unloaded later keeps its block here until then; the
+        unload notice later in the history tells the model to stop.
+        """
+        text = self._summary_text or ""
+        folded = len(self._folded)
+        loads = [load for load in active_skills(history) if load.index < folded]
+        if not loads:
+            return text
+        resupply = resupply_message(loads)
+        budget = self._actual_context_length * (1 - self._reserve_ratio)
+        if self._counter.count_messages([{"role": "user", "content": resupply}]) > budget / 2:
+            resupply = resupply_message(loads, names_only=True)
+        return f"{text}\n\n{resupply}"
 
     def _compact(
         self, history: list[dict]
