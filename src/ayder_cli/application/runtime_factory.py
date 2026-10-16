@@ -44,11 +44,23 @@ class RuntimeComponents:
     context_manager: Any = field(default=None)  # ContextManagerProtocol
 
 
-def _apply_skill_setting(tool_registry: ToolRegistry, project_ctx: ProjectContext, setting: Any) -> None:
-    """Scope the registry's skills; hide the skill tool for "none"."""
+def apply_skill_setting(
+    tool_registry: ToolRegistry,
+    project_ctx: ProjectContext,
+    setting: Any,
+    messages: list[dict] | None = None,
+) -> None:
+    """Scope the registry's skills; hide the skill tool for "none", show it otherwise.
+
+    Called at runtime construction and again on a provider switch, where
+    ``messages`` is the live history (ChatLoop binds it only once).
+    """
     tool_registry.skill_scope = build_scope(Path(project_ctx.root), setting)
+    tool_registry.skill_scope.messages = messages
     if setting == "none":
         tool_registry.excluded_tools.add("skill")
+    else:
+        tool_registry.excluded_tools.discard("skill")
 
 
 def create_runtime(
@@ -93,7 +105,7 @@ def create_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
-    _apply_skill_setting(tool_registry, project_ctx, cfg.session_skills())
+    apply_skill_setting(tool_registry, project_ctx, cfg.session_skills())
 
     try:
         structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
@@ -208,7 +220,7 @@ def create_agent_runtime(
     )
     # An agent reads its own setting, then its provider profile's; never [app].
     skills_setting = agent_config.skills if agent_config.skills is not None else cfg.profile_skills
-    _apply_skill_setting(tool_registry, project_ctx, skills_setting)
+    apply_skill_setting(tool_registry, project_ctx, skills_setting)
 
     # 5. Build agent system prompt
     identity_prefix = (

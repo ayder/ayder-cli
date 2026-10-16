@@ -18,6 +18,7 @@ from ayder_cli.logging_config import setup_logging
 import openai
 
 from ayder_cli.providers import evren, provider_orchestrator, ProviderUnavailableError
+from ayder_cli.application.runtime_factory import apply_skill_setting
 from ayder_cli.core.result import ToolError
 from ayder_cli.core.skills import SkillInfo, active_skills, render_skill_block
 from ayder_cli.tools.builtins.skill import _after_change, discover_skills
@@ -119,6 +120,11 @@ def _apply_provider_switch(
         app.config = new_config
         app.llm = new_llm
         app.chat_loop.llm = app.llm
+        # The new profile's skills setting: scope, tool exclusion and catalog
+        # (the prompt rebuild below reads the registry).
+        apply_skill_setting(
+            app.registry, app.registry.project_ctx, new_config.session_skills(), app.messages
+        )
 
         # Update model and UI
         app.model = new_config.model

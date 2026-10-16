@@ -197,20 +197,30 @@ def _sync_builtin_skills() -> Path:
         return PACKAGED_SKILLS_DIR  # nothing ships, so there is nothing to sync
     try:
         stamp = _packaged_stamp()
-        if target.is_dir() and stamp_path.is_file() and stamp_path.read_text(encoding="utf-8") == stamp:
+        # Compared as bytes: an undecodable STAMP is simply stale.
+        if target.is_dir() and stamp_path.is_file() and stamp_path.read_bytes() == stamp.encode("utf-8"):
             return target
         BUILTIN_HOME.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=".sync-", dir=BUILTIN_HOME))
+        retired = staging / "retired"
         try:
             shutil.copytree(
                 PACKAGED_SKILLS_DIR,
                 staging / "skills",
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
+            (staging / "STAMP").write_text(stamp, encoding="utf-8")
             if target.exists():
-                os.replace(target, staging / "retired")
-            os.replace(staging / "skills", target)
-            stamp_path.write_text(stamp, encoding="utf-8")
+                os.replace(target, retired)
+            try:
+                os.replace(staging / "skills", target)
+            except OSError:
+                if retired.exists() and not target.exists():
+                    # Other processes may read the old copy: put it back.
+                    os.replace(retired, target)
+                raise
+            # A rename replaces the STAMP entry itself, never a file it links to.
+            os.replace(staging / "STAMP", stamp_path)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         return target
