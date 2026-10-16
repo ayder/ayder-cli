@@ -7,16 +7,23 @@ from ..definition import ToolDefinition
 SKILL_TOOL_PROMPT = """
 
 ### Skill Tool
-Skills hold the workflows for larger kinds of work. The catalog under "### Skills" lists
-the ones enabled for this session.
-- When a request matches a catalog entry, call `skill(action="load", name="<name>")`
-  before you start the work, then follow the instructions it returns.
-- Do not ask the user to choose a mode or a role; choose the skill yourself.
-- Load more than one skill only when the request needs both. A skill stays loaded for
-  the rest of the session; do not load it again unless you unloaded it.
-- If no entry matches, continue without a skill.
-- `skill(action="read", name="<name>", path="<file>")` reads a file the loaded skill lists.
-- `skill(action="unload", name="<name>")` stops a skill when the work changes kind.
+The catalog under "### Skills" lists the skills enabled for this session, one
+per line as `name: the kinds of requests it is for`.
+- Match by the kind of work, not by its size. "Plan a multi-step web project"
+  matches an entry for planning multi-step technical work; "fix the failing
+  test" matches an entry for debugging code.
+- When a request matches and needs more than one reply, call
+  `skill(action="load", name="<name>")` before you start the work, then follow
+  the instructions it returns.
+- A request you can fully answer in one reply without tools needs no skill.
+- If no entry matches, do the work without a skill.
+- Do not ask the user to choose a mode or a role. Reason about what the
+  request needs, and load the skill whose guidance will help you deliver it.
+- Load more than one skill only when the request needs both. A loaded skill
+  stays loaded for the session; do not load it again unless you unloaded it.
+- `skill(action="read", name="<name>", path="<file>")` reads a file the loaded
+  skill lists; `skill(action="unload", name="<name>")` stops it when the work
+  changes kind.
 """
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (

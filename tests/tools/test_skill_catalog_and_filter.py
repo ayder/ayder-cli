@@ -83,7 +83,7 @@ def test_none_hides_the_tool_and_the_catalog(tmp_path, monkeypatch):
     names = [s["function"]["name"] for s in rt.tool_registry.get_schemas(tags=frozenset(rt.config.tool_tags))]
     assert "skill" not in names
     assert "### Skill Tool" not in rt.system_prompt
-    assert "### Skills" not in rt.system_prompt
+    assert "\n### Skills\n" not in rt.system_prompt  # the catalog header line
     result = rt.tool_registry.execute("skill", {"action": "list"})
     assert isinstance(result, ToolError)
 
@@ -135,7 +135,7 @@ def test_empty_list_hides_the_tool(tmp_path, monkeypatch):
     _packaged()
     rt = _runtime(tmp_path, monkeypatch, Config(skills=[]))
     assert "skill" in rt.tool_registry.excluded_tools
-    assert "### Skills" not in rt.system_prompt
+    assert "\n### Skills\n" not in rt.system_prompt  # the catalog header line
 
 
 def test_rebuilt_prompt_keeps_the_catalog(tmp_path, monkeypatch):
