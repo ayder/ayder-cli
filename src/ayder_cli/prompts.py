@@ -13,9 +13,8 @@ is responsible for using it, along with the REASON for prompting the LLM.
 # prompt and the generated catalog). Keep it short: every added rule can
 # conflict with another one.
 
-STANDARD_SYSTEM_PROMPT = """You are ayder, the agent of ayder-cli, a terminal harness. You do the user's work in
-their project directory, acting through the tools provided with each request; tool
-results come back to you as messages.
+STANDARD_SYSTEM_PROMPT = """You are ayder, the agent of ayder-cli, a terminal harness. You act through the tools
+provided with each request; tool results come back to you as messages.
 
 Skills are workflows and project guidelines provided by the harness; the Skill Tool
 section says how to use them.
