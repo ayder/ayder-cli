@@ -165,6 +165,7 @@ max_output_tokens = 32768     # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
+# skills = ["engineering"]    # or "none"; default: the built-in skills
 agent_timeout = 300           # Seconds before a background agent is cancelled
 
 [logging]
@@ -429,9 +430,29 @@ A skill is a directory with a `SKILL.md` file, optionally starting with
 `name:` and `description:` frontmatter. ayder looks in three places, and a
 later one overrides an earlier one with the same name:
 
-1. built-in skills shipped with ayder
+1. built-in skills in `~/.ayder/builtin/skills/`, managed by ayder and
+   replaced on upgrade; to customize one, copy it to `~/.ayder/skills/<name>/`
 2. your skills in `~/.ayder/skills/<name>/`
 3. project skills in `<project>/.ayder/skills/<name>/`
+
+ayder ships an `engineering` skill (build, change, debug or review code;
+research; plan multi-step work). The system prompt is a general assistant;
+when a skill fits the request, the model loads it itself.
+
+The skills enabled for a session are listed in the system prompt under
+"### Skills" (name and description), and only those can be loaded by the
+model. The `skills` setting chooses them:
+
+| `skills` | Enabled skills |
+|---|---|
+| not set | the built-in skills (`engineering`), including your or the project's copy of the same name |
+| `"none"` or `[]` | none: no skill tool, no catalog |
+| `["a", "b"]` | exactly these names, from any layer |
+
+The main session reads `[llm.<provider>].skills`, then `[app].skills`. An
+agent reads `[agents.<name>].skills`, then its provider profile's; never
+`[app]`. The `/skill` command loads any discovered skill, including project
+skills that are not in the catalog.
 
 The model loads one with `skill(action="load", name=...)`; the instructions
 come back as the tool result, so the conversation's earlier messages (and the
@@ -644,6 +665,7 @@ Each agent field:
 | `system_prompt` | Yes | The agent's role and instructions |
 | `provider` | No | LLM provider profile name (inherits from `[app]` if omitted) |
 | `model` | No | Model name override (inherits from provider profile if omitted) |
+| `skills` | No | `"none"` or a list of skill names (inherits from the provider profile; default: the built-in skills) |
 
 ### Using Agents
 
