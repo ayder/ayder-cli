@@ -44,7 +44,7 @@ class ChatLoopConfig:
     model: str = "qwen3-coder:latest"
     provider: str = "ollama"  # Needed for provider initialization
     num_ctx: int = 65536
-    max_output_tokens: int = 4096
+    max_output_tokens: int = 32768
     stop_sequences: list = field(default_factory=list)
     permissions: set = field(default_factory=lambda: {"r"})
     tool_tags: frozenset | None = field(

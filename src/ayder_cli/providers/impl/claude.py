@@ -39,7 +39,7 @@ class ClaudeProvider(AIProvider):
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": anthropic_messages,
-            "max_tokens": getattr(self.config, "max_output_tokens", 4096),
+            "max_tokens": getattr(self.config, "max_output_tokens", 32768),
             "stream": False,
         }
         if system_prompt:
@@ -93,7 +93,7 @@ class ClaudeProvider(AIProvider):
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": anthropic_messages,
-            "max_tokens": getattr(self.config, "max_output_tokens", 4096),
+            "max_tokens": getattr(self.config, "max_output_tokens", 32768),
         }
         if system_prompt:
             kwargs["system"] = system_prompt

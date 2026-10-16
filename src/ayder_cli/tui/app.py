@@ -474,11 +474,11 @@ class AyderApp(App):
         )
         self._callbacks = AppCallbacks(self)
         if isinstance(self.config, dict):
-            max_output_tokens = self.config.get("max_output_tokens", 4096)
+            max_output_tokens = self.config.get("max_output_tokens", 32768)
             stop_sequences = self.config.get("stop_sequences", [])
             tool_tags_list = self.config.get("tool_tags", ["core", "metadata"])
         else:
-            max_output_tokens = getattr(self.config, "max_output_tokens", 4096)
+            max_output_tokens = getattr(self.config, "max_output_tokens", 32768)
             raw_stop = getattr(self.config, "stop_sequences", [])
             stop_sequences = list(raw_stop) if raw_stop is not None else []
             raw_tags = getattr(self.config, "tool_tags", ["core", "metadata"])
