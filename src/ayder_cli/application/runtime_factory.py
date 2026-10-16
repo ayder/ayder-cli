@@ -7,6 +7,7 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ayder_cli.core.config import Config, load_config, load_config_for_provider
@@ -16,13 +17,13 @@ from ayder_cli.core.context_manager_factory import context_manager_factory
 if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
 from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.skills import build_scope
 from ayder_cli.providers import AIProvider, provider_orchestrator
 from ayder_cli.providers.retry import RetryConfig, RetryingProvider
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
 from ayder_cli.prompts import (
     get_system_prompt,
-    PROJECT_STRUCTURE_MACRO_TEMPLATE,
 )
 from ayder_cli.log import get_logger
 
@@ -40,6 +41,25 @@ class RuntimeComponents:
     tool_registry: ToolRegistry
     system_prompt: str
     context_manager: Any = field(default=None)  # ContextManagerProtocol
+
+
+def apply_skill_setting(
+    tool_registry: ToolRegistry,
+    project_ctx: ProjectContext,
+    setting: Any,
+    messages: list[dict] | None = None,
+) -> None:
+    """Scope the registry's skills; hide the skill tool for "none", show it otherwise.
+
+    Called at runtime construction and again on a provider switch, where
+    ``messages`` is the live history (ChatLoop binds it only once).
+    """
+    tool_registry.skill_scope = build_scope(Path(project_ctx.root), setting)
+    tool_registry.skill_scope.messages = messages
+    if setting == "none":
+        tool_registry.excluded_tools.add("skill")
+    else:
+        tool_registry.excluded_tools.discard("skill")
 
 
 def create_runtime(
@@ -60,7 +80,7 @@ def create_runtime(
             (e.g. "AGENTIC" for `ayder-cli --agent`). See prompts.get_system_prompt.
         system_prompt_override: When set, use this text as the system-prompt base
             instead of prompts.get_system_prompt (ayder --system-prompt FILE). Tool
-            prompts and the project-structure macro are still appended.
+            prompts are still appended.
 
     Returns:
         RuntimeComponents with all dependencies wired.
@@ -84,15 +104,7 @@ def create_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
-
-    try:
-        structure = tool_registry.execute("get_project_structure", {"max_depth": 3})
-        macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
-    except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so runtime construction continues without it
-        logger.opt(exception=True).warning(
-            "Project-structure macro unavailable; continuing without it"
-        )
-        macro = ""
+    apply_skill_setting(tool_registry, project_ctx, cfg.session_skills())
 
     # Format the final prompt (protocol injection now handled dynamically by chat_loop and protocols)
     if system_prompt_override is not None:
@@ -101,7 +113,7 @@ def create_runtime(
         base_prompt = get_system_prompt(cfg.prompt)
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    system_prompt = base_prompt + tool_prompts + macro
+    system_prompt = base_prompt + tool_prompts
 
     # Freeze system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
@@ -196,6 +208,9 @@ def create_agent_runtime(
         process_manager=process_manager,
         context_manager=context_mgr,
     )
+    # An agent reads its own setting, then its provider profile's; never [app].
+    skills_setting = agent_config.skills if agent_config.skills is not None else cfg.profile_skills
+    apply_skill_setting(tool_registry, project_ctx, skills_setting)
 
     # 5. Build agent system prompt
     identity_prefix = (

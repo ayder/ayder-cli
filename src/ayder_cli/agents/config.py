@@ -1,9 +1,10 @@
 """AgentConfig — Pydantic model for agent definitions."""
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from ayder_cli.core.config import _coerce_skills_setting
 from ayder_cli.core.reasoning import ReasoningEffort, ThinkOption
 
 
@@ -32,6 +33,13 @@ class AgentConfig(BaseModel):
     max_output_tokens: int | None = None
     think: ThinkOption = None
     reasoning_effort: ReasoningEffort = None
+    # None: the provider profile's setting; "none" or a list: see Config.skills.
+    skills: list[str] | Literal["none"] | None = None
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _validate_skills(cls, v: Any) -> Any:
+        return _coerce_skills_setting(v)
 
     @model_validator(mode="before")
     @classmethod

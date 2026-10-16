@@ -83,6 +83,7 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"Uninstalled plugin '{}'","method":"info","path":"tools/plugin_manager.py","qualname":"uninstall_plugin"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"cancel: agent='{}' \u2014 no running/queued instances","method":"debug","path":"agents/registry.py","qualname":"AgentRegistry.cancel"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"cancel: agent='{}' cancelled {} instance(s): {}","method":"debug","path":"agents/registry.py","qualname":"AgentRegistry.cancel"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"name","message":"skills lists {!r}, but no skill directory provides it","method":"warning","path":"core/skills.py","qualname":"build_scope"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio error: {}","method":"error","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio exception: {}","method":"critical","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"num_ctx","message":"Context budget: {} tokens (derived from num_ctx; max_context_tokens unset)","method":"info","path":"core/default_context_manager.py","qualname":"DefaultContextManager.__init__"}}
@@ -138,7 +139,9 @@
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"self.config.chat_protocol","message":"Ollama chat_protocol={!r} is not recognized; forcing generic_xml fallback","method":"warning","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"self.config.model","message":"LLM returned empty response (possible connection drop). model={}, provider={}","method":"error","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"signal.Signals(signum).name","message":"Received signal {}; flushing logs","method":"warning","path":"diagnostics.py","qualname":"install_exception_hooks._chained_signal"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"skill_dir.name","message":"Skill directory {!r} declares name {!r}; the directory name is used","method":"debug","path":"core/skills.py","qualname":"read_skill_info"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"source.repo","message":"Downloading '{}' at {}","method":"info","path":"tools/plugin_github.py","qualname":"download_plugin"}}
+{"class":"R-path","site":{"arg_index":"pos:0","expr":"target","message":"Built-in skills were not synced to {} ({}); reading the packaged copy","method":"warning","path":"core/skills.py","qualname":"_sync_builtin_skills"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tc.function.name","message":"Tool '{}' called with missing args {} ({} chars raw)","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tc_entry['function'].get('name', '?')","message":"Malformed tool arguments for '{}': {} chars \u2014 repairing before storing in history","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tc_obj.function.name","message":"Tool execution cancelled: {}","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls._safe_exec"}}
@@ -160,6 +163,7 @@
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"', '.join(valid)","message":"Unsupported driver (value_chars={}); must be one of: {}. Fix the driver in your [llm.<provider>] profile.","method":"error","path":"core/config.py","qualname":"Config.validate_driver"}}
 {"class":"R-name","site":{"arg_index":"pos:1","expr":"agent_name","message":"Agent panel could not show run {} of agent {}","method":"debug","path":"tui/commands.py","qualname":"handle_agent"}}
 {"class":"R-id","site":{"arg_index":"pos:1","expr":"commit_sha[:7]","message":"Downloading '{}' at {}","method":"info","path":"tools/plugin_github.py","qualname":"download_plugin"}}
+{"class":"R-name","site":{"arg_index":"pos:1","expr":"declared","message":"Skill directory {!r} declares name {!r}; the directory name is used","method":"debug","path":"core/skills.py","qualname":"read_skill_info"}}
 {"class":"R-count","site":{"arg_index":"pos:1","expr":"delay","message":"Provider stream failed ({}); retrying in {:.2f}s ({} attempts left)","method":"info","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"driver.mode.value","message":"Ollama driver={} mode={} for {!r}","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"driver.mode.value","message":"{} ({}) failed mid-stream (error_type={}); transparently retrying with {} ({})","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
@@ -222,6 +226,7 @@
 {"class":"R-name","site":{"arg_index":"pos:1","expr":"tc.name","message":"Tool call id reused by a different tool ({} then {}); calls would merge","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"think","message":"Ollama model {!r} rejected think={!r}; retrying with think=False","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider._stream_in_content"}}
 {"class":"R-status","site":{"arg_index":"pos:1","expr":"think","message":"Ollama model {!r} rejected think={!r}; retrying with think=False","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider._stream_native"}}
+{"class":"R-class","site":{"arg_index":"pos:1","expr":"type(exc).__name__","message":"Built-in skills were not synced to {} ({}); reading the packaged copy","method":"warning","path":"core/skills.py","qualname":"_sync_builtin_skills"}}
 {"class":"R-class","site":{"arg_index":"pos:1","expr":"type(exc).__name__","message":"Provider retry budget exhausted after {} attempts; raising {}","method":"warning","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
 {"class":"R-class","site":{"arg_index":"pos:1","expr":"type(exc).__name__","message":"Unreadable context slot at {}: {}","method":"warning","path":"tools/builtins/context.py","qualname":"_scan_context_dir"}}
 {"class":"R-name","site":{"arg_index":"pos:2","expr":"', '.join(discovered_modules)","message":"Auto-discovered {} tool definitions from {} modules: {}","method":"info","path":"tools/definition.py","qualname":"_discover_definitions"}}

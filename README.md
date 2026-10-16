@@ -165,6 +165,7 @@ max_output_tokens = 32768     # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
+# skills = ["engineering"]    # or "none"; default: the built-in skills
 agent_timeout = 300           # Seconds before a background agent is cancelled
 
 [logging]
@@ -310,7 +311,7 @@ ayder -f instructions.txt
 ayder --stdin < prompt.txt
 
 # Override the main LLM system prompt with a file
-# (tool instructions + project structure are still appended)
+# (tool instructions are still appended)
 ayder --system-prompt prompt-file.md "refactor this code"
 ```
 
@@ -409,7 +410,7 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/tasks` | Browse and implement tasks from `.ayder/tasks/` |
 | `/implement [id]` | Interactive task picker, or implement by ID (e.g., `/implement 1`) |
 | `/notes` | Browse and edit markdown notes |
-| `/skill` | Activate a domain skill from `.ayder/skills/` via the shared `skill` tool backend |
+| `/skill` | Load a skill as a user message: `/skill <name> [request]`, or pick one |
 | `/verbose` | Toggle verbose mode |
 | `/logging` | Set log level for current session (NONE, ERROR, WARNING, INFO, DEBUG, TRACE) |
 | `/compact` | Summarize conversation, save a context snapshot, clear, and reload |
@@ -423,10 +424,47 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/agent <name> <task>` | Dispatch an agent to run a task in the background |
 | `/agent cancel <name>` | Cancel a running agent |
 
-### Logging
+### Skills
 
-The LLM can also call `skill(action="list" | "load" | "unload")`
-automatically when a request clearly matches an available project skill.
+A skill is a directory with a `SKILL.md` file, optionally starting with
+`name:` and `description:` frontmatter. ayder looks in three places, and a
+later one overrides an earlier one with the same name:
+
+1. built-in skills in `~/.ayder/builtin/skills/`, managed by ayder and
+   replaced on upgrade; to customize one, copy it to `~/.ayder/skills/<name>/`
+2. your skills in `~/.ayder/skills/<name>/`
+3. project skills in `<project>/.ayder/skills/<name>/`
+
+ayder ships an `engineering` skill (build, change, debug or review code;
+research; plan multi-step work). The system prompt is a general assistant;
+when a skill fits the request, the model loads it itself.
+
+The skills enabled for a session are listed in the system prompt under
+"### Skills" (name and description), and only those can be loaded by the
+model. The `skills` setting chooses them:
+
+| `skills` | Enabled skills |
+|---|---|
+| not set | the built-in skills (`engineering`), including your or the project's copy of the same name |
+| `"none"` or `[]` | none: no skill tool, no catalog |
+| `["a", "b"]` | exactly these names, from any layer |
+
+The main session reads `[llm.<provider>].skills`, then `[app].skills`. An
+agent reads `[agents.<name>].skills`, then its provider profile's; never
+`[app]`. The `/skill` command loads any discovered skill, including project
+skills that are not in the catalog.
+
+The model loads one with `skill(action="load", name=...)`; the instructions
+come back as the tool result, so the conversation's earlier messages (and the
+provider's KV cache) are unchanged. Several skills can be active; other files
+in a skill's directory are read on demand with `skill(action="read")`.
+A skill directory or `SKILL.md` that links outside its skills directory is
+listed but never read or loaded; copy the skill instead of symlinking it.
+A loaded skill stays in context for the whole session: when trimming or
+compaction removes it, ayder adds it back right after the system prompt, or
+inside the Ollama summary.
+
+### Logging
 
 - Errors are always captured to `.ayder/log/errors.log`, even when
   `logging_level` is `NONE`. Set `file_enabled = false` under `[logging]` to
@@ -627,6 +665,7 @@ Each agent field:
 | `system_prompt` | Yes | The agent's role and instructions |
 | `provider` | No | LLM provider profile name (inherits from `[app]` if omitted) |
 | `model` | No | Model name override (inherits from provider profile if omitted) |
+| `skills` | No | `"none"` or a list of skill names (inherits from the provider profile; default: the built-in skills) |
 
 ### Using Agents
 

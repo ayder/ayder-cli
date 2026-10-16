@@ -320,7 +320,7 @@ def test_plain_marker_draws_no_ruff_noqa_warning(tmp_path):
 
 
 def test_full_tree_census_is_frozen():
-    """137 is the §C10 census. A different number means the gate is reading the
+    """134 is the §C10 census. A different number means the gate is reading the
     wrong tree, or the census moved without the plan being updated.
 
     Step 5-04 moved it from 119/113 in two measured steps. Commit 1 reached
@@ -342,6 +342,10 @@ def test_full_tree_census_is_frozen():
     The thinking-panel flush in `on_thinking_stop` added one more: rendering
     buffered reasoning is cosmetic, and a failure there must not abort the
     turn that just finished thinking.
+
+    Dropping the project-structure block from the system prompt removed three
+    (137 -> 134): the guarded get_project_structure calls in create_runtime,
+    the TUI startup prompt and the TUI model-switch rebuild.
     """
     # Built-in MCP adds two modules and three remote failure boundaries:
     # server session, tool dispatch, and per-server discovery.
@@ -349,8 +353,8 @@ def test_full_tree_census_is_frozen():
     # driver's list_models no longer swallows server errors (one fewer), and
     # the evren terms paths catch named errors only.
     code, out = _run()
-    assert "broad=137" in out, out
-    assert "files=119/119" in out, out
-    code, out = _run("--expect-broad", "134")
+    assert "broad=134" in out, out
+    assert "files=120/120" in out, out
+    code, out = _run("--expect-broad", "137")
     assert code == 1
-    assert "census: found 137" in out
+    assert "census: found 134" in out

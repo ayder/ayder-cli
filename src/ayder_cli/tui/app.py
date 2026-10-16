@@ -303,7 +303,6 @@ class AyderApp(App):
         self._cancel_event: asyncio.Event | None = None
         self._verbose_mode: bool = False
         self._show_thinking: bool = False
-        self._active_skill: str | None = None
 
         # Build all shared runtime components via the factory. An explicit
         # model argument is used for resumed sessions so they continue with the
@@ -523,20 +522,8 @@ class AyderApp(App):
         self.chat_loop.config.pre_iteration_hook = _composed_pre_iteration
 
     def _init_system_prompt(self) -> None:
-        """Build and set the system prompt with project structure."""
-        from ayder_cli.prompts import (
-            get_system_prompt,
-            PROJECT_STRUCTURE_MACRO_TEMPLATE,
-        )
-
-        try:
-            structure = self.registry.execute("get_project_structure", {"max_depth": 3})
-            macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(project_structure=structure)
-        except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so startup continues without it
-            logger.opt(exception=True).warning(
-                "Project-structure macro unavailable; continuing without it"
-            )
-            macro = ""
+        """Build and set the system prompt: the base prompt plus tool prompts."""
+        from ayder_cli.prompts import get_system_prompt
 
         if self._system_prompt_override is not None:
             base_prompt = self._system_prompt_override
@@ -545,7 +532,7 @@ class AyderApp(App):
         raw_tags = getattr(self.config, "tool_tags", None) if not isinstance(self.config, dict) else self.config.get("tool_tags")
         tags = frozenset(raw_tags) if raw_tags else None
         tool_prompts = self.registry.get_system_prompts(tags=tags)
-        system_prompt = base_prompt + tool_prompts + macro
+        system_prompt = base_prompt + tool_prompts
         self.messages.append({"role": "system", "content": system_prompt})
 
     def _replay_history(self, chat_view) -> None:
@@ -560,64 +547,16 @@ class AyderApp(App):
 
     def update_system_prompt_model(self) -> None:
         """Update the model name in the system prompt after /model switch."""
-        from ayder_cli.prompts import (
-            get_system_prompt,
-            PROJECT_STRUCTURE_MACRO_TEMPLATE,
-        )
+        from ayder_cli.prompts import get_system_prompt
 
         if self.messages and self.messages[0].get("role") == "system":
-            try:
-                structure = self.registry.execute(
-                    "get_project_structure", {"max_depth": 3}
-                )
-                macro = PROJECT_STRUCTURE_MACRO_TEMPLATE.format(
-                    project_structure=structure
-                )
-            except Exception:  # noqa: BLE001 - tool boundary: the project-structure macro is optional, so the model switch continues without it
-                logger.opt(exception=True).warning(
-                    "Project-structure macro unavailable on model switch; "
-                    "continuing without it"
-                )
-                macro = ""
             tags = self.chat_loop.config.tool_tags
             tool_prompts = self.registry.get_system_prompts(tags=tags)
             if self._system_prompt_override is not None:
                 base_prompt = self._system_prompt_override
             else:
                 base_prompt = get_system_prompt(self.config.prompt)
-            self.messages[0]["content"] = base_prompt + tool_prompts + macro
-
-    def inject_skill(self, skill_name: str, skill_content: str) -> None:
-        """Inject or replace the active skill system message."""
-        from ayder_cli.prompts import SKILL_INJECTION_TEMPLATE
-
-        # Remove previous skill message if any (in place so chat_loop.messages
-        # keeps referencing the same list object)
-        self.messages[:] = [
-            m for m in self.messages
-            if not (
-                m.get("role") == "system"
-                and m.get("content", "").startswith("### ACTIVE SKILL:")
-            )
-        ]
-        block = SKILL_INJECTION_TEMPLATE.format(
-            skill_name=skill_name, skill_content=skill_content
-        ).lstrip()
-        self.messages.append({"role": "system", "content": block})
-        self._active_skill = skill_name
-
-    def unload_skill(self) -> str | None:
-        """Remove the active skill system message and return its prior name."""
-        previous = self._active_skill
-        self.messages[:] = [
-            m for m in self.messages
-            if not (
-                m.get("role") == "system"
-                and m.get("content", "").startswith("### ACTIVE SKILL:")
-            )
-        ]
-        self._active_skill = None
-        return previous
+            self.messages[0]["content"] = base_prompt + tool_prompts
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel.

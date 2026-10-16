@@ -27,7 +27,7 @@ logger = get_logger("tool")
 
 
 _INJECTED_PARAMS = frozenset(
-    {"project_ctx", "process_manager", "context_manager", "app"}
+    {"project_ctx", "process_manager", "context_manager", "app", "skill_scope"}
 )
 
 
@@ -40,6 +40,7 @@ def execute_tool(
     process_manager: Any = None,
     context_manager: Any = None,
     app: Any = None,
+    skill_scope: Any = None,
 ) -> ToolResult:
     """Execute a tool through the full pipeline.
 
@@ -110,6 +111,8 @@ def execute_tool(
         call_args["context_manager"] = context_manager
     if "app" in sig.parameters and app is not None:
         call_args["app"] = app
+    if "skill_scope" in sig.parameters and skill_scope is not None:
+        call_args["skill_scope"] = skill_scope
 
     # Step 6b: Reject arguments the tool cannot accept.
     # Models improvise parameter names. Without this they reach

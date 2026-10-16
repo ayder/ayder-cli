@@ -101,3 +101,19 @@ def capture_loguru():
     ModuleNotFoundError from any subdirectory.
     """
     return loguru_capture
+
+
+@pytest.fixture(autouse=True)
+def _isolated_skill_layers(tmp_path_factory, monkeypatch):
+    """Keep every test away from ~/.ayder and from the packaged skills.
+
+    The layer roots are module globals read at call time, so pointing them
+    at empty temporary directories isolates discovery for the whole test.
+    """
+    from ayder_cli.core import skills
+
+    base = tmp_path_factory.mktemp("skill-layers")
+    monkeypatch.setattr(skills, "PACKAGED_SKILLS_DIR", base / "packaged")
+    monkeypatch.setattr(skills, "USER_SKILLS_DIR", base / "user")
+    monkeypatch.setattr(skills, "BUILTIN_HOME", base / "builtin")
+    monkeypatch.setattr(skills, "_builtin_root", None)

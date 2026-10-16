@@ -72,6 +72,7 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 │  core/config.py              (Pydantic Config)                 │
 │  core/context.py             (ProjectContext, sandboxing)      │
 │  core/result.py              (ToolSuccess, ToolError)          │
+│  core/skills.py              (skill discovery, delivery)       │
 │  core/context_manager.py     (ContextManagerProtocol)          │
 │  core/default_context_manager.py                               │
 │  core/ollama_context_manager.py  (KV-cache-aware)              │
@@ -154,6 +155,8 @@ cli.py:main()
 | `core/config_migration.py` | TOML config migration helpers | migration routines for schema changes |
 | `core/context.py` | Project sandboxing | `ProjectContext` |
 | `core/result.py` | Tool result types | `ToolSuccess`, `ToolError` |
+| `core/skills.py` | Skill discovery, delivery, built-in sync and the session filter | `SkillInfo`, `SkillScope`, `discover_all()`, `render_skill_block()`, `active_skills()`, `builtin_skills_root()`, `build_scope()`, `format_catalog()` |
+| `skills/<name>/SKILL.md` | Packaged built-in skills (data only, shipped in the wheel); synced to `~/.ayder/builtin/skills` when `~/.ayder/builtin/STAMP` (version + SHA-256) differs | - |
 | `core/context_manager.py` | ContextManager Protocol + shared utilities | `ContextManagerProtocol`, `ContextStats`, `truncate_tool_result()` |
 | `core/default_context_manager.py` | Tiered context manager for non-Ollama providers | `DefaultContextManager`, `TokenCounter`, `MessageTier` |
 | `core/ollama_context_manager.py` | KV-cache-aware context manager for Ollama | `OllamaContextManager`, `OllamaContextStats` |
@@ -294,6 +297,7 @@ the design rationale.
 | `tools/builtins/context.py` | Session context snapshots | `context` |
 | `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
 | `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
+| `tools/builtins/skill.py` | Skill tool impl | `skill()`, `discover_skills()` |
 | `tools/builtins/web.py` | HTTP fetch tool | `fetch_web()` |
 | `tools/builtins/utils_tools.py` | Misc utility tools | `manage_environment_vars()` |
 | `tools/builtins/*_definitions.py` | Per-domain tool definitions (9 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
@@ -303,7 +307,7 @@ the design rationale.
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
 | `process_manager.py` | Background processes | `ProcessManager`, `background_process()` |
-| `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()`, `PROJECT_STRUCTURE_MACRO_TEMPLATE` |
+| `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()` |
 | `parser.py` | XML tool-call parsing | `parse_custom_tool_calls()` |
 
 ### Theme Modules
@@ -590,7 +594,7 @@ AyderApp is the main Textual application implementing a chat-style interface:
 The application manages:
 - LLM provider setup and configuration
 - Tool registry initialization with middleware
-- System prompt construction with project structure
+- System prompt construction (base prompt + tool prompts + skill catalog; no project tree)
 - Process manager for background operations
 
 ### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)
@@ -718,6 +722,8 @@ Schema-driven tool definitions with auto-discovery:
 - `DefaultContextManager` (`core/default_context_manager.py`) — tiered/heuristic compaction for estimator-driven providers.
 - `OllamaContextManager` (`core/ollama_context_manager.py`) — stable-prefix + real-token accounting, uses `prompt_eval_count` / `prompt_eval_duration` directly.
 - `CacheMonitor` (`core/cache_monitor.py`) — timing-based KV-cache hit detection driving adaptive compaction thresholds.
+
+Both managers re-supply active skills that a trim or compaction removed (`core/skills.py` `active_skills`).
 
 Selection lives in `core/context_manager_factory.py` (driver → class path registry). `create_runtime()` owns instantiation and calls `freeze_system_prompt()` once.
 

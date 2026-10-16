@@ -7,20 +7,20 @@ from ..definition import ToolDefinition
 SKILL_TOOL_PROMPT = """
 
 ### Skill Tool
-Use `skill(action="list")` to discover project skills in `.ayder/skills/`.
-When a user request clearly matches an available skill, call
-`skill(action="load", name="<skill-name>")` before continuing so the skill
-instructions are active. Use `skill(action="unload")` when the user asks to
-clear the active skill.
+The catalog under "### Skills" lists the enabled skills as `name: what it is for`.
+Load a skill when it fits the work: `skill(action="load", name="<name>")` returns its
+instructions; follow them while that work lasts. `skill(action="read", name="<name>",
+path="<file>")` reads a file the skill lists; `skill(action="unload", name="<name>")`
+stops it.
 """
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="skill",
         description=(
-            "List, load, or unload project skills from .ayder/skills/. Loading "
-            "a skill reads SKILL.md plus directly referenced local files and "
-            "activates it as a system message."
+            "List, load, read or unload skills. Loading returns the skill's "
+            "instructions as this tool's result; reading returns one of the "
+            "skill's files."
         ),
         description_template="Skill action `{action}`",
         tags=("core",),
@@ -28,17 +28,24 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         permission="r",
         safe_mode_blocked=False,
         system_prompt=SKILL_TOOL_PROMPT,
+        # load is bounded by MAX_SKILL_BYTES and read truncates itself, so the
+        # loop's generic truncation must not cut a skill body in half.
+        max_result_chars=0,
         parameters={
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "load", "unload"],
+                    "enum": ["list", "load", "read", "unload"],
                     "description": "Operation to perform.",
                 },
                 "name": {
                     "type": "string",
-                    "description": "Skill name. Required for action=load.",
+                    "description": "Skill name. Required for load and read.",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "File inside the skill, relative to it. Required for read.",
                 },
             },
             "required": ["action"],

@@ -97,6 +97,10 @@ agent_timeout = 1800               # seconds before a background agent is cancel
 # tasks/notes (metadata), background process control for test suites
 # (background), and web fetch (http). See /plugin for the full tag list.
 tool_tags = ["core", "metadata", "background", "http"]
+# Skills the session's model may load (listed under "### Skills" in the system
+# prompt). Not set = the built-in skills; "none" = no skill tool; or a strict
+# list. A [llm.*] profile's skills wins over this one for the session.
+# skills = ["engineering"]
 
 [ui]
 # TUI layout (theme) — picks the chrome/layout:
@@ -180,6 +184,7 @@ driver = "ollama"
 base_url = "http://localhost:11434"
 model = "qwen3.6:35b-a3b-coding-nvfp4"
 num_ctx = 32768                     # keep modest: local VRAM is the constraint
+# skills = "none"                   # wins over [app].skills; agents on this profile inherit it
 reasoning_effort = "default"
 think = true                        # default; set false if the selected model rejects thinking
 
@@ -224,6 +229,7 @@ think = true                        # default; set false if the selected model r
 [agents.pm_spec]
 provider = "ollama_cloud"
 model = "glm-5.2:cloud"
+# skills = ["engineering"]          # wins over the provider profile's skills; [app] is never read
 temperature = 0.4
 max_output_tokens = 8192
 reasoning_effort = "high"
