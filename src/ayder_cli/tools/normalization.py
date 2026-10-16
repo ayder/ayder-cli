@@ -21,15 +21,58 @@ PATH_PARAMETERS: dict[str, list[str]] = {
 }
 
 
+def canonicalize_arguments(tool_name: str, arguments: dict) -> dict:
+    """Return a canonical copy of ``arguments``, without touching the filesystem.
+
+    1. Apply parameter aliases (e.g. ``path`` -> ``file_path``); a canonical key
+       already present wins, and aliases apply in declaration order.
+    2. Coerce ``"123"`` to ``123`` for ``integer`` parameters.
+    3. Coerce ``"true"`` / ``"false"`` (case-insensitive, surrounding space
+       ignored) to ``True`` / ``False`` for ``boolean`` parameters.
+
+    Values that cannot be coerced are left as they are, for the schema
+    validator to reject. Shared by the execution policy and the chat loop's
+    required-argument gate, so both resolve aliases and coercions alike.
+    """
+    canonical = dict(arguments)  # copy to avoid mutating caller's dict
+    td = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    parameter_aliases = (
+        dict(td.parameter_aliases)
+        if td is not None
+        else PARAMETER_ALIASES.get(tool_name, {})
+    )
+
+    for alias, target in parameter_aliases.items():
+        if alias in canonical and target not in canonical:
+            canonical[target] = canonical.pop(alias)
+
+    if td:
+        props = td.parameters.get("properties", {})
+        for key, schema in props.items():
+            if key not in canonical or not isinstance(canonical[key], str):
+                continue
+            expected = schema.get("type")
+            if expected == "integer":
+                try:
+                    canonical[key] = int(canonical[key])
+                except ValueError:
+                    pass  # keep as string; validation will catch it later
+            elif expected == "boolean":
+                word = canonical[key].strip().lower()
+                if word in ("true", "false"):
+                    canonical[key] = word == "true"
+
+    return canonical
+
+
 def normalize_arguments(
     tool_name: str, arguments: dict, project_ctx: ProjectContext
 ) -> dict:
-    """Normalize tool arguments in three steps.
+    """Canonicalize tool arguments, then resolve path parameters.
 
-    1. Apply parameter aliases (e.g. ``path`` → ``file_path``).
+    1. ``canonicalize_arguments``: aliases, integer and boolean coercion.
     2. Resolve path parameters to absolute paths via ProjectContext
        (also validates the path is inside the project sandbox).
-    3. Coerce string values to int for integer-typed parameters.
 
     Args:
         tool_name: Name of the tool being called.
@@ -42,25 +85,15 @@ def normalize_arguments(
     Raises:
         ValueError: If a path parameter resolves outside the project sandbox.
     """
-    normalized = dict(arguments)  # copy to avoid mutating caller's dict
+    normalized = canonicalize_arguments(tool_name, arguments)
     td = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
-    parameter_aliases = (
-        dict(td.parameter_aliases)
-        if td is not None
-        else PARAMETER_ALIASES.get(tool_name, {})
-    )
     path_parameters = (
         list(td.path_parameters)
         if td is not None
         else PATH_PARAMETERS.get(tool_name, [])
     )
 
-    # Step 1: Apply aliases
-    for alias, canonical in parameter_aliases.items():
-        if alias in normalized and canonical not in normalized:
-            normalized[canonical] = normalized.pop(alias)
-
-    # Step 2: Resolve path parameters to absolute (validates sandbox)
+    # Resolve path parameters to absolute (validates sandbox)
     for param_name in path_parameters:
         if param_name in normalized and normalized[param_name]:
             try:
@@ -68,19 +101,5 @@ def normalize_arguments(
                 normalized[param_name] = str(validated_path)
             except ValueError:
                 raise  # security error — propagate to caller
-
-    # Step 3: Type coercion (string → int for integer-typed parameters)
-    if td:
-        props = td.parameters.get("properties", {})
-        for key, schema in props.items():
-            if (
-                schema.get("type") == "integer"
-                and key in normalized
-                and isinstance(normalized[key], str)
-            ):
-                try:
-                    normalized[key] = int(normalized[key])
-                except ValueError:
-                    pass  # keep as string; validation will catch it later
 
     return normalized

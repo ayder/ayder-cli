@@ -13,14 +13,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
 
-from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
+from ayder_cli.application.execution_policy import (
+    ExecutionPolicy,
+    ExecutionResult,
+    ToolRequest,
+)
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
+from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 llm_log = get_logger("llm")
 tool_log = get_logger("tool")
@@ -37,7 +44,7 @@ class ChatLoopConfig:
     model: str = "qwen3-coder:latest"
     provider: str = "ollama"  # Needed for provider initialization
     num_ctx: int = 65536
-    max_output_tokens: int = 4096
+    max_output_tokens: int = 32768
     stop_sequences: list = field(default_factory=list)
     permissions: set = field(default_factory=lambda: {"r"})
     tool_tags: frozenset | None = field(
@@ -77,6 +84,30 @@ class ChatCallbacks(Protocol):
     def is_cancelled(self) -> bool: ...
 
 
+_CANCELLED_BEFORE_RUN = "Tool call was cancelled before it ran."
+_INTERRUPTED_WHILE_RUNNING = (
+    "Tool call was interrupted while running and may have partially applied. "
+    "Check the current state before retrying."
+)
+
+
+@dataclass
+class _ToolBatch:
+    """State owned by one ``_execute_tool_calls`` batch and all its workers.
+
+    Worker threads keep a reference for their whole lifetime, and nothing is
+    reset between batches, so a late worker of a cancelled batch can only
+    touch its own batch. ``lock`` guards the start transition and the
+    ``started``/``results`` records; ``cancelled`` is the batch's latch.
+    """
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    cancelled: threading.Event = field(default_factory=threading.Event)
+    started: set[str] = field(default_factory=set)
+    results: dict[str, dict] = field(default_factory=dict)
+    appended: set[str] = field(default_factory=set)
+
+
 class ChatLoop:
     """Async chat loop that drives LLM agent interactions.
 
@@ -107,6 +138,26 @@ class ChatLoop:
         # builds it knows nothing about sessions (C11b).
         self.context_manager.session_id = self.config.session_id
         self.context_manager.run_id = self.config.run_id
+
+        # Parallel worker tasks of every batch, held until they finish. A
+        # cancelled batch does not await them (no shield), so Ctrl+C never
+        # waits for a long command; _reap_task drops them when they end.
+        self._inflight_tasks: set[asyncio.Task] = set()
+
+    def _reap_task(self, task: asyncio.Task) -> None:
+        """Done-callback for a retained worker task.
+
+        Retrieves the task's outcome so a late failure is never reported as
+        "exception was never retrieved". It writes no history and calls no
+        UI callback: a late completion belongs to its own, settled batch.
+        """
+        self._inflight_tasks.discard(task)
+        if not task.cancelled():
+            # asyncio's Task.exception(), which marks the outcome retrieved.
+            # Bound first: the logging gate reads any `.exception(...)` call
+            # as a possible logger call and cannot type `task`.
+            retrieve_outcome = task.exception
+            retrieve_outcome()
 
     # -- public API ----------------------------------------------------------
 
@@ -429,7 +480,11 @@ class ChatLoop:
                         raw_args = tc_entry["function"].get("arguments", "")
                         if isinstance(raw_args, str):
                             try:
-                                json.loads(raw_args)
+                                decoded = json.loads(raw_args)
+                                if not isinstance(decoded, dict):
+                                    # e.g. "null": never send it back to the
+                                    # provider; the call is refused anyway.
+                                    tc_entry["function"]["arguments"] = "{}"
                             except (json.JSONDecodeError, ValueError):
                                 llm_log.warning(
                                     "Malformed tool arguments for '{}': "
@@ -478,225 +533,321 @@ class ChatLoop:
     # -- Tool execution ------------------------------------------------------
 
     async def _execute_tool_calls(self, tool_calls: List[_ToolCall]) -> bool:
-        """Split auto-approved (parallel) vs needs-confirmation (sequential)."""
-        tool_results_map = {}
-        auto_approved = []
-        needs_confirmation = []
+        """Split auto-approved (parallel) vs needs-confirmation (sequential).
 
-        for tc in tool_calls:
-            # Check for parsing errors injected by XML/JSON fallback protocols
-            if getattr(tc, "error", None):
-                rd = {
-                    "tool_call_id": tc.id,
-                    "name": "parse_error",
-                    "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
-                }
-                tool_results_map[tc.id] = rd
-                self.cb.on_tool_start(tc.id, "parse_error", {})
-                self.cb.on_tool_complete(tc.id, rd["result"])
-                continue
+        Every call gets exactly one tool message, however the batch ends. The
+        ``finally`` settles any call the normal path did not append (Ctrl+C
+        cancels the turn task, or a callback raises), using the batch's own
+        recorded results, then the exception propagates unchanged.
+        """
+        batch = _ToolBatch()
+        tool_results_map: dict[str, Any] = {}
+        try:
+            auto_approved = []
+            needs_confirmation = []
 
-            if not tc.function.name or tc.function.name == "unknown":
-                rd = {
-                    "tool_call_id": tc.id,
-                    "name": "unknown",
-                    "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
-                }
-                tool_results_map[tc.id] = rd
-                self.cb.on_tool_start(tc.id, "unknown", {})
-                self.cb.on_tool_complete(tc.id, rd["result"])
-                continue
+            for tc in tool_calls:
+                # Check for parsing errors injected by XML/JSON fallback protocols
+                if getattr(tc, "error", None):
+                    rd = {
+                        "tool_call_id": tc.id,
+                        "name": "parse_error",
+                        "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
+                    }
+                    tool_results_map[tc.id] = rd
+                    self.cb.on_tool_start(tc.id, "parse_error", {})
+                    self.cb.on_tool_complete(tc.id, rd["result"])
+                    continue
 
-            # Validate that arguments parsed correctly — some providers
-            # (e.g. DeepSeek) send empty/malformed arguments in the native
-            # tool call while putting the real content in reasoning.
-            args = _parse_arguments(tc.function.arguments)
-            missing = _check_required_args(tc.function.name, args)
-            if missing:
-                err_msg = (
-                    f"Error: tool call '{tc.function.name}' has missing required "
-                    f"arguments: {', '.join(missing)}. "
-                    f"Raw arguments received: {tc.function.arguments!r}. "
-                    f"You must provide all required arguments in the function call."
-                )
-                rd = {
-                    "tool_call_id": tc.id,
-                    "name": tc.function.name,
-                    "result": err_msg,
-                }
-                tool_results_map[tc.id] = rd
-                self.cb.on_tool_start(tc.id, tc.function.name, args)
-                self.cb.on_tool_complete(tc.id, err_msg)
-                tool_log.warning(
-                    "Tool '{}' called with missing args {} ({} chars raw)",
-                    tc.function.name,
-                    missing,
-                    len(tc.function.arguments),
-                )
-                continue
+                if not tc.function.name or tc.function.name == "unknown":
+                    rd = {
+                        "tool_call_id": tc.id,
+                        "name": "unknown",
+                        "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
+                    }
+                    tool_results_map[tc.id] = rd
+                    self.cb.on_tool_start(tc.id, "unknown", {})
+                    self.cb.on_tool_complete(tc.id, rd["result"])
+                    continue
 
-            if self._tool_needs_confirmation(tc.function.name):
-                needs_confirmation.append(tc)
-            else:
-                auto_approved.append(tc)
-
-        # Show non-empty tools as running
-        for tc in tool_calls:
-            if tc.id in tool_results_map:
-                continue
-            args = _parse_arguments(tc.function.arguments)
-            self.cb.on_tool_start(tc.id, tc.function.name, args)
-
-        escalated = False
-
-        # Auto-approved in parallel via asyncio.as_completed for speculative background execution
-        if auto_approved:
-
-            async def _safe_exec(tc_obj):
-                try:
-                    return tc_obj, await self._exec_tool_async(tc_obj)
-                except asyncio.CancelledError:
-                    tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
-                    return tc_obj, RuntimeError("Tool execution cancelled")
-                except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
-                    tool_log.opt(exception=True).warning(
-                        "Tool execution failed for '{}'", tc_obj.function.name
+                # Validate that arguments parsed correctly — some providers
+                # (e.g. DeepSeek) send empty/malformed arguments in the native
+                # tool call while putting the real content in reasoning.
+                args, arg_status = _parse_tool_arguments(tc.function.arguments)
+                refusal = _argument_refusal(tc.function.name, arg_status)
+                if refusal is not None:
+                    rd = {
+                        "tool_call_id": tc.id,
+                        "name": tc.function.name,
+                        "result": refusal,
+                    }
+                    tool_results_map[tc.id] = rd
+                    self.cb.on_tool_start(tc.id, tc.function.name, args)
+                    self.cb.on_tool_complete(tc.id, refusal)
+                    continue
+                missing = _check_required_args(tc.function.name, args)
+                if missing:
+                    err_msg = (
+                        f"Error: tool call '{tc.function.name}' has missing required "
+                        f"arguments: {', '.join(missing)}. "
+                        f"Raw arguments received: {tc.function.arguments!r}. "
+                        f"You must provide all required arguments in the function call."
                     )
-                    return tc_obj, e
+                    rd = {
+                        "tool_call_id": tc.id,
+                        "name": tc.function.name,
+                        "result": err_msg,
+                    }
+                    tool_results_map[tc.id] = rd
+                    self.cb.on_tool_start(tc.id, tc.function.name, args)
+                    self.cb.on_tool_complete(tc.id, err_msg)
+                    tool_log.warning(
+                        "Tool '{}' called with missing args {} ({} chars raw)",
+                        tc.function.name,
+                        missing,
+                        len(tc.function.arguments),
+                    )
+                    continue
 
-            tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
-
-            for completed_task in asyncio.as_completed(tasks):
-                tc, rd = await completed_task
-                tool_results_map[tc.id] = rd
-
-                # Truncate at the single source of truth — overwrite rd["result"]
-                # so both the UI notification and the later history append read the
-                # same bounded form. See opus47.md finding #1.
-                if isinstance(rd, dict):
-                    tid = rd["tool_call_id"]
-                    name = rd["name"]
-                    result = _truncate_for_tool(name, str(rd["result"]))
-                    rd["result"] = result
-                    self.cb.on_tool_complete(tid, result)
+                if self._tool_needs_confirmation(tc.function.name):
+                    needs_confirmation.append(tc)
                 else:
-                    self.cb.on_tool_complete(tc.id, f"Error: {rd}")
+                    auto_approved.append(tc)
 
-        # Needs-confirmation sequentially
-        custom_instructions = None
-        for tc in needs_confirmation:
-            name = tc.function.name
-            args = _parse_arguments(tc.function.arguments)
+            # Show non-empty tools as running
+            for tc in tool_calls:
+                if tc.id in tool_results_map:
+                    continue
+                args = _parse_arguments(tc.function.arguments)
+                self.cb.on_tool_start(tc.id, tc.function.name, args)
 
-            confirm = await self.cb.request_confirmation(name, args)
+            escalated = False
 
-            if confirm is not None and getattr(confirm, "action", None) == "approve":
-                policy = ExecutionPolicy(self.config.permissions)
-                started = time.perf_counter()
-                exec_result = await asyncio.to_thread(
-                    policy.execute_with_registry,
+            # Auto-approved in parallel via asyncio.as_completed for speculative background execution
+            if auto_approved:
+
+                async def _safe_exec(tc_obj):
+                    try:
+                        return tc_obj, await self._exec_tool_async(tc_obj, batch)
+                    except asyncio.CancelledError:
+                        tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
+                        return tc_obj, RuntimeError("Tool execution cancelled")
+                    except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
+                        tool_log.opt(exception=True).warning(
+                            "Tool execution failed for '{}'", tc_obj.function.name
+                        )
+                        return tc_obj, e
+
+                tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
+                for worker_task in tasks:
+                    self._inflight_tasks.add(worker_task)
+                    worker_task.add_done_callback(self._reap_task)
+
+                for completed_task in asyncio.as_completed(tasks):
+                    tc, rd = await completed_task
+                    tool_results_map[tc.id] = rd
+
+                    # The worker already truncated rd["result"] (the single source
+                    # of truth), so the UI notification, the batch record and the
+                    # later history append read the same bounded form. See
+                    # opus47.md finding #1.
+                    if isinstance(rd, dict):
+                        tid = rd["tool_call_id"]
+                        result = str(rd["result"])
+                        self.cb.on_tool_complete(tid, result)
+                    else:
+                        self.cb.on_tool_complete(tc.id, f"Error: {rd}")
+
+            # Needs-confirmation sequentially
+            custom_instructions = None
+            for tc in needs_confirmation:
+                name = tc.function.name
+                args = _parse_arguments(tc.function.arguments)
+
+                confirm = await self.cb.request_confirmation(name, args)
+
+                if confirm is not None and getattr(confirm, "action", None) == "approve":
+                    # The same cancel-gated worker as the parallel path.
+                    rd = await self._exec_tool_async(tc, batch)
+                    result = str(rd["result"])
+                    tool_results_map[tc.id] = rd
+
+                    # Notify UI
+                    self.cb.on_tool_complete(tc.id, result)
+
+                elif confirm is not None and getattr(confirm, "action", None) == "instruct":
+                    # User provided instructions instead of approval
+                    custom_instructions = getattr(confirm, "instructions", None)
+                    denied_msg = "Tool call skipped by user instruction."
+                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                    tool_results_map[tc.id] = rd
+                    self.cb.on_tool_complete(tc.id, denied_msg)
+                    break  # Stop processing further tools if we got an instruction
+                else:
+                    # User denied tool — still must add a result so the LLM sees
+                    # a valid tool_call → tool_result sequence (required by API)
+                    denied_msg = "Tool call denied by user."
+                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                    tool_results_map[tc.id] = rd
+                    self.cb.on_tool_complete(tc.id, denied_msg)
+
+            # Ensure every tool_call has a result (API requires it)
+            for tc in tool_calls:
+                if tc.id not in tool_results_map:
+                    skipped_msg = "Tool call skipped."
+                    tool_results_map[tc.id] = {
+                        "tool_call_id": tc.id,
+                        "name": tc.function.name,
+                        "result": skipped_msg,
+                    }
+                    self.cb.on_tool_complete(tc.id, skipped_msg)
+
+            # Process results in correct order -> append tool messages
+            for tc in tool_calls:
+                rd_result: dict[str, Any] | None = tool_results_map.get(tc.id)
+                if rd_result is None:
+                    continue
+
+                if isinstance(rd_result, dict):
+                    tid = rd_result["tool_call_id"]
+                    name = rd_result["name"]
+                    result = str(rd_result["result"])
+
+                    # Length only: `result` is tool-result content and may itself
+                    # echo caller-supplied arguments (e.g. a missing-required-arg
+                    # error message), so it must never reach a log verbatim --
+                    # not even truncated ("truncation is not redaction").
+                    tool_log.trace("Appending Tool Result [{}] to history: {} chars", name, len(result))
+
+                    escalated = escalated or _is_escalation_result(result)
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tid,
+                            "name": name,
+                            "content": result,
+                        }
+                    )
+                    batch.appended.add(tc.id)
+                else:
+                    # rd_result is BaseException (includes Exception)
+                    err_id, err_name = tc.id, tc.function.name
+                    error_msg = f"Error: {rd_result}"
+                    tool_log.trace(
+                        "Appending Tool Error [{}] to history: {} chars", err_name, len(error_msg)
+                    )
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": err_id,
+                            "name": err_name,
+                            "content": error_msg,
+                        }
+                    )
+                    batch.appended.add(tc.id)
+
+            if custom_instructions:
+                self.messages.append({"role": "user", "content": custom_instructions})
+
+            self.cb.on_tools_cleanup()
+            return escalated
+        finally:
+            self._settle_tool_batch(tool_calls, batch, tool_results_map)
+
+    async def _exec_tool_async(self, tc, batch: "_ToolBatch | None" = None) -> dict:
+        """Execute a single tool call through the shared execution policy path.
+
+        The worker thread owns the call's lifecycle, so it survives the
+        cancellation of the coroutine awaiting it:
+
+        1. Under ``batch.lock`` it refuses to start once the batch is cancelled
+           (its own latch, or the callbacks' flag at that moment), else it
+           records the call as started. The latch belongs to the batch, so a
+           later turn's fresh cancel event cannot revive a cancelled batch.
+        2. It runs ``ExecutionPolicy.execute_with_registry`` outside the lock.
+        3. It truncates and records the result in the batch, then emits the
+           ``tool_call`` event. A late completion therefore never writes
+           history or reaches the UI; the batch's settlement reads the record.
+        """
+        name = tc.function.name
+        args = _parse_arguments(tc.function.arguments)
+        policy = ExecutionPolicy(self.config.permissions)
+        state = batch if batch is not None else _ToolBatch()
+
+        def run() -> dict:
+            with state.lock:
+                if state.cancelled.is_set() or self.cb.is_cancelled() is True:
+                    return {"tool_call_id": tc.id, "name": name, "result": _CANCELLED_BEFORE_RUN}
+                state.started.add(tc.id)
+            started = time.perf_counter()
+            returned = False
+            try:
+                exec_result = policy.execute_with_registry(
                     ToolRequest(name, args),
                     self.registry,
                     pre_approved=True,
                 )
-                self._emit_tool_call(name, args, started, exec_result)
-                result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
-                rd = {"tool_call_id": tc.id, "name": name, "result": result}
-                tool_results_map[tc.id] = rd
+                returned = True
+            finally:
+                if not returned:
+                    # The policy call raised (e.g. a middleware's
+                    # PermissionError). Record the terminal outcome and emit
+                    # its completion event here, in the worker, so neither is
+                    # lost if the waiter is cancelled; the exception still
+                    # propagates unchanged to the waiter.
+                    raised = sys.exc_info()[1]
+                    failed = ExecutionResult(success=False, error=raised)
+                    failure = _truncate_for_tool(name, f"Error: {raised}")
+                    with state.lock:
+                        state.results[tc.id] = {
+                            "tool_call_id": tc.id, "name": name, "result": failure,
+                        }
+                    self._emit_tool_call(name, args, started, failed)
+            result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
+            rd = {"tool_call_id": tc.id, "name": name, "result": result}
+            with state.lock:
+                state.results[tc.id] = rd
+            self._emit_tool_call(name, args, started, exec_result)
+            return rd
 
-                # Notify UI
-                self.cb.on_tool_complete(tc.id, result)
+        return await asyncio.to_thread(run)
 
-            elif confirm is not None and getattr(confirm, "action", None) == "instruct":
-                # User provided instructions instead of approval
-                custom_instructions = getattr(confirm, "instructions", None)
-                denied_msg = "Tool call skipped by user instruction."
-                rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
-                tool_results_map[tc.id] = rd
-                self.cb.on_tool_complete(tc.id, denied_msg)
-                break  # Stop processing further tools if we got an instruction
-            else:
-                # User denied tool — still must add a result so the LLM sees
-                # a valid tool_call → tool_result sequence (required by API)
-                denied_msg = "Tool call denied by user."
-                rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
-                tool_results_map[tc.id] = rd
-                self.cb.on_tool_complete(tc.id, denied_msg)
+    def _settle_tool_batch(
+        self,
+        tool_calls: List[_ToolCall],
+        batch: "_ToolBatch",
+        tool_results_map: dict[str, Any],
+    ) -> None:
+        """Append one tool message for every call the batch did not append.
 
-        # Ensure every tool_call has a result (API requires it)
+        Runs in ``_execute_tool_calls``'s ``finally``. It first latches the
+        batch as cancelled, so no queued worker starts afterwards, and takes
+        its snapshot of started calls and recorded results under the lock.
+        Each unsettled call then gets, in call order: its collected or
+        recorded result; the interrupted notice if a worker had started it;
+        or the cancelled notice. No UI callback runs here. On a normal batch
+        every call is already appended and this appends nothing.
+        """
+        with batch.lock:
+            batch.cancelled.set()
+            started = set(batch.started)
+            recorded = dict(batch.results)
         for tc in tool_calls:
-            if tc.id not in tool_results_map:
-                skipped_msg = "Tool call skipped."
-                tool_results_map[tc.id] = {
-                    "tool_call_id": tc.id,
-                    "name": tc.function.name,
-                    "result": skipped_msg,
-                }
-                self.cb.on_tool_complete(tc.id, skipped_msg)
-
-        # Process results in correct order -> append tool messages
-        for tc in tool_calls:
-            rd_result: dict[str, Any] | None = tool_results_map.get(tc.id)
-            if rd_result is None:
+            if tc.id in batch.appended:
                 continue
-
-            if isinstance(rd_result, dict):
-                tid = rd_result["tool_call_id"]
-                name = rd_result["name"]
-                result = str(rd_result["result"])
-
-                # Length only: `result` is tool-result content and may itself
-                # echo caller-supplied arguments (e.g. a missing-required-arg
-                # error message), so it must never reach a log verbatim --
-                # not even truncated ("truncation is not redaction").
-                tool_log.trace("Appending Tool Result [{}] to history: {} chars", name, len(result))
-
-                escalated = escalated or _is_escalation_result(result)
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tid,
-                        "name": name,
-                        "content": result,
-                    }
-                )
+            rd = tool_results_map.get(tc.id, recorded.get(tc.id))
+            if isinstance(rd, dict):
+                name, content = rd["name"], str(rd["result"])
+            elif rd is not None:
+                name, content = tc.function.name, f"Error: {rd}"
+            elif tc.id in started:
+                name, content = tc.function.name, _INTERRUPTED_WHILE_RUNNING
             else:
-                # rd_result is BaseException (includes Exception)
-                err_id, err_name = tc.id, tc.function.name
-                error_msg = f"Error: {rd_result}"
-                tool_log.trace(
-                    "Appending Tool Error [{}] to history: {} chars", err_name, len(error_msg)
-                )
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": err_id,
-                        "name": err_name,
-                        "content": error_msg,
-                    }
-                )
-
-        if custom_instructions:
-            self.messages.append({"role": "user", "content": custom_instructions})
-
-        self.cb.on_tools_cleanup()
-        return escalated
-
-    async def _exec_tool_async(self, tc) -> dict:
-        """Execute a single tool call through the shared execution policy path."""
-        name = tc.function.name
-        args = _parse_arguments(tc.function.arguments)
-        policy = ExecutionPolicy(self.config.permissions)
-        started = time.perf_counter()
-        exec_result = await asyncio.to_thread(
-            policy.execute_with_registry,
-            ToolRequest(name, args),
-            self.registry,
-            pre_approved=True,
-        )
-        self._emit_tool_call(name, args, started, exec_result)
-        result = _unwrap_exec_result(exec_result)
-        return {"tool_call_id": tc.id, "name": name, "result": result}
+                name, content = tc.function.name, _CANCELLED_BEFORE_RUN
+            self.messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "name": name, "content": content}
+            )
+            batch.appended.add(tc.id)
 
     # -- Helpers -------------------------------------------------------------
 
@@ -704,6 +855,27 @@ class ChatLoop:
         """Delegate to shared ExecutionPolicy — same check for CLI and TUI."""
         policy = ExecutionPolicy(self.config.permissions)
         return policy.get_confirmation_requirement(tool_name).requires_confirmation
+
+
+def _argument_refusal(tool_name: str, status: str) -> str | None:
+    """The tool result for a call that must not run, or None if it may run.
+
+    Non-object arguments never run (F11). Arguments repaired after being cut
+    off run only for a tool registered explicitly as read-only (``"r"``):
+    unknown, MCP and plugin tools are not assumed safe (F2).
+    """
+    if status == "invalid":
+        return (
+            f"Error: arguments for '{tool_name}' must be a JSON object. "
+            "Nothing was executed."
+        )
+    if status == "repaired" and TOOL_PERMISSIONS.get(tool_name) != "r":
+        return (
+            f"Error: the arguments for '{tool_name}' were cut off (likely the "
+            "output token limit), so nothing was executed. Resend the call, "
+            "splitting large content across several smaller calls."
+        )
+    return None
 
 
 def _truncate_for_tool(tool_name: str, content: str) -> str:
@@ -723,37 +895,71 @@ def _truncate_for_tool(tool_name: str, content: str) -> str:
     return truncate_tool_result(content, max_chars=override)
 
 
-def _parse_arguments(arguments) -> dict:
-    """Safely parse tool call arguments (str or dict).
+def _parse_tool_arguments(arguments) -> tuple[dict, str]:
+    """Parse tool call arguments and say how trustworthy the result is.
+
+    Returns ``(args, status)``:
+
+    - ``"ok"``: a dict; empty or whitespace text (providers send ``""`` for a
+      call with no arguments); JSON text that decodes to an object; a complete
+      leading object recovered with ``raw_decode`` (``'{...}{...}'``); or
+      unrecoverable text, which yields ``{}`` as before.
+    - ``"repaired"``: the text was cut off, typically at the output token
+      limit, and ``_repair_truncated_json`` closed it. The values may be
+      partial, so only explicitly read-only tools may run on them.
+    - ``"invalid"``: any value that is not an object, whether a raw non-text
+      value (``None``, a list, a number) or JSON text that decodes to one
+      (``"null"``, ``"[]"``, ``"1"``). The call must not run.
+    """
+    status: list[str] = []
+    args = _parse_arguments(arguments, status)
+    return args, status[0]
+
+
+def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
+    """Safely parse tool call arguments (str or dict) to a dict.
 
     When the LLM hits its output token limit, the streamed JSON may be
     truncated (e.g. ``{"file_path": "foo", "content": "abc...``).
     We attempt ``json.loads`` first; on failure we try to repair the
     truncated JSON by closing open strings/braces before giving up.
+
+    When ``status`` is given, the parse status (see ``_parse_tool_arguments``)
+    is appended to it. Non-object values yield ``{}``.
     """
+    def _done(args: dict, outcome: str) -> dict:
+        if status is not None:
+            status.append(outcome)
+        return args
+
     if isinstance(arguments, dict):
-        return arguments
-    if isinstance(arguments, str):
+        return _done(arguments, "ok")
+    if not isinstance(arguments, str):
+        return _done({}, "invalid")
+    if not arguments.strip():
+        return _done({}, "ok")
+    try:
+        decoded = json.loads(arguments)
+    except (json.JSONDecodeError, ValueError):
+        tool_log.warning("Tool arguments JSON parse failed ({} chars)", len(arguments))
+        # Try extracting just the first JSON object (handles concatenated
+        # JSON like '{...}{...}' that slipped past expansion).
         try:
-            return json.loads(arguments)
+            obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
+            if isinstance(obj, dict):
+                tool_log.warning("Recovered tool arguments via raw_decode")
+                return _done(obj, "ok")
         except (json.JSONDecodeError, ValueError):
-            tool_log.warning("Tool arguments JSON parse failed ({} chars)", len(arguments))
-            # Try extracting just the first JSON object (handles concatenated
-            # JSON like '{...}{...}' that slipped past expansion).
-            try:
-                obj, _ = json.JSONDecoder().raw_decode(arguments.strip())
-                if isinstance(obj, dict):
-                    tool_log.warning("Recovered tool arguments via raw_decode")
-                    return obj
-            except (json.JSONDecodeError, ValueError):
-                pass
-            repaired = _repair_truncated_json(arguments)
-            if repaired is not None:
-                tool_log.warning("Recovered tool arguments via truncated JSON repair")
-                return repaired
-            tool_log.warning("Could not recover tool arguments — using empty dict")
-            return {}
-    return {}
+            pass
+        repaired = _repair_truncated_json(arguments)
+        if repaired is not None:
+            tool_log.warning("Recovered tool arguments via truncated JSON repair")
+            return _done(repaired, "repaired")
+        tool_log.warning("Could not recover tool arguments — using empty dict")
+        return _done({}, "ok")
+    if isinstance(decoded, dict):
+        return _done(decoded, "ok")
+    return _done({}, "invalid")
 
 
 def _repair_truncated_json(raw: str) -> dict | None:
@@ -792,26 +998,22 @@ def _check_required_args(tool_name: str, parsed_args: dict) -> list[str]:
     present it wins, and aliases are consulted in declaration order.
     """
     from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+    from ayder_cli.tools.normalization import canonicalize_arguments
 
     tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
     if not tool_def or not tool_def.parameters:
         return []
     required = tool_def.parameters.get("required", [])
-    aliases = dict(tool_def.parameter_aliases)  # alias -> canonical
-
-    def _effective(name: str):
-        """The value the tool will actually receive for ``name``."""
-        if name in parsed_args:
-            return parsed_args[name]
-        for alias, canonical in aliases.items():
-            if canonical == name and alias in parsed_args:
-                return parsed_args[alias]
-        return None
+    if not isinstance(parsed_args, dict):
+        return list(required)
+    # The same canonicalizer the execution policy runs, so aliases and
+    # coercions resolve identically in this gate and in the policy.
+    canonical = canonicalize_arguments(tool_name, parsed_args)
 
     # Check both missing keys and empty-string values
     missing = []
     for r in required:
-        val = _effective(r)
+        val = canonical.get(r)
         if val is None or (isinstance(val, str) and not val.strip()):
             missing.append(r)
     return missing

@@ -605,9 +605,11 @@ previously-split `AgentLoopBase` and `LoopConfig` were merged back in):
 - Routes *every* LLM response through the injected `ContextManagerProtocol` (`prepare_messages()` / `update_from_response()`); tool outputs are truncated at insertion time via `truncate_tool_result()` so the KV-cache prefix remains stable
 
 Key features:
-- Auto-approved tools run in parallel (`asyncio.gather`); confirmation-required tools run sequentially
+- Auto-approved tools run in parallel (`asyncio.as_completed`); confirmation-required tools run sequentially
 - Confirmation gate applies to **both** OpenAI-format and XML/JSON custom tool calls
-- `ExecutionPolicy.execute_with_registry()` is the single execution entry (validate → permission → execute)
+- `ExecutionPolicy.execute_with_registry()` is the single execution entry (object check → `canonicalize_arguments()` → validate → permission → execute). Canonicalization applies aliases and `"123"`/`"true"`/`"false"` coercion; the loop's required-argument gate uses the same function
+- Argument integrity: `_parse_tool_arguments()` reports `ok`, `repaired` or `invalid`. Non-object arguments never run. Arguments repaired after being cut off (output token limit) run only for tools registered explicitly as `r`; other tools get an error asking the model to resend in smaller calls
+- Cancellation: each batch owns a `_ToolBatch`. Workers refuse to start once the batch is cancelled and record their own result and `tool_call` event. When a batch ends early (Ctrl+C or a raising callback), a `finally` appends exactly one tool message per unanswered call: its result, an "interrupted, may have partially applied" notice, or a "cancelled before it ran" notice. Running workers are not awaited, so Ctrl+C returns at once
 - Token usage tracking and iteration limiting
 - Pre-iteration hook (`pre_iteration_hook`) used by the agent system to inject summaries
 - Graceful cancellation via `is_cancelled()`

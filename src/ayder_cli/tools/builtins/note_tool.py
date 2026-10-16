@@ -141,6 +141,28 @@ def note(
     prefix: str | None = None,
 ) -> ToolResult:
     """Dispatch a note action. See module docstring for the per-action contract."""
+    try:
+        return _dispatch(
+            project_ctx, action, note_id, content, tags, mode, max_chars, offset,
+            limit, prefix,
+        )
+    except ValueError as exc:
+        # An unconfined notes dir or note target (e.g. an outward symlink).
+        return ToolError(f"Security Error: {exc}", "security")
+
+
+def _dispatch(
+    project_ctx: ProjectContext,
+    action: str,
+    note_id: str | None,
+    content: str | None,
+    tags: str | None,
+    mode: str | None,
+    max_chars: int | None,
+    offset: int | None,
+    limit: int | None,
+    prefix: str | None,
+) -> ToolResult:
     act = (action or "").strip().lower()
     if act == "create":
         return _create(project_ctx, note_id, content, tags)

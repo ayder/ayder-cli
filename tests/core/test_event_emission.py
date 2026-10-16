@@ -363,7 +363,7 @@ def test_default_manager_token_budget_emits_token_budget_not_max_history(tmp_pat
 
 
 def test_default_manager_exhausted_budget_emits_budget_exhausted(tmp_path):
-    """`available <= 0` drops all history before the normal emission point."""
+    """`available <= 0` drops all history except the newest unit (F8)."""
     _setup(tmp_path)
     m = _default_manager(max_context_tokens=8192)
     m.freeze_system_prompt("x" * 200_000, [])         # overhead eats the budget
@@ -373,7 +373,8 @@ def test_default_manager_exhausted_budget_emits_budget_exhausted(tmp_path):
               if e["strategy"] == "budget_exhausted"]
     assert len(events) == 1
     assert set(events[0]) == ENVELOPE | CONTEXT_TRIM_FIELDS
-    assert events[0]["after"] <= 1
+    # The system message plus the newest unit (one user message) are sent.
+    assert events[0]["after"] == 2
     assert events[0]["dropped"] == events[0]["before"] - events[0]["after"] > 0
 
 

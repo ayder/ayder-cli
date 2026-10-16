@@ -161,7 +161,7 @@ editor = "vim"                # Editor for /task-edit command
 verbose = false               # Show file contents after write + LLM debug
 max_background_processes = 5  # Max concurrent background processes (1-20)
 max_iterations = 10           # Max agentic iterations per message (1-100)
-max_output_tokens = 4096      # Max tokens in LLM response
+max_output_tokens = 32768     # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
@@ -371,12 +371,13 @@ ayder-cli includes a context manager that automatically keeps your conversation 
 - **Real token counts**: Uses Ollama's `prompt_eval_count` and `eval_count` from native API responses instead of estimates. Compaction decisions are based on actual usage, not heuristics.
 - **Cache monitoring**: Tracks `prompt_eval_duration / prompt_eval_count` ratio to detect KV-cache hits (hot/warm/miss). When the cache is hot, compaction is delayed (threshold raised from 70% to 90%) to avoid invalidating it.
 - **Auto-detected context length**: On startup, queries `/api/show` to get the model's real context length instead of relying on `num_ctx`. Falls back to `num_ctx` if detection fails.
-- **Heuristic compaction**: When the context fills up, oldest message units are replaced with a text summary — no LLM call needed.
+- **Heuristic compaction**: When the context fills up, the oldest half of the message units is replaced with a text summary — no LLM call needed. The newest unit is never folded. The summary persists: every later request reuses the same summary message, so each request extends the previous one until the next compaction. A new compaction folds the previous summary into one capped summary (8,000 characters).
+- **Prefix contract**: Message-level prefix stability holds while the model, tools and `max_history = 0` stay unchanged and the history is append-only. Rewriting history (`/clear`, a compact, loading a session) starts a new generation: the summary is dropped and compaction waits for a fresh token count. This guarantees a stable message prefix; whether the server reuses its cache is up to the server.
 - **Native SDK**: Uses `ollama.AsyncClient` directly (not the OpenAI compatibility layer) for full timing data, native thinking support, and `keep_alive=-1` to prevent model unloading.
 
 **General-purpose manager** (Anthropic, OpenAI, Gemini, and other drivers):
 
-Every message is assigned an importance tier (system > recent user > recent assistant > tool results > old history). When the conversation approaches the token budget, old tool results are compressed (JSON structurally summarized, large text head/tail truncated) and the lowest-priority messages are pruned. Tool call + result pairs are kept as atomic units.
+Every message is assigned an importance tier (system > recent user > recent assistant > tool results > old history). When the conversation approaches the token budget, old tool results are compressed (JSON structurally summarized, large text head/tail truncated) and the lowest-priority messages are pruned. Tool call + result pairs are kept as atomic units. The newest unit is always kept, even when it alone exceeds the budget, so the model always sees the request it is answering.
 
 The context manager is configured under `[context_manager]` in `config.toml`:
 
@@ -501,6 +502,8 @@ ayder-cli includes a built-in task system:
 3. **Archive** (`/archive-completed-tasks`) -- Move done tasks to archive
 
 Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames (e.g., `TASK-001-add-auth-middleware.md`).
+
+The `task` tool resolves identifiers (a path, filename, ID or slug) only to files inside `.ayder/tasks/`. An identifier that points elsewhere, including through a symlink, is not resolved. If `.ayder/tasks/`, `.ayder/context/` or `.ayder/notes/` itself resolves outside the project, those tools return a security error.
 
 ```
 > /tasks            # Interactive task browser
