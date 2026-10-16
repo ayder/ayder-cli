@@ -350,7 +350,7 @@ def test_full_tree_census_is_frozen():
     # the evren terms paths catch named errors only.
     code, out = _run()
     assert "broad=137" in out, out
-    assert "files=119/119" in out, out
+    assert "files=120/120" in out, out
     code, out = _run("--expect-broad", "134")
     assert code == 1
     assert "census: found 137" in out

@@ -18,7 +18,9 @@ from ayder_cli.logging_config import setup_logging
 import openai
 
 from ayder_cli.providers import evren, provider_orchestrator, ProviderUnavailableError
-from ayder_cli.tools.builtins.skill import SkillInfo, discover_skills, skill
+from ayder_cli.core.result import ToolError
+from ayder_cli.core.skills import SkillInfo, active_skills, render_skill_block
+from ayder_cli.tools.builtins.skill import _after_change, discover_skills
 from ayder_cli.tui.screens import (
     AgentListScreen,
     CLISelectScreen,
@@ -935,41 +937,56 @@ def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
     )
 
 
-def _run_skill_tool_for_user(
+def _load_skill_for_user(
     app: "AyderApp",
-    action: str,
-    name: str | None,
+    info: SkillInfo,
+    command: str,
     chat_view: ChatView,
 ) -> bool:
-    """Run the shared skill tool for a user command and report the result."""
-    result = skill(
-        project_ctx=app.registry.project_ctx,
-        app=app,
-        action=action,
-        name=name,
-    )
-    chat_view.add_system_message(str(result))
-    return getattr(result, "is_success", False)
+    """Append ``info``'s block (plus an optional command) as a user message.
+
+    Returns True when a user message was appended, so a command can run. With
+    the skill already active, the command alone is appended.
+    """
+    active = [load.name for load in active_skills(app.messages)]
+    if info.name in active:
+        chat_view.add_system_message(f"Skill '{info.name}' is already active.")
+        if not command:
+            return False
+        app.messages.append({"role": "user", "content": command})
+        chat_view.add_user_message(command)
+        return True
+    block = render_skill_block(info)
+    if isinstance(block, ToolError):
+        chat_view.add_system_message(str(block))
+        return False
+    content = f"{block}\n\n{command}" if command else block
+    app.messages.append({"role": "user", "content": content})
+    chat_view.add_system_message(f"Activated skill: {info.name}")
+    if command:
+        chat_view.add_user_message(command)
+    _after_change(app, active + [info.name])
+    return True
 
 
 def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
-    """Activate a domain skill from .ayder/skills/ via the skill tool."""
+    """Load a skill as a user message: /skill <name> [command], or a picker."""
     skills = discover_skills(app.registry.project_ctx)
 
     if not skills:
-        chat_view.add_system_message("No skills found in .ayder/skills/")
+        chat_view.add_system_message("No skills found.")
         return
 
+    by_name: dict[str, SkillInfo] = {info.name: info for info in skills}
+
     if args.strip():
-        # Direct activation: /skill python-developer [optional command]
         parts = args.strip().split(None, 1)
         name = parts[0]
         command = parts[1] if len(parts) > 1 else ""
-        match = next((skill_info for skill_info in skills if skill_info.name == name), None)
+        match = by_name.get(name)
         if match is None:
-            available = ", ".join(skill_info.name for skill_info in skills)
             chat_view.add_system_message(
-                f"Unknown skill: '{name}'. Available: {available}"
+                f"Unknown skill: '{name}'. Available: {', '.join(by_name)}"
             )
             return
 
@@ -977,38 +994,32 @@ def handle_skill(app: "AyderApp", args: str, chat_view: ChatView) -> None:
 
         def _prepare() -> None:
             nonlocal loaded
-            loaded = _run_skill_tool_for_user(app, "load", match.name, chat_view)
-            if loaded and command:
-                chat_view.add_user_message(command)
-                app.messages.append({"role": "user", "content": command})
+            loaded = _load_skill_for_user(app, match, command, chat_view)
 
         app.request_turn(prepare=_prepare, run_loop=lambda: loaded and bool(command))
-    else:
-        # Interactive picker
-        current = app._active_skill or ""
-        items = [(skill_info.name, skill_info.name) for skill_info in skills]
-        skill_map: dict[str, SkillInfo] = {skill_info.name: skill_info for skill_info in skills}
+        return
 
-        def on_skill_selected(selected: str | None) -> None:
-            if selected:
-                selected_skill = skill_map[selected]
+    current = ", ".join(load.name for load in active_skills(app.messages))
+    items = [(info.name, f"{info.name} ({info.layer})") for info in skills]
 
-                def _prepare() -> None:
-                    _run_skill_tool_for_user(
-                        app, "load", selected_skill.name, chat_view
-                    )
+    def on_skill_selected(selected: str | None) -> None:
+        if selected:
+            chosen = by_name[selected]
 
-                app.request_turn(prepare=_prepare, run_loop=False)
+            def _prepare() -> None:
+                _load_skill_for_user(app, chosen, "", chat_view)
 
-        app.push_screen(
-            CLISelectScreen(
-                title="Select skill",
-                items=items,
-                current=current,
-                description=f"Active: {current or 'none'}",
-            ),
-            on_skill_selected,
-        )
+            app.request_turn(prepare=_prepare, run_loop=False)
+
+    app.push_screen(
+        CLISelectScreen(
+            title="Select skill",
+            items=items,
+            current=current,
+            description=f"Active: {current or 'none'}",
+        ),
+        on_skill_selected,
+    )
 
 
 def do_clear(app: AyderApp, chat_view: ChatView) -> None:

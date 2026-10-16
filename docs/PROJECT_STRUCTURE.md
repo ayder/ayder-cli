@@ -72,6 +72,7 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 │  core/config.py              (Pydantic Config)                 │
 │  core/context.py             (ProjectContext, sandboxing)      │
 │  core/result.py              (ToolSuccess, ToolError)          │
+│  core/skills.py              (skill discovery, delivery)       │
 │  core/context_manager.py     (ContextManagerProtocol)          │
 │  core/default_context_manager.py                               │
 │  core/ollama_context_manager.py  (KV-cache-aware)              │
@@ -154,6 +155,7 @@ cli.py:main()
 | `core/config_migration.py` | TOML config migration helpers | migration routines for schema changes |
 | `core/context.py` | Project sandboxing | `ProjectContext` |
 | `core/result.py` | Tool result types | `ToolSuccess`, `ToolError` |
+| `core/skills.py` | Skill discovery and delivery | `SkillInfo`, `SkillScope`, `discover_all()`, `render_skill_block()`, `active_skills()` |
 | `core/context_manager.py` | ContextManager Protocol + shared utilities | `ContextManagerProtocol`, `ContextStats`, `truncate_tool_result()` |
 | `core/default_context_manager.py` | Tiered context manager for non-Ollama providers | `DefaultContextManager`, `TokenCounter`, `MessageTier` |
 | `core/ollama_context_manager.py` | KV-cache-aware context manager for Ollama | `OllamaContextManager`, `OllamaContextStats` |
@@ -294,6 +296,7 @@ the design rationale.
 | `tools/builtins/context.py` | Session context snapshots | `context` |
 | `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
 | `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
+| `tools/builtins/skill.py` | Skill tool impl | `skill()`, `discover_skills()` |
 | `tools/builtins/web.py` | HTTP fetch tool | `fetch_web()` |
 | `tools/builtins/utils_tools.py` | Misc utility tools | `manage_environment_vars()` |
 | `tools/builtins/*_definitions.py` | Per-domain tool definitions (9 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |

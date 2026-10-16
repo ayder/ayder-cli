@@ -303,7 +303,6 @@ class AyderApp(App):
         self._cancel_event: asyncio.Event | None = None
         self._verbose_mode: bool = False
         self._show_thinking: bool = False
-        self._active_skill: str | None = None
 
         # Build all shared runtime components via the factory. An explicit
         # model argument is used for resumed sessions so they continue with the
@@ -586,38 +585,6 @@ class AyderApp(App):
             else:
                 base_prompt = get_system_prompt(self.config.prompt)
             self.messages[0]["content"] = base_prompt + tool_prompts + macro
-
-    def inject_skill(self, skill_name: str, skill_content: str) -> None:
-        """Inject or replace the active skill system message."""
-        from ayder_cli.prompts import SKILL_INJECTION_TEMPLATE
-
-        # Remove previous skill message if any (in place so chat_loop.messages
-        # keeps referencing the same list object)
-        self.messages[:] = [
-            m for m in self.messages
-            if not (
-                m.get("role") == "system"
-                and m.get("content", "").startswith("### ACTIVE SKILL:")
-            )
-        ]
-        block = SKILL_INJECTION_TEMPLATE.format(
-            skill_name=skill_name, skill_content=skill_content
-        ).lstrip()
-        self.messages.append({"role": "system", "content": block})
-        self._active_skill = skill_name
-
-    def unload_skill(self) -> str | None:
-        """Remove the active skill system message and return its prior name."""
-        previous = self._active_skill
-        self.messages[:] = [
-            m for m in self.messages
-            if not (
-                m.get("role") == "system"
-                and m.get("content", "").startswith("### ACTIVE SKILL:")
-            )
-        ]
-        self._active_skill = None
-        return previous
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel.

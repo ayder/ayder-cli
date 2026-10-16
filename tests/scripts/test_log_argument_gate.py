@@ -183,13 +183,13 @@ def test_live_tree_is_clean_and_fully_reconciled():
     code, out = _run()
     assert code == 0, out
     assert f"scanned {_live_py_count()} file(s)" in out, out
-    assert "235 logging call site(s): 229 level-method + 6 emit_event" in out, out
-    assert "143 call site(s) with >=1 interpolated argument" in out, out
-    assert "287 interpolated argument(s) after static splat expansion" in out, out
-    assert "(274 raw, 5 splat(s) -> 18 key(s))" in out, out
+    assert "236 logging call site(s): 230 level-method + 6 emit_event" in out, out
+    assert "144 call site(s) with >=1 interpolated argument" in out, out
+    assert "289 interpolated argument(s) after static splat expansion" in out, out
+    assert "(276 raw, 5 splat(s) -> 18 key(s))" in out, out
     assert "2 dynamic message row(s)" in out, out
     assert "111 chain input(s): 6 bind + 105 opt + 0 patch, 1 data row(s)" in out, out
-    assert "290 baseline row(s)" in out, out
+    assert "292 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
 
@@ -205,7 +205,7 @@ def test_committed_baseline_is_ordered_and_collision_free():
 
 
 FROZEN_TALLY = {
-    "R-name": 96, "R-id": 40, "R-count": 90, "R-status": 27, "R-class": 10,
+    "R-name": 98, "R-id": 40, "R-count": 90, "R-status": 27, "R-class": 10,
     "R-path": 24, "dynamic-trusted": 1,
     "dynamic-residual:known-shape-masked": 2,
 }
@@ -234,7 +234,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     # otherwise the mutation below would be proving nothing.
     code, out = _run(*invocation, cwd=tmp_path, gate=gate)
     assert code == 0, out
-    assert "290 baseline row(s)" in out, out
+    assert "292 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
     rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
@@ -246,7 +246,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     code, out = _run(*invocation, cwd=tmp_path, gate=gate)
     assert code == 1, out
     assert "CLASS-TALLY" in out, out
-    assert "97 'R-name'" in out and "is 96" in out, out
+    assert "99 'R-name'" in out and "is 98" in out, out
     assert "23 'R-path'" in out and "is 24" in out, out
     # The retag is invisible to every row-level report - that is the point.
     assert "NEW unclassified" not in out, out
@@ -305,10 +305,10 @@ def test_committed_baseline_classification_tally():
     assert tally == FROZEN_TALLY, tally
     retained = sum(tally.get(t, 0) for t in
                    ("R-name", "R-id", "R-count", "R-status", "R-class"))
-    assert retained == 263, tally
+    assert retained == 265, tally
     assert "content-deferred:5-04" not in tally, "5-04 content deferral is closed"
     assert "dynamic-deferred:5-04" not in tally, "5-04 dynamic deferral is closed"
-    assert sum(tally.values()) == 290, tally
+    assert sum(tally.values()) == 292, tally
     assert "ident" not in tally, "the forbidden generic tag is in the baseline"
 
 

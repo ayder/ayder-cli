@@ -399,24 +399,3 @@ Then call the context tool exactly once to save it:
 Conversation:
 {conversation_text}
 """
-
-
-# =============================================================================
-# SKILL INJECTION TEMPLATE (skill tool / AyderApp.inject_skill())
-# =============================================================================
-# Used by: skill tool / AyderApp.inject_skill()
-# REASON: Inject a domain-specific skill block as a mid-conversation system
-# message. The marker "### ACTIVE SKILL:" allows replacement on re-activation.
-
-SKILL_INJECTION_TEMPLATE = """\
-
-### ACTIVE SKILL: {skill_name}
-SCOPE: This skill provides domain-specific standards that work alongside — never
-against — the base operational rules. If any instruction here conflicts with a
-base rule, the base rule wins. Refer to the Domain and Trigger sections within
-the skill content to determine when to apply it.
-
-{skill_content}
-
-### END SKILL
-"""
