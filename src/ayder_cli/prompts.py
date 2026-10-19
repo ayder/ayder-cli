@@ -50,22 +50,37 @@ ENVIRONMENT_PROMPT = """
 
 ## Environment
 Working directory: {working_directory}
-Session start: {started_at}
+Session start: {started_at}{scratch_line}
 
 Work inside the working directory. Do not create, modify or initialize anything
-outside it (including `git init`) without the user's consent.
+outside it (including `git init`) without the user's consent.{scratch_rule}
 """
 
+# REASON: Models put temporary files in /tmp by habit. A per-session directory
+# there (core/context.py:new_scratch_dir) gives them a sanctioned place, and
+# the file tools accept it. Omitted when the directory could not be created.
+SCRATCH_LINE = "\nScratch directory: {scratch_dir}"
 
-def build_environment_prompt(working_directory: Path, started_at: datetime) -> str:
+SCRATCH_RULE = """
+Use the scratch directory for temporary files, scripts and outputs instead of /tmp
+or ~/tmp. It is the only place outside the working directory you may write to
+without asking, and the file tools accept paths in it."""
+
+
+def build_environment_prompt(
+    working_directory: Path, started_at: datetime, scratch_dir: Path | None = None
+) -> str:
     """Render the session environment section for the system prompt.
 
     ``started_at`` should be timezone-aware local time; it renders as ISO 8601
     to the minute with its UTC offset (e.g. 2026-10-19T03:33+03:00).
+    ``scratch_dir`` adds the scratch directory line and its rule.
     """
     return ENVIRONMENT_PROMPT.format(
         working_directory=working_directory,
         started_at=started_at.isoformat(timespec="minutes"),
+        scratch_line=SCRATCH_LINE.format(scratch_dir=scratch_dir) if scratch_dir else "",
+        scratch_rule=SCRATCH_RULE if scratch_dir else "",
     )
 
 # =============================================================================

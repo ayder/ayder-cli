@@ -6,6 +6,7 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +18,7 @@ from ayder_cli.core.context_manager_factory import context_manager_factory
 
 if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import ProjectContext, new_scratch_dir
 from ayder_cli.core.skills import build_scope
 from ayder_cli.providers import AIProvider, provider_orchestrator
 from ayder_cli.providers.retry import RetryConfig, RetryingProvider
@@ -98,6 +99,9 @@ def create_runtime(
 
     llm_provider: AIProvider = provider_orchestrator.create(cfg)
     project_ctx = ProjectContext(project_root)
+    scratch_dir = new_scratch_dir(project_ctx.root)
+    if scratch_dir is not None:
+        project_ctx.scratch_dir = scratch_dir.resolve()
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
 
     # Create context manager before registry so tools can receive it via DI.
@@ -114,7 +118,9 @@ def create_runtime(
         base_prompt = system_prompt_override
     else:
         base_prompt = get_system_prompt(cfg.prompt)
-    environment_prompt = build_environment_prompt(project_ctx.root, datetime.now().astimezone())
+    environment_prompt = build_environment_prompt(
+        project_ctx.root, datetime.now().astimezone(), project_ctx.scratch_dir
+    )
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = base_prompt + environment_prompt + tool_prompts
@@ -237,7 +243,15 @@ def create_agent_runtime(
     )
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    environment_prompt = build_environment_prompt(project_ctx.root, datetime.now().astimezone())
+    # Each run gets its own directory inside the session's scratch directory,
+    # which the shared ProjectContext already admits.
+    agent_scratch = None
+    if project_ctx.scratch_dir is not None:
+        label = "agent-" + re.sub(r"[^A-Za-z0-9_-]", "-", agent_config.name)
+        agent_scratch = new_scratch_dir(project_ctx.root, parent=project_ctx.scratch_dir, label=label)
+    environment_prompt = build_environment_prompt(
+        project_ctx.root, datetime.now().astimezone(), agent_scratch
+    )
     system_prompt = (
         identity_prefix + agent_config.system_prompt + environment_prompt
         + tool_prompts + deliverable_directive

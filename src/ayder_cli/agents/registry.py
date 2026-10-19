@@ -384,7 +384,9 @@ class AgentRegistry:
                                 worktree_path = wt_dir
                                 self._session_worktrees.add(wt_dir)
                                 run.worktree_path = wt_dir
-                                project_ctx = ProjectContext(wt_dir)
+                                project_ctx = ProjectContext(
+                                    wt_dir, scratch_dir=self._project_ctx.scratch_dir
+                                )
                                 head_before = await asyncio.to_thread(
                                     branch_head, repo_root, run.branch_name
                                 )
