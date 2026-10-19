@@ -11,6 +11,9 @@ on:
 
 jobs:
   build-and-publish:
+    # The pypi environment admits only main and release-*/beta-* tags, so on a
+    # pull request the job is refused before any step runs and the PR shows red.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # This job only runs in the context of your 'pypi' environment
     environment: pypi 
