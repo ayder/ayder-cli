@@ -13,7 +13,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="bash",
         description=(
             "Run a shell command and return its exit code, stdout, and stderr. "
-            "Use for builds, tests, git, file inspection, and other terminal tasks."
+            "Use for builds, tests, git, file inspection, and other terminal tasks. "
+            "Each call starts in the working directory; a `cd` does not carry over."
         ),
         description_template="Command `{command}` will be executed",
         tags=("core",),

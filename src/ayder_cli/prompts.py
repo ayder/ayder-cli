@@ -4,6 +4,9 @@ Each prompt template is labeled with a comment indicating which module/function
 is responsible for using it, along with the REASON for prompting the LLM.
 """
 
+from datetime import date
+from pathlib import Path
+
 # =============================================================================
 # CORE SYSTEM PROMPT
 # =============================================================================
@@ -33,6 +36,32 @@ needs the user's decision.
 MINIMAL_SYSTEM_PROMPT = """You are a developer and coding assistant. Analyze understand and the user request. Be concise. Execute one implementation step at a time."""
 
 EXTENDED_SYSTEM_PROMPT = STANDARD_SYSTEM_PROMPT
+
+# =============================================================================
+# SESSION ENVIRONMENT SECTION
+# =============================================================================
+# Used by: runtime_factory.create_runtime() / create_agent_runtime(), after the
+# base prompt and before the tool prompts, for every tier and override.
+# REASON: Without the project's absolute path a model guessed one (the home
+# directory, from a skill header) and ran `git init` there. Built once per
+# session so the frozen prompt and its cache prefix never change.
+
+ENVIRONMENT_PROMPT = """
+
+## Environment
+Working directory: {working_directory}
+Session start date: {start_date}
+
+Work inside the working directory. Do not create, modify or initialize anything
+outside it (including `git init`) without the user's consent.
+"""
+
+
+def build_environment_prompt(working_directory: Path, start_date: date) -> str:
+    """Render the session environment section for the system prompt."""
+    return ENVIRONMENT_PROMPT.format(
+        working_directory=working_directory, start_date=start_date.isoformat()
+    )
 
 # =============================================================================
 # AGENTIC ORCHESTRATOR SYSTEM PROMPT

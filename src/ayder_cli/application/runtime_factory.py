@@ -7,6 +7,7 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ from ayder_cli.providers.retry import RetryConfig, RetryingProvider
 from ayder_cli.tools.registry import ToolRegistry, create_default_registry
 from ayder_cli.process_manager import ProcessManager
 from ayder_cli.prompts import (
+    build_environment_prompt,
     get_system_prompt,
 )
 from ayder_cli.log import get_logger
@@ -41,6 +43,7 @@ class RuntimeComponents:
     tool_registry: ToolRegistry
     system_prompt: str
     context_manager: Any = field(default=None)  # ContextManagerProtocol
+    environment_prompt: str = ""  # frozen for the session; reused by TUI rebuilds
 
 
 def apply_skill_setting(
@@ -111,9 +114,10 @@ def create_runtime(
         base_prompt = system_prompt_override
     else:
         base_prompt = get_system_prompt(cfg.prompt)
+    environment_prompt = build_environment_prompt(project_ctx.root, date.today())
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    system_prompt = base_prompt + tool_prompts
+    system_prompt = base_prompt + environment_prompt + tool_prompts
 
     # Freeze system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
@@ -129,6 +133,7 @@ def create_runtime(
         tool_registry=tool_registry,
         system_prompt=system_prompt,
         context_manager=context_mgr,
+        environment_prompt=environment_prompt,
     )
 
 
@@ -232,7 +237,11 @@ def create_agent_runtime(
     )
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    system_prompt = identity_prefix + agent_config.system_prompt + tool_prompts + deliverable_directive
+    environment_prompt = build_environment_prompt(project_ctx.root, date.today())
+    system_prompt = (
+        identity_prefix + agent_config.system_prompt + environment_prompt
+        + tool_prompts + deliverable_directive
+    )
 
     # Freeze agent system prompt after tool schemas are known.
     tool_schemas = tool_registry.get_schemas(tags=tool_tags)
