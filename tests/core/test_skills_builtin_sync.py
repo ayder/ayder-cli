@@ -81,12 +81,12 @@ def test_sync_runs_once_per_process(monkeypatch):
     assert calls == [1]
 
 
-def test_the_real_package_ships_engineering():
-    """The wheel content: src/ayder_cli/skills/engineering/SKILL.md (kind: new interface)."""
-    real = Path(sk.__file__).resolve().parent.parent / "skills" / "engineering" / "SKILL.md"
+def test_the_real_package_ships_development_workflow():
+    """The wheel content: src/ayder_cli/skills/development-workflow/SKILL.md (kind: new interface)."""
+    real = Path(sk.__file__).resolve().parent.parent / "skills" / "development-workflow" / "SKILL.md"
     text = real.read_text(encoding="utf-8")
     fields, body = sk.parse_frontmatter(text)
-    assert fields["name"] == "engineering" and fields["description"]
+    assert fields["name"] == "development-workflow" and fields["description"]
     assert text.isascii()
     assert len(text.splitlines()) < 130
 
