@@ -68,7 +68,8 @@ def test_a_symlinked_base_is_refused(tmp_path, monkeypatch):
 
 
 def test_a_base_owned_by_someone_else_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(context.os, "getuid", lambda: os.getuid() + 1)
+    other_uid = os.getuid() + 1
+    monkeypatch.setattr(context.os, "getuid", lambda: other_uid)
 
     assert new_scratch_dir(tmp_path) is None
 

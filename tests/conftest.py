@@ -109,7 +109,7 @@ def _isolated_scratch_base(tmp_path_factory, monkeypatch):
     from ayder_cli.core import context
 
     base = tmp_path_factory.mktemp("scratch") / "ayder-test"
-    monkeypatch.setattr(context, "SCRATCH_BASE", base, raising=False)
+    monkeypatch.setattr(context, "SCRATCH_BASE", base)
 
 
 @pytest.fixture(autouse=True)
