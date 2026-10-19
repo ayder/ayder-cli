@@ -58,7 +58,7 @@ def test_load_needs_no_app_and_returns_the_block(tmp_path):
     _write_skill(tmp_path, "alpha")
     result = _run(tmp_path, "load", name="alpha")
     assert isinstance(result, ToolSuccess)
-    assert result.startswith("### SKILL LOADED: alpha\nSource: project (")
+    assert result.startswith("### SKILL LOADED: alpha\nSource: project\n")
     assert result.endswith("## Domain\nPython\n\n### END SKILL: alpha")
     assert "description:" not in result
 
