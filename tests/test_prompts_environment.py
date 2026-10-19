@@ -3,9 +3,11 @@
 Kind: baseline regression. On the parent no prompt named the project's absolute
 path, so a model guessed one from a skill header and ran `git init` in the
 user's home directory. Structure only, never wording: the section must hold the
-resolved project root and the session start date, ahead of the tool prompts.
+resolved project root and the session start date and time, ahead of the tool
+prompts.
 """
 
+import re
 from datetime import date
 from unittest.mock import MagicMock
 
@@ -28,6 +30,13 @@ def test_runtime_prompt_has_root_and_date_before_tools(tmp_path, monkeypatch):
     assert root in prompt
     assert date.today().isoformat() in prompt
     assert prompt.index(root) < prompt.index(SKILL_TOOL_PROMPT)
+
+
+def test_runtime_prompt_has_start_time(tmp_path, monkeypatch):
+    """Baseline regression: the start date came without a time of day."""
+    prompt = _runtime(tmp_path, monkeypatch).system_prompt
+
+    assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}", prompt)
 
 
 def test_override_prompt_has_root(tmp_path, monkeypatch):
