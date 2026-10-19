@@ -67,9 +67,30 @@ class ToolDefinition:
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
+                "parameters": self._parameters_with_required_marked(),
             },
         }
+
+    def _parameters_with_required_marked(self) -> Dict[str, Any]:
+        """``parameters`` with "Required." leading each required field's description.
+
+        Providers' chat templates drop the ``required`` array, so the model
+        learns what is required only from the descriptions.
+        """
+        required = self.parameters.get("required") or []
+        properties = self.parameters.get("properties")
+        if not required or not isinstance(properties, dict):
+            return self.parameters
+        marked = dict(properties)
+        for name in required:
+            field = marked.get(name)
+            if not isinstance(field, dict):
+                continue
+            text = field.get("description", "")
+            if not text.startswith("Required."):
+                field = {**field, "description": f"Required. {text}".strip()}
+            marked[name] = field
+        return {**self.parameters, "properties": marked}
 
 # ---------------------------------------------------------------------------
 # Auto-Discovery System

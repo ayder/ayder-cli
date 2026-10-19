@@ -108,7 +108,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "string",
                     "enum": ["write", "replace", "insert", "delete"],
                     "description": (
-                        "Required. The edit operation. insert: content becomes the new line N "
+                        "The edit operation. insert: content becomes the new line N "
                         "(existing line N and below shift down); line_number past EOF appends."
                     ),
                 },
