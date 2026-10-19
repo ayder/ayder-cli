@@ -294,3 +294,30 @@ def test_call_threads_base_branch_to_create_run(monkeypatch):
 
     handler(action="call", name="coder", task="x", timeout_s=1200)
     assert captured["timeout"] == 1200  # explicit per-call override threads through
+
+
+@needs_git
+@pytest.mark.asyncio
+async def test_worktree_agent_keeps_the_session_scratch_dir(tmp_path, monkeypatch):
+    """The worktree's ProjectContext still admits the parent's scratch directory."""
+    repo = _init_repo(tmp_path / "repo")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    seen = {}
+
+    class _R:
+        def __init__(self, *a, **k):
+            self.agent_name = "coder"; self.status = "idle"
+            seen["scratch"] = k["project_ctx"].scratch_dir
+        def cancel(self): return True
+        async def run(self, task):
+            return AgentRunOutcome("done", "ok", None, None)
+
+    reg = _registry(ProjectContext(repo, scratch_dir=scratch), cap=1)
+    reg.set_loop(asyncio.get_running_loop())
+    monkeypatch.setattr("ayder_cli.agents.registry.AgentRunner", _R)
+
+    rid = reg.create_run("coder", "x", branch_name="agent/scratch")
+    await reg.await_run(rid, timeout_s=10)
+
+    assert seen["scratch"] == scratch.resolve()
