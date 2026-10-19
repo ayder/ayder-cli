@@ -437,7 +437,7 @@ later one overrides an earlier one with the same name:
 3. project skills in `<project>/.ayder/skills/<name>/`
 
 ayder ships a `development-workflow` skill (orient, align, plan, execute and
-validate multi-step or risky software work; small edits skip it). The system prompt is a general assistant;
+validate multi-step software work; small edits skip it). The system prompt is a general assistant;
 when a skill fits the request, the model loads it itself.
 
 The skills enabled for a session are listed in the system prompt under

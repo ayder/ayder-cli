@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: Multi-step or risky software work - a new feature, a refactor, a bug whose cause is unknown, a change across several files. Not for small, obvious edits, quick fixes or questions.
+description: Multi-step software work - a new feature, a refactor, a bug whose cause is unknown, a change across several files. Not for small, obvious edits, quick fixes or questions.
 ---
 
 # Development workflow
@@ -11,7 +11,7 @@ Use this workflow for software work in the current project. Act as an experience
 
 - Small and obvious (a typo, a one-line fix, a config value): make the change, verify it,
   report.
-- Multi-step or risky (a feature, a refactor, a bug with an unknown cause, anything that
+- Multi-step (a feature, a refactor, a bug with an unknown cause, anything that
   touches several files): follow the full workflow below.
 
 ## Workflow
