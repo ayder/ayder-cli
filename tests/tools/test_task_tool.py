@@ -82,9 +82,11 @@ class TestCreate:
         assert "- **Status:** in_progress" in text
 
     def test_create_normalizes_dependencies(self, ctx):
-        task(ctx, "create", title="Dep Task", dependencies="3, TASK-004 , 5")
-        text = (ctx.root / ".ayder" / "tasks" / "TASK-001-dep-task.md").read_text()
-        assert "- **Dependencies:** TASK-003, TASK-004, TASK-005" in text
+        for title in ("One", "Two", "Three"):
+            task(ctx, "create", title=title)
+        task(ctx, "create", title="Dep Task", dependencies="1, TASK-002 , 3")
+        text = (ctx.root / ".ayder" / "tasks" / "TASK-004-dep-task.md").read_text()
+        assert "- **Dependencies:** TASK-001, TASK-002, TASK-003" in text
 
     def test_create_default_dependencies_none(self, ctx):
         task(ctx, "create", title="No Deps")
@@ -283,6 +285,115 @@ class TestUpdate:
         text = (ctx.root / ".ayder" / "tasks" / "TASK-001-app.md").read_text()
         assert "## Risks" in text
         assert "r1" in text
+
+
+# --------------------------------------------------------------------------- #
+# dependencies
+# --------------------------------------------------------------------------- #
+def _task_files(ctx):
+    return sorted(p.name for p in (ctx.root / ".ayder" / "tasks").glob("*.md"))
+
+
+def _deps_line(ctx, name):
+    text = (ctx.root / ".ayder" / "tasks" / name).read_text(encoding="utf-8")
+    return next(line for line in text.splitlines() if "**Dependencies:**" in line)
+
+
+class TestDependencies:
+    def test_create_rejects_a_dependency_on_itself(self, ctx):
+        # Parallel creates are numbered in completion order: "1" can turn out
+        # to be the task being created.
+        result = task(ctx, "create", title="Move", dependencies="1")
+        assert isinstance(result, ToolError)
+        assert "itself" in result
+        assert _task_files(ctx) == []
+
+    def test_create_rejects_a_dependency_that_does_not_exist(self, ctx):
+        task(ctx, "create", title="One")
+        result = task(ctx, "create", title="Two", dependencies="1, 7")
+        assert isinstance(result, ToolError)
+        assert "TASK-007" in result
+        assert _task_files(ctx) == ["TASK-001-one.md"]
+
+    def test_create_rejects_a_dependency_that_is_not_a_task_id(self, ctx):
+        task(ctx, "create", title="One")
+        result = task(ctx, "create", title="Two", dependencies="the package move")
+        assert isinstance(result, ToolError)
+        assert _task_files(ctx) == ["TASK-001-one.md"]
+
+    def test_create_rejects_a_cycle_through_an_existing_task(self, ctx, tasks_dir):
+        # A hand-written task that already depends on the next id to be allocated.
+        (tasks_dir / "TASK-001-early.md").write_text(
+            "# Early\n\n## Signature\n- **ID:** TASK-001\n- **Status:** pending\n"
+            "- **Dependencies:** TASK-002\n",
+            encoding="utf-8",
+        )
+        result = task(ctx, "create", title="Late", dependencies="1")
+        assert isinstance(result, ToolError)
+        assert "cycle" in result
+        assert _task_files(ctx) == ["TASK-001-early.md"]
+
+    def test_update_dependencies_rewrites_only_the_dependencies_line(self, ctx):
+        task(ctx, "create", title="One")
+        task(ctx, "create", title="Two")
+        task(ctx, "create", title="Three", body="## Goal\n\nkeep me")
+        path = ctx.root / ".ayder" / "tasks" / "TASK-003-three.md"
+        before = path.read_text(encoding="utf-8")
+
+        result = task(ctx, "update_dependencies", identifier="3", dependencies="2, 1")
+
+        assert isinstance(result, ToolSuccess)
+        assert "TASK-003" in result
+        after = path.read_text(encoding="utf-8")
+        assert "- **Dependencies:** TASK-002, TASK-001" in after
+        assert after.replace("TASK-002, TASK-001", "none") == before
+
+    def test_update_dependencies_clears_with_an_empty_value(self, ctx):
+        task(ctx, "create", title="One")
+        task(ctx, "create", title="Two", dependencies="1")
+        result = task(ctx, "update_dependencies", identifier="2", dependencies="")
+        assert isinstance(result, ToolSuccess)
+        assert _deps_line(ctx, "TASK-002-two.md") == "- **Dependencies:** none"
+
+    def test_update_dependencies_repairs_a_self_reference(self, ctx, tasks_dir):
+        # The broken state the old create allowed.
+        (tasks_dir / "TASK-001-move.md").write_text(
+            "# Move\n\n## Signature\n- **ID:** TASK-001\n- **Status:** pending\n"
+            "- **Dependencies:** TASK-001\n",
+            encoding="utf-8",
+        )
+        result = task(ctx, "update_dependencies", identifier="1", dependencies="")
+        assert isinstance(result, ToolSuccess)
+        assert _deps_line(ctx, "TASK-001-move.md") == "- **Dependencies:** none"
+
+    @pytest.mark.parametrize(
+        "deps, message",
+        [("2", "itself"), ("9", "TASK-009"), ("1", "cycle"), ("first", "task ID")],
+    )
+    def test_update_dependencies_rejects_and_leaves_the_file_unchanged(
+        self, ctx, deps, message
+    ):
+        task(ctx, "create", title="One")
+        task(ctx, "create", title="Two")
+        task(ctx, "update_dependencies", identifier="1", dependencies="2")
+        path = ctx.root / ".ayder" / "tasks" / "TASK-002-two.md"
+        before = path.read_bytes()
+
+        result = task(ctx, "update_dependencies", identifier="2", dependencies=deps)
+
+        assert isinstance(result, ToolError)
+        assert message in result
+        assert path.read_bytes() == before
+
+    def test_update_dependencies_unknown_task(self, ctx):
+        result = task(ctx, "update_dependencies", identifier="5", dependencies="")
+        assert isinstance(result, ToolError)
+
+    def test_update_dependencies_is_in_the_action_enum(self):
+        from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+        props = TOOL_DEFINITIONS_BY_NAME["task"].parameters["properties"]
+        assert "update_dependencies" in props["action"]["enum"]
 
 
 # --------------------------------------------------------------------------- #
