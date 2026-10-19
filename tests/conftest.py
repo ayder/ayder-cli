@@ -104,6 +104,15 @@ def capture_loguru():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_scratch_base(tmp_path_factory, monkeypatch):
+    """Keep every test's session scratch directories out of the real /tmp."""
+    from ayder_cli.core import context
+
+    base = tmp_path_factory.mktemp("scratch") / "ayder-test"
+    monkeypatch.setattr(context, "SCRATCH_BASE", base, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_skill_layers(tmp_path_factory, monkeypatch):
     """Keep every test away from ~/.ayder and from the packaged skills.
 
