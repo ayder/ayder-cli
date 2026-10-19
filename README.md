@@ -39,7 +39,7 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
-- **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
+- **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked. The one exception is the session scratch directory, `/tmp/ayder-<uid>/<project>-<hash>/<session>/` (mode 0700, one subdirectory per agent run), which the system prompt names as the place for temporary files and which the file tools accept. It is not cleaned up; the OS clears `/tmp`.
 - **Safe mode** (TUI): Blocks `file_editor`, `run_shell_command`, `run_background_process`, `kill_background_process`, and `fetch_web`.
 - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
 - You may also prefer to run ayder-cli in a container for additional security.
