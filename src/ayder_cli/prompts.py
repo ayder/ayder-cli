@@ -4,7 +4,7 @@ Each prompt template is labeled with a comment indicating which module/function
 is responsible for using it, along with the REASON for prompting the LLM.
 """
 
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 
 # =============================================================================
@@ -50,17 +50,22 @@ ENVIRONMENT_PROMPT = """
 
 ## Environment
 Working directory: {working_directory}
-Session start date: {start_date}
+Session start: {started_at}
 
 Work inside the working directory. Do not create, modify or initialize anything
 outside it (including `git init`) without the user's consent.
 """
 
 
-def build_environment_prompt(working_directory: Path, start_date: date) -> str:
-    """Render the session environment section for the system prompt."""
+def build_environment_prompt(working_directory: Path, started_at: datetime) -> str:
+    """Render the session environment section for the system prompt.
+
+    ``started_at`` should be timezone-aware local time; it renders as ISO 8601
+    to the minute with its UTC offset (e.g. 2026-10-19T03:33+03:00).
+    """
     return ENVIRONMENT_PROMPT.format(
-        working_directory=working_directory, start_date=start_date.isoformat()
+        working_directory=working_directory,
+        started_at=started_at.isoformat(timespec="minutes"),
     )
 
 # =============================================================================

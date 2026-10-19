@@ -7,7 +7,7 @@ eliminating the duplicate `_build_services()` / `AyderApp.__init__()` wiring.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -114,7 +114,7 @@ def create_runtime(
         base_prompt = system_prompt_override
     else:
         base_prompt = get_system_prompt(cfg.prompt)
-    environment_prompt = build_environment_prompt(project_ctx.root, date.today())
+    environment_prompt = build_environment_prompt(project_ctx.root, datetime.now().astimezone())
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
     system_prompt = base_prompt + environment_prompt + tool_prompts
@@ -237,7 +237,7 @@ def create_agent_runtime(
     )
     tool_tags = frozenset(cfg.tool_tags) if cfg.tool_tags else None
     tool_prompts = tool_registry.get_system_prompts(tags=tool_tags)
-    environment_prompt = build_environment_prompt(project_ctx.root, date.today())
+    environment_prompt = build_environment_prompt(project_ctx.root, datetime.now().astimezone())
     system_prompt = (
         identity_prefix + agent_config.system_prompt + environment_prompt
         + tool_prompts + deliverable_directive

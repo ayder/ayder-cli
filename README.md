@@ -311,7 +311,7 @@ ayder -f instructions.txt
 ayder --stdin < prompt.txt
 
 # Override the main LLM system prompt with a file
-# (the environment section with working directory and start date,
+# (the environment section with working directory and start time,
 #  and the tool instructions, are still appended)
 ayder --system-prompt prompt-file.md "refactor this code"
 ```
