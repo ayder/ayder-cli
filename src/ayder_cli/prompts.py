@@ -52,8 +52,9 @@ ENVIRONMENT_PROMPT = """
 Working directory: {working_directory}
 Session start: {started_at}{scratch_line}
 
-Work inside the working directory. Do not create, modify or initialize anything
-outside it (including `git init`) without the user's consent.{scratch_rule}
+Your workspace is {workspace}.
+Outside it, read only paths the user names or the task requires, and create,
+modify or initialize nothing (including `git init`) without the user's consent.{scratch_rule}
 """
 
 # REASON: Models put temporary files in /tmp by habit. A per-session directory
@@ -61,10 +62,7 @@ outside it (including `git init`) without the user's consent.{scratch_rule}
 # the file tools accept it. Omitted when the directory could not be created.
 SCRATCH_LINE = "\nScratch directory: {scratch_dir}"
 
-SCRATCH_RULE = """
-Use the scratch directory for temporary files, scripts and outputs instead of /tmp
-or ~/tmp. It is the only place outside the working directory you may write to
-without asking, and the file tools accept paths in it."""
+SCRATCH_RULE = "\nPut temporary files in the scratch directory, not in /tmp or ~/tmp."
 
 
 def build_environment_prompt(
@@ -79,6 +77,11 @@ def build_environment_prompt(
     return ENVIRONMENT_PROMPT.format(
         working_directory=working_directory,
         started_at=started_at.isoformat(timespec="minutes"),
+        workspace=(
+            "the working directory and the scratch directory"
+            if scratch_dir
+            else "the working directory"
+        ),
         scratch_line=SCRATCH_LINE.format(scratch_dir=scratch_dir) if scratch_dir else "",
         scratch_rule=SCRATCH_RULE if scratch_dir else "",
     )
