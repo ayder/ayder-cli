@@ -148,6 +148,7 @@ class TestFactoryTUIIntegration:
             mock_components.tool_registry = Mock()
             mock_components.tool_registry.execute.return_value = "src/\n  main.py"
             mock_components.tool_registry.get_system_prompts.return_value = ""
+            mock_components.environment_prompt = ""
             mock_components.system_prompt = "test system prompt"
             mock_create_runtime.return_value = mock_components
 
@@ -190,6 +191,7 @@ class TestFactoryTUIIntegration:
             mock_components.tool_registry = Mock()
             mock_components.tool_registry.execute.return_value = "src/\n  main.py"
             mock_components.tool_registry.get_system_prompts.return_value = ""
+            mock_components.environment_prompt = ""
             mock_components.context_manager = Mock()
             mock_create_runtime.return_value = mock_components
 
@@ -232,6 +234,7 @@ class TestFactoryTUIIntegration:
             mock_components.tool_registry = Mock()
             mock_components.tool_registry.execute.return_value = "src/\n  main.py"
             mock_components.tool_registry.get_system_prompts.return_value = "[TOOLS]"
+            mock_components.environment_prompt = ""
             mock_create_runtime.return_value = mock_components
 
             app = AyderApp(system_prompt_override="TUI_CUSTOM")

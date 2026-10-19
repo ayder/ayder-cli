@@ -365,7 +365,8 @@ def render_skill_block(info: SkillInfo) -> str | ToolError:
     _, body = parse_frontmatter(text)
     lines = [
         f"{LOADED_MARKER}{info.name}",
-        f"Source: {info.layer} ({info.path.parent})",
+        # Layer only: models took the skill's absolute path for the project root.
+        f"Source: {info.layer}",
     ]
     resources = skill_resources(info)
     if resources:

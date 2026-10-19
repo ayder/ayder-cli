@@ -4,6 +4,9 @@ Each prompt template is labeled with a comment indicating which module/function
 is responsible for using it, along with the REASON for prompting the LLM.
 """
 
+from datetime import datetime
+from pathlib import Path
+
 # =============================================================================
 # CORE SYSTEM PROMPT
 # =============================================================================
@@ -33,6 +36,55 @@ needs the user's decision.
 MINIMAL_SYSTEM_PROMPT = """You are a developer and coding assistant. Analyze understand and the user request. Be concise. Execute one implementation step at a time."""
 
 EXTENDED_SYSTEM_PROMPT = STANDARD_SYSTEM_PROMPT
+
+# =============================================================================
+# SESSION ENVIRONMENT SECTION
+# =============================================================================
+# Used by: runtime_factory.create_runtime() / create_agent_runtime(), after the
+# base prompt and before the tool prompts, for every tier and override.
+# REASON: Without the project's absolute path a model guessed one (the home
+# directory, from a skill header) and ran `git init` there. Built once per
+# session so the frozen prompt and its cache prefix never change.
+
+ENVIRONMENT_PROMPT = """
+
+## Environment
+Working directory: {working_directory}
+Session start: {started_at}{scratch_line}
+
+Your workspace is {workspace}.
+Outside it, read only paths the user names or the task requires, and create,
+modify or initialize nothing (including `git init`) without the user's consent.{scratch_rule}
+"""
+
+# REASON: Models put temporary files in /tmp by habit. A per-session directory
+# there (core/context.py:new_scratch_dir) gives them a sanctioned place, and
+# the file tools accept it. Omitted when the directory could not be created.
+SCRATCH_LINE = "\nScratch directory: {scratch_dir}"
+
+SCRATCH_RULE = "\nPut temporary files in the scratch directory, not in /tmp or ~/tmp."
+
+
+def build_environment_prompt(
+    working_directory: Path, started_at: datetime, scratch_dir: Path | None = None
+) -> str:
+    """Render the session environment section for the system prompt.
+
+    ``started_at`` should be timezone-aware local time; it renders as ISO 8601
+    to the minute with its UTC offset (e.g. 2026-10-19T03:33+03:00).
+    ``scratch_dir`` adds the scratch directory line and its rule.
+    """
+    return ENVIRONMENT_PROMPT.format(
+        working_directory=working_directory,
+        started_at=started_at.isoformat(timespec="minutes"),
+        workspace=(
+            "the working directory and the scratch directory"
+            if scratch_dir
+            else "the working directory"
+        ),
+        scratch_line=SCRATCH_LINE.format(scratch_dir=scratch_dir) if scratch_dir else "",
+        scratch_rule=SCRATCH_RULE if scratch_dir else "",
+    )
 
 # =============================================================================
 # AGENTIC ORCHESTRATOR SYSTEM PROMPT

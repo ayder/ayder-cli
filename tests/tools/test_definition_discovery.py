@@ -307,3 +307,42 @@ class TestBackwardCompatibility:
             assert schema["type"] == "function"
             assert "function" in schema
             assert schema["function"]["name"] == td.name
+
+
+class TestRequiredInDescriptions:
+    """Providers' chat templates drop the schema's `required` array, so a model
+    sees requiredness only in the parameter descriptions (live probe, 2.5.1)."""
+
+    def _td(self, properties, required):
+        return ToolDefinition(
+            name="probe",
+            description="Probe.",
+            func_ref="x:y",
+            parameters={"type": "object", "properties": properties, "required": required},
+        )
+
+    def test_required_parameters_are_marked_in_the_schema(self):
+        td = self._td(
+            {"path": {"type": "string", "description": "File path."},
+             "bare": {"type": "string"},
+             "mode": {"type": "string", "description": "Optional mode."}},
+            ["path", "bare"],
+        )
+        props = td.to_openai_schema()["function"]["parameters"]["properties"]
+        assert props["path"]["description"] == "Required. File path."
+        assert props["bare"]["description"] == "Required."
+        assert props["mode"]["description"] == "Optional mode."
+        assert props["path"]["type"] == "string"
+
+    def test_the_definition_itself_is_not_changed(self):
+        td = self._td({"path": {"type": "string", "description": "File path."}}, ["path"])
+        td.to_openai_schema()
+        assert td.parameters["properties"]["path"]["description"] == "File path."
+
+    def test_every_shipped_tool_marks_its_required_parameters(self):
+        for td in TOOL_DEFINITIONS:
+            props = td.to_openai_schema()["function"]["parameters"].get("properties", {})
+            for name in td.parameters.get("required", []):
+                text = props[name]["description"]
+                assert text.startswith("Required."), (td.name, name)
+                assert "Required. Required." not in text, (td.name, name)

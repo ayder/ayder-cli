@@ -18,7 +18,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="task",
         description=(
             "Manage .ayder/tasks/ task files. Single tool, dispatched on "
-            "`action`: create | list | show | status | update_status | update. "
+            "`action`: create | list | show | status | update_status | update | "
+            "update_dependencies. "
             "Output is bounded plain text (use offset/limit/max_chars/section to "
             "page); prefer this over file_editor for all task operations."
         ),
@@ -39,12 +40,14 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                         "status",
                         "update_status",
                         "update",
+                        "update_dependencies",
                     ],
                     "description": (
                         "Operation to perform. create: new task. list: paged "
                         "rows. show: bounded body/section. status: current "
                         "status. update_status: change status. update: replace "
-                        "one PRD section."
+                        "one PRD section. update_dependencies: replace the "
+                        "dependency list."
                     ),
                 },
                 "title": {
@@ -63,8 +66,11 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 "dependencies": {
                     "type": "string",
                     "description": (
-                        "[create] Comma-separated task IDs this depends on, e.g. "
-                        "'TASK-003,TASK-004' or '3,4'."
+                        "[create/update_dependencies] Comma-separated IDs of "
+                        "existing tasks this one depends on, e.g. 'TASK-003,TASK-004' "
+                        "or '3,4'. A task cannot depend on itself, on a task not yet "
+                        "created, or close a cycle. [update_dependencies] Empty "
+                        "clears the list."
                     ),
                 },
                 "branch": {
@@ -85,7 +91,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 "identifier": {
                     "type": "string",
                     "description": (
-                        "[show/status/update_status/update] Task identifier: ID "
+                        "[show/status/update_status/update/update_dependencies] Task "
+                        "identifier: ID "
                         "('7', '007', 'TASK-007'), filename, path, or slug."
                     ),
                 },

@@ -313,6 +313,7 @@ class AyderApp(App):
             system_prompt_override=system_prompt_override,
         )
         self.config = rt.config
+        self._environment_prompt = rt.environment_prompt
         if self._log_settings is None:
             from ayder_cli.cli import build_logging_settings
 
@@ -532,7 +533,7 @@ class AyderApp(App):
         raw_tags = getattr(self.config, "tool_tags", None) if not isinstance(self.config, dict) else self.config.get("tool_tags")
         tags = frozenset(raw_tags) if raw_tags else None
         tool_prompts = self.registry.get_system_prompts(tags=tags)
-        system_prompt = base_prompt + tool_prompts
+        system_prompt = base_prompt + self._environment_prompt + tool_prompts
         self.messages.append({"role": "system", "content": system_prompt})
 
     def _replay_history(self, chat_view) -> None:
@@ -556,7 +557,7 @@ class AyderApp(App):
                 base_prompt = self._system_prompt_override
             else:
                 base_prompt = get_system_prompt(self.config.prompt)
-            self.messages[0]["content"] = base_prompt + tool_prompts
+            self.messages[0]["content"] = base_prompt + self._environment_prompt + tool_prompts
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel.

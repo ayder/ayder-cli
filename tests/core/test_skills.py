@@ -116,10 +116,13 @@ def test_block_strips_frontmatter_and_lists_files(tmp_path):
     block = sk.render_skill_block(sk.read_skill_info(skill_dir, "user"))
     assert block == (
         "### SKILL LOADED: eng\n"
-        f"Source: user ({skill_dir})\n"
+        "Source: user\n"
         'Files: plan.md, ref/check.md (read with skill(action="read", name="eng", path=...))\n'
         "\n# Eng\nDo it\n\n### END SKILL: eng"
     )
+    # Baseline regression: the header carried the skill's absolute path, which a
+    # model took as the project root (2026-10-19 git init in the home directory).
+    assert str(skill_dir) not in block
 
 
 def test_block_without_files_has_no_files_line(tmp_path):

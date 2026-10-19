@@ -39,7 +39,7 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
-- **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked.
+- **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked. The one exception is the session scratch directory, `/tmp/ayder-<uid>/<project>-<hash>/<session>/` (mode 0700, one subdirectory per agent run), which the system prompt names as the place for temporary files and which the file tools accept. It is not cleaned up; the OS clears `/tmp`.
 - **Safe mode** (TUI): Blocks `file_editor`, `run_shell_command`, `run_background_process`, `kill_background_process`, and `fetch_web`.
 - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
 - You may also prefer to run ayder-cli in a container for additional security.
@@ -165,7 +165,7 @@ max_output_tokens = 32768     # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
-# skills = ["engineering"]    # or "none"; default: the built-in skills
+# skills = ["development-workflow"]    # or "none"; default: the built-in skills
 agent_timeout = 300           # Seconds before a background agent is cancelled
 
 [logging]
@@ -311,7 +311,8 @@ ayder -f instructions.txt
 ayder --stdin < prompt.txt
 
 # Override the main LLM system prompt with a file
-# (tool instructions are still appended)
+# (the environment section with working directory and start time,
+#  and the tool instructions, are still appended)
 ayder --system-prompt prompt-file.md "refactor this code"
 ```
 
@@ -435,8 +436,9 @@ later one overrides an earlier one with the same name:
 2. your skills in `~/.ayder/skills/<name>/`
 3. project skills in `<project>/.ayder/skills/<name>/`
 
-ayder ships an `engineering` skill (build, change, debug or review code;
-research; plan multi-step work). The system prompt is a general assistant;
+ayder ships a `development-workflow` skill for multi-step software work: a plan
+note and tasks, approval before any project file changes, then execution with
+per-task status. Small edits and questions skip it. The system prompt is a general assistant;
 when a skill fits the request, the model loads it itself.
 
 The skills enabled for a session are listed in the system prompt under
@@ -445,7 +447,7 @@ model. The `skills` setting chooses them:
 
 | `skills` | Enabled skills |
 |---|---|
-| not set | the built-in skills (`engineering`), including your or the project's copy of the same name |
+| not set | the built-in skills (`development-workflow`), including your or the project's copy of the same name |
 | `"none"` or `[]` | none: no skill tool, no catalog |
 | `["a", "b"]` | exactly these names, from any layer |
 

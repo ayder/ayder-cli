@@ -1,6 +1,7 @@
 """Consolidated ``task(action=...)`` handler (spec 01).
 
-One tool covers ``create | list | show | status | update_status | update``.
+One tool covers ``create | list | show | status | update_status | update |
+update_dependencies``.
 Every action returns short **plain text** bounded by construction, so the
 chat-loop's generic tool-result truncation (which *replaces* over-budget JSON
 with a useless structural summary) is never triggered. The tool definition sets
@@ -66,18 +67,77 @@ def _canonical_id(path) -> str:
     return f"TASK-{tid:03d}" if tid is not None else path.stem
 
 
-def _normalize_deps(dependencies: str | None) -> str:
-    """Normalize ``"3, TASK-004 , 5"`` → ``"TASK-003, TASK-004, TASK-005"``."""
-    if not dependencies or not dependencies.strip():
-        return "none"
-    out: list[str] = []
-    for raw in dependencies.split(","):
+_DEPS_LINE = re.compile(r"(-\s+\*\*Dependencies:\*\*[ \t]+).*")
+
+
+def _parse_deps(dependencies: str | None) -> list[int] | ToolError:
+    """Parse ``"3, TASK-004 , 5"`` → ``[3, 4, 5]`` (duplicates dropped)."""
+    ids: list[int] = []
+    for raw in (dependencies or "").split(","):
         tok = raw.strip()
         if not tok:
             continue
         m = re.fullmatch(r"(?:TASK-)?0*(\d+)", tok, re.IGNORECASE)
-        out.append(f"TASK-{int(m.group(1)):03d}" if m else tok)
-    return ", ".join(out) if out else "none"
+        if m is None:
+            return ToolError(
+                f"Dependency '{tok}' is not a task ID (use 'TASK-003' or '3')",
+                "validation",
+            )
+        if int(m.group(1)) not in ids:
+            ids.append(int(m.group(1)))
+    return ids
+
+
+def _format_deps(ids: list[int]) -> str:
+    return ", ".join(f"TASK-{i:03d}" for i in ids) if ids else "none"
+
+
+def _dependency_graph(project_ctx: ProjectContext) -> dict[int, list[int]]:
+    """Every task id mapped to the ids on its Dependencies line."""
+    graph: dict[int, list[int]] = {}
+    for path in _confined_task_files(_get_tasks_dir(project_ctx)):
+        tid = _extract_id(path.name)
+        if tid is None:
+            continue
+        m = _DEPS_LINE.search(path.read_text(encoding="utf-8"))
+        line = m.group(0) if m else ""
+        graph[tid] = [int(d) for d in re.findall(r"TASK-0*(\d+)", line, re.IGNORECASE)]
+    return graph
+
+
+def _check_deps(
+    project_ctx: ProjectContext, task_id: int, deps: list[int]
+) -> ToolError | None:
+    """Reject a dependency on the task itself, on a missing task, or one that closes a cycle.
+
+    Callers hold ``_ID_LOCK`` so the graph cannot change underneath the check.
+    """
+    if task_id in deps:
+        return ToolError(f"TASK-{task_id:03d} cannot depend on itself", "validation")
+    graph = _dependency_graph(project_ctx)
+    missing = [d for d in deps if d not in graph]
+    if missing:
+        # Parallel creates are numbered in completion order, so a dependency
+        # must already exist when the task that needs it is created.
+        return ToolError(
+            f"Unknown dependency {_format_deps(missing)}: create a task only after "
+            "the tasks it depends on exist",
+            "validation",
+        )
+    graph[task_id] = deps
+    seen: set[int] = set()
+    stack = list(deps)
+    while stack:
+        tid = stack.pop()
+        if tid == task_id:
+            return ToolError(
+                f"These dependencies would make a cycle back to TASK-{task_id:03d}",
+                "validation",
+            )
+        if tid not in seen:
+            seen.add(tid)
+            stack.extend(graph.get(tid, []))
+    return None
 
 
 def _strip_caller_signature(body: str) -> str:
@@ -183,7 +243,9 @@ def _create(
         )
     slug = _title_to_slug(title)
     br = (branch or f"agent/{slug}").strip()
-    deps = _normalize_deps(dependencies)
+    deps = _parse_deps(dependencies)
+    if isinstance(deps, ToolError):
+        return deps
     clean_body = _strip_caller_signature(body) if body else ""
 
     _ensure_tasks_dir(project_ctx)
@@ -194,10 +256,15 @@ def _create(
     with _ID_LOCK:
         for _ in range(5):
             task_id = _next_id(project_ctx)
+            invalid = _check_deps(project_ctx, task_id, deps)
+            if invalid is not None:
+                return invalid
             path = _get_tasks_dir(project_ctx) / f"TASK-{task_id:03d}-{slug}.md"
             try:
                 with open(path, "x", encoding="utf-8") as fh:  # O_EXCL: atomic claim
-                    fh.write(_render_task(task_id, title, st, br, deps, clean_body))
+                    fh.write(
+                        _render_task(task_id, title, st, br, _format_deps(deps), clean_body)
+                    )
             except FileExistsError as exc:
                 last_err = exc
                 continue
@@ -326,6 +393,32 @@ def _update_status(
     return ToolSuccess(f"{_canonical_id(path)}: {current} → {target}")
 
 
+def _update_dependencies(
+    project_ctx: ProjectContext, identifier: str | None, dependencies: str | None
+) -> ToolResult:
+    if not identifier:
+        return ToolError(
+            "identifier is required for action 'update_dependencies'", "validation"
+        )
+    deps = _parse_deps(dependencies)
+    if isinstance(deps, ToolError):
+        return deps
+    path = resolve_task_path(project_ctx, identifier)
+    task_id = _extract_id(path.name) if path is not None else None
+    if path is None or task_id is None:
+        return ToolError(f"Task not found: {identifier}", "not_found")
+    with _ID_LOCK:
+        invalid = _check_deps(project_ctx, task_id, deps)
+        if invalid is not None:
+            return invalid
+        text = path.read_text(encoding="utf-8")
+        new_text, n = _DEPS_LINE.subn(rf"\g<1>{_format_deps(deps)}", text, count=1)
+        if n == 0:
+            return ToolError("No Dependencies line found in task file", "execution")
+        path.write_text(new_text, encoding="utf-8")
+    return ToolSuccess(f"TASK-{task_id:03d} · dependencies: {_format_deps(deps)}")
+
+
 def _update(
     project_ctx: ProjectContext,
     identifier: str | None,
@@ -423,8 +516,10 @@ def _dispatch(
         return _update_status(project_ctx, identifier, status)
     if act == "update":
         return _update(project_ctx, identifier, section, content)
+    if act == "update_dependencies":
+        return _update_dependencies(project_ctx, identifier, dependencies)
     return ToolError(
         f"Unknown action '{action}'. Valid: create, list, show, status, "
-        "update_status, update",
+        "update_status, update, update_dependencies",
         "validation",
     )

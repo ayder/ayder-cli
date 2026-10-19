@@ -100,7 +100,7 @@ tool_tags = ["core", "metadata", "background", "http"]
 # Skills the session's model may load (listed under "### Skills" in the system
 # prompt). Not set = the built-in skills; "none" = no skill tool; or a strict
 # list. A [llm.*] profile's skills wins over this one for the session.
-# skills = ["engineering"]
+# skills = ["development-workflow"]
 
 [ui]
 # TUI layout (theme) — picks the chrome/layout:
@@ -229,7 +229,7 @@ think = true                        # default; set false if the selected model r
 [agents.pm_spec]
 provider = "ollama_cloud"
 model = "glm-5.2:cloud"
-# skills = ["engineering"]          # wins over the provider profile's skills; [app] is never read
+# skills = ["development-workflow"] # wins over the provider profile's skills; [app] is never read
 temperature = 0.4
 max_output_tokens = 8192
 reasoning_effort = "high"

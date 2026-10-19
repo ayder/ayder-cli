@@ -20,6 +20,7 @@ def _app():
     app.registry.get_system_prompts.return_value = "[TOOLS]"
     app.config = Config()
     app._system_prompt_override = None
+    app._environment_prompt = "[ENV]"
     app.messages = []
     app.chat_loop = MagicMock()
     app.chat_loop.config.tool_tags = frozenset({"core"})
@@ -33,6 +34,15 @@ def test_startup_prompt_has_no_project_structure():
     assert content.endswith("[TOOLS]")
     assert "PROJECT STRUCTURE" not in content
     app.registry.execute.assert_not_called()
+
+
+def test_startup_and_rebuild_keep_the_environment_section():
+    """Baseline regression: both builds carry the session's frozen environment section."""
+    app = _app()
+    app._init_system_prompt()
+    assert "[ENV]" in app.messages[0]["content"]
+    app.update_system_prompt_model()
+    assert "[ENV]" in app.messages[0]["content"]
 
 
 def test_model_switch_rebuild_has_no_project_structure():

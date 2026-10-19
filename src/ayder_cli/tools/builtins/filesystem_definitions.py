@@ -115,21 +115,21 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 "content": {
                     "type": "string",
                     "description": (
-                        "Content for 'write' (the complete file) or 'insert' (the line). "
+                        "Required for 'write' (the complete file) and 'insert' (the line). "
                         "Accepted up to 10MB."
                     ),
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "Exact string to find for 'replace' operation",
+                    "description": "Required for 'replace'. Exact string to find.",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "New string to substitute for 'replace' operation",
+                    "description": "Required for 'replace'. New string to substitute.",
                 },
                 "line_number": {
                     "type": "integer",
-                    "description": "Line number (1-based) for 'insert' or 'delete' operations",
+                    "description": "Required for 'insert' and 'delete'. Line number (1-based).",
                 },
                 "replace_all": {
                     "type": "boolean",
