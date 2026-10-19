@@ -165,7 +165,7 @@ max_output_tokens = 32768     # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
-# skills = ["engineering"]    # or "none"; default: the built-in skills
+# skills = ["development-workflow"]    # or "none"; default: the built-in skills
 agent_timeout = 300           # Seconds before a background agent is cancelled
 
 [logging]
@@ -436,8 +436,8 @@ later one overrides an earlier one with the same name:
 2. your skills in `~/.ayder/skills/<name>/`
 3. project skills in `<project>/.ayder/skills/<name>/`
 
-ayder ships an `engineering` skill (build, change, debug or review code;
-research; plan multi-step work). The system prompt is a general assistant;
+ayder ships a `development-workflow` skill (orient, align, plan, execute and
+validate multi-step or risky software work; small edits skip it). The system prompt is a general assistant;
 when a skill fits the request, the model loads it itself.
 
 The skills enabled for a session are listed in the system prompt under
@@ -446,7 +446,7 @@ model. The `skills` setting chooses them:
 
 | `skills` | Enabled skills |
 |---|---|
-| not set | the built-in skills (`engineering`), including your or the project's copy of the same name |
+| not set | the built-in skills (`development-workflow`), including your or the project's copy of the same name |
 | `"none"` or `[]` | none: no skill tool, no catalog |
 | `["a", "b"]` | exactly these names, from any layer |
 

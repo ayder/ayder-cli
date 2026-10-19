@@ -1,9 +1,9 @@
 ---
-name: engineering
-description: Build, change, debug or review code in a codebase; research a technical problem; plan multi-step technical work.
+name: development-workflow
+description: Multi-step or risky software work - a new feature, a refactor, a bug whose cause is unknown, a change across several files. Not for small, obvious edits, quick fixes or questions.
 ---
 
-# Engineering
+# Development workflow
 
 Use this workflow for software work in the current project. Act as an experienced engineer.
 
