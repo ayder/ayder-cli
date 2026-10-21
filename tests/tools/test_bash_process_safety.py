@@ -180,3 +180,19 @@ def test_gone_group_is_never_signalled_again(pm, tmp_path, monkeypatch):
     pm.kill_process(mp.id)
     pm._cleanup_all()
     assert sent == []
+
+
+def test_status_refresh_marks_an_empty_group_gone(pm, tmp_path, monkeypatch):
+    """Baseline regression (review): a process that exited on its own and was
+    never stopped got its (possibly reused) pgid signalled at exit."""
+    import ayder_cli.process_manager as pmmod
+
+    mp = pm.start_process("echo done", cwd=str(tmp_path))
+    mp.process.wait(timeout=5)
+    pm.list_processes()  # the refresh sees the leader exited and the group empty
+
+    sent = []
+    monkeypatch.setattr(pmmod, "_group_alive", lambda pgid: True)
+    monkeypatch.setattr(pmmod.os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    pm._cleanup_all()
+    assert sent == []

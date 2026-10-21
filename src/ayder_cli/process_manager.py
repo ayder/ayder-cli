@@ -48,6 +48,9 @@ class ManagedProcess:
     start_time: float
     status: str = "running"  # "running" or "exited"
     exit_code: Optional[int] = None
+    # Set once the group was seen empty: the reaped leader's pid may then be
+    # reused by an unrelated group, so it is never signalled again.
+    group_gone: bool = False
     stdout_buffer: Deque[str] = field(default_factory=lambda: deque(maxlen=500))
     stderr_buffer: Deque[str] = field(default_factory=lambda: deque(maxlen=500))
     _stdout_thread: Optional[threading.Thread] = field(default=None, repr=False)
@@ -80,9 +83,7 @@ class ProcessManager:
         with self._lock:
             # Refresh statuses before counting
             for mp in self._processes.values():
-                if mp.status == "running" and mp.process.poll() is not None:
-                    mp.status = "exited"
-                    mp.exit_code = mp.process.returncode
+                self._refresh(mp)
 
             running_count = sum(
                 1 for mp in self._processes.values() if mp.status == "running"
@@ -135,12 +136,20 @@ class ProcessManager:
     def get_process(self, process_id: int) -> Optional[ManagedProcess]:
         """Get a managed process by ID, refreshing its status."""
         mp = self._processes.get(process_id)
-        if mp and mp.status == "running":
+        if mp:
+            self._refresh(mp)
+        return mp
+
+    @staticmethod
+    def _refresh(mp: ManagedProcess) -> None:
+        """Update *mp*'s status, and note an empty group so its pgid is never signalled again."""
+        if mp.status == "running":
             ret = mp.process.poll()
             if ret is not None:
                 mp.status = "exited"
                 mp.exit_code = ret
-        return mp
+        if mp.status == "exited" and not mp.group_gone and _has_killpg():
+            mp.group_gone = not _group_alive(mp.process.pid)
 
     def kill_process(self, process_id: int) -> bool:
         """Kill a background process and its whole group. SIGTERM, then SIGKILL@5s.
@@ -156,9 +165,17 @@ class ProcessManager:
         if mp is None:
             return False
 
-        killed = self._terminate_tree(mp.process)
+        killed = self._terminate_group(mp)
         mp.status = "exited"
         mp.exit_code = mp.process.returncode
+        return killed
+
+    def _terminate_group(self, mp: ManagedProcess) -> bool:
+        """Terminate *mp*'s group once; afterwards its pgid is never signalled."""
+        if mp.group_gone:
+            return False
+        killed = self._terminate_tree(mp.process)
+        mp.group_gone = True
         return killed
 
     @staticmethod
@@ -207,18 +224,14 @@ class ProcessManager:
     def list_processes(self) -> list:
         """Return all managed processes, refreshing statuses."""
         for mp in self._processes.values():
-            if mp.status == "running":
-                ret = mp.process.poll()
-                if ret is not None:
-                    mp.status = "exited"
-                    mp.exit_code = ret
+            self._refresh(mp)
         return list(self._processes.values())
 
     def _cleanup_all(self):
         """Terminate every process group, including exited leaders' (called at exit)."""
         for mp in self._processes.values():
             try:
-                self._terminate_tree(mp.process)
+                self._terminate_group(mp)
             except Exception:  # noqa: BLE001 - atexit cleanup: one process that resists termination must not stop the others being killed
                 logger.opt(exception=True).debug(
                     "Failed to terminate process tree for background process {}",
