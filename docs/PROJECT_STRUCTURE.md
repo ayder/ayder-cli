@@ -100,7 +100,7 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 4. **Single Loop**: `ChatLoop` (in `loops/chat_loop.py`) owns the full async LLM + tool execution loop; both CLI and TUI route through it
 5. **Single Execution Path**: `ExecutionPolicy.execute_with_registry()` is the sole tool execution entry point; validation → permission → execute, no inline policy in loop code
 6. **Single Validation Path**: `ValidationAuthority → SchemaValidator` is the only validation stage; schema derived from live `TOOL_DEFINITIONS` registry (no hardcoded lists)
-7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security (project root plus the session scratch directory from `new_scratch_dir`)
+7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security (project root plus the session scratch directory from `new_scratch_dir`). Only a path outside the sandbox (`PathOutsideSandboxError`) is reported as a security error; other bad input, such as a binary file or a non-numeric line number, is a validation error
 8. **Single Execution Engine**: Both TUI and CLI drive `ChatLoop.run()` through the `ChatCallbacks` protocol (`AppCallbacks` and `CliCallbacks` respectively); CLI runs it via `asyncio.run`
 
 ---

@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.log import get_logger
 
@@ -174,9 +174,11 @@ def create_note(
         rel_path = project_ctx.to_relative(path)
         return ToolSuccess(f"Note created: {rel_path}")
 
-    except ValueError as e:
+    except PathOutsideSandboxError as e:
         # An unconfined notes dir or note target (e.g. an outward symlink).
         return ToolError(f"Security Error: {e}", "security")
+    except ValueError as e:
+        return ToolError(f"Error: {e}", "validation")
     except Exception as e:  # noqa: BLE001 - tool boundary: any note-write failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error creating note: {str(e)}", "execution")
 

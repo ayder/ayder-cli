@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.log import get_logger
 
@@ -301,8 +301,10 @@ def manage_environment_vars(
                 f"File: {project_ctx.to_relative(env_path)}"
             )
 
+    except PathOutsideSandboxError as e:
+        return ToolError(f"Security Error: {e}", "security")
     except ValueError as e:
-        return ToolError(f"Security Error: {str(e)}", "security")
+        return ToolError(f"Error: {e}", "validation")
     except Exception as e:  # noqa: BLE001 - tool boundary: any .env read or write failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error managing environment variables: {str(e)}", "execution")
 

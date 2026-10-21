@@ -12,7 +12,7 @@ import json
 import time
 from typing import Any, Callable, Optional
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError, ToolResult
 from ayder_cli.log import get_logger
 from ayder_cli.tools.hooks import HookManager, ToolExecutionResult, ToolExecutionStatus
@@ -85,8 +85,10 @@ def execute_tool(
     # Step 2: Normalize (aliases, paths, type coercion)
     try:
         args = normalize_arguments(tool_name, args, project_ctx)
+    except PathOutsideSandboxError as e:
+        return ToolError(f"Security Error: {e}", "security")
     except ValueError as e:
-        return ToolError(f"Security Error: {str(e)}", "security")
+        return ToolError(f"Error: {e}", "validation")
 
     # Step 3: Check tool function exists
     if tool_func is None:

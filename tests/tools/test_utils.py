@@ -115,7 +115,7 @@ class TestPrepareNewContentReplaceString:
                 if r["message"].startswith("Security error in replace_string:")]
         assert hits, "security-error record never emitted"
         assert hits[0]["level"].name == "WARNING"
-        assert hits[0]["message"] == "Security error in replace_string: ValueError"
+        assert hits[0]["message"] == "Security error in replace_string: PathOutsideSandboxError"
         assert sentinel not in loguru_caplog.text
         assert "hunter2" not in loguru_caplog.text
 
@@ -239,7 +239,7 @@ def test_insert_line_preview_error_logs_type_only(loguru_caplog):
             if r["message"].startswith("Error in insert_line preview:")]
     assert hits, "insert_line preview record never emitted"
     assert hits[0]["level"].name == "WARNING"
-    assert hits[0]["message"] == "Error in insert_line preview: ValueError"
+    assert hits[0]["message"] == "Error in insert_line preview: PathOutsideSandboxError"
     assert sentinel not in loguru_caplog.text
     assert "hunter2" not in loguru_caplog.text
 
@@ -257,6 +257,6 @@ def test_delete_line_preview_error_logs_type_only(loguru_caplog):
             if r["message"].startswith("Error in delete_line preview:")]
     assert hits, "delete_line preview record never emitted"
     assert hits[0]["level"].name == "WARNING"
-    assert hits[0]["message"] == "Error in delete_line preview: ValueError"
+    assert hits[0]["message"] == "Error in delete_line preview: PathOutsideSandboxError"
     assert sentinel not in loguru_caplog.text
     assert "hunter2" not in loguru_caplog.text

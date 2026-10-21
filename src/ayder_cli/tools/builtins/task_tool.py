@@ -29,7 +29,7 @@ on ``read_task`` there.
 import re
 from datetime import datetime
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError, ToolResult, ToolSuccess
 
 from .tasks import (
@@ -496,9 +496,11 @@ def task(
             project_ctx, action, title, body, dependencies, branch, status,
             identifier, section, meta_only, max_chars, offset, limit, content,
         )
-    except ValueError as exc:
+    except PathOutsideSandboxError as exc:
         # An unconfined .ayder/tasks (e.g. a symlink leaving the project).
         return ToolError(f"Security Error: {exc}", "security")
+    except ValueError as exc:
+        return ToolError(f"Error: {exc}", "validation")
 
 
 def _dispatch(

@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch
 
 from ayder_cli.tools.builtins import filesystem, search
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError
 
 # Create a namespace object that mimicks the old 'impl' module
@@ -44,7 +44,7 @@ class TestToolPathSecurity:
         ctx = ProjectContext(str(tmp_path))
 
         # Mock validate_path to ensure it's called
-        with patch.object(ProjectContext, 'validate_path', side_effect=ValueError("Access denied")) as mock_validate:
+        with patch.object(ProjectContext, 'validate_path', side_effect=PathOutsideSandboxError("Access denied")) as mock_validate:
             # list_files
             result = impl.file_explorer(ctx, ".")
             assert isinstance(result, ToolError)

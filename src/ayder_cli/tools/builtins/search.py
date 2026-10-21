@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.log import get_logger
 
@@ -99,8 +99,10 @@ def search_codebase(
                 output_format,
                 target_is_file=target_is_file,
             )
+    except PathOutsideSandboxError as e:
+        return ToolError(f"Security Error: {e}", "security")
     except ValueError as e:
-        return ToolError(f"Security Error: {str(e)}", "security")
+        return ToolError(f"Error: {e}", "validation")
     except Exception as e:  # noqa: BLE001 - tool boundary: model-supplied search arguments must fail as a ToolError, never as a crash
         return ToolError(f"Error during search: {str(e)}", "execution")
 

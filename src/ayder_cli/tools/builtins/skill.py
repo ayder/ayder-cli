@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.context_manager import truncate_tool_result
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.core.skills import (
@@ -124,8 +124,10 @@ def skill(
                 return _not_found(scope, name)
             try:
                 target = resolve_resource(info, path)
-            except ValueError as exc:
+            except PathOutsideSandboxError as exc:
                 return ToolError(f"Security Error: {exc}", "security")
+            except ValueError as exc:
+                return ToolError(f"Error: {exc}", "validation")
             except FileNotFoundError:
                 return ToolError(f"Skill '{name}' has no file '{path}'.", "validation")
             try:

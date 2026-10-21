@@ -10,7 +10,7 @@ File-I/O lives in ``notes.py``; this module owns dispatch, per-action
 validation, and output bounding (``offset`` / ``max_chars`` / ``limit``).
 """
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError, ToolResult, ToolSuccess
 
 from .notes import (
@@ -146,9 +146,11 @@ def note(
             project_ctx, action, note_id, content, tags, mode, max_chars, offset,
             limit, prefix,
         )
-    except ValueError as exc:
+    except PathOutsideSandboxError as exc:
         # An unconfined notes dir or note target (e.g. an outward symlink).
         return ToolError(f"Security Error: {exc}", "security")
+    except ValueError as exc:
+        return ToolError(f"Error: {exc}", "validation")
 
 
 def _dispatch(
