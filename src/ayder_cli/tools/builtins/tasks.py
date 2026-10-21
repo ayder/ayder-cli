@@ -230,7 +230,7 @@ def list_tasks(
     return ToolSuccess("\n".join(lines))
 
 
-_ID_FORM = re.compile(r"^(?:TASK-)?0*(\d+)$", re.IGNORECASE)
+_ID_FORM = re.compile(r"^(?:TASK-)?0*(\d+)(?:\.md)?$", re.IGNORECASE)
 
 
 def _slug_matches(tasks_dir: Path, pattern: str) -> list[Path]:
@@ -239,7 +239,7 @@ def _slug_matches(tasks_dir: Path, pattern: str) -> list[Path]:
     The slug is the stem after ``TASK-NNN-``; ``pattern`` is lower-case.
     """
     files = list(_confined_task_files(tasks_dir))
-    exact = [p for p in files if p.stem.lower().split("-", 2)[2:] == [pattern]]
+    exact = [p for p in files if re.fullmatch(rf"task-\d+-{re.escape(pattern)}", p.stem.lower())]
     return exact or [p for p in files if pattern in p.stem.lower()]
 
 
