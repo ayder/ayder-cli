@@ -63,7 +63,7 @@ class TestFileExplorerDirectory:
         files = json.loads(result)
         assert "file1.txt" in files
         assert "file2.txt" in files
-        assert "subdir" in files
+        assert "subdir/" in files
 
     def test_list_files_specified_directory(self, tmp_path, project_context):
         """Test listing files in specified directory."""

@@ -38,6 +38,7 @@ READ_FILE_DEFAULT_LINES = 2000
 # A minified bundle is one huge line, so lines and pages are capped by size too.
 READ_FILE_MAX_LINE_CHARS = 2000
 READ_FILE_MAX_PAGE_CHARS = 100_000
+FILE_EXPLORER_MAX_ENTRIES = 500
 
 
 def _format_size(n_bytes: int) -> str:
@@ -171,8 +172,17 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
         abs_path = project_ctx.validate_path(path)
         
         if abs_path.is_dir():
-            files = [item.name for item in abs_path.iterdir()]
-            return ToolSuccess(json.dumps(files))
+            entries = sorted(
+                (item.name + "/" if item.is_dir() else item.name for item in abs_path.iterdir()),
+                key=str.lower,
+            )
+            listing = json.dumps(entries[:FILE_EXPLORER_MAX_ENTRIES])
+            if len(entries) > FILE_EXPLORER_MAX_ENTRIES:
+                listing += (
+                    f"\n[showing {FILE_EXPLORER_MAX_ENTRIES} of {len(entries)} entries; "
+                    "list a subdirectory or use bash]"
+                )
+            return ToolSuccess(listing)
             
         elif abs_path.exists():
             rel_path = project_ctx.to_relative(abs_path)

@@ -18,7 +18,10 @@ _FILE_PATH_ALIASES = (
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="file_explorer",
-        description="List files in a directory or get metadata for a specific file.",
+        description=(
+            "List files in a directory or get metadata for a specific file. "
+            "Directories end with '/'; at most 500 entries."
+        ),
         description_template="Exploring path {path}",
         tags=("core",),
         func_ref="ayder_cli.tools.builtins.filesystem:file_explorer",
