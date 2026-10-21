@@ -66,6 +66,12 @@ def test_start_below_one(ctx, tmp_path):
     _validation(read_file(ctx, "f.txt", start_line=-5), "start_line must be >= 1")
 
 
+def test_start_zero(ctx, tmp_path):
+    """Baseline regression (review): 0 was read as 'not given'."""
+    _write(tmp_path, "f.txt", "a\nb\n")
+    _validation(read_file(ctx, "f.txt", start_line=0), "start_line must be >= 1")
+
+
 def test_explicit_range_unchanged(ctx, tmp_path):
     """Preservation."""
     _write(tmp_path, "f.txt", "a\nb\nc\nd\ne\n")

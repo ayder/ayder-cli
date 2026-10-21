@@ -105,3 +105,23 @@ def test_run_tui_reuses_resume_session_id(tmp_path, monkeypatch):
         resume_session_id="a1b2-c3d4",
     )
     assert (tmp_path / ".ayder" / "sessions" / "a1b2-c3d4.json").exists()
+
+
+def test_run_tui_saves_custom_system_prompt(tmp_path, monkeypatch):
+    """Baseline regression (review): the override was never saved."""
+    import json
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("ayder_cli.tui.AyderApp", _FakeApp)
+    from ayder_cli.tui import run_tui
+
+    run_tui(system_prompt_override="CUSTOM", resume_session_id="a1b2-c3d4")
+    data = json.loads((tmp_path / ".ayder" / "sessions" / "a1b2-c3d4.json").read_text())
+    assert data["system_prompt_override"] == "CUSTOM"
+
+
+def test_resumed_custom_prompt_survives_rebuild():
+    """Preservation: a resumed app given the override keeps it in messages[0]."""
+    app = AyderApp(model="test", initial_messages=_restored(), resume_session_id="a1b2-c3d4",
+                   system_prompt_override="CUSTOM PERSONA")
+    assert app.messages[0]["content"].startswith("CUSTOM PERSONA")
