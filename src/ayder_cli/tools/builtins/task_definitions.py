@@ -11,7 +11,7 @@ structural summary). The handler self-bounds every action's output via
 
 from typing import Tuple
 
-from ..definition import ToolDefinition
+from ..definition import ToolDefinition, parallel_safe_when
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -27,6 +27,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         tags=("metadata",),
         func_ref="ayder_cli.tools.builtins.task_tool:task",
         permission="w",
+        parallel_safe=parallel_safe_when("action", "list", "show", "status"),
         max_result_chars=0,
         parameters={
             "type": "object",

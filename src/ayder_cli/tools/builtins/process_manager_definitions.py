@@ -9,7 +9,7 @@ generic tool-result truncation; its handler self-bounds ``logs`` via offset/max_
 
 from typing import Tuple
 
-from ..definition import ToolDefinition
+from ..definition import ToolDefinition, parallel_safe_when
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -25,6 +25,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         tags=("background",),
         func_ref="ayder_cli.tools.builtins.background_process_tool:background_process",
         permission="x",
+        parallel_safe=parallel_safe_when("action", "logs", "list", "info"),
         safe_mode_blocked=True,
         max_result_chars=0,
         parameters={

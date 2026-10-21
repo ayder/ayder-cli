@@ -33,6 +33,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             },
         },
         permission="r",
+        parallel_safe=True,
         parameter_aliases=(
             ("dir", "path"),
             ("directory", "path"),
@@ -74,6 +75,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["file_path"],
         },
         permission="r",
+        parallel_safe=True,
         parameter_aliases=_FILE_PATH_ALIASES,
         path_parameters=("file_path",),
         # read_file paginates internally; the chat-loop's head+tail truncation

@@ -27,6 +27,7 @@ from ayder_cli.application.execution_policy import (
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
+from ayder_cli.tools.definition import is_parallel_safe
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 llm_log = get_logger("llm")
@@ -537,7 +538,7 @@ class ChatLoop:
     # -- Tool execution ------------------------------------------------------
 
     async def _execute_tool_calls(self, tool_calls: List[_ToolCall]) -> bool:
-        """Split auto-approved (parallel) vs needs-confirmation (sequential).
+        """Run a batch in emission order; parallelize safe auto-approved runs.
 
         Every call gets exactly one tool message, however the batch ends. The
         ``finally`` settles any call the normal path did not append (Ctrl+C
@@ -547,8 +548,9 @@ class ChatLoop:
         batch = _ToolBatch()
         tool_results_map: dict[str, Any] = {}
         try:
-            auto_approved = []
-            needs_confirmation = []
+            runnable: list[_ToolCall] = []
+            confirm_ids: set[str] = set()
+            safe_ids: set[str] = set()
 
             for tc in tool_calls:
                 # Check for parsing errors injected by XML/JSON fallback protocols
@@ -613,10 +615,11 @@ class ChatLoop:
                     )
                     continue
 
+                runnable.append(tc)
                 if self._tool_needs_confirmation(tc.function.name):
-                    needs_confirmation.append(tc)
-                else:
-                    auto_approved.append(tc)
+                    confirm_ids.add(tc.id)
+                if is_parallel_safe(tc.function.name, args):
+                    safe_ids.add(tc.id)
 
             # Show non-empty tools as running
             for tc in tool_calls:
@@ -627,44 +630,46 @@ class ChatLoop:
 
             escalated = False
 
-            # Auto-approved in parallel via asyncio.as_completed for speculative background execution
-            if auto_approved:
+            async def _safe_exec(tc_obj):
+                try:
+                    return tc_obj, await self._exec_tool_async(tc_obj, batch)
+                except asyncio.CancelledError:
+                    tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
+                    return tc_obj, RuntimeError("Tool execution cancelled")
+                except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
+                    tool_log.opt(exception=True).warning(
+                        "Tool execution failed for '{}'", tc_obj.function.name
+                    )
+                    return tc_obj, e
 
-                async def _safe_exec(tc_obj):
-                    try:
-                        return tc_obj, await self._exec_tool_async(tc_obj, batch)
-                    except asyncio.CancelledError:
-                        tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
-                        return tc_obj, RuntimeError("Tool execution cancelled")
-                    except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
-                        tool_log.opt(exception=True).warning(
-                            "Tool execution failed for '{}'", tc_obj.function.name
-                        )
-                        return tc_obj, e
-
-                tasks = [asyncio.create_task(_safe_exec(tc)) for tc in auto_approved]
-                for worker_task in tasks:
-                    self._inflight_tasks.add(worker_task)
-                    worker_task.add_done_callback(self._reap_task)
-
-                for completed_task in asyncio.as_completed(tasks):
-                    tc, rd = await completed_task
-                    tool_results_map[tc.id] = rd
-
-                    # The worker already truncated rd["result"] (the single source
-                    # of truth), so the UI notification, the batch record and the
-                    # later history append read the same bounded form. See
-                    # opus47.md finding #1.
-                    if isinstance(rd, dict):
-                        tid = rd["tool_call_id"]
-                        result = str(rd["result"])
-                        self.cb.on_tool_complete(tid, result)
-                    else:
-                        self.cb.on_tool_complete(tc.id, f"Error: {rd}")
-
-            # Needs-confirmation sequentially
+            # Calls take effect in emission order: a run of parallel-safe,
+            # auto-approved calls runs concurrently; every other call runs
+            # alone, after confirmation if it needs one.
             custom_instructions = None
-            for tc in needs_confirmation:
+            for kind, segment in _plan_tool_segments(runnable, confirm_ids, safe_ids):
+                if kind == "parallel":
+                    tasks = [asyncio.create_task(_safe_exec(tc)) for tc in segment]
+                    for worker_task in tasks:
+                        self._inflight_tasks.add(worker_task)
+                        worker_task.add_done_callback(self._reap_task)
+
+                    for completed_task in asyncio.as_completed(tasks):
+                        tc, rd = await completed_task
+                        tool_results_map[tc.id] = rd
+
+                        # The worker already truncated rd["result"] (the single source
+                        # of truth), so the UI notification, the batch record and the
+                        # later history append read the same bounded form. See
+                        # opus47.md finding #1.
+                        if isinstance(rd, dict):
+                            tid = rd["tool_call_id"]
+                            result = str(rd["result"])
+                            self.cb.on_tool_complete(tid, result)
+                        else:
+                            self.cb.on_tool_complete(tc.id, f"Error: {rd}")
+                    continue
+
+                tc = segment[0]
                 name = tc.function.name
                 args = _parse_arguments(tc.function.arguments)
 
@@ -686,7 +691,7 @@ class ChatLoop:
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
                     self.cb.on_tool_complete(tc.id, denied_msg)
-                    break  # Stop processing further tools if we got an instruction
+                    break  # No later call runs once the user redirects the turn
                 else:
                     # User denied tool — still must add a result so the LLM sees
                     # a valid tool_call → tool_result sequence (required by API)
@@ -859,6 +864,31 @@ class ChatLoop:
         """Delegate to shared ExecutionPolicy — same check for CLI and TUI."""
         policy = ExecutionPolicy(self.config.permissions)
         return policy.get_confirmation_requirement(tool_name).requires_confirmation
+
+
+def _plan_tool_segments(
+    calls: List[_ToolCall], confirm_ids: set[str], safe_ids: set[str]
+) -> list[tuple[str, List[_ToolCall]]]:
+    """Cut a batch into ordered segments.
+
+    A run of consecutive calls that are parallel-safe and auto-approved is one
+    "parallel" segment. Every other call is a segment of its own: "confirm"
+    if it needs confirmation, else a one-call "parallel" segment.
+    """
+    segments: list[tuple[str, List[_ToolCall]]] = []
+    for tc in calls:
+        if tc.id in confirm_ids:
+            segments.append(("confirm", [tc]))
+        elif (
+            tc.id in safe_ids
+            and segments
+            and segments[-1][0] == "parallel"
+            and segments[-1][1][-1].id in safe_ids
+        ):
+            segments[-1][1].append(tc)
+        else:
+            segments.append(("parallel", [tc]))
+    return segments
 
 
 def _argument_refusal(tool_name: str, status: str) -> str | None:

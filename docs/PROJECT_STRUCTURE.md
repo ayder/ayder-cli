@@ -609,7 +609,7 @@ previously-split `AgentLoopBase` and `LoopConfig` were merged back in):
 - Routes *every* LLM response through the injected `ContextManagerProtocol` (`prepare_messages()` / `update_from_response()`); tool outputs are truncated at insertion time via `truncate_tool_result()` so the KV-cache prefix remains stable
 
 Key features:
-- Auto-approved tools run in parallel (`asyncio.as_completed`); confirmation-required tools run sequentially
+- Tool calls run in emission order. Consecutive calls that are parallel-safe (`ToolDefinition.parallel_safe`, default False) and auto-approved run concurrently (`asyncio.as_completed`). Every other call runs alone, after confirmation if required. Once the user answers a confirmation with instructions, no later call in the batch runs. MCP tools default to parallel-safe; `.ayder/mcp.json` `"parallel"` and the tools' annotations override that
 - Confirmation gate applies to **both** OpenAI-format and XML/JSON custom tool calls
 - `ExecutionPolicy.execute_with_registry()` is the single execution entry (object check → `canonicalize_arguments()` → validate → permission → execute). Canonicalization applies aliases and `"123"`/`"true"`/`"false"` coercion; the loop's required-argument gate uses the same function
 - Argument integrity: `_parse_tool_arguments()` reports `ok`, `repaired` or `invalid`. Non-object arguments never run. Arguments repaired after being cut off (output token limit) run only for tools registered explicitly as `r`; other tools get an error asking the model to resend in smaller calls
@@ -645,6 +645,7 @@ Schema-driven tool definitions with auto-discovery:
 - **Required-tool validation**: Raises `ImportError` if core tools (`file_explorer`, `read_file`, `file_editor`, `bash`) are absent
 - **Permissions**: `"r"` (read), `"w"` (write), `"x"` (execute), `"http"` (network)
 - **Safety flags**: `safe_mode_blocked`, `is_terminal` per definition
+- **Scheduling**: `parallel_safe` per definition: a bool, or a predicate over the call's arguments (`parallel_safe_when("action", ...)`); unknown tools are never parallel-safe
 - **Path parameters**: Names listed in `path_parameters` are automatically resolved via `ProjectContext`
 - **Aliases**: `parameter_aliases` tuples for common name normalisation
 - **Schema generation**: `to_openai_schema()` returns the OpenAI function-calling dict

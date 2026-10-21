@@ -6,7 +6,7 @@ Tools: fetch_web
 
 from typing import Tuple
 
-from ..definition import ToolDefinition
+from ..definition import ToolDefinition, parallel_safe_when
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -55,6 +55,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["url"],
         },
         permission="http",
+        parallel_safe=parallel_safe_when("method", "GET", "HEAD", "OPTIONS", default="GET"),
         safe_mode_blocked=True,
     ),
 )

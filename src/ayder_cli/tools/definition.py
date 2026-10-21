@@ -10,7 +10,7 @@ TERMINAL_TOOLS) are generated from TOOL_DEFINITIONS at import time.
 import importlib
 import pkgutil
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from ayder_cli.log import get_logger
 
@@ -30,6 +30,10 @@ class ToolDefinition:
     permission: str = "r"  # "r", "w", "x", or "http"
     is_terminal: bool = False
     safe_mode_blocked: bool = False
+    # Whether consecutive auto-approved calls may run concurrently: a bool, or a
+    # predicate over the call's parsed arguments. False makes the call a
+    # barrier that runs alone, in emission order.
+    parallel_safe: "bool | Callable[[Dict[str, Any]], bool]" = False
 
     # ---- UI ----
     description_template: Optional[str] = None
@@ -95,6 +99,22 @@ class ToolDefinition:
 # ---------------------------------------------------------------------------
 # Auto-Discovery System
 # ---------------------------------------------------------------------------
+
+
+def parallel_safe_when(
+    param: str, *values: str, default: Optional[str] = None
+) -> Callable[[Dict[str, Any]], bool]:
+    """Predicate for ``parallel_safe``: true iff ``args[param]`` is one of ``values``.
+
+    Values compare exactly, so any other value (or case) makes the call a
+    barrier. ``values`` is a tuple: unhashable argument values compare
+    without raising.
+    """
+
+    def predicate(args: Dict[str, Any]) -> bool:
+        return args.get(param, default) in values
+
+    return predicate
 
 
 def _discover_definitions() -> Tuple["ToolDefinition", ...]:
@@ -225,3 +245,16 @@ def register_dynamic_definition(td: ToolDefinition) -> None:
     SchemaValidator can validate dynamic tools like agent.
     """
     TOOL_DEFINITIONS_BY_NAME[td.name] = td
+
+
+def is_parallel_safe(name: str, args: Dict[str, Any]) -> bool:
+    """Whether this call may share a parallel segment with its neighbours.
+
+    Reads the name lookup at call time; a tool that is not registered, or that
+    never set ``parallel_safe``, is a barrier.
+    """
+    td = TOOL_DEFINITIONS_BY_NAME.get(name)
+    if td is None:
+        return False
+    flag = td.parallel_safe
+    return bool(flag(args)) if callable(flag) else bool(flag)
