@@ -97,6 +97,9 @@ def _touch(tasks_dir, *names):
     (["TASK-002-other.md", "TASK-005-add-oauth2.md"], "add-oauth2", "TASK-005-add-oauth2.md"),
     (["TASK-015-x.md"], "5", None),
     (["TASK-002-probe-a.md", "TASK-003-probe-b.md"], "probe", None),
+    (["TASK-001-add-auth.md"], "TASK-001.md", "TASK-001-add-auth.md"),
+    (["TASK-001-add-auth.md", "TASK-002-auth.md", "notes-on-auth.md"], "auth",
+     "TASK-002-auth.md"),
 ])
 def test_identifier_resolves_to_one_task_or_none(ctx, tasks_dir, files, ident, expected):
     """Baseline regression: today each resolves to the wrong task."""
