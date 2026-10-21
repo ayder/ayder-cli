@@ -92,7 +92,7 @@ def read_file(
         explicit_range = start_line is not None or end_line is not None
 
         if explicit_range:
-            start = int(start_line) if start_line else 1
+            start = int(start_line) if start_line is not None else 1
             end = int(end_line) if end_line else total_lines
             if start < 1:
                 return ToolError(f"Error: start_line must be >= 1 (got {start}).", "validation")
