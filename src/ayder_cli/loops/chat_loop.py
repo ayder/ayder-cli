@@ -861,6 +861,12 @@ class ChatLoop:
         return policy.get_confirmation_requirement(tool_name).requires_confirmation
 
 
+def _plan_tool_segments(
+    calls: List[_ToolCall], confirm_ids: set[str], safe_ids: set[str]
+) -> list[tuple[str, List[_ToolCall]]]:
+    return []
+
+
 def _argument_refusal(tool_name: str, status: str) -> str | None:
     """The tool result for a call that must not run, or None if it may run.
 

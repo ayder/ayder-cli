@@ -10,7 +10,7 @@ TERMINAL_TOOLS) are generated from TOOL_DEFINITIONS at import time.
 import importlib
 import pkgutil
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from ayder_cli.log import get_logger
 
@@ -225,3 +225,11 @@ def register_dynamic_definition(td: ToolDefinition) -> None:
     SchemaValidator can validate dynamic tools like agent.
     """
     TOOL_DEFINITIONS_BY_NAME[td.name] = td
+
+
+def parallel_safe_when(param: str, *values: str, default: Optional[str] = None) -> Callable[[Dict[str, Any]], bool]:
+    return lambda args: False
+
+
+def is_parallel_safe(name: str, args: Dict[str, Any]) -> bool:
+    return False
