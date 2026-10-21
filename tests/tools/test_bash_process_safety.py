@@ -163,3 +163,20 @@ def test_stop_fully_exited_is_success(pm, tmp_path):
     mp.process.wait(timeout=5)
     r = kill_background_process(pm, mp.id)
     assert isinstance(r, ToolSuccess) and "nothing left running" in r
+
+
+def test_gone_group_is_never_signalled_again(pm, tmp_path, monkeypatch):
+    """Baseline regression (review): a reaped leader's pid can be reused by an
+    unrelated group; once the group was seen empty it must not be signalled."""
+    import ayder_cli.process_manager as pmmod
+
+    mp = pm.start_process("echo done", cwd=str(tmp_path))
+    mp.process.wait(timeout=5)
+    pm.kill_process(mp.id)  # observes the empty group
+
+    sent = []
+    monkeypatch.setattr(pmmod, "_group_alive", lambda pgid: True)  # the pid was reused
+    monkeypatch.setattr(pmmod.os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    pm.kill_process(mp.id)
+    pm._cleanup_all()
+    assert sent == []
