@@ -21,7 +21,7 @@ import uuid
 
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.application.runtime_factory import create_runtime
-from ayder_cli.core.config import Config
+from ayder_cli.core.config import Config, load_config_for_provider
 from ayder_cli.core.reasoning import get_effort_label
 from ayder_cli.diagnostics import install_asyncio_handler
 from ayder_cli.log import get_logger
@@ -234,6 +234,7 @@ class AyderApp(App):
         permissions: set | None = None,
         agent_mode: bool = False,
         system_prompt_override: str | None = None,
+        provider: str | None = None,
         initial_messages: list[dict] | None = None,
         resume_session_id: str | None = None,
         log_settings=None,
@@ -312,6 +313,7 @@ class AyderApp(App):
         # model argument is used for resumed sessions so they continue with the
         # model saved in the session file instead of the current config default.
         rt = create_runtime(
+            config=load_config_for_provider(provider) if provider else None,
             prompt_tier="AGENTIC" if agent_mode else None,
             model_name=None if model == "default" else model,
             system_prompt_override=system_prompt_override,

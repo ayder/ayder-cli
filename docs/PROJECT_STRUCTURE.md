@@ -594,7 +594,7 @@ AyderApp is the main Textual application implementing a chat-style interface:
 The application manages:
 - LLM provider setup and configuration
 - Tool registry initialization with middleware
-- System prompt construction (base prompt + environment section + tool prompts + skill catalog; no project tree). The environment section (`prompts.build_environment_prompt`) gives the absolute working directory and the session start date and time (ISO 8601, local time with UTC offset). It is built once per session and reused on `/model` rebuilds. A resumed session (`--resume`) keeps its history but rebuilds the system prompt for the current session, so the scratch directory, start time, tool prompts and agent capability prompts are current; `/model` rebuilds keep the capability prompts.
+- System prompt construction (base prompt + environment section + tool prompts + skill catalog; no project tree). The environment section (`prompts.build_environment_prompt`) gives the absolute working directory and the session start date and time (ISO 8601, local time with UTC offset). It is built once per session and reused on `/model` rebuilds. A resumed session (`--resume`) restores the provider it last used (the session file stores it; a provider no longer configured falls back to the default with a warning) and its `--system-prompt` text, keeps its history, and rebuilds the system prompt for the current session, so the scratch directory, start time, tool prompts and agent capability prompts are current; `/model` rebuilds keep the capability prompts.
 - Process manager for background operations
 
 ### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)

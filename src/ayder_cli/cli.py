@@ -402,7 +402,7 @@ def main():
 
     # --resume: restore a saved session and launch the TUI. It is mutually
     # exclusive with session-shaping options — the saved file already carries
-    # the model, permissions, agent mode, and any --system-prompt text; the
+    # the provider, model, permissions, agent mode, and any --system-prompt text; the
     # app rebuilds the rest of the system prompt for this session.
     if getattr(args, "resume", None):
         _conflicts: list[str] = []
@@ -448,10 +448,21 @@ def main():
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
+        from ayder_cli.core.config import list_provider_profiles
         from ayder_cli.tui import run_tui
+
+        provider = sess.provider
+        if provider and provider not in list_provider_profiles():
+            print(
+                f"Warning: provider '{provider}' from the saved session is not "
+                "configured; using the default provider.",
+                file=sys.stderr,
+            )
+            provider = None
 
         run_tui(
             model=sess.model or "default",
+            provider=provider,
             safe_mode=sess.safe_mode,
             permissions=set(sess.permissions),
             agent_mode=sess.agent_mode,
