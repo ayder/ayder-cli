@@ -18,8 +18,8 @@ from pathlib import Path
 
 STANDARD_SYSTEM_PROMPT = """You are ayder, the agent of ayder-cli, a terminal harness. You act through the tools
 provided with each request; tool results come back to you as messages.
-Tool calls in one response run in the order you send them; consecutive read-only
-calls run at the same time.
+Tool calls in one response run in the order you send them, except that consecutive
+read-only calls and MCP calls may run at the same time.
 
 Skills are workflows and project guidelines provided by the harness; the Skill Tool
 section says how to use them.
