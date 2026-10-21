@@ -1042,6 +1042,43 @@ class TestMainResume:
         assert kwargs['agent_mode'] is True
         assert kwargs['permissions'] == {"r", "w", "x", "http"}
 
+    def test_resume_passes_saved_provider(self, tmp_path, monkeypatch):
+        """Baseline regression (live test): --resume started the default provider."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+        from ayder_cli.core.session import save_session
+
+        monkeypatch.chdir(tmp_path)
+        sid = save_session([{"role": "system", "content": "SYS"},
+                            {"role": "user", "content": "hi"}], provider="anthropic")
+        with patch.object(sys, 'argv', ['ayder', '--resume', sid]), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=Config()), \
+             patch('ayder_cli.core.config.list_provider_profiles', return_value=["anthropic", "ollama"]), \
+             patch('ayder_cli.cli.setup_logging'), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            main()
+        assert mock_run_tui.call_args[1]['provider'] == "anthropic"
+
+    def test_resume_unknown_provider_falls_back(self, tmp_path, monkeypatch, capsys):
+        """New interface: a removed profile warns and uses the default provider."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+        from ayder_cli.core.session import save_session
+
+        monkeypatch.chdir(tmp_path)
+        sid = save_session([{"role": "system", "content": "SYS"},
+                            {"role": "user", "content": "hi"}], provider="gone")
+        with patch.object(sys, 'argv', ['ayder', '--resume', sid]), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=Config()), \
+             patch('ayder_cli.core.config.list_provider_profiles', return_value=["ollama"]), \
+             patch('ayder_cli.cli.setup_logging'), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            main()
+        assert mock_run_tui.call_args[1]['provider'] is None
+        assert "gone" in capsys.readouterr().err
+
     def test_resume_passes_custom_system_prompt(self, tmp_path, monkeypatch):
         """Baseline regression (review): --resume dropped a --system-prompt session's prompt."""
         from ayder_cli.cli import main

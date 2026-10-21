@@ -171,3 +171,19 @@ def test_legacy_session_has_no_custom_prompt(tmp_path):
     data.pop("system_prompt_override", None)
     path.write_text(json.dumps(data), encoding="utf-8")
     assert load_session(sid, root=tmp_path).system_prompt_override is None
+
+
+def test_provider_roundtrip(tmp_path):
+    """Baseline regression (live test): resume started the default provider."""
+    sid = save_session(_msgs(), root=tmp_path, provider="anthropic")
+    assert load_session(sid, root=tmp_path).provider == "anthropic"
+
+
+def test_legacy_session_has_no_provider(tmp_path):
+    """Preservation: files saved before the field load with None."""
+    sid = save_session(_msgs(), root=tmp_path)
+    path = sessions_dir(tmp_path) / f"{sid}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("provider", None)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert load_session(sid, root=tmp_path).provider is None

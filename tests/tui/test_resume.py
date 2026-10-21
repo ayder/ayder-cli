@@ -125,3 +125,38 @@ def test_resumed_custom_prompt_survives_rebuild():
     app = AyderApp(model="test", initial_messages=_restored(), resume_session_id="a1b2-c3d4",
                    system_prompt_override="CUSTOM PERSONA")
     assert app.messages[0]["content"].startswith("CUSTOM PERSONA")
+
+
+def test_run_tui_saves_active_provider(tmp_path, monkeypatch):
+    """Baseline regression (live test): the provider was never saved."""
+    import json
+    from types import SimpleNamespace
+
+    class _App(_FakeApp):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.config = SimpleNamespace(provider="anthropic")  # e.g. after /provider
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("ayder_cli.tui.AyderApp", _App)
+    from ayder_cli.tui import run_tui
+
+    run_tui(resume_session_id="a1b2-c3d4")
+    data = json.loads((tmp_path / ".ayder" / "sessions" / "a1b2-c3d4.json").read_text())
+    assert data["provider"] == "anthropic"
+
+
+def test_app_loads_the_given_provider(monkeypatch):
+    """New interface: AyderApp(provider=...) builds its runtime from that profile."""
+    from ayder_cli.core.config import Config
+    from ayder_cli.tui import app as app_module
+
+    seen = []
+
+    def fake_load(provider):
+        seen.append(provider)
+        return Config()
+
+    monkeypatch.setattr(app_module, "load_config_for_provider", fake_load)
+    AyderApp(model="test", provider="anthropic")
+    assert seen == ["anthropic"]
