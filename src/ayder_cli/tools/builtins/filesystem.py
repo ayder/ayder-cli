@@ -35,6 +35,9 @@ def _path_lock(abs_path) -> threading.Lock:
 # Claude Code's Read tool — large enough for most source files in one shot,
 # small enough that small-context LLMs don't drown.
 READ_FILE_DEFAULT_LINES = 2000
+# A minified bundle is one huge line, so lines and pages are capped by size too.
+READ_FILE_MAX_LINE_CHARS = 2000
+READ_FILE_MAX_PAGE_CHARS = 100_000
 
 
 def _format_size(n_bytes: int) -> str:
@@ -90,6 +93,18 @@ def read_file(
         if explicit_range:
             start = int(start_line) if start_line else 1
             end = int(end_line) if end_line else total_lines
+            if start < 1:
+                return ToolError(f"Error: start_line must be >= 1 (got {start}).", "validation")
+            if end_line and end < start:
+                return ToolError(
+                    f"Error: start_line ({start}) must be <= end_line ({end}).", "validation"
+                )
+            if total_lines and start > total_lines:
+                return ToolError(
+                    f"Error: start_line {start} is past the end of the file "
+                    f"({total_lines} lines).",
+                    "validation",
+                )
         else:
             start = 1
             end = min(total_lines, READ_FILE_DEFAULT_LINES)
@@ -98,13 +113,26 @@ def read_file(
         end_idx = min(total_lines, end)
         selected = lines[start_idx:end_idx]
 
-        body = "".join(f"{start + i}: {line}" for i, line in enumerate(selected))
+        parts: list[str] = []
+        page_chars = 0
+        for i, line in enumerate(selected):
+            nl = "\n" if line.endswith("\n") else ""
+            text = line[:-1] if nl else line
+            if len(text) > READ_FILE_MAX_LINE_CHARS:
+                cut = len(text) - READ_FILE_MAX_LINE_CHARS
+                text = f"{text[:READ_FILE_MAX_LINE_CHARS]} … [+{cut} chars]"
+            entry = f"{start + i}: {text}{nl}"
+            if parts and page_chars + len(entry) > READ_FILE_MAX_PAGE_CHARS:
+                break
+            parts.append(entry)
+            page_chars += len(entry)
+        body = "".join(parts)
 
         # Always append a footer so the caller never has to infer completeness
         # from absence. Two shapes:
         #   - more remaining → name the next call to make
         #   - reached EOF    → explicit [COMPLETE] marker
-        last_returned = start_idx + len(selected)
+        last_returned = start_idx + len(parts)
         more_remaining = last_returned < total_lines
 
         if more_remaining:

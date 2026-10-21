@@ -46,7 +46,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="read_file",
         description=(
             "Read the contents of a file. Output uses '<line_no>: <text>' "
-            "formatting. Without a range, returns up to the first 2000 lines; "
+            "formatting. Without a range, returns up to the first 2000 lines "
+            "or 100K chars, and lines over 2000 chars are cut; "
             "if the file is longer, the result includes a footer naming the "
             "total line count and the exact follow-up call to fetch the next "
             "page (call again with start_line set to the next line). Pass "
