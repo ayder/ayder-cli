@@ -230,11 +230,26 @@ def list_tasks(
     return ToolSuccess("\n".join(lines))
 
 
+_ID_FORM = re.compile(r"^(?:TASK-)?0*(\d+)(?:\.md)?$", re.IGNORECASE)
+
+
+def _slug_matches(tasks_dir: Path, pattern: str) -> list[Path]:
+    """Return the tasks whose slug equals ``pattern``, else those containing it.
+
+    The slug is the stem after ``TASK-NNN-``; ``pattern`` is lower-case.
+    """
+    files = list(_confined_task_files(tasks_dir))
+    exact = [p for p in files if re.fullmatch(rf"task-\d+-{re.escape(pattern)}", p.stem.lower())]
+    return exact or [p for p in files if pattern in p.stem.lower()]
+
+
 def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | None:
     """Resolve a task identifier to its file path, or None if no task matches.
 
     Tries, in order: relative path from project root, filename in the tasks dir,
-    numeric ID lookup ("001"/"1"/"TASK-001"), then slug substring match. Shared
+    numeric ID lookup ("001"/"1"/"TASK-001"), then slug match. An ID-form
+    identifier matches only that ID; a slug must match exactly one task (an
+    exact slug beats a substring). Shared
     by the `task` tool and the agent harness (which resolves the agent tool's
     task_id), so both accept identifiers in the same flexible forms.
 
@@ -247,6 +262,7 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
         tasks_dir = _get_tasks_dir(project_ctx)
     except ValueError:
         return None
+    identifier = identifier.strip()
 
     def _confined(path: Path) -> Path | None:
         try:
@@ -273,21 +289,37 @@ def resolve_task_path(project_ctx: ProjectContext, identifier: str) -> Path | No
     if candidate.exists() and candidate.is_file():
         return _confined(candidate)
 
-    # Strategy 3: Try to extract numeric ID and lookup ("001", "1", "TASK-001", ...)
-    id_match = re.search(r"(\d+)", identifier)
+    # Strategy 3: an ID form ("001", "1", "TASK-001") never falls through
+    id_match = _ID_FORM.fullmatch(identifier)
     if id_match:
-        path = _get_task_path_by_id(project_ctx, int(id_match.group(1)))
-        if path is not None:
-            return path
+        return _get_task_path_by_id(project_ctx, int(id_match.group(1)))
 
-    # Strategy 4: Try as slug substring match
-    slug_pattern = identifier.lower().strip()
-    if slug_pattern:
-        for candidate in _confined_task_files(tasks_dir):
-            if slug_pattern in candidate.stem.lower():
-                return candidate
+    # Strategy 4: a slug that matches exactly one task
+    if identifier:
+        matches = _slug_matches(tasks_dir, identifier.lower())
+        if len(matches) == 1:
+            return matches[0]
 
     return None
+
+
+def ambiguous_task_ids(project_ctx: ProjectContext, identifier: str) -> list[str]:
+    """Return the IDs a slug identifier matches when it matches two or more tasks."""
+    try:
+        tasks_dir = _get_tasks_dir(project_ctx)
+    except ValueError:
+        return []
+    identifier = identifier.strip()
+    if not identifier or _ID_FORM.fullmatch(identifier):
+        return []
+    matches = _slug_matches(tasks_dir, identifier.lower())
+    if len(matches) < 2:
+        return []
+    ids = []
+    for path in matches:
+        num = _extract_id(path.name)
+        ids.append(f"TASK-{num:03d}" if num is not None else path.stem)
+    return ids
 
 
 def read_task(project_ctx: ProjectContext, identifier: str):
