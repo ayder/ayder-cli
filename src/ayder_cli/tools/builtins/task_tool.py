@@ -41,6 +41,7 @@ from .tasks import (
     _confined_task_files,
     _parse_status,
     _title_to_slug,
+    ambiguous_task_ids,
     resolve_task_path,
 )
 from ayder_cli.log import get_logger
@@ -188,6 +189,17 @@ def _render_task(
     return text
 
 
+def _not_found(project_ctx: ProjectContext, identifier: str) -> ToolError:
+    """Name the matches of an ambiguous identifier; otherwise report not found."""
+    ids = ambiguous_task_ids(project_ctx, identifier)
+    if ids:
+        return ToolError(
+            f"Ambiguous task identifier '{identifier}': matches {', '.join(ids)}; use the ID",
+            "validation",
+        )
+    return ToolError(f"Task not found: {identifier}", "not_found")
+
+
 def _find_section(content: str, name: str):
     """Locate a heading ``name`` (level 2-6, case-insensitive).
 
@@ -330,7 +342,7 @@ def _show(
         return ToolError("identifier is required for action 'show'", "validation")
     path = resolve_task_path(project_ctx, identifier)
     if path is None:
-        return ToolError(f"Task not found: {identifier}", "not_found")
+        return _not_found(project_ctx, identifier)
     try:
         content = path.read_text(encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - tool boundary: any task-file read failure becomes a ToolError  # pragma: no cover
@@ -360,7 +372,7 @@ def _status(project_ctx: ProjectContext, identifier: str | None) -> ToolResult:
         return ToolError("identifier is required for action 'status'", "validation")
     path = resolve_task_path(project_ctx, identifier)
     if path is None:
-        return ToolError(f"Task not found: {identifier}", "not_found")
+        return _not_found(project_ctx, identifier)
     return ToolSuccess(f"{_canonical_id(path)}: {_parse_status(path)}")
 
 
@@ -383,7 +395,7 @@ def _update_status(
         )
     path = resolve_task_path(project_ctx, identifier)
     if path is None:
-        return ToolError(f"Task not found: {identifier}", "not_found")
+        return _not_found(project_ctx, identifier)
     current = _parse_status(path)
     content = path.read_text(encoding="utf-8")
     new_content, n = re.subn(
@@ -408,7 +420,7 @@ def _update_dependencies(
     path = resolve_task_path(project_ctx, identifier)
     task_id = _extract_id(path.name) if path is not None else None
     if path is None or task_id is None:
-        return ToolError(f"Task not found: {identifier}", "not_found")
+        return _not_found(project_ctx, identifier)
     with _ID_LOCK:
         invalid = _check_deps(project_ctx, task_id, deps)
         if invalid is not None:
@@ -439,7 +451,7 @@ def _update(
         )
     path = resolve_task_path(project_ctx, identifier)
     if path is None:
-        return ToolError(f"Task not found: {identifier}", "not_found")
+        return _not_found(project_ctx, identifier)
 
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
