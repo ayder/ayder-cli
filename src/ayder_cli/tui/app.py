@@ -363,6 +363,7 @@ class AyderApp(App):
         self.messages: list[dict] = list(initial_messages) if initial_messages else []
         if not self._resuming:
             self._init_system_prompt()
+        self._capability_prompts = ""
 
         # Initialize agent registry if agents are configured (Part 1)
         self._agent_registry: AgentRegistry | None = None
@@ -442,6 +443,7 @@ class AyderApp(App):
 
             # Append capability prompts to system prompt
             cap_prompts = self._agent_registry.get_capability_prompts()
+            self._capability_prompts = cap_prompts or ""
             if (
                 not self._resuming
                 and cap_prompts
@@ -522,6 +524,11 @@ class AyderApp(App):
 
         self.chat_loop.config.pre_iteration_hook = _composed_pre_iteration
 
+        # A restored system prompt names the old session's scratch directory,
+        # start time and tool set; rebuild it for this session.
+        if self._resuming:
+            self.update_system_prompt_model()
+
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt: the base prompt plus tool prompts."""
         from ayder_cli.prompts import get_system_prompt
@@ -547,7 +554,7 @@ class AyderApp(App):
                 chat_view.add_assistant_message(content)
 
     def update_system_prompt_model(self) -> None:
-        """Update the model name in the system prompt after /model switch."""
+        """Rebuild the system prompt (after /model, and on resume)."""
         from ayder_cli.prompts import get_system_prompt
 
         if self.messages and self.messages[0].get("role") == "system":
@@ -557,7 +564,9 @@ class AyderApp(App):
                 base_prompt = self._system_prompt_override
             else:
                 base_prompt = get_system_prompt(self.config.prompt)
-            self.messages[0]["content"] = base_prompt + self._environment_prompt + tool_prompts
+            self.messages[0]["content"] = (
+                base_prompt + self._environment_prompt + tool_prompts + self._capability_prompts
+            )
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel.
