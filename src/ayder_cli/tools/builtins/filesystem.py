@@ -9,6 +9,7 @@ import re
 import difflib
 import tempfile
 import threading
+from pathlib import Path
 
 from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
@@ -215,14 +216,22 @@ def _finalize(
             )
         )
         return ToolSuccess(f"[DRY RUN] No changes written to {rel_path}.\n{diff}")
-    # Atomic write: a crash mid-write must never leave a truncated target,
-    # and concurrent readers must see either the old or the new content.
+    _atomic_write(abs_path, new_content)
+    return ToolSuccess(success_msg)
+
+
+def _atomic_write(abs_path: Path, content: str) -> None:
+    """Replace *abs_path* with *content* atomically, keeping its mode.
+
+    A crash or encoding error mid-write never leaves a truncated target, and
+    concurrent readers see either the old or the new content.
+    """
     tmp_fd, tmp_name = tempfile.mkstemp(
         dir=str(abs_path.parent), prefix=f".{abs_path.name}.", suffix=".tmp"
     )
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(new_content)
+            f.write(content)
         if abs_path.exists():
             os.chmod(tmp_name, os.stat(abs_path).st_mode)
         os.replace(tmp_name, str(abs_path))
@@ -230,7 +239,6 @@ def _finalize(
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise
-    return ToolSuccess(success_msg)
 
 
 _HINT_MIN_RATIO = 0.6
