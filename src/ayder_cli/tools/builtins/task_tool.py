@@ -397,7 +397,8 @@ def _update_status(
     path = resolve_task_path(project_ctx, identifier)
     if path is None:
         return _not_found(project_ctx, identifier)
-    with _path_lock(path.resolve()):
+    real = path.resolve()  # write through an in-dir symlink
+    with _path_lock(real):
         current = _parse_status(path)
         content = path.read_text(encoding="utf-8")
         new_content, n = re.subn(
@@ -405,7 +406,7 @@ def _update_status(
         )
         if n == 0:
             return ToolError("No Status line found in task file", "execution")
-        _atomic_write(path, new_content)
+        _atomic_write(real, new_content)
     return ToolSuccess(f"{_canonical_id(path)}: {current} → {target}")
 
 
@@ -427,12 +428,13 @@ def _update_dependencies(
         invalid = _check_deps(project_ctx, task_id, deps)
         if invalid is not None:
             return invalid
-        with _path_lock(path.resolve()):
+        real = path.resolve()  # write through an in-dir symlink
+        with _path_lock(real):
             text = path.read_text(encoding="utf-8")
             new_text, n = _DEPS_LINE.subn(rf"\g<1>{_format_deps(deps)}", text, count=1)
             if n == 0:
                 return ToolError("No Dependencies line found in task file", "execution")
-            _atomic_write(path, new_text)
+            _atomic_write(real, new_text)
     return ToolSuccess(f"TASK-{task_id:03d} · dependencies: {_format_deps(deps)}")
 
 
@@ -456,7 +458,8 @@ def _update(
     if path is None:
         return _not_found(project_ctx, identifier)
 
-    with _path_lock(path.resolve()):
+    real = path.resolve()  # write through an in-dir symlink
+    with _path_lock(real):
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
         block = [f"## {section.strip()}", "", content_arg.strip("\n")]
@@ -467,7 +470,7 @@ def _update(
             new_lines = lines[:s] + block + ([""] + after if after else [])
         else:
             new_lines = lines + ["", *block]
-        _atomic_write(path, "\n".join(new_lines).rstrip("\n") + "\n")
+        _atomic_write(real, "\n".join(new_lines).rstrip("\n") + "\n")
     return ToolSuccess(
         f'{_canonical_id(path)} · updated section "{section.strip()}" '
         f"({len(content_arg)} chars)"
