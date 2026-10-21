@@ -13,7 +13,7 @@ def _restored():
     ]
 
 
-def test_init_seeds_messages_and_skips_system_rebuild():
+def test_init_restores_history_and_rebuilds_system():
     app = AyderApp(
         model="test",
         initial_messages=_restored(),
@@ -21,9 +21,30 @@ def test_init_seeds_messages_and_skips_system_rebuild():
     )
     assert app._resuming is True
     assert app.resume_session_id == "a1b2-c3d4"
-    # No fresh system prompt appended; restored list is used verbatim.
-    assert app.messages == _restored()
-    assert app.messages[0]["content"] == "RESTORED SYS"
+    assert app.messages[1:] == _restored()[1:]
+    assert app.messages[0]["role"] == "system"
+    assert app.messages[0]["content"] != "RESTORED SYS"
+
+
+def test_resume_rebuilds_environment():
+    """Baseline regression (audit P0-4): the saved prompt names a dead scratch dir."""
+    old = [
+        {"role": "system", "content": "SYS\n\n## Environment\nScratch directory: /tmp/ayder-x/old\n"},
+        *_restored()[1:],
+    ]
+    app = AyderApp(model="test", initial_messages=old, resume_session_id="a1b2-c3d4")
+    system = app.messages[0]["content"]
+    assert app._environment_prompt and app._environment_prompt in system
+    assert "/tmp/ayder-x/old" not in system
+    assert app.messages[1:] == _restored()[1:]
+
+
+def test_model_switch_keeps_capability_prompts():
+    """New interface: /model used to drop the agent capability prompts."""
+    app = AyderApp(model="test")
+    app._capability_prompts = "\nCAP\n"
+    app.update_system_prompt_model()
+    assert app.messages[0]["content"].endswith("\nCAP\n")
 
 
 def test_init_without_resume_builds_system_prompt():
