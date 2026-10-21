@@ -7,9 +7,9 @@ No network (environment: local-faked).
 import pytest
 
 from ayder_cli.core.context import ProjectContext
-from ayder_cli.core.result import ToolSuccess
+from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.tools.builtins.task_tool import task
-from ayder_cli.tools.builtins.tasks import create_task
+from ayder_cli.tools.builtins.tasks import create_task, read_task, resolve_task_path
 
 
 @pytest.fixture
@@ -82,3 +82,53 @@ def test_legacy_task_update_and_status(ctx, tasks_dir):
     task(ctx, action="update_status", identifier="1", status="done")
     text = _file(tasks_dir)
     assert "new" in text and "old" not in text and "- **Status:** done" in text
+
+
+def _touch(tasks_dir, *names):
+    for name in names:
+        (tasks_dir / name).write_text(
+            f"# {name}\n\n## Signature\n- **ID:** {name[:8]}\n- **Status:** pending\n",
+            encoding="utf-8",
+        )
+
+
+@pytest.mark.parametrize("files,ident,expected", [
+    (["TASK-002-x.md", "TASK-001-api-v2.md"], "v2", "TASK-001-api-v2.md"),
+    (["TASK-002-other.md", "TASK-005-add-oauth2.md"], "add-oauth2", "TASK-005-add-oauth2.md"),
+    (["TASK-015-x.md"], "5", None),
+    (["TASK-002-probe-a.md", "TASK-003-probe-b.md"], "probe", None),
+])
+def test_identifier_resolves_to_one_task_or_none(ctx, tasks_dir, files, ident, expected):
+    """Baseline regression: today each resolves to the wrong task."""
+    _touch(tasks_dir, *files)
+    path = resolve_task_path(ctx, ident)
+    assert (path.name if path else None) == expected
+
+
+def test_exact_slug_beats_substring(ctx, tasks_dir):
+    """Baseline regression: today the first sorted match (add-auth) wins."""
+    _touch(tasks_dir, "TASK-001-add-auth.md", "TASK-002-auth.md")
+    assert resolve_task_path(ctx, "auth").name == "TASK-002-auth.md"
+
+
+def test_ambiguous_identifier_names_the_matches(ctx, tasks_dir):
+    """Baseline regression: today show returns TASK-002's content."""
+    _touch(tasks_dir, "TASK-002-probe-a.md", "TASK-003-probe-b.md")
+    r = task(ctx, action="show", identifier="probe")
+    assert isinstance(r, ToolError) and r.category == "validation"
+    assert "TASK-002, TASK-003" in str(r) and "use the ID" in str(r)
+
+
+def test_read_task_ambiguous_is_none(ctx, tasks_dir):
+    """Baseline regression: the agent harness must not dispatch on a guess."""
+    _touch(tasks_dir, "TASK-002-probe-a.md", "TASK-003-probe-b.md")
+    assert read_task(ctx, "probe") is None
+
+
+@pytest.mark.parametrize("ident", ["3", "003", "TASK-003", "TASK-3", "task-003", " 3 ",
+                                   "TASK-003-add-auth", "TASK-003-add-auth.md", "add-auth",
+                                   "auth"])
+def test_documented_forms_resolve(ctx, tasks_dir, ident):
+    """Preservation."""
+    _touch(tasks_dir, "TASK-003-add-auth.md")
+    assert resolve_task_path(ctx, ident).name == "TASK-003-add-auth.md"
