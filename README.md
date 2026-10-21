@@ -733,7 +733,8 @@ project root, then start Ayder:
     "local-tools": {
       "command": "python",
       "args": ["server.py"],
-      "env": {"EXAMPLE_SETTING": "value"}
+      "env": {"EXAMPLE_SETTING": "value"},
+      "parallel": false
     },
     "remote-tools": {
       "url": "http://localhost:8000/mcp"
@@ -748,6 +749,16 @@ the CLI, TUI, and delegated agents. No plugin installation or `/plugin` toggle
 is needed. Tool calls retain the usual permissions: `x` for stdio servers and
 `http` for HTTP servers. Configure only servers you intend Ayder to connect to:
 local server commands start during runtime initialization to discover tools.
+
+Calls to MCP tools in one response run at the same time by default. Set
+`"parallel": false` on a server to run its calls one at a time, in the order the
+model sent them. Do this for servers that write local files, so a read sent in
+the same response cannot see the file before the write. `"parallel": true` runs
+all of a server's tools concurrently, whatever the server declares. Without the
+key, the server's own tool annotations decide: a tool marked `readOnlyHint`
+runs concurrently, and one marked `readOnlyHint: false` or `destructiveHint`
+runs alone. MCP calls always wait for built-in tools that change things
+(`file_editor`, `bash`, ...) sent before them.
 
 Tools keep their server-provided names unless they conflict with an existing
 tool; conflicting names receive a `server__` prefix (and a numeric suffix if
