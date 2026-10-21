@@ -4,7 +4,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-from mcp.types import Tool
+from mcp.types import Tool, ToolAnnotations
 
 from ayder_cli.application.execution_policy import ExecutionPolicy
 from ayder_cli.application.validation import SchemaValidator, ToolRequest
@@ -200,3 +200,23 @@ def test_parent_and_agent_runtime_freeze_mcp_schemas(tmp_path, monkeypatch):
         frozen_schemas = manager.freeze_system_prompt.call_args.args[1]
         assert "remote_search" in {s["function"]["name"] for s in frozen_schemas}
     client.connect_server.assert_called_once()
+
+
+@pytest.mark.parametrize("server_extra,annotations,expected", [
+    ({}, None, True),  # no config, no annotations: today's behaviour
+    ({}, ToolAnnotations(readOnlyHint=True), True),
+    ({}, ToolAnnotations(readOnlyHint=False), False),
+    ({}, ToolAnnotations(destructiveHint=True), False),
+    ({}, ToolAnnotations(readOnlyHint=True, destructiveHint=True), True),
+    ({"parallel": False}, ToolAnnotations(readOnlyHint=True), False),
+    ({"parallel": True}, ToolAnnotations(destructiveHint=True), True),
+    ({"parallel": "yes"}, None, True),  # not a bool: ignored
+])
+def test_mcp_parallel_safe_resolution(tmp_path, monkeypatch, server_extra, annotations, expected):
+    """Baseline regression: MCP calls fan out in parallel unless the server's
+    config or its tool annotations say the tool writes."""
+    configure(tmp_path, {"remote": {"url": "http://localhost:8000/mcp", **server_extra}})
+    t = tool("remote_search").model_copy(update={"annotations": annotations})
+    fake_client(monkeypatch, [[t]])
+    create_default_registry(ProjectContext(str(tmp_path)))
+    assert definition.is_parallel_safe("remote_search", {"query": "x"}) is expected
