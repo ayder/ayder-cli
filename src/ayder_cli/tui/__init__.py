@@ -99,6 +99,7 @@ def run_tui(
                 agent_mode=agent_mode,
                 safe_mode=app.safe_mode,
                 permissions=app.permissions,
+                system_prompt_override=system_prompt_override,
             )
         except Exception as exc:  # noqa: BLE001 - exit-path boundary: never let a save failure mask the exit
             logger.opt(exception=True).warning("Session auto-save failed on exit")

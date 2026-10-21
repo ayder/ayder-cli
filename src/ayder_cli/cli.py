@@ -402,7 +402,8 @@ def main():
 
     # --resume: restore a saved session and launch the TUI. It is mutually
     # exclusive with session-shaping options — the saved file already carries
-    # the model, permissions, agent mode, and system prompt.
+    # the model, permissions, agent mode, and any --system-prompt text; the
+    # app rebuilds the rest of the system prompt for this session.
     if getattr(args, "resume", None):
         _conflicts: list[str] = []
         if getattr(args, "agent", False):
@@ -454,6 +455,7 @@ def main():
             safe_mode=sess.safe_mode,
             permissions=set(sess.permissions),
             agent_mode=sess.agent_mode,
+            system_prompt_override=sess.system_prompt_override,
             initial_messages=sess.messages,
             resume_session_id=sess.session_id,
             session_name=getattr(args, "name", None),
