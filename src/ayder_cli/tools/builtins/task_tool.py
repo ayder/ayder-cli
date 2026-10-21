@@ -189,7 +189,9 @@ def _render_task(
 
 
 def _find_section(content: str, name: str):
-    """Locate a heading ``name`` (any level, case-insensitive).
+    """Locate a heading ``name`` (level 2-6, case-insensitive).
+
+    The H1 title is never a section, but it still ends one.
 
     Returns ``(start_line, end_line, level)`` spanning the heading through the
     line before the next heading of the same-or-shallower level, or ``None``.
@@ -197,7 +199,7 @@ def _find_section(content: str, name: str):
     lines = content.splitlines()
     target = name.strip().lower()
     for idx, line in enumerate(lines):
-        m = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        m = re.match(r"^(#{2,6})\s+(.*?)\s*$", line)
         if m and m.group(2).strip().lower() == target:
             level = len(m.group(1))
             end = len(lines)
