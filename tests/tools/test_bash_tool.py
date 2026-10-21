@@ -1,5 +1,6 @@
 """Tests for the bash tool (spec 07)."""
 
+import os
 import shutil
 import subprocess
 from unittest import mock
@@ -11,6 +12,14 @@ from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.tools.builtins.shell import bash
 
 
+def _popen(stdout="", stderr="", returncode=0):
+    """A Popen stand-in: bash() calls communicate() and reads returncode."""
+    proc = mock.MagicMock()
+    proc.communicate.return_value = (stdout, stderr)
+    proc.returncode = returncode
+    return proc
+
+
 @pytest.fixture
 def ctx(tmp_path):
     return ProjectContext(str(tmp_path))
@@ -19,36 +28,37 @@ def ctx(tmp_path):
 class TestTimeout:
     def test_default_timeout_is_120(self, ctx):
         with mock.patch(
-            "ayder_cli.tools.builtins.shell.subprocess.run"
+            "ayder_cli.tools.builtins.shell.subprocess.Popen"
         ) as m:
-            m.return_value = subprocess.CompletedProcess("c", 0, stdout="", stderr="")
+            m.return_value = _popen()
             bash(ctx, "echo hi")
-            assert m.call_args.kwargs["timeout"] == 120
+            assert m.return_value.communicate.call_args.kwargs["timeout"] == 120
 
     def test_timeout_clamped_to_600(self, ctx):
         with mock.patch(
-            "ayder_cli.tools.builtins.shell.subprocess.run"
+            "ayder_cli.tools.builtins.shell.subprocess.Popen"
         ) as m:
-            m.return_value = subprocess.CompletedProcess("c", 0, stdout="", stderr="")
+            m.return_value = _popen()
             bash(ctx, "echo hi", timeout=99999)
-            assert m.call_args.kwargs["timeout"] == 600
+            assert m.return_value.communicate.call_args.kwargs["timeout"] == 600
 
     def test_timeout_floor_is_1(self, ctx):
         with mock.patch(
-            "ayder_cli.tools.builtins.shell.subprocess.run"
+            "ayder_cli.tools.builtins.shell.subprocess.Popen"
         ) as m:
-            m.return_value = subprocess.CompletedProcess("c", 0, stdout="", stderr="")
+            m.return_value = _popen()
             bash(ctx, "echo hi", timeout=0)
-            assert m.call_args.kwargs["timeout"] == 1
+            assert m.return_value.communicate.call_args.kwargs["timeout"] == 1
 
     def test_timeout_expiry_message(self, ctx):
-        with mock.patch(
-            "ayder_cli.tools.builtins.shell.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="sleep", timeout=1),
-        ):
+        proc = _popen()
+        proc.communicate.side_effect = [subprocess.TimeoutExpired(cmd="sleep", timeout=1), ("", "")]
+        with mock.patch("ayder_cli.tools.builtins.shell.subprocess.Popen", return_value=proc), \
+             mock.patch("ayder_cli.tools.builtins.shell.ProcessManager._terminate_tree") as kill:
             result = bash(ctx, "sleep 100", timeout=1)
             assert isinstance(result, ToolError)
             assert "timed out" in result.lower()
+            kill.assert_called_once_with(proc, grace=2.0)
 
 
 class TestEnvironment:
@@ -63,13 +73,14 @@ class TestEnvironment:
         assert isinstance(result, ToolSuccess)
         assert "/" in result  # a real PATH came through
 
-    def test_environment_none_passes_env_none(self, ctx):
+    def test_environment_none_inherits_plus_noninteractive_defaults(self, ctx):
         with mock.patch(
-            "ayder_cli.tools.builtins.shell.subprocess.run"
+            "ayder_cli.tools.builtins.shell.subprocess.Popen"
         ) as m:
-            m.return_value = subprocess.CompletedProcess("c", 0, stdout="", stderr="")
+            m.return_value = _popen()
             bash(ctx, "echo hi")
-            assert m.call_args.kwargs["env"] is None
+            env = m.call_args.kwargs["env"]
+            assert env["PATH"] == os.environ["PATH"] and env["GIT_PAGER"] == "cat"
 
 
 class TestShell:
@@ -87,9 +98,9 @@ class TestShell:
     def test_default_uses_bash_argv(self, ctx):
         import subprocess as _sp
         with mock.patch(
-            "ayder_cli.tools.builtins.shell.subprocess.run"
+            "ayder_cli.tools.builtins.shell.subprocess.Popen"
         ) as m:
-            m.return_value = _sp.CompletedProcess("c", 0, stdout="", stderr="")
+            m.return_value = _popen()
             bash(ctx, "echo hi")
             argv = m.call_args.args[0]
             assert argv[0].endswith("bash") and argv[1] == "-c" and argv[2] == "echo hi"
@@ -101,8 +112,8 @@ class TestShell:
             return f"/usr/bin/{name}" if name == "busybox" else None
 
         with mock.patch("ayder_cli.tools.builtins.shell.shutil.which", side_effect=fake_which), \
-             mock.patch("ayder_cli.tools.builtins.shell.subprocess.run") as m:
-            m.return_value = _sp.CompletedProcess("c", 0, stdout="", stderr="")
+             mock.patch("ayder_cli.tools.builtins.shell.subprocess.Popen") as m:
+            m.return_value = _popen()
             bash(ctx, "echo hi", shell="busybox")
             argv = m.call_args.args[0]
             assert argv == ["/usr/bin/busybox", "sh", "-c", "echo hi"]
@@ -114,8 +125,8 @@ class TestShell:
             return "/bin/bash" if name == "bash" else None  # zsh missing
 
         with mock.patch("ayder_cli.tools.builtins.shell.shutil.which", side_effect=fake_which), \
-             mock.patch("ayder_cli.tools.builtins.shell.subprocess.run") as m:
-            m.return_value = _sp.CompletedProcess("c", 0, stdout="hi\n", stderr="")
+             mock.patch("ayder_cli.tools.builtins.shell.subprocess.Popen") as m:
+            m.return_value = _popen(stdout="hi\n")
             result = bash(ctx, "echo hi", shell="zsh")
             assert "[shell 'zsh' not found; ran with 'bash']" in result
 

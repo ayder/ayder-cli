@@ -201,8 +201,8 @@ class TestKillBackgroundProcess:
         # Refresh status
         pm.get_process(mp.id)
         result = kill_background_process(pm, mp.id)
-        assert isinstance(result, ToolError)
-        assert "already exited" in result
+        assert isinstance(result, ToolSuccess)
+        assert "already exited" in result and "nothing left running" in result
 
 
 class TestListBackgroundProcesses:

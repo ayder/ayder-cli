@@ -29,6 +29,15 @@ def _has_killpg() -> bool:
     return hasattr(os, "killpg")
 
 
+def _group_alive(pgid: int) -> bool:
+    """True while any process we may signal is still in group *pgid*."""
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+    return True
+
+
 @dataclass
 class ManagedProcess:
     """A background process tracked by the ProcessManager."""
@@ -87,6 +96,7 @@ class ProcessManager:
             proc = subprocess.Popen(
                 command,
                 shell=True,
+                stdin=subprocess.DEVNULL,  # never compete with the TUI for its tty
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -135,49 +145,53 @@ class ProcessManager:
     def kill_process(self, process_id: int) -> bool:
         """Kill a background process and its whole group. SIGTERM, then SIGKILL@5s.
 
+        The group is killed even when the leader has exited: children it forked
+        keep the group alive.
+
         Returns:
-            True if process was killed, False if not found or already exited.
+            True if anything in the group was killed, False if not found or
+            nothing was left running.
         """
         mp = self.get_process(process_id)
         if mp is None:
             return False
-        if mp.status == "exited":
-            return False
 
-        self._terminate_tree(mp.process)
+        killed = self._terminate_tree(mp.process)
         mp.status = "exited"
         mp.exit_code = mp.process.returncode
-        return True
+        return killed
 
     @staticmethod
-    def _terminate_tree(proc: subprocess.Popen) -> None:
+    def _terminate_tree(proc: subprocess.Popen, grace: float = 5.0) -> bool:
         """Terminate a process and every child in its group.
 
         Processes are spawned as session leaders (start_new_session=True), so the
         process-group id equals the child's pid and killpg reaches forked
         grandchildren that would otherwise be orphaned holding a port. Falls back to
         terminate()/kill() where killpg is unavailable (e.g. Windows).
+
+        SIGTERM, then SIGKILL once *grace* seconds pass with the group still
+        alive. Returns True if anything in the group was running.
         """
         if _has_killpg():
-            try:
-                pgid = os.getpgid(proc.pid)
-            except (ProcessLookupError, OSError):
-                return  # already gone
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                pass
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
+            # A session leader's pgid is its pid, also after the leader is reaped
+            # (os.getpgid would fail then, leaving its children running).
+            pgid = proc.pid
+            proc.poll()  # reap an exited leader so it no longer counts as a member
+            if not _group_alive(pgid):
+                return False
+            for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:
-                    os.killpg(pgid, signal.SIGKILL)
+                    os.killpg(pgid, sig)
                 except (ProcessLookupError, OSError):
                     pass
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
+                deadline = time.monotonic() + grace
+                while time.monotonic() < deadline:
+                    proc.poll()
+                    if not _group_alive(pgid):
+                        return True
+                    time.sleep(0.05)
+            return True
         else:
             try:
                 proc.terminate()
@@ -188,6 +202,7 @@ class ProcessManager:
                     proc.wait(timeout=5)
             except OSError:
                 pass
+            return True
 
     def list_processes(self) -> list:
         """Return all managed processes, refreshing statuses."""
@@ -200,16 +215,15 @@ class ProcessManager:
         return list(self._processes.values())
 
     def _cleanup_all(self):
-        """Terminate all running process groups (called at exit)."""
+        """Terminate every process group, including exited leaders' (called at exit)."""
         for mp in self._processes.values():
-            if mp.status == "running":
-                try:
-                    self._terminate_tree(mp.process)
-                except Exception:  # noqa: BLE001 - atexit cleanup: one process that resists termination must not stop the others being killed
-                    logger.opt(exception=True).debug(
-                        "Failed to terminate process tree for background process {}",
-                        mp.id,
-                    )
+            try:
+                self._terminate_tree(mp.process)
+            except Exception:  # noqa: BLE001 - atexit cleanup: one process that resists termination must not stop the others being killed
+                logger.opt(exception=True).debug(
+                    "Failed to terminate process tree for background process {}",
+                    mp.id,
+                )
 
     @staticmethod
     def _read_stream(mp: ManagedProcess, stream, buffer: Deque[str]):
@@ -309,15 +323,17 @@ def kill_background_process(
     if mp is None:
         return ToolError(f"No process with ID {process_id}", "validation")
 
-    if mp.status == "exited":
-        return ToolError(
-            f"Process {process_id} already exited (code={mp.exit_code})", "validation"
-        )
-
+    was_running = mp.status == "running"
     killed = process_manager.kill_process(process_id)
-    if killed:
+    if was_running:
         return ToolSuccess(f"Process {process_id} killed")
-    return ToolError(f"Failed to kill process {process_id}", "execution")
+    if killed:
+        return ToolSuccess(
+            f"Process {process_id}: leader had exited; killed remaining group members"
+        )
+    return ToolSuccess(
+        f"Process {process_id} already exited (code={mp.exit_code}); nothing left running"
+    )
 
 
 def list_background_processes(

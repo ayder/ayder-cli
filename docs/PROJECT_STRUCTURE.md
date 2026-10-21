@@ -293,7 +293,7 @@ the design rationale.
 | `tools/plugin_github.py` | GitHub-sourced plugin fetcher | remote-plugin loader |
 | `tools/builtins/filesystem.py` | File system tool impls | `file_explorer()`, `read_file()`, `file_editor()` |
 | `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
-| `tools/builtins/shell.py` | Shell execution impl | `bash()` |
+| `tools/builtins/shell.py` | Shell execution impl: own session, closed stdin, prompts/pagers off (`GIT_TERMINAL_PROMPT=0`, `PAGER`/`GIT_PAGER=cat`; `environment` overrides), process-group kill on timeout with partial output, per-stream output bounds | `bash()` |
 | `tools/builtins/context.py` | Session context snapshots | `context` |
 | `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
 | `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
@@ -306,7 +306,7 @@ the design rationale.
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `process_manager.py` | Background processes | `ProcessManager`, `background_process()` |
+| `process_manager.py` | Background processes (closed stdin; `stop` and exit cleanup kill the whole process group, also after the leader exited) | `ProcessManager`, `background_process()` |
 | `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()` |
 | `parser.py` | XML tool-call parsing | `parse_custom_tool_calls()` |
 

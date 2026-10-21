@@ -447,7 +447,7 @@ class TestRunShellCommandExceptions:
 
     def test_exception_handling_general_error(self, project_context):
         """Test general exception handling - Lines 205-206."""
-        with patch('subprocess.run', side_effect=OSError("Mocked OS error")):
+        with patch('subprocess.Popen', side_effect=OSError("Mocked OS error")):
             result = impl.bash(project_context, "echo test")
             assert isinstance(result, ToolError)
             assert result.category == "execution"

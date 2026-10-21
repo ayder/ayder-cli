@@ -500,11 +500,13 @@ class TestListFilesSymlinks:
 class TestRunShellCommandTimeout:
     """Test bash() timeout handling."""
 
-    @patch("ayder_cli.tools.builtins.shell.subprocess.run")
-    def test_bash_timeout(self, mock_run, tmp_path):
+    @patch("ayder_cli.tools.builtins.shell.ProcessManager._terminate_tree")
+    @patch("ayder_cli.tools.builtins.shell.subprocess.Popen")
+    def test_bash_timeout(self, mock_popen, mock_kill, tmp_path):
         """Test bash timeout handling."""
         import subprocess
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 100", timeout=60)
+        mock_popen.return_value.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="sleep 100", timeout=60), ("", "")]
 
         ctx = ProjectContext(str(tmp_path))
         result = impl.bash(ctx, "sleep 100")
