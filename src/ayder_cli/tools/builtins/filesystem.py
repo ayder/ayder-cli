@@ -235,12 +235,14 @@ def _finalize(
     if dry_run:
         if old_content == new_content:
             return ToolSuccess(f"[DRY RUN] No changes would be made to {rel_path}.")
+        # A scratch-dir path stays absolute; a/ and b/ prefixes only fit relative ones.
+        absolute = Path(str(rel_path)).is_absolute()
         diff = "".join(
             difflib.unified_diff(
                 old_content.splitlines(keepends=True),
                 new_content.splitlines(keepends=True),
-                fromfile=f"a/{rel_path}",
-                tofile=f"b/{rel_path}",
+                fromfile=str(rel_path) if absolute else f"a/{rel_path}",
+                tofile=str(rel_path) if absolute else f"b/{rel_path}",
             )
         )
         return ToolSuccess(f"[DRY RUN] No changes written to {rel_path}.\n{diff}")
@@ -346,17 +348,29 @@ def file_editor(
             if operation == "write":
                 if content is None:
                     return ToolError("Error: 'content' parameter is required for 'write' operation.", "validation")
-                old_content = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
+                existed = abs_path.exists()
+                old_content = abs_path.read_text(encoding="utf-8") if existed else ""
                 if not dry_run:
                     abs_path.parent.mkdir(parents=True, exist_ok=True)
+                new_count = len(content.splitlines())
+                detail = (
+                    f"overwrote, {len(old_content.splitlines())} → {new_count} lines"
+                    if existed
+                    else f"created, {new_count} lines"
+                )
                 return _finalize(
                     abs_path, rel_path, old_content, content,
-                    f"Successfully wrote to {rel_path}", dry_run,
+                    f"Successfully wrote to {rel_path} ({detail})", dry_run,
                 )
 
             elif operation == "replace":
                 if old_string is None or new_string is None:
                     return ToolError("Error: 'old_string' and 'new_string' are required for 'replace' operation.", "validation")
+                if not regex and old_string == new_string:
+                    return ToolError(
+                        "Error: old_string and new_string are identical; nothing to replace.",
+                        "validation",
+                    )
                 if not abs_path.exists():
                     return ToolError(f"Error: File '{rel_path}' does not exist.")
                 with open(abs_path, "r", encoding="utf-8") as f:
@@ -409,11 +423,17 @@ def file_editor(
                 ins = content
                 if ins and not ins.endswith("\n"):
                     ins += "\n"
+                if idx == len(lines) and lines and not lines[-1].endswith("\n"):
+                    lines[-1] += "\n"  # never glue the insert onto an unterminated last line
                 new_content = "".join(lines[:idx] + [ins] + lines[idx:])
-                return _finalize(
-                    abs_path, rel_path, old_content, new_content,
-                    f"Successfully inserted content at line {line_number} in {rel_path}", dry_run,
-                )
+                if line_number - 1 > len(lines):
+                    msg = (
+                        f"Successfully appended content at line {idx + 1} in {rel_path} "
+                        f"(the file had {len(lines)} lines)"
+                    )
+                else:
+                    msg = f"Successfully inserted content at line {line_number} in {rel_path}"
+                return _finalize(abs_path, rel_path, old_content, new_content, msg, dry_run)
 
             elif operation == "delete":
                 if line_number is None:
