@@ -223,6 +223,10 @@ class AyderApp(App):
         ("pagedown", "scroll_chat_down", "Scroll Down"),
     ]
 
+    # Agent capability prompts appended to the system prompt; kept so every
+    # rebuild (/model, resume) re-appends them.
+    _capability_prompts: str = ""
+
     def __init__(
         self,
         model: str = "default",
@@ -363,7 +367,6 @@ class AyderApp(App):
         self.messages: list[dict] = list(initial_messages) if initial_messages else []
         if not self._resuming:
             self._init_system_prompt()
-        self._capability_prompts = ""
 
         # Initialize agent registry if agents are configured (Part 1)
         self._agent_registry: AgentRegistry | None = None
