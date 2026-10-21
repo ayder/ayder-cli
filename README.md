@@ -543,7 +543,7 @@ ayder-cli includes a built-in task system:
 
 Tasks are stored as markdown files in `.ayder/tasks/` using slug-based filenames (e.g., `TASK-001-add-auth-middleware.md`).
 
-The `task` tool resolves identifiers (a path, filename, ID or slug) only to files inside `.ayder/tasks/`. An identifier that points elsewhere, including through a symlink, is not resolved. If `.ayder/tasks/`, `.ayder/context/` or `.ayder/notes/` itself resolves outside the project, those tools return a security error.
+The `task` tool resolves identifiers (a path, filename, ID or slug) only to files inside `.ayder/tasks/`. An identifier that points elsewhere, including through a symlink, is not resolved. If `.ayder/tasks/`, `.ayder/context/` or `.ayder/notes/` itself resolves outside the project, those tools return a security error. An ID (`7`, `007`, `TASK-007`) matches only that task. A slug must match one task (an exact slug wins); if several match, the tool lists them and asks for the ID. `section` names a `##` heading; the `#` title is never a section.
 
 ```
 > /tasks            # Interactive task browser
