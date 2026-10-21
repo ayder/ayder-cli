@@ -26,6 +26,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         tags=("core",),
         func_ref="ayder_cli.tools.builtins.skill:skill",
         permission="r",
+        parallel_safe=True,
         safe_mode_blocked=False,
         system_prompt=SKILL_TOOL_PROMPT,
         # load is bounded by MAX_SKILL_BYTES and read truncates itself, so the

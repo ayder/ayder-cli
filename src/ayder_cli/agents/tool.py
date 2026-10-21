@@ -11,7 +11,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Callable
 
-from ayder_cli.tools.definition import ToolDefinition
+from ayder_cli.tools.definition import ToolDefinition, parallel_safe_when
 
 if TYPE_CHECKING:
     from ayder_cli.agents.registry import AgentRegistry
@@ -95,6 +95,7 @@ AGENT_TOOL_DEFINITION = ToolDefinition(
         "required": ["action"],
     },
     permission="r",
+    parallel_safe=parallel_safe_when("action", "list", "status", "read_result"),
     tags=("core", "agents"),
     max_result_chars=0,
     system_prompt="",

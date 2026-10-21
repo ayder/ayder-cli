@@ -63,6 +63,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["pattern"],
         },
         permission="r",
+        parallel_safe=True,
         path_parameters=("directory",),
     ),
     ToolDefinition(
@@ -81,5 +82,6 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             },
         },
         permission="r",
+        parallel_safe=True,
     ),
 )

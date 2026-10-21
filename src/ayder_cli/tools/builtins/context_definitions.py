@@ -2,7 +2,7 @@
 
 from typing import Tuple
 
-from ..definition import ToolDefinition
+from ..definition import ToolDefinition, parallel_safe_when
 
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
@@ -49,6 +49,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "required": ["action"],
         },
         permission="w",
+        parallel_safe=parallel_safe_when("action", "list", "stats", "load"),
         safe_mode_blocked=False,
     ),
 )

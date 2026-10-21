@@ -864,7 +864,26 @@ class ChatLoop:
 def _plan_tool_segments(
     calls: List[_ToolCall], confirm_ids: set[str], safe_ids: set[str]
 ) -> list[tuple[str, List[_ToolCall]]]:
-    return []
+    """Cut a batch into ordered segments.
+
+    A run of consecutive calls that are parallel-safe and auto-approved is one
+    "parallel" segment. Every other call is a segment of its own: "confirm"
+    if it needs confirmation, else a one-call "parallel" segment.
+    """
+    segments: list[tuple[str, List[_ToolCall]]] = []
+    for tc in calls:
+        if tc.id in confirm_ids:
+            segments.append(("confirm", [tc]))
+        elif (
+            tc.id in safe_ids
+            and segments
+            and segments[-1][0] == "parallel"
+            and segments[-1][1][-1].id in safe_ids
+        ):
+            segments[-1][1].append(tc)
+        else:
+            segments.append(("parallel", [tc]))
+    return segments
 
 
 def _argument_refusal(tool_name: str, status: str) -> str | None:

@@ -9,7 +9,7 @@ tool-result truncation; its handler self-bounds via offset/max_chars/limit.
 
 from typing import Tuple
 
-from ..definition import ToolDefinition
+from ..definition import ToolDefinition, parallel_safe_when
 
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -25,6 +25,7 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         tags=("metadata",),
         func_ref="ayder_cli.tools.builtins.note_tool:note",
         permission="w",
+        parallel_safe=parallel_safe_when("action", "read", "list"),
         safe_mode_blocked=False,
         max_result_chars=0,
         parameters={
