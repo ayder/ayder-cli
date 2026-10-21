@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = get_logger("tool")
 # A project's agents share connections, but each registry gets its own schemas.
-_clients: dict[Path, tuple[MCPClient, list[tuple[str, str, Tool]]]] = {}
+_clients: dict[Path, tuple[MCPClient, list[tuple[str, str, bool, Tool]]]] = {}
 _lock = threading.Lock()
 
 
@@ -52,6 +52,26 @@ def _resolve_name(natural: str, server: str, taken: set[str]) -> str:
     return candidate
 
 
+def _mcp_parallel_safe(server_config: dict[str, Any], tool: Tool) -> bool:
+    """Whether calls to this MCP tool may run concurrently; first rule wins.
+
+    1. The server's ``"parallel"`` bool in mcp.json (other values are ignored).
+    2. The tool's annotations: read-only runs in parallel; an explicit
+       ``readOnlyHint: false`` or ``destructiveHint: true`` is a barrier.
+    3. Otherwise parallel: MCP fan-outs keep running concurrently.
+    """
+    configured = server_config.get("parallel")
+    if configured is True or configured is False:
+        return configured
+    hints = tool.annotations
+    if hints is not None:
+        if hints.readOnlyHint is True:
+            return True
+        if hints.readOnlyHint is False or hints.destructiveHint is True:
+            return False
+    return True
+
+
 def register_mcp_tools(registry: ToolRegistry) -> None:
     """Expose configured MCP tools as core tools in every default registry."""
     root = registry.project_ctx.root
@@ -62,7 +82,7 @@ def register_mcp_tools(registry: ToolRegistry) -> None:
             if not servers:
                 return
             client = MCPClient(root)
-            discovered: list[tuple[str, str, Tool]] = []
+            discovered: list[tuple[str, str, bool, Tool]] = []
             for name, config in servers.items():
                 try:
                     if not isinstance(config, dict):
@@ -72,7 +92,10 @@ def register_mcp_tools(registry: ToolRegistry) -> None:
                     logger.opt(exception=True).warning("MCP server failed to connect")
                     continue
                 permission = "http" if "url" in config else "x"
-                discovered.extend((name, permission, tool) for tool in tools)
+                discovered.extend(
+                    (name, permission, _mcp_parallel_safe(config, tool), tool)
+                    for tool in tools
+                )
             cached = (client, discovered)
             _clients[root] = cached
         client, discovered = cached
@@ -80,7 +103,7 @@ def register_mcp_tools(registry: ToolRegistry) -> None:
     taken = set(registry.get_registered_tools())
     # Reserved for the dynamically installed agent dispatcher.
     taken.add("agent")
-    for server, permission, tool in discovered:
+    for server, permission, parallel_safe, tool in discovered:
         name = _resolve_name(tool.name, server, taken)
         taken.add(name)
         definition = ToolDefinition(
@@ -89,6 +112,7 @@ def register_mcp_tools(registry: ToolRegistry) -> None:
             parameters=tool.inputSchema,
             tags=("core",),
             permission=permission,
+            parallel_safe=parallel_safe,
         )
         registry.register_dynamic_tool(
             definition, client.make_handler(server, tool.name)
