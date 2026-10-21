@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.log import get_logger
 
@@ -80,9 +80,11 @@ def context(
             project_ctx, action, name, content, overwrite, keep_last_n,
             context_manager, app,
         )
-    except ValueError as exc:
+    except PathOutsideSandboxError as exc:
         # An unconfined context dir or slot (e.g. a symlink leaving the project).
         return ToolError(f"Security Error: {exc}", "security")
+    except ValueError as exc:
+        return ToolError(f"Error: {exc}", "validation")
 
 
 def _dispatch(

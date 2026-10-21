@@ -9,8 +9,9 @@ import re
 import difflib
 import tempfile
 import threading
+from pathlib import Path
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolSuccess, ToolError
 from ayder_cli.log import get_logger
 
@@ -122,8 +123,16 @@ def read_file(
             )
         return ToolSuccess(body + footer)
 
+    except PathOutsideSandboxError as e:
+        return ToolError(f"Security Error: {e}", "security")
+    except UnicodeDecodeError:
+        return ToolError(
+            f"'{project_ctx.to_relative(abs_path)}' is not UTF-8 text "
+            f"(binary, {_format_size(file_size)}); use bash (e.g. `file`, `xxd | head`) to inspect it",
+            "validation",
+        )
     except ValueError as e:
-        return ToolError(f"Security Error: {str(e)}", "security")
+        return ToolError(f"Error: {e}", "validation")
     except Exception as e:  # noqa: BLE001 - tool boundary: any read failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error reading file: {str(e)}", "execution")
 
@@ -177,8 +186,10 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
             rel_path = project_ctx.to_relative(abs_path)
             return ToolError(f"Error: '{rel_path}' does not exist.")
             
+    except PathOutsideSandboxError as e:
+        return ToolError(f"Security Error: {e}", "security")
     except ValueError as e:
-        return ToolError(f"Security Error: {str(e)}", "security")
+        return ToolError(f"Error: {e}", "validation")
     except Exception as e:  # noqa: BLE001 - tool boundary: any stat or path failure becomes a ToolError, since tools must not raise into the loop
         return ToolError(f"Error exploring path: {str(e)}", "execution")
 
@@ -205,14 +216,22 @@ def _finalize(
             )
         )
         return ToolSuccess(f"[DRY RUN] No changes written to {rel_path}.\n{diff}")
-    # Atomic write: a crash mid-write must never leave a truncated target,
-    # and concurrent readers must see either the old or the new content.
+    _atomic_write(abs_path, new_content)
+    return ToolSuccess(success_msg)
+
+
+def _atomic_write(abs_path: Path, content: str) -> None:
+    """Replace *abs_path* with *content* atomically, keeping its mode.
+
+    A crash or encoding error mid-write never leaves a truncated target, and
+    concurrent readers see either the old or the new content.
+    """
     tmp_fd, tmp_name = tempfile.mkstemp(
         dir=str(abs_path.parent), prefix=f".{abs_path.name}.", suffix=".tmp"
     )
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(new_content)
+            f.write(content)
         if abs_path.exists():
             os.chmod(tmp_name, os.stat(abs_path).st_mode)
         os.replace(tmp_name, str(abs_path))
@@ -220,7 +239,6 @@ def _finalize(
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise
-    return ToolSuccess(success_msg)
 
 
 _HINT_MIN_RATIO = 0.6
@@ -390,7 +408,9 @@ def file_editor(
             else:
                 return ToolError(f"Error: Unknown operation '{operation}'", "validation")
 
+    except PathOutsideSandboxError as e:
+        return ToolError(f"Security Error: {e}", "security")
     except ValueError as e:
-        return ToolError(f"Security Error: {str(e)}", "security")
+        return ToolError(f"Error: {e}", "validation")
     except Exception as e:  # noqa: BLE001 - tool boundary: model-supplied edit arguments must fail as a ToolError, never as a crash
         return ToolError(f"Error executing file_editor: {str(e)}", "execution")

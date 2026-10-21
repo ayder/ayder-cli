@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ayder_cli.core.config import CONFIG_DIR
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError
 from ayder_cli.log import get_logger
 
@@ -387,16 +387,17 @@ def resolve_resource(info: SkillInfo, rel_path: str) -> Path:
     """Path of a resource file inside the skill directory.
 
     Raises:
-        ValueError: the path is absolute, names SKILL.md, or resolves outside
-            the skill directory (including through a symlink).
+        PathOutsideSandboxError: the path is absolute or resolves outside the
+            skill directory (including through a symlink).
+        ValueError: the path names SKILL.md.
         FileNotFoundError: no such file.
     """
     if info.problem == LINK_PROBLEM:
-        raise ValueError(f"Security Alert: skill '{info.name}' {LINK_PROBLEM}")
+        raise PathOutsideSandboxError(f"Security Alert: skill '{info.name}' {LINK_PROBLEM}")
     skill_dir = info.path.parent
     candidate = Path(rel_path)
     if candidate.is_absolute():
-        raise ValueError(f"Security Alert: '{rel_path}' is absolute")
+        raise PathOutsideSandboxError(f"Security Alert: '{rel_path}' is absolute")
     target = skill_dir / candidate
     ProjectContext.within(skill_dir, target)
     if os.path.realpath(target) == os.path.realpath(info.path):

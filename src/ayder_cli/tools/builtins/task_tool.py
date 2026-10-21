@@ -29,9 +29,10 @@ on ``read_task`` there.
 import re
 from datetime import datetime
 
-from ayder_cli.core.context import ProjectContext
+from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError, ToolResult, ToolSuccess
 
+from .filesystem import _atomic_write, _path_lock
 from .tasks import (
     _ensure_tasks_dir,
     _extract_id,
@@ -396,14 +397,16 @@ def _update_status(
     path = resolve_task_path(project_ctx, identifier)
     if path is None:
         return _not_found(project_ctx, identifier)
-    current = _parse_status(path)
-    content = path.read_text(encoding="utf-8")
-    new_content, n = re.subn(
-        r"(-\s+\*\*Status:\*\*\s+).+", rf"\g<1>{target}", content, count=1
-    )
-    if n == 0:
-        return ToolError("No Status line found in task file", "execution")
-    path.write_text(new_content, encoding="utf-8")
+    real = path.resolve()  # write through an in-dir symlink
+    with _path_lock(real):
+        current = _parse_status(path)
+        content = path.read_text(encoding="utf-8")
+        new_content, n = re.subn(
+            r"(-\s+\*\*Status:\*\*\s+).+", rf"\g<1>{target}", content, count=1
+        )
+        if n == 0:
+            return ToolError("No Status line found in task file", "execution")
+        _atomic_write(real, new_content)
     return ToolSuccess(f"{_canonical_id(path)}: {current} → {target}")
 
 
@@ -425,11 +428,13 @@ def _update_dependencies(
         invalid = _check_deps(project_ctx, task_id, deps)
         if invalid is not None:
             return invalid
-        text = path.read_text(encoding="utf-8")
-        new_text, n = _DEPS_LINE.subn(rf"\g<1>{_format_deps(deps)}", text, count=1)
-        if n == 0:
-            return ToolError("No Dependencies line found in task file", "execution")
-        path.write_text(new_text, encoding="utf-8")
+        real = path.resolve()  # write through an in-dir symlink
+        with _path_lock(real):
+            text = path.read_text(encoding="utf-8")
+            new_text, n = _DEPS_LINE.subn(rf"\g<1>{_format_deps(deps)}", text, count=1)
+            if n == 0:
+                return ToolError("No Dependencies line found in task file", "execution")
+            _atomic_write(real, new_text)
     return ToolSuccess(f"TASK-{task_id:03d} · dependencies: {_format_deps(deps)}")
 
 
@@ -453,17 +458,19 @@ def _update(
     if path is None:
         return _not_found(project_ctx, identifier)
 
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    block = [f"## {section.strip()}", "", content_arg.strip("\n")]
-    found = _find_section(text, section)
-    if found:
-        s, e, _ = found
-        after = lines[e:]
-        new_lines = lines[:s] + block + ([""] + after if after else [])
-    else:
-        new_lines = lines + ["", *block]
-    path.write_text("\n".join(new_lines).rstrip("\n") + "\n", encoding="utf-8")
+    real = path.resolve()  # write through an in-dir symlink
+    with _path_lock(real):
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        block = [f"## {section.strip()}", "", content_arg.strip("\n")]
+        found = _find_section(text, section)
+        if found:
+            s, e, _ = found
+            after = lines[e:]
+            new_lines = lines[:s] + block + ([""] + after if after else [])
+        else:
+            new_lines = lines + ["", *block]
+        _atomic_write(real, "\n".join(new_lines).rstrip("\n") + "\n")
     return ToolSuccess(
         f'{_canonical_id(path)} · updated section "{section.strip()}" '
         f"({len(content_arg)} chars)"
@@ -496,9 +503,11 @@ def task(
             project_ctx, action, title, body, dependencies, branch, status,
             identifier, section, meta_only, max_chars, offset, limit, content,
         )
-    except ValueError as exc:
+    except PathOutsideSandboxError as exc:
         # An unconfined .ayder/tasks (e.g. a symlink leaving the project).
         return ToolError(f"Security Error: {exc}", "security")
+    except ValueError as exc:
+        return ToolError(f"Error: {exc}", "validation")
 
 
 def _dispatch(

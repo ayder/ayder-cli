@@ -59,6 +59,10 @@ def new_scratch_dir(
         return None
 
 
+class PathOutsideSandboxError(ValueError):
+    """A path resolves outside the project root, scratch dir, or a confined directory."""
+
+
 class ProjectContext:
     """Handles path validation and translation between relative and absolute paths.
 
@@ -89,7 +93,7 @@ class ProjectContext:
             Resolved absolute Path object
 
         Raises:
-            ValueError: If path is outside the project root
+            PathOutsideSandboxError: If path is outside the project root
         """
         clean_path = os.path.expanduser(str(file_path).strip())
 
@@ -100,7 +104,7 @@ class ProjectContext:
 
         in_scratch = self.scratch_dir is not None and target_path.is_relative_to(self.scratch_dir)
         if not target_path.is_relative_to(self.root) and not in_scratch:
-            raise ValueError(
+            raise PathOutsideSandboxError(
                 f"Security Alert: Path '{target_path}' is outside project root '{self.root}'"
             )
 
@@ -114,7 +118,7 @@ class ProjectContext:
         The directory is not created.
 
         Raises:
-            ValueError: If the resolved directory is outside the project root.
+            PathOutsideSandboxError: If the resolved directory is outside the project root.
         """
         return self.validate_path(str(Path(".ayder", *parts)))
 
@@ -130,11 +134,11 @@ class ProjectContext:
         follow-stat the target's content, so a refused entry stays unread.
 
         Raises:
-            ValueError: If ``path`` resolves outside ``directory``.
+            PathOutsideSandboxError: If ``path`` resolves outside ``directory``.
         """
         resolved = Path(os.path.realpath(path))
         if not resolved.is_relative_to(Path(os.path.realpath(directory))):
-            raise ValueError(
+            raise PathOutsideSandboxError(
                 f"Security Alert: Path '{resolved}' is outside '{directory}'"
             )
         return Path(path)

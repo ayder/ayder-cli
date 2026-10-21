@@ -4,10 +4,13 @@ task or none (audit P0-1, P2-10).
 No network (environment: local-faked).
 """
 
+import threading
+
 import pytest
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError, ToolSuccess
+from ayder_cli.tools.builtins import task_tool
 from ayder_cli.tools.builtins.task_tool import task
 from ayder_cli.tools.builtins.tasks import create_task, read_task, resolve_task_path
 
@@ -135,3 +138,56 @@ def test_documented_forms_resolve(ctx, tasks_dir, ident):
     """Preservation."""
     _touch(tasks_dir, "TASK-003-add-auth.md")
     assert resolve_task_path(ctx, ident).name == "TASK-003-add-auth.md"
+
+
+def test_failed_write_leaves_task_intact(ctx, tasks_dir):
+    """Baseline regression (P2-12): write_text truncates, then fails to encode."""
+    _new(ctx, "T", "## Goal\ng")
+    before = _file(tasks_dir)
+    r = task(ctx, action="update", identifier="1", section="Goal", content="\ud800")
+    assert isinstance(r, ToolError) and r.category == "validation"
+    assert _file(tasks_dir) == before
+    assert not list(tasks_dir.glob(".*.tmp"))
+
+
+@pytest.mark.parametrize("second,expected", [
+    (dict(action="update", section="Notes", content="n"), "## Notes\n\nn"),
+    (dict(action="update_status", status="in_progress"), "- **Status:** in_progress"),
+])
+def test_concurrent_edits_keep_both(ctx, tasks_dir, monkeypatch, second, expected):
+    """Baseline regression (P2-12): the paused first edit overwrites the second."""
+    _new(ctx, "T", "## Goal\ng")
+    entered = threading.Event()
+    real = task_tool._find_section
+    calls = []
+
+    def paused(content, name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            threading.Event().wait(0.3)  # the second edit runs now unless it is locked out
+        return real(content, name)
+
+    monkeypatch.setattr(task_tool, "_find_section", paused)
+    first = threading.Thread(target=task, args=(ctx,), kwargs=dict(
+        action="update", identifier="1", section="Goal", content="g2"))
+    first.start()
+    assert entered.wait(5)
+    task(ctx, identifier="1", **second)
+    first.join(5)
+    text = _file(tasks_dir)
+    assert "## Goal\n\ng2" in text and expected in text
+
+
+def test_edit_writes_through_an_in_dir_symlink(ctx, tasks_dir):
+    """Baseline regression (review): the atomic replace swapped out the link."""
+    _new(ctx, "T", "## Goal\ng")
+    link = next(tasks_dir.glob("TASK-001-*.md"))
+    real = tasks_dir / "real.txt"
+    link.rename(real)
+    link.symlink_to(real.name)
+    task(ctx, action="update_status", identifier="1", status="in_progress")
+    task(ctx, action="update", identifier="1", section="Goal", content="g2")
+    assert link.is_symlink()
+    text = real.read_text(encoding="utf-8")
+    assert "- **Status:** in_progress" in text and "## Goal\n\ng2" in text
