@@ -3,11 +3,13 @@
 No network (environment: local-faked).
 """
 
+import json
+
 import pytest
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError
-from ayder_cli.tools.builtins.filesystem import file_editor, read_file
+from ayder_cli.tools.builtins.filesystem import file_editor, file_explorer, read_file
 
 
 @pytest.fixture
@@ -139,3 +141,36 @@ def test_dry_run_header_relative(ctx, tmp_path):
     _write(tmp_path, "f.txt", "old\n")
     out = str(file_editor(ctx, "f.txt", "write", content="new\n", dry_run=True))
     assert "--- a/f.txt" in out and "+++ b/f.txt" in out
+
+
+# --- file_explorer listing (P2-7) ---
+
+
+def test_explorer_sorted_with_dir_suffix(ctx, tmp_path):
+    """Baseline regression: unsorted names, no directory marker."""
+    d = tmp_path / "d"
+    d.mkdir()
+    (d / "b.txt").write_text("", encoding="utf-8")
+    (d / "A").mkdir()
+    (d / "c").mkdir()
+    assert json.loads(str(file_explorer(ctx, "d"))) == ["A/", "b.txt", "c/"]
+
+
+def test_explorer_cap(ctx, tmp_path):
+    """Baseline regression: a listing had no cap."""
+    d = tmp_path / "big"
+    d.mkdir()
+    for i in range(501):
+        (d / f"f{i:04d}").write_text("", encoding="utf-8")
+    listing, footer = str(file_explorer(ctx, "big")).split("\n", 1)
+    assert len(json.loads(listing)) == 500
+    assert "[showing 500 of 501 entries" in footer
+
+
+def test_explorer_exact_cap(ctx, tmp_path):
+    """Preservation: 500 entries are listed in full, with no footer."""
+    d = tmp_path / "full"
+    d.mkdir()
+    for i in range(500):
+        (d / f"f{i:04d}").write_text("", encoding="utf-8")
+    assert len(json.loads(str(file_explorer(ctx, "full")))) == 500
