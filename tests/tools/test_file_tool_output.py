@@ -7,7 +7,7 @@ import pytest
 
 from ayder_cli.core.context import ProjectContext
 from ayder_cli.core.result import ToolError
-from ayder_cli.tools.builtins.filesystem import read_file
+from ayder_cli.tools.builtins.filesystem import file_editor, read_file
 
 
 @pytest.fixture
@@ -75,3 +75,67 @@ def test_empty_file(ctx, tmp_path):
     _write(tmp_path, "e.txt", "")
     assert "COMPLETE: 0 lines" in str(read_file(ctx, "e.txt"))
     assert not isinstance(read_file(ctx, "e.txt", start_line=1), ToolError)
+
+
+# --- file_editor reports what it did (P2-3..P2-6) ---
+
+
+def test_insert_past_eof_reports_real_line(ctx, tmp_path):
+    """Baseline regression: said 'at line 99' but appended at line 6."""
+    _write(tmp_path, "f.txt", "a\nb\nc\nd\ne\n")
+    out = str(file_editor(ctx, "f.txt", "insert", content="x", line_number=99))
+    assert "at line 6" in out and "(the file had 5 lines)" in out
+
+
+def test_insert_past_eof_after_unterminated_line(ctx, tmp_path):
+    """Baseline regression: the inserted text was glued onto 'b'."""
+    _write(tmp_path, "f.txt", "a\nb")
+    file_editor(ctx, "f.txt", "insert", content="x", line_number=9)
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "a\nb\nx\n"
+
+
+def test_replace_identical_strings(ctx, tmp_path):
+    """Baseline regression: reported 'Successfully replaced 1 occurrence'."""
+    _write(tmp_path, "f.txt", "a = 1\n")
+    r = file_editor(ctx, "f.txt", "replace", old_string="a = 1", new_string="a = 1")
+    _validation(r, "identical")
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "a = 1\n"
+
+
+def test_dry_run_header_absolute(tmp_path):
+    """Baseline regression: a scratch-dir file got 'a//private/...'."""
+    root, scratch = tmp_path / "root", tmp_path / "scratch"
+    root.mkdir()
+    scratch.mkdir()
+    ctx = ProjectContext(str(root), scratch_dir=scratch)
+    target = scratch / "f.txt"
+    target.write_text("old\n", encoding="utf-8")
+    out = str(file_editor(ctx, str(target), "write", content="new\n", dry_run=True))
+    assert f"--- {target.resolve()}" in out and "a//" not in out
+
+
+def test_write_created(ctx, tmp_path):
+    """Baseline regression: always said 'Successfully wrote to'."""
+    out = str(file_editor(ctx, "new.txt", "write", content="a\nb\n"))
+    assert "(created, 2 lines)" in out
+
+
+def test_write_overwrote(ctx, tmp_path):
+    """Baseline regression."""
+    _write(tmp_path, "f.txt", "a\nb\nc\n")
+    out = str(file_editor(ctx, "f.txt", "write", content="z\n"))
+    assert "(overwrote, 3 → 1 lines)" in out
+
+
+def test_insert_in_range_message(ctx, tmp_path):
+    """Preservation."""
+    _write(tmp_path, "f.txt", "a\nb\n")
+    out = str(file_editor(ctx, "f.txt", "insert", content="x", line_number=2))
+    assert "Successfully inserted content at line 2 in f.txt" in out
+
+
+def test_dry_run_header_relative(ctx, tmp_path):
+    """Preservation."""
+    _write(tmp_path, "f.txt", "old\n")
+    out = str(file_editor(ctx, "f.txt", "write", content="new\n", dry_run=True))
+    assert "--- a/f.txt" in out and "+++ b/f.txt" in out
