@@ -177,3 +177,17 @@ def test_concurrent_edits_keep_both(ctx, tasks_dir, monkeypatch, second, expecte
     first.join(5)
     text = _file(tasks_dir)
     assert "## Goal\n\ng2" in text and expected in text
+
+
+def test_edit_writes_through_an_in_dir_symlink(ctx, tasks_dir):
+    """Baseline regression (review): the atomic replace swapped out the link."""
+    _new(ctx, "T", "## Goal\ng")
+    link = next(tasks_dir.glob("TASK-001-*.md"))
+    real = tasks_dir / "real.txt"
+    link.rename(real)
+    link.symlink_to(real.name)
+    task(ctx, action="update_status", identifier="1", status="in_progress")
+    task(ctx, action="update", identifier="1", section="Goal", content="g2")
+    assert link.is_symlink()
+    text = real.read_text(encoding="utf-8")
+    assert "- **Status:** in_progress" in text and "## Goal\n\ng2" in text
