@@ -31,6 +31,8 @@ class AgentConfig(BaseModel):
     num_ctx: int | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
+    # LLM calls per run before the loop stops; None = 100, 0 = unlimited.
+    max_iterations: int | None = None
     think: ThinkOption = None
     reasoning_effort: ReasoningEffort = None
     # None: the provider profile's setting; "none" or a list: see Config.skills.
@@ -57,7 +59,7 @@ class AgentConfig(BaseModel):
                     new_data[key] = float(val)
                 except ValueError:
                     pass
-        for key in ("num_ctx", "max_output_tokens"):
+        for key in ("num_ctx", "max_output_tokens", "max_iterations"):
             val = new_data.get(key)
             if isinstance(val, str) and val.strip():
                 try:

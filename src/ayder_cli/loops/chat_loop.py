@@ -52,6 +52,7 @@ class ChatLoopConfig:
         default_factory=lambda: frozenset({"core", "metadata"})
     )
     max_history: int = 0
+    max_iterations: int = 0  # LLM calls per run(); 0 = unlimited
     verbose: bool = False
     pre_iteration_hook: Any | None = None  # async callable(messages) -> None
     session_id: str | None = None
@@ -84,6 +85,9 @@ class ChatCallbacks(Protocol):
     ) -> object | None: ...
     def is_cancelled(self) -> bool: ...
 
+
+# Consecutive reasoning-only replies the loop prompts again before stopping.
+_MAX_REASONING_RETRIES = 2
 
 _CANCELLED_BEFORE_RUN = "Tool call was cancelled before it ran."
 _INTERRUPTED_WHILE_RUNNING = (
@@ -228,8 +232,15 @@ class ChatLoop:
             await self.context_manager.detect_context_length()
 
         iteration_n = 0
+        reasoning_only = 0
         while True:
             if self.cb.is_cancelled():
+                return
+            cap = self.config.max_iterations
+            if cap and iteration_n >= cap:
+                self.cb.on_system_message(
+                    f"Error: stopped after {cap} tool iterations (max_iterations = {cap})."
+                )
                 return
 
             # Every field the event reads is bound BEFORE the try, so the
@@ -468,6 +479,13 @@ class ChatLoop:
                     self.messages.append(
                         {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
                     )
+                    reasoning_only += 1
+                    if reasoning_only > _MAX_REASONING_RETRIES:
+                        self.cb.on_system_message(
+                            f"Error: the model returned only reasoning {reasoning_only} "
+                            "times in a row; stopped."
+                        )
+                        return
                     self.messages.append(
                         {
                             "role": "user",
@@ -500,6 +518,7 @@ class ChatLoop:
                                 parsed = _parse_arguments(raw_args)
                                 tc_entry["function"]["arguments"] = json.dumps(parsed)
 
+                reasoning_only = 0
                 msg_dict: dict = {"role": "assistant", "content": final_content}
                 if raw_tool_calls_for_history:
                     msg_dict["tool_calls"] = raw_tool_calls_for_history

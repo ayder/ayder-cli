@@ -97,6 +97,7 @@ def _run_loop(
         permissions=set(permissions or {"r"}),
         tool_tags=frozenset(rt.config.tool_tags) if rt.config.tool_tags else None,
         max_history=rt.config.max_history_messages,
+        max_iterations=rt.config.max_iterations,
         session_id=session_id,
     )
 

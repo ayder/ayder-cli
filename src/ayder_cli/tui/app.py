@@ -511,6 +511,7 @@ class AyderApp(App):
                 permissions=self.permissions,
                 tool_tags=tool_tags,
                 max_history=getattr(self.config, 'max_history_messages', 0),
+                max_iterations=getattr(self.config, 'max_iterations', 200),
                 session_id=self._session_id,
             ),
             callbacks=self._callbacks,
