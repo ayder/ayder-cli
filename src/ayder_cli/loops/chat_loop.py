@@ -253,8 +253,15 @@ class ChatLoop:
                 return
             cap = self.config.max_iterations
             if cap and iteration_n >= cap:
+                if self.config.run_id is None:
+                    remedy = (
+                        "Send a message to continue, or raise [app] max_iterations "
+                        "(0 = unlimited)."
+                    )
+                else:
+                    remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
                 self.cb.on_system_message(
-                    f"Error: stopped after {cap} tool iterations (max_iterations = {cap})."
+                    f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}"
                 )
                 return
 
@@ -781,6 +788,8 @@ class ChatLoop:
                     # rd_result is BaseException (includes Exception)
                     err_id, err_name = tc.id, tc.function.name
                     error_msg = f"Error: {rd_result}" + self._repeat_note(tc)
+                    if tc.id in repaired_ids:
+                        error_msg = _REPAIRED_PREFIX + error_msg
                     tool_log.trace(
                         "Appending Tool Error [{}] to history: {} chars", err_name, len(error_msg)
                     )
