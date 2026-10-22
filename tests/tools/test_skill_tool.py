@@ -176,3 +176,46 @@ def test_discover_skills_is_unfiltered(tmp_path):
 def test_load_strips_the_name(tmp_path):
     _write_skill(tmp_path, "alpha")
     assert _run(tmp_path, "load", name=" alpha ").startswith("### SKILL LOADED: alpha\n")
+
+
+# --- list marks active skills (audit P2-29) ------------------------------------
+
+
+def _loaded(tmp_path, name):
+    return {"role": "tool", "content": str(_run(tmp_path, "load", name=name))}
+
+
+def test_list_marks_active(tmp_path):
+    """Baseline regression: after compaction the model could not see what was loaded."""
+    _write_skill(tmp_path, "alpha")
+    _write_skill(tmp_path, "beta")
+    result = _run(tmp_path, "list", messages=[_loaded(tmp_path, "beta")])
+    assert result == ("Available skills:\n- alpha (project): Does X\n"
+                      "- beta (project): Does X [active]")
+
+
+def test_list_includes_user_loaded_disabled_skill(tmp_path):
+    """Baseline regression: a skill loaded with /skill but not enabled was not listed."""
+    _write_skill(tmp_path, "alpha")
+    _write_skill(tmp_path, "beta")
+    history = [_loaded(tmp_path, "beta")]
+    result = _run(tmp_path, "list", messages=history, enabled=frozenset({"alpha"}))
+    assert result == ("Available skills:\n- alpha (project): Does X\n"
+                      "- beta (project): Does X [active]")
+
+
+def test_list_active_with_nothing_enabled(tmp_path):
+    """Baseline regression: 'No skills are enabled' hid an active skill."""
+    _write_skill(tmp_path, "alpha")
+    result = _run(tmp_path, "list", messages=[_loaded(tmp_path, "alpha")], enabled=frozenset())
+    assert result == "Available skills:\n- alpha (project): Does X [active]"
+
+
+def test_list_active_skill_missing_on_disk(tmp_path):
+    """An active skill whose directory was removed is still listed by name."""
+    import shutil
+
+    skill_dir = _write_skill(tmp_path, "alpha")
+    history = [_loaded(tmp_path, "alpha")]
+    shutil.rmtree(skill_dir)
+    assert _run(tmp_path, "list", messages=history) == "Available skills:\n- alpha [active]"

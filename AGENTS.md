@@ -50,115 +50,127 @@ This document provides coding standards, tool configurations, and workflows for 
 ayder-cli/
 ├── src/ayder_cli/              # Main source code
 │   ├── cli.py                  # Entry point (argparse)
-│   ├── cli_runner.py           # CLI command execution logic
-│   ├── cli_callbacks.py        # CLI callback implementations
-│   ├── client.py               # ChatSession helpers
+│   ├── __main__.py             # `python -m ayder_cli`
+│   ├── cli_runner.py           # Single-command (non-TUI) runs and task commands
+│   ├── cli_callbacks.py        # CliCallbacks (ChatCallbacks for plain terminal runs)
 │   ├── console.py              # Rich console instance
 │   ├── version.py              # Version info
-│   ├── logging_config.py       # Loguru setup
+│   ├── log.py                  # Channel-scoped loguru accessors
+│   ├── logging_config.py       # Loguru sinks + stdlib-logging bridge
+│   ├── masking.py              # Credential masking for log text
+│   ├── diagnostics.py          # Process-level exception capture
+│   ├── parser.py               # Unified LLM output parser (ContentProcessor)
+│   ├── process_manager.py      # Background processes (own process group, group kill)
+│   ├── prompts.py              # System prompt templates + environment section
+│   ├── ui.py                   # Rich terminal UI helpers
 │   │
 │   ├── core/                   # Core infrastructure
 │   │   ├── config.py           # Pydantic config with validation
-│   │   ├── context.py          # ProjectContext (path sandboxing)
-│   │   └── result.py           # ToolSuccess/ToolError types
+│   │   ├── config_migration.py # Config schema v2.0 migration
+│   │   ├── context.py          # ProjectContext (path sandboxing, scratch dir)
+│   │   ├── result.py           # ToolSuccess/ToolError types
+│   │   ├── session.py          # Save/restore TUI sessions (.ayder/sessions/)
+│   │   ├── skills.py           # Skill discovery, scope, load blocks, active set
+│   │   ├── reasoning.py        # Reasoning settings (think / reasoning_effort)
+│   │   ├── context_manager.py  # ContextManager protocol + shared helpers
+│   │   ├── context_manager_factory.py  # Picks the context manager per provider
+│   │   ├── default_context_manager.py  # Token-budget trimming (non-Ollama)
+│   │   ├── ollama_context_manager.py   # Cache-aware stable-prefix manager (Ollama)
+│   │   └── cache_monitor.py    # KV-cache hit detection
 │   │
 │   ├── agents/                 # Multi-agent system
-│   │   ├── __init__.py         # Package exports
+│   │   ├── config.py           # AgentConfig ([agents.<name>])
+│   │   ├── registry.py         # AgentRegistry (dispatch, queue, lifecycle)
+│   │   ├── run.py              # AgentRun (per-dispatch state the main LLM polls)
+│   │   ├── runner.py           # AgentRunner (one isolated ChatLoop per dispatch)
 │   │   ├── callbacks.py        # AgentCallbacks (ChatCallbacks for agents)
-│   │   ├── config.py           # AgentConfig (Pydantic model)
-│   │   ├── registry.py         # AgentRegistry (lifecycle management)
-│   │   ├── runner.py           # AgentRunner (isolated ChatLoop execution)
-│   │   ├── summary.py          # AgentSummary (structured result)
-│   │   └── tool.py             # call_agent tool definition + handler
+│   │   ├── worktree.py         # Git worktree isolation for agents
+│   │   └── tool.py             # The `agent` tool definition + handler
 │   │
 │   ├── application/            # Shared application layer (CLI + TUI)
-│   │   ├── execution_policy.py         # ExecutionPolicy, PermissionDeniedError
-│   │   ├── message_contract.py         # LLM message format contracts
-│   │   ├── runtime_factory.py          # create_runtime() + create_agent_runtime()
-│   │   ├── temporal_contract.py        # Temporal workflow contracts
-│   │   ├── temporal_metadata.py        # Temporal metadata types
-│   │   └── validation.py              # ValidationAuthority, SchemaValidator
+│   │   ├── execution_policy.py # ExecutionPolicy, PermissionDeniedError
+│   │   ├── message_contract.py # LLM message format contracts
+│   │   ├── runtime_factory.py  # create_runtime() + create_agent_runtime()
+│   │   └── validation.py       # ValidationAuthority, SchemaValidator
 │   │
-│   ├── loops/                  # Shared agent loop + base classes
-│   │   ├── base.py             # AgentLoopBase (iteration, checkpoint, routing)
-│   │   ├── chat_loop.py        # ChatLoop (async LLM + tool execution loop)
-│   │   └── config.py           # Shared LoopConfig dataclass
+│   ├── loops/
+│   │   └── chat_loop.py        # ChatLoop, ChatLoopConfig, ChatCallbacks (the only loop)
 │   │
 │   ├── providers/              # LLM provider implementations
 │   │   ├── base.py             # AIProvider protocol, NormalizedStreamChunk
-│   │   ├── orchestrator.py  # Factory: create(config) → provider
+│   │   ├── orchestrator.py     # Factory: create(config) → provider
+│   │   ├── retry.py            # Retry wrapper (backoff + mid-stream recovery)
 │   │   ├── evren.py            # evren gateway terms-of-use acceptance (/model)
 │   │   └── impl/               # Individual provider drivers
 │   │       ├── openai.py       # OpenAIProvider (base for most drivers)
-│   │       ├── ollama.py       # OllamaProvider (native + XML fallback)
+│   │       ├── ollama.py       # OllamaProvider (routes through ollama_drivers/)
+│   │       ├── ollama_inspector.py  # Model introspection + native tool-call probe
+│   │       ├── ollama_drivers/ # Per-family Ollama chat drivers + resolution matrix
 │   │       ├── claude.py       # ClaudeProvider (Anthropic SDK)
 │   │       ├── gemini.py       # GeminiProvider (Google GenAI SDK)
 │   │       ├── deepseek.py     # DeepSeekProvider (OpenAI-compatible)
 │   │       ├── qwen.py         # QwenNativeProvider (DashScope SDK)
 │   │       └── glm.py          # GLMNativeProvider (ZhipuAI SDK)
 │   │
-│   ├── services/               # Service layer
-│   │   └── interactions.py     # InteractionSink protocol (LLM debug events)
+│   ├── services/
+│   │   ├── interactions.py     # InteractionSink protocol (LLM debug events)
+│   │   └── messaging_inbox.py  # Unix-socket inbox for prompts from peer processes
 │   │
-│   ├── tools/                  # Tool framework + implementations (25 tools)
+│   ├── tools/                  # Tool framework + built-in tools
 │   │   ├── definition.py       # ToolDefinition dataclass + auto-discovery
-│   │   ├── registry.py         # ToolRegistry (schema, execution, system prompts)
+│   │   ├── registry.py         # ToolRegistry (schemas, dispatch, system prompts)
 │   │   ├── schemas.py          # OpenAI-format JSON schemas
-│   │   ├── execution.py        # Tool execution engine
-│   │   ├── hooks.py            # Hook/middleware system
-│   │   ├── normalization.py    # Argument normalization + path resolution
+│   │   ├── execution.py        # Tool execution pipeline
+│   │   ├── hooks.py            # Middleware and execution callbacks
+│   │   ├── normalization.py    # Argument aliases, path resolution, coercion
 │   │   ├── utils.py            # Tool utilities
+│   │   ├── mcp.py              # Built-in MCP tools from .ayder/mcp.json
+│   │   ├── mcp_client.py       # MCP sessions + synchronous dispatch bridge
+│   │   ├── plugin_manager.py   # Install/update/load external plugins
+│   │   ├── plugin_api.py       # Plugin API version checks
+│   │   ├── plugin_github.py    # Plugin download from GitHub
+│   │   ├── plugin_status.py    # Plugin status badges
 │   │   └── builtins/           # Built-in tool implementations
-│   │       ├── *_definitions.py # Distributed tool definitions (13 files)
-│   │       ├── filesystem.py   # file_explorer, read_file, file_editor
-│   │       ├── python_editor.py # CST-based Python structural editor
-│   │       ├── search.py       # search_codebase, get_project_structure
-│   │       ├── shell.py        # run_shell_command
-│   │       ├── venv.py         # Virtualenv management tools
-│   │       ├── utils_tools.py  # manage_environment_vars
-│   │       ├── web.py          # fetch_web
-│   │       ├── dbs_tool.py     # DBS RAG API tool
-│   │       ├── temporal.py     # Temporal workflow tool
-│   │       ├── tasks.py        # Task management (.ayder/tasks/)
-│   │       ├── notes.py        # Note management (.ayder/notes/)
-│   │       └── memory.py       # Cross-session memory storage
+│   │       ├── *_definitions.py       # Tool definitions, auto-discovered
+│   │       ├── filesystem.py          # file_explorer, read_file, file_editor
+│   │       ├── search.py              # search_codebase
+│   │       ├── utils_tools.py         # get_project_structure, manage_environment_vars
+│   │       ├── shell.py               # bash
+│   │       ├── background_process_tool.py  # background_process
+│   │       ├── context.py             # context (stats, save/load, compact)
+│   │       ├── note_tool.py           # note
+│   │       ├── notes.py               # Note storage (.ayder/notes/)
+│   │       ├── task_tool.py           # task
+│   │       ├── tasks.py               # Task files (.ayder/tasks/)
+│   │       ├── skill.py               # skill
+│   │       └── web.py                 # fetch_web
 │   │
 │   ├── tui/                    # Textual TUI (main interface)
 │   │   ├── __init__.py         # run_tui() entry point
 │   │   ├── app.py              # AyderApp main application
-│   │   ├── chat_loop.py        # Backward-compat re-exports → loops/chat_loop.py
-│   │   ├── commands.py         # Slash command handlers (19 commands)
+│   │   ├── commands.py         # Slash command handlers
+│   │   ├── keybindings.py      # Keybinding registry
 │   │   ├── helpers.py          # TUI helper functions
 │   │   ├── adapter.py          # TUIInteractionSink (verbose debug)
-│   │   ├── parser.py           # Message parsing
-│   │   ├── screens.py          # Modal screens (confirm, select, permission, task edit)
+│   │   ├── parser.py           # Re-exports of the unified ContentProcessor
+│   │   ├── rendering.py        # Safe render helpers
+│   │   ├── screens.py          # Modal screens (confirm, select, permission, task edit, …)
 │   │   ├── theme_manager.py    # Theme loading and CSS
 │   │   ├── types.py            # MessageType, ConfirmResult
-│   │   └── widgets.py          # ChatView, ToolPanel, CLIInputBar, StatusBar
+│   │   └── widgets.py          # ChatView, ToolPanel, CLIInputBar, StatusBar, …
 │   │
-│   ├── themes/                 # TUI themes
-│   │   ├── __init__.py         # Theme registry
-│   │   ├── claude.py           # Claude theme CSS (default, RGB)
-│   │   └── ayder.py            # ayder tokenised layout + ANSI/RGB palette overlay ([ui] palette)
+│   ├── skills/                 # Packaged built-in skills (development-workflow/SKILL.md)
 │   │
-│   ├── parser.py               # XML/JSON tool call parser
-│   ├── process_manager.py      # Background process management
-│   ├── prompts.py              # System prompt templates
-│   └── ui.py                   # Rich terminal UI helpers
+│   └── themes/                 # TUI themes
+│       ├── claude.py           # Claude theme CSS (RGB)
+│       └── ayder.py            # ayder tokenised layout + ANSI/RGB palette ([ui] palette)
 │
-├── tests/                      # Test suite (998+ tests)
-│   ├── application/            # Application layer tests
-│   ├── core/                   # Core tests
-│   ├── services/               # Services tests
-│   ├── tools/                  # Tool tests
-│   ├── ui/                     # TUI tests
-│   └── *.py                    # Top-level tests
-│
-├── .ayder/                     # Project-specific data (tasks, notes, memory, skills)
+├── tests/                      # Test suite, mirrors src/ (agents/, core/, loops/, tools/, tui/, …)
+├── docs/                       # GATE.md, PROJECT_STRUCTURE.md, config.toml.example, guides
+├── .ayder/                     # Project data (tasks, notes, sessions, skills); gitignored
 ├── pyproject.toml              # Project configuration
 ├── AGENTS.md                   # This file
-├── README.md                   # Project overview
-└── .claude/                    # Claude Code configuration + skills
+└── README.md                   # Project overview
 ```
 
 ### Key Files Reference
@@ -167,14 +179,12 @@ ayder-cli/
 |------|---------|
 | `cli.py` | Entry point, argument parsing |
 | `tui/app.py` | Main TUI application (AyderApp) |
-| `tui/commands.py` | Slash command handlers (19 commands) |
+| `tui/commands.py` | Slash command handlers |
 | `loops/chat_loop.py` | Async LLM + tool execution loop (ChatLoop + ChatCallbacks protocol) |
-| `tui/chat_loop.py` | Backward-compat re-exports (TuiChatLoop → ChatLoop aliases) |
-| `cli_runner.py` | CLI command execution + sync agent loop |
+| `cli_runner.py` | Single-command (non-TUI) runs |
 | `application/runtime_factory.py` | `create_runtime()` — single composition root for CLI + TUI |
 | `application/execution_policy.py` | Shared permission + tool execution policy |
 | `application/validation.py` | ValidationAuthority + SchemaValidator (single validation path) |
-| `loops/base.py` | AgentLoopBase shared by CLI and TUI loops |
 | `tools/definition.py` | ToolDefinition dataclass + auto-discovery from `*_definitions.py` |
 | `tools/registry.py` | ToolRegistry: schemas, execution, system prompts, tag filtering |
 | `core/config.py` | Configuration with Pydantic validation |
@@ -183,7 +193,7 @@ ayder-cli/
 | `providers/impl/ollama_drivers/` | Per-family Ollama chat-driver package (matrix, registry, drivers, error classifier) |
 | `providers/impl/ollama_inspector.py` | `OllamaInspector` with `probe_native_tool_calling()` for empirical model verification |
 | `docs/README_OLLAMA.md` | **Ollama tool-call compatibility guide.** Read before adding/changing any matrix routing for an Ollama model. Covers the `OllamaInspector.probe_native_tool_calling()` API, equivalent `curl` recipes, the markup-leak detection table, and the decision flow for new families. |
-| `docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md` | Design spec for the per-family Ollama chat-drivers architecture. |
+| `docs/GATE.md` | The gate procedure every PR's final SHA passes |
 
 ## Environment Setup
 
@@ -431,7 +441,7 @@ class TestFeature:
 
 ### Runtime Factory
 
-`application/runtime_factory.py` provides `create_runtime()` — the single composition root used by both CLI and TUI. It assembles a `RuntimeComponents` dataclass containing: `config`, `llm_provider`, `process_manager`, `project_ctx`, `tool_registry`, `memory_manager`, `system_prompt`.
+`application/runtime_factory.py` provides `create_runtime()` — the single composition root used by both CLI and TUI. It assembles a `RuntimeComponents` dataclass containing: `config`, `llm_provider`, `process_manager`, `project_ctx`, `tool_registry`, `system_prompt`, `context_manager`, `environment_prompt`.
 
 ### Pluggable Tool System
 
@@ -460,23 +470,21 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
 )
 ```
 
-**Current Tools (25 total):**
+**Built-in Tools** (plugins and MCP servers add more at runtime; `tests/test_agents_md.py` keeps this table in step with the registry):
 
 | Category | Tag | Tools |
 |----------|-----|-------|
 | **Filesystem** | `core` | `file_explorer`, `read_file`, `file_editor` |
 | **Search** | `core` | `search_codebase`, `get_project_structure` |
-| **Shell** | `core` | `run_shell_command` |
-| **Memory** | `metadata` | `save_memory`, `load_memory` |
-| **Notes** | `metadata` | `create_note` |
-| **Tasks** | `metadata` | `list_tasks`, `show_task` |
-| **Python Editor** | `python` | `python_editor` (CST-based structural editing) |
-| **Background Processes** | `background` | `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes` |
-| **Virtual Environments** | `venv` | `create_virtualenv`, `install_requirements`, `list_virtualenvs`, `activate_virtualenv`, `remove_virtualenv` |
+| **Shell** | `core` | `bash` |
+| **Session context** | `core` | `context` |
+| **Skills** | `core` | `skill` |
+| **Agents** | `core` | `agent` (registered when agents are configured) |
+| **Notes** | `metadata` | `note` |
+| **Tasks** | `metadata` | `task` |
+| **Background Processes** | `background` | `background_process` |
 | **Web** | `http` | `fetch_web` |
-| **DBS** | `dbs` | `dbs_tool` (RAG API for DBS issues) |
 | **Environment** | `env` | `manage_environment_vars` |
-| **Temporal** | `temporal` | `temporal_workflow` |
 
 **Tag System:** Tools are filtered by tags. Default enabled tags: `["core", "metadata"]`. Use `/plugin` in TUI to toggle additional tags at runtime.
 
