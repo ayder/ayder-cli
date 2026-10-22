@@ -73,6 +73,10 @@ def _default_scope(project_ctx: ProjectContext, app: Any) -> SkillScope:
     )
 
 
+def _marked(line: str, active: bool) -> str:
+    return f"{line} [active]" if active else line
+
+
 def _not_found(scope: SkillScope, name: str) -> ToolError:
     enabled = ", ".join(info.name for info in scope.enabled_skills())
     suffix = f" Enabled: {enabled}" if enabled else " No skills are enabled."
@@ -95,9 +99,17 @@ def skill(
     match action:
         case "list":
             skills = scope.enabled_skills()
-            if not skills:
+            if not skills and not active_names:
                 return ToolSuccess("No skills are enabled for this session.")
-            return ToolSuccess("Available skills:\n" + "\n".join(list_line(s) for s in skills))
+            lines = [_marked(list_line(s), s.name in active_names) for s in skills]
+            # Skills the user loaded with /skill, which the filter does not limit.
+            listed = {s.name for s in skills}
+            on_disk = {s.name: s for s in discover_all(scope.project_root)}
+            for active in active_names:
+                if active not in listed:
+                    line = list_line(on_disk[active]) if active in on_disk else f"- {active}"
+                    lines.append(_marked(line, True))
+            return ToolSuccess("Available skills:\n" + "\n".join(lines))
 
         case "load":
             if not name:

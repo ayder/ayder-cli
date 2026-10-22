@@ -18,7 +18,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="skill",
         description=(
-            "List, load, read or unload skills. Loading returns the skill's "
+            "List, load, read or unload skills. The list marks loaded skills "
+            "[active]. Loading returns the skill's "
             "instructions as this tool's result; reading returns one of the "
             "skill's files."
         ),
