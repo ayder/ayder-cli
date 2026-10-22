@@ -35,6 +35,10 @@ def _path_lock(abs_path) -> threading.Lock:
 # Claude Code's Read tool — large enough for most source files in one shot,
 # small enough that small-context LLMs don't drown.
 READ_FILE_DEFAULT_LINES = 2000
+# A minified bundle is one huge line, so lines and pages are capped by size too.
+READ_FILE_MAX_LINE_CHARS = 2000
+READ_FILE_MAX_PAGE_CHARS = 100_000
+FILE_EXPLORER_MAX_ENTRIES = 500
 
 
 def _format_size(n_bytes: int) -> str:
@@ -88,8 +92,20 @@ def read_file(
         explicit_range = start_line is not None or end_line is not None
 
         if explicit_range:
-            start = int(start_line) if start_line else 1
+            start = int(start_line) if start_line is not None else 1
             end = int(end_line) if end_line else total_lines
+            if start < 1:
+                return ToolError(f"Error: start_line must be >= 1 (got {start}).", "validation")
+            if end_line and end < start:
+                return ToolError(
+                    f"Error: start_line ({start}) must be <= end_line ({end}).", "validation"
+                )
+            if total_lines and start > total_lines:
+                return ToolError(
+                    f"Error: start_line {start} is past the end of the file "
+                    f"({total_lines} lines).",
+                    "validation",
+                )
         else:
             start = 1
             end = min(total_lines, READ_FILE_DEFAULT_LINES)
@@ -98,13 +114,26 @@ def read_file(
         end_idx = min(total_lines, end)
         selected = lines[start_idx:end_idx]
 
-        body = "".join(f"{start + i}: {line}" for i, line in enumerate(selected))
+        parts: list[str] = []
+        page_chars = 0
+        for i, line in enumerate(selected):
+            nl = "\n" if line.endswith("\n") else ""
+            text = line[:-1] if nl else line
+            if len(text) > READ_FILE_MAX_LINE_CHARS:
+                cut = len(text) - READ_FILE_MAX_LINE_CHARS
+                text = f"{text[:READ_FILE_MAX_LINE_CHARS]} … [+{cut} chars]"
+            entry = f"{start + i}: {text}{nl}"
+            if parts and page_chars + len(entry) > READ_FILE_MAX_PAGE_CHARS:
+                break
+            parts.append(entry)
+            page_chars += len(entry)
+        body = "".join(parts)
 
         # Always append a footer so the caller never has to infer completeness
         # from absence. Two shapes:
         #   - more remaining → name the next call to make
         #   - reached EOF    → explicit [COMPLETE] marker
-        last_returned = start_idx + len(selected)
+        last_returned = start_idx + len(parts)
         more_remaining = last_returned < total_lines
 
         if more_remaining:
@@ -143,8 +172,17 @@ def file_explorer(project_ctx: ProjectContext, path: str = ".") -> str:
         abs_path = project_ctx.validate_path(path)
         
         if abs_path.is_dir():
-            files = [item.name for item in abs_path.iterdir()]
-            return ToolSuccess(json.dumps(files))
+            entries = sorted(
+                (item.name + "/" if item.is_dir() else item.name for item in abs_path.iterdir()),
+                key=str.lower,
+            )
+            listing = json.dumps(entries[:FILE_EXPLORER_MAX_ENTRIES])
+            if len(entries) > FILE_EXPLORER_MAX_ENTRIES:
+                listing += (
+                    f"\n[showing {FILE_EXPLORER_MAX_ENTRIES} of {len(entries)} entries; "
+                    "list a subdirectory or use bash]"
+                )
+            return ToolSuccess(listing)
             
         elif abs_path.exists():
             rel_path = project_ctx.to_relative(abs_path)
@@ -207,12 +245,14 @@ def _finalize(
     if dry_run:
         if old_content == new_content:
             return ToolSuccess(f"[DRY RUN] No changes would be made to {rel_path}.")
+        # A scratch-dir path stays absolute; a/ and b/ prefixes only fit relative ones.
+        absolute = Path(str(rel_path)).is_absolute()
         diff = "".join(
             difflib.unified_diff(
                 old_content.splitlines(keepends=True),
                 new_content.splitlines(keepends=True),
-                fromfile=f"a/{rel_path}",
-                tofile=f"b/{rel_path}",
+                fromfile=str(rel_path) if absolute else f"a/{rel_path}",
+                tofile=str(rel_path) if absolute else f"b/{rel_path}",
             )
         )
         return ToolSuccess(f"[DRY RUN] No changes written to {rel_path}.\n{diff}")
@@ -318,17 +358,29 @@ def file_editor(
             if operation == "write":
                 if content is None:
                     return ToolError("Error: 'content' parameter is required for 'write' operation.", "validation")
-                old_content = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
+                existed = abs_path.exists()
+                old_content = abs_path.read_text(encoding="utf-8") if existed else ""
                 if not dry_run:
                     abs_path.parent.mkdir(parents=True, exist_ok=True)
+                new_count = len(content.splitlines())
+                detail = (
+                    f"overwrote, {len(old_content.splitlines())} → {new_count} lines"
+                    if existed
+                    else f"created, {new_count} lines"
+                )
                 return _finalize(
                     abs_path, rel_path, old_content, content,
-                    f"Successfully wrote to {rel_path}", dry_run,
+                    f"Successfully wrote to {rel_path} ({detail})", dry_run,
                 )
 
             elif operation == "replace":
                 if old_string is None or new_string is None:
                     return ToolError("Error: 'old_string' and 'new_string' are required for 'replace' operation.", "validation")
+                if not regex and old_string == new_string:
+                    return ToolError(
+                        "Error: old_string and new_string are identical; nothing to replace.",
+                        "validation",
+                    )
                 if not abs_path.exists():
                     return ToolError(f"Error: File '{rel_path}' does not exist.")
                 with open(abs_path, "r", encoding="utf-8") as f:
@@ -381,11 +433,17 @@ def file_editor(
                 ins = content
                 if ins and not ins.endswith("\n"):
                     ins += "\n"
+                if idx == len(lines) and lines and not lines[-1].endswith("\n"):
+                    lines[-1] += "\n"  # never glue the insert onto an unterminated last line
                 new_content = "".join(lines[:idx] + [ins] + lines[idx:])
-                return _finalize(
-                    abs_path, rel_path, old_content, new_content,
-                    f"Successfully inserted content at line {line_number} in {rel_path}", dry_run,
-                )
+                if line_number - 1 > len(lines):
+                    msg = (
+                        f"Successfully appended content at line {idx + 1} in {rel_path} "
+                        f"(the file had {len(lines)} lines)"
+                    )
+                else:
+                    msg = f"Successfully inserted content at line {line_number} in {rel_path}"
+                return _finalize(abs_path, rel_path, old_content, new_content, msg, dry_run)
 
             elif operation == "delete":
                 if line_number is None:

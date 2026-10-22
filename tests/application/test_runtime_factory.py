@@ -200,6 +200,7 @@ class TestFactoryTUIIntegration:
             ])
 
             mock_create_runtime.assert_called_once_with(
+                config=None,
                 prompt_tier=None,
                 model_name="saved-model",
                 system_prompt_override=None,

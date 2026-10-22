@@ -38,6 +38,8 @@ class SessionData:
     created_at: str
     updated_at: str
     path: Path
+    system_prompt_override: str | None = None
+    provider: str | None = None
 
 
 def sessions_dir(root: Path | None = None) -> Path:
@@ -73,6 +75,8 @@ def save_session(
     agent_mode: bool = False,
     safe_mode: bool = False,
     permissions: set[str] | None = None,
+    system_prompt_override: str | None = None,
+    provider: str | None = None,
 ) -> str:
     """Write *messages* + settings to .ayder/sessions/<id>.json; return the id.
 
@@ -101,10 +105,12 @@ def save_session(
         "session_id": session_id,
         "created_at": created_at,
         "updated_at": now,
+        "provider": provider,
         "model": model,
         "agent_mode": bool(agent_mode),
         "safe_mode": bool(safe_mode),
         "permissions": sorted(permissions) if permissions else [],
+        "system_prompt_override": system_prompt_override,
         "cwd": str(base.resolve()),
         "message_count": len(messages),
         "messages": messages,
@@ -154,6 +160,8 @@ def load_session(token: str, root: Path | None = None) -> SessionData:
         created_at=data.get("created_at", ""),
         updated_at=data.get("updated_at", ""),
         path=path,
+        system_prompt_override=data.get("system_prompt_override"),
+        provider=data.get("provider"),
     )
 
 
@@ -176,6 +184,8 @@ def persist_and_announce(
     agent_mode: bool = False,
     safe_mode: bool = False,
     permissions: set[str] | None = None,
+    system_prompt_override: str | None = None,
+    provider: str | None = None,
     out=print,
 ) -> str | None:
     """Save the session on exit and print the resume hint.
@@ -195,6 +205,8 @@ def persist_and_announce(
         agent_mode=agent_mode,
         safe_mode=safe_mode,
         permissions=permissions,
+        system_prompt_override=system_prompt_override,
+        provider=provider,
     )
     out(resume_hint(sid))
     return sid

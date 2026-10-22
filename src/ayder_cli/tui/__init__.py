@@ -36,6 +36,7 @@ def run_tui(
     permissions: set | None = None,
     agent_mode: bool = False,
     system_prompt_override: str | None = None,
+    provider: str | None = None,
     initial_messages: list[dict] | None = None,
     resume_session_id: str | None = None,
     session_name: str | None = None,
@@ -52,6 +53,8 @@ def run_tui(
             so the main LLM drives the multi-agent harness (ayder-cli --agent).
         system_prompt_override: When set, use this text as the system-prompt base
             instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
+        provider: When resuming, the provider profile the session last used;
+            None uses the config's default provider.
         initial_messages: When resuming, the restored conversation (incl. the
             saved system prompt) to seed the app with.
         resume_session_id: When resuming, the id of the session being continued
@@ -70,7 +73,7 @@ def run_tui(
         app = AyderApp(
             model=model, safe_mode=safe_mode, permissions=permissions,
             agent_mode=agent_mode, system_prompt_override=system_prompt_override,
-            initial_messages=initial_messages, resume_session_id=resume_session_id,
+            provider=provider, initial_messages=initial_messages, resume_session_id=resume_session_id,
             session_name=session_name, log_settings=log_settings,
         )
     except ProviderUnavailableError as e:
@@ -99,6 +102,9 @@ def run_tui(
                 agent_mode=agent_mode,
                 safe_mode=app.safe_mode,
                 permissions=app.permissions,
+                system_prompt_override=system_prompt_override,
+                # The live provider, so a /provider switch is what resumes.
+                provider=getattr(getattr(app, "config", None), "provider", None),
             )
         except Exception as exc:  # noqa: BLE001 - exit-path boundary: never let a save failure mask the exit
             logger.opt(exception=True).warning("Session auto-save failed on exit")

@@ -18,7 +18,10 @@ _FILE_PATH_ALIASES = (
 TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="file_explorer",
-        description="List files in a directory or get metadata for a specific file.",
+        description=(
+            "List files in a directory or get metadata for a specific file. "
+            "Directories end with '/'; at most 500 entries."
+        ),
         description_template="Exploring path {path}",
         tags=("core",),
         func_ref="ayder_cli.tools.builtins.filesystem:file_explorer",
@@ -51,7 +54,8 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
             "total line count and the exact follow-up call to fetch the next "
             "page (call again with start_line set to the next line). Pass "
             "explicit start_line / end_line (1-based, inclusive) to read a "
-            "specific slice."
+            "specific slice. Any page stops at 100K chars, and lines over 2000 "
+            "chars are cut; use bash to see the rest of a cut line."
         ),
         description_template="File {file_path} will be read",
         tags=("core",),

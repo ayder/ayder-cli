@@ -63,7 +63,7 @@ class TestFileExplorerDirectory:
         files = json.loads(result)
         assert "file1.txt" in files
         assert "file2.txt" in files
-        assert "subdir" in files
+        assert "subdir/" in files
 
     def test_list_files_specified_directory(self, tmp_path, project_context):
         """Test listing files in specified directory."""
@@ -447,7 +447,7 @@ class TestRunShellCommandExceptions:
 
     def test_exception_handling_general_error(self, project_context):
         """Test general exception handling - Lines 205-206."""
-        with patch('subprocess.run', side_effect=OSError("Mocked OS error")):
+        with patch('subprocess.Popen', side_effect=OSError("Mocked OS error")):
             result = impl.bash(project_context, "echo test")
             assert isinstance(result, ToolError)
             assert result.category == "execution"

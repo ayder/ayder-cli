@@ -293,7 +293,7 @@ the design rationale.
 | `tools/plugin_github.py` | GitHub-sourced plugin fetcher | remote-plugin loader |
 | `tools/builtins/filesystem.py` | File system tool impls | `file_explorer()`, `read_file()`, `file_editor()` |
 | `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
-| `tools/builtins/shell.py` | Shell execution impl | `bash()` |
+| `tools/builtins/shell.py` | Shell execution impl: own session, closed stdin, prompts/pagers off (`GIT_TERMINAL_PROMPT=0`, `PAGER`/`GIT_PAGER=cat`; `environment` overrides), process-group kill on timeout with partial output, per-stream output bounds | `bash()` |
 | `tools/builtins/context.py` | Session context snapshots | `context` |
 | `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
 | `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
@@ -306,7 +306,7 @@ the design rationale.
 
 | Module | Purpose | Key Classes/Functions |
 |--------|---------|----------------------|
-| `process_manager.py` | Background processes | `ProcessManager`, `background_process()` |
+| `process_manager.py` | Background processes (closed stdin; `stop` and exit cleanup kill the whole process group, also after the leader exited) | `ProcessManager`, `background_process()` |
 | `prompts.py` | System prompts | `SYSTEM_PROMPT`, `PLANNING_PROMPT_TEMPLATE`, `get_system_prompt()` |
 | `parser.py` | XML tool-call parsing | `parse_custom_tool_calls()` |
 
@@ -594,7 +594,7 @@ AyderApp is the main Textual application implementing a chat-style interface:
 The application manages:
 - LLM provider setup and configuration
 - Tool registry initialization with middleware
-- System prompt construction (base prompt + environment section + tool prompts + skill catalog; no project tree). The environment section (`prompts.build_environment_prompt`) gives the absolute working directory and the session start date and time (ISO 8601, local time with UTC offset). It is built once per session and reused on `/model` rebuilds.
+- System prompt construction (base prompt + environment section + tool prompts + skill catalog; no project tree). The environment section (`prompts.build_environment_prompt`) gives the absolute working directory and the session start date and time (ISO 8601, local time with UTC offset). It is built once per session and reused on `/model` rebuilds. A resumed session (`--resume`) restores the provider it last used (the session file stores it; a provider no longer configured falls back to the default with a warning) and its `--system-prompt` text, keeps its history, and rebuilds the system prompt for the current session, so the scratch directory, start time, tool prompts and agent capability prompts are current; `/model` rebuilds keep the capability prompts.
 - Process manager for background operations
 
 ### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)

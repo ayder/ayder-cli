@@ -14,7 +14,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         description=(
             "Run a shell command and return its exit code, stdout, and stderr. "
             "Use for builds, tests, git, file inspection, and other terminal tasks. "
-            "Each call starts in the working directory; a `cd` does not carry over."
+            "Each call starts in the working directory; a `cd` does not carry over. "
+            "stdin is closed and prompts/pagers are off, so a command that waits for "
+            "input fails fast; a timeout kills the whole process group. "
+            "Start servers and watchers with background_process, not `&`."
         ),
         description_template="Command `{command}` will be executed",
         tags=("core",),

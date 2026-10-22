@@ -21,7 +21,7 @@ import uuid
 
 from ayder_cli.application.execution_policy import ExecutionPolicy, ToolRequest
 from ayder_cli.application.runtime_factory import create_runtime
-from ayder_cli.core.config import Config
+from ayder_cli.core.config import Config, load_config_for_provider
 from ayder_cli.core.reasoning import get_effort_label
 from ayder_cli.diagnostics import install_asyncio_handler
 from ayder_cli.log import get_logger
@@ -223,6 +223,10 @@ class AyderApp(App):
         ("pagedown", "scroll_chat_down", "Scroll Down"),
     ]
 
+    # Agent capability prompts appended to the system prompt; kept so every
+    # rebuild (/model, resume) re-appends them.
+    _capability_prompts: str = ""
+
     def __init__(
         self,
         model: str = "default",
@@ -230,6 +234,7 @@ class AyderApp(App):
         permissions: set | None = None,
         agent_mode: bool = False,
         system_prompt_override: str | None = None,
+        provider: str | None = None,
         initial_messages: list[dict] | None = None,
         resume_session_id: str | None = None,
         log_settings=None,
@@ -308,6 +313,7 @@ class AyderApp(App):
         # model argument is used for resumed sessions so they continue with the
         # model saved in the session file instead of the current config default.
         rt = create_runtime(
+            config=load_config_for_provider(provider) if provider else None,
             prompt_tier="AGENTIC" if agent_mode else None,
             model_name=None if model == "default" else model,
             system_prompt_override=system_prompt_override,
@@ -442,6 +448,7 @@ class AyderApp(App):
 
             # Append capability prompts to system prompt
             cap_prompts = self._agent_registry.get_capability_prompts()
+            self._capability_prompts = cap_prompts or ""
             if (
                 not self._resuming
                 and cap_prompts
@@ -522,6 +529,11 @@ class AyderApp(App):
 
         self.chat_loop.config.pre_iteration_hook = _composed_pre_iteration
 
+        # A restored system prompt names the old session's scratch directory,
+        # start time and tool set; rebuild it for this session.
+        if self._resuming:
+            self.update_system_prompt_model()
+
     def _init_system_prompt(self) -> None:
         """Build and set the system prompt: the base prompt plus tool prompts."""
         from ayder_cli.prompts import get_system_prompt
@@ -547,7 +559,7 @@ class AyderApp(App):
                 chat_view.add_assistant_message(content)
 
     def update_system_prompt_model(self) -> None:
-        """Update the model name in the system prompt after /model switch."""
+        """Rebuild the system prompt (after /model, and on resume)."""
         from ayder_cli.prompts import get_system_prompt
 
         if self.messages and self.messages[0].get("role") == "system":
@@ -557,7 +569,9 @@ class AyderApp(App):
                 base_prompt = self._system_prompt_override
             else:
                 base_prompt = get_system_prompt(self.config.prompt)
-            self.messages[0]["content"] = base_prompt + self._environment_prompt + tool_prompts
+            self.messages[0]["content"] = (
+                base_prompt + self._environment_prompt + tool_prompts + self._capability_prompts
+            )
 
     def _animate_activity(self) -> None:
         """Animate spinners in the activity bar and tool panel.
