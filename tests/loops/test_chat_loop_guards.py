@@ -253,3 +253,30 @@ def test_repaired_read_gets_prefix():
 def test_ok_read_has_no_prefix():
     """Preservation."""
     assert REPAIRED not in _batch(_loop(None), _call("read_file", READ_A, "c1"))["c1"]
+
+
+# --- final review fixes --------------------------------------------------------
+
+
+@pytest.mark.parametrize("run_id, where", [(None, "[app] max_iterations"),
+                                           (1, "[agents.<name>] max_iterations")])
+def test_cap_message_says_how_to_continue(run_id, where):
+    """Review (I2): the stop named the setting but gave no next step."""
+    loop = _loop(_Provider(_tool()), max_iterations=2, run_id=run_id)
+    asyncio.run(asyncio.wait_for(loop.run(), timeout=5))
+    (msg,) = loop.cb.system
+    assert msg.startswith("Error: stopped after 2 LLM calls (max_iterations = 2).")
+    assert where in msg and "0 = unlimited" in msg
+    assert ("Send a message to continue" in msg) == (run_id is None)
+
+
+class _RaisingRegistry(_Registry):
+    def execute(self, name, arguments):
+        raise RuntimeError("boom")
+
+
+def test_repaired_read_that_raises_gets_prefix():
+    """Review (M2): the warning was missing when the tool raised."""
+    loop = _loop(None, registry=_RaisingRegistry())
+    out = _batch(loop, _call("read_file", '{"file_path": "a.py", "start_line": 1', "c1"))
+    assert "boom" in out["c1"] and out["c1"].startswith(REPAIRED)
