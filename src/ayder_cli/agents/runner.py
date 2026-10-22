@@ -27,6 +27,9 @@ logger = get_logger("agent")
 _ECHO_LINE = re.compile(r"^\s*(task_id|task_preview)\s*:", re.IGNORECASE)
 _VERDICT_LINE = re.compile(r"^\s*VERDICT\s*:", re.IGNORECASE)
 
+# An agent's LLM calls per run when its [agents.<name>] sets no max_iterations.
+AGENT_MAX_ITERATIONS = 100
+
 
 @dataclass
 class AgentRunOutcome:
@@ -157,6 +160,11 @@ class AgentRunner:
                 permissions=self._permissions,
                 tool_tags=frozenset(rt.config.tool_tags) if getattr(rt.config, "tool_tags", None) else None,
                 max_history=getattr(rt.config, "max_history_messages", 30),
+                max_iterations=(
+                    AGENT_MAX_ITERATIONS
+                    if self._agent_config.max_iterations is None
+                    else self._agent_config.max_iterations
+                ),
                 session_id=self._session_id,
                 run_id=self.run_id,
             )

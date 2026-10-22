@@ -374,6 +374,8 @@ class Config(BaseModel):
     # bound. The old fixed 30 predates large-context models and thrashes a tiny
     # history window on a big context.
     max_history_messages: int = Field(default=0)
+    # LLM calls per user turn before the loop stops; 0 = unlimited.
+    max_iterations: int = Field(default=200)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     # Ollama thinking mode. Defaults on because most local models in the
@@ -547,6 +549,13 @@ class Config(BaseModel):
     def validate_max_history_messages(cls, v: int) -> int:
         if v < 0:
             raise ValueError("max_history_messages must be non-negative (0 = unlimited)")
+        return v
+
+    @field_validator("max_iterations")
+    @classmethod
+    def validate_max_iterations(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("max_iterations must be non-negative (0 = unlimited)")
         return v
 
     @model_validator(mode="after")

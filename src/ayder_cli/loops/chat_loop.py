@@ -28,6 +28,7 @@ from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 from ayder_cli.tools.definition import is_parallel_safe
+from ayder_cli.tools.normalization import canonicalize_arguments
 from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 
 llm_log = get_logger("llm")
@@ -52,6 +53,7 @@ class ChatLoopConfig:
         default_factory=lambda: frozenset({"core", "metadata"})
     )
     max_history: int = 0
+    max_iterations: int = 0  # LLM calls per run(); 0 = unlimited
     verbose: bool = False
     pre_iteration_hook: Any | None = None  # async callable(messages) -> None
     session_id: str | None = None
@@ -84,6 +86,17 @@ class ChatCallbacks(Protocol):
     ) -> object | None: ...
     def is_cancelled(self) -> bool: ...
 
+
+# Consecutive reasoning-only replies the loop prompts again before stopping.
+_MAX_REASONING_RETRIES = 2
+# The repeat count of an identical tool call from which its result gets a note.
+_REPEAT_NOTE_AT = 3
+# How much of a refused call's raw arguments the missing-argument error echoes.
+_ECHO_MAX_CHARS = 300
+_REPAIRED_PREFIX = (
+    "[harness] arguments were truncated and repaired; "
+    "verify the target is what you intended.\n"
+)
 
 _CANCELLED_BEFORE_RUN = "Tool call was cancelled before it ran."
 _INTERRUPTED_WHILE_RUNNING = (
@@ -148,6 +161,11 @@ class ChatLoop:
         # cancelled batch does not await them (no shield), so Ctrl+C never
         # waits for a long command; _reap_task drops them when they end.
         self._inflight_tasks: set[asyncio.Task] = set()
+
+        # The repetition guard: the last call's signature and how many times
+        # in a row it has occurred in this run(), in history order.
+        self._last_call_sig: tuple[str, str] | None = None
+        self._repeat_count = 0
 
     def _reap_task(self, task: asyncio.Task) -> None:
         """Done-callback for a retained worker task.
@@ -228,8 +246,23 @@ class ChatLoop:
             await self.context_manager.detect_context_length()
 
         iteration_n = 0
+        reasoning_only = 0
+        self._last_call_sig, self._repeat_count = None, 0
         while True:
             if self.cb.is_cancelled():
+                return
+            cap = self.config.max_iterations
+            if cap and iteration_n >= cap:
+                if self.config.run_id is None:
+                    remedy = (
+                        "Send a message to continue, or raise [app] max_iterations "
+                        "(0 = unlimited)."
+                    )
+                else:
+                    remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
+                self.cb.on_system_message(
+                    f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}"
+                )
                 return
 
             # Every field the event reads is bound BEFORE the try, so the
@@ -468,6 +501,13 @@ class ChatLoop:
                     self.messages.append(
                         {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
                     )
+                    reasoning_only += 1
+                    if reasoning_only > _MAX_REASONING_RETRIES:
+                        self.cb.on_system_message(
+                            f"Error: the model returned only reasoning {reasoning_only} "
+                            "times in a row; stopped."
+                        )
+                        return
                     self.messages.append(
                         {
                             "role": "user",
@@ -500,6 +540,7 @@ class ChatLoop:
                                 parsed = _parse_arguments(raw_args)
                                 tc_entry["function"]["arguments"] = json.dumps(parsed)
 
+                reasoning_only = 0
                 msg_dict: dict = {"role": "assistant", "content": final_content}
                 if raw_tool_calls_for_history:
                     msg_dict["tool_calls"] = raw_tool_calls_for_history
@@ -551,6 +592,7 @@ class ChatLoop:
             runnable: list[_ToolCall] = []
             confirm_ids: set[str] = set()
             safe_ids: set[str] = set()
+            repaired_ids: set[str] = set()
 
             for tc in tool_calls:
                 # Check for parsing errors injected by XML/JSON fallback protocols
@@ -591,12 +633,14 @@ class ChatLoop:
                     self.cb.on_tool_start(tc.id, tc.function.name, args)
                     self.cb.on_tool_complete(tc.id, refusal)
                     continue
+                if arg_status == "repaired":
+                    repaired_ids.add(tc.id)
                 missing = _check_required_args(tc.function.name, args)
                 if missing:
                     err_msg = (
                         f"Error: tool call '{tc.function.name}' has missing required "
                         f"arguments: {', '.join(missing)}. "
-                        f"Raw arguments received: {tc.function.arguments!r}. "
+                        f"Raw arguments received: {_bounded_echo(tc.function.arguments)}. "
                         f"You must provide all required arguments in the function call."
                     )
                     rd = {
@@ -729,19 +773,23 @@ class ChatLoop:
                     tool_log.trace("Appending Tool Result [{}] to history: {} chars", name, len(result))
 
                     escalated = escalated or _is_escalation_result(result)
+                    if tc.id in repaired_ids:
+                        result = _REPAIRED_PREFIX + result
                     self.messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tid,
                             "name": name,
-                            "content": result,
+                            "content": result + self._repeat_note(tc),
                         }
                     )
                     batch.appended.add(tc.id)
                 else:
                     # rd_result is BaseException (includes Exception)
                     err_id, err_name = tc.id, tc.function.name
-                    error_msg = f"Error: {rd_result}"
+                    error_msg = f"Error: {rd_result}" + self._repeat_note(tc)
+                    if tc.id in repaired_ids:
+                        error_msg = _REPAIRED_PREFIX + error_msg
                     tool_log.trace(
                         "Appending Tool Error [{}] to history: {} chars", err_name, len(error_msg)
                     )
@@ -860,6 +908,26 @@ class ChatLoop:
 
     # -- Helpers -------------------------------------------------------------
 
+    def _repeat_note(self, tc: _ToolCall) -> str:
+        """Count ``tc`` in the run's call sequence; the note from its 3rd repeat on.
+
+        Polling a status legitimately repeats a call, so the note never blocks
+        it and only asks the model to check whether the result changed.
+        """
+        name = tc.function.name
+        canonical = canonicalize_arguments(name, _parse_arguments(tc.function.arguments))
+        sig = (name, json.dumps(canonical, sort_keys=True, default=str))
+        if sig == self._last_call_sig:
+            self._repeat_count += 1
+        else:
+            self._last_call_sig, self._repeat_count = sig, 1
+        if self._repeat_count < _REPEAT_NOTE_AT:
+            return ""
+        return (
+            f"\n[harness] identical call repeated {self._repeat_count} times in a row; "
+            "if the result did not change, change approach or ask the user."
+        )
+
     def _tool_needs_confirmation(self, tool_name: str) -> bool:
         """Delegate to shared ExecutionPolicy — same check for CLI and TUI."""
         policy = ExecutionPolicy(self.config.permissions)
@@ -910,6 +978,14 @@ def _argument_refusal(tool_name: str, status: str) -> str | None:
             "splitting large content across several smaller calls."
         )
     return None
+
+
+def _bounded_echo(arguments) -> str:
+    """The repr of a refused call's arguments, cut to ``_ECHO_MAX_CHARS``."""
+    echo = repr(arguments)
+    if len(echo) <= _ECHO_MAX_CHARS:
+        return echo
+    return f"{echo[:_ECHO_MAX_CHARS]}… ({len(echo)} chars)"
 
 
 def _truncate_for_tool(tool_name: str, content: str) -> str:
