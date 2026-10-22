@@ -177,3 +177,79 @@ def test_agent_runner_passes_max_iterations(configured, expected):
         MockLoop.return_value.run = AsyncMock()
         asyncio.run(runner.run("task"))
     assert MockLoop.call_args.kwargs["config"].max_iterations == expected
+
+
+# --- P1-6: repetition note ---------------------------------------------------
+
+from ayder_cli.providers.base import _FunctionCall, _ToolCall  # noqa: E402
+
+READ_A = '{"file_path": "a.py"}'
+NOTE = "[harness] identical call repeated"
+
+
+def _call(name, arguments, call_id):
+    return _ToolCall(id=call_id, type="function",
+                     function=_FunctionCall(name=name, arguments=arguments))
+
+
+def _batch(loop, *calls):
+    asyncio.run(loop._execute_tool_calls(list(calls)))
+    return {m["tool_call_id"]: m["content"] for m in loop.messages if m["role"] == "tool"}
+
+
+def test_third_identical_call_gets_note_in_one_batch():
+    """Baseline regression: nothing told the model it was repeating itself."""
+    out = _batch(_loop(None), *(_call("read_file", READ_A, f"c{i}") for i in (1, 2, 3)))
+    assert NOTE not in out["c1"] and NOTE not in out["c2"]
+    assert f"{NOTE} 3 times in a row" in out["c3"]
+
+
+def test_identical_calls_across_iterations_get_note():
+    """Baseline regression: the same call in every iteration, with no note."""
+    loop = _loop(_Provider(_tool(args=READ_A)), max_iterations=4)
+    asyncio.run(asyncio.wait_for(loop.run(), timeout=5))
+    notes = [NOTE in c for c in _tool_messages(loop)]
+    assert notes == [False, False, True, True]
+    assert "repeated 4 times" in _tool_messages(loop)[3]
+
+
+def test_two_identical_calls_no_note():
+    """Preservation: a repeat, or a changed argument, is not flagged."""
+    out = _batch(_loop(None), _call("read_file", READ_A, "c1"), _call("read_file", READ_A, "c2"),
+                 _call("read_file", '{"file_path": "b.py"}', "c3"),
+                 _call("read_file", READ_A, "c4"))
+    assert not any(NOTE in v for v in out.values())
+
+
+# --- P2-23: bounded argument echo ---------------------------------------------
+
+
+def test_missing_arg_echo_is_bounded():
+    """Baseline regression: a 100 KB argument came back whole in the error."""
+    raw = json.dumps({"operation": "write", "content": "x" * 100_000})
+    out = _batch(_loop(None), _call("file_editor", raw, "c1"))["c1"]
+    assert "missing required arguments: file_path" in out
+    assert len(out) < 1000 and f"({len(repr(raw))} chars)" in out
+
+
+def test_short_missing_arg_echo_unchanged():
+    """Preservation: a short echo is shown whole."""
+    raw = '{"operation": "write"}'
+    out = _batch(_loop(None), _call("file_editor", raw, "c1"))["c1"]
+    assert f"Raw arguments received: {raw!r}." in out
+
+
+# --- P2-24: repaired-argument prefix -------------------------------------------
+
+REPAIRED = "[harness] arguments were truncated and repaired"
+
+
+def test_repaired_read_gets_prefix():
+    """Baseline regression: a read ran on cut-off arguments without a word."""
+    out = _batch(_loop(None), _call("read_file", '{"file_path": "a.py", "start_line": 1', "c1"))
+    assert out["c1"].startswith(REPAIRED)
+
+
+def test_ok_read_has_no_prefix():
+    """Preservation."""
+    assert REPAIRED not in _batch(_loop(None), _call("read_file", READ_A, "c1"))["c1"]
