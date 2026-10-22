@@ -50,6 +50,7 @@ This document provides coding standards, tool configurations, and workflows for 
 ayder-cli/
 ├── src/ayder_cli/              # Main source code
 │   ├── cli.py                  # Entry point (argparse)
+│   ├── __main__.py             # `python -m ayder_cli`
 │   ├── cli_runner.py           # Single-command (non-TUI) runs and task commands
 │   ├── cli_callbacks.py        # CliCallbacks (ChatCallbacks for plain terminal runs)
 │   ├── console.py              # Rich console instance
@@ -157,6 +158,8 @@ ayder-cli/
 │   │   ├── theme_manager.py    # Theme loading and CSS
 │   │   ├── types.py            # MessageType, ConfirmResult
 │   │   └── widgets.py          # ChatView, ToolPanel, CLIInputBar, StatusBar, …
+│   │
+│   ├── skills/                 # Packaged built-in skills (development-workflow/SKILL.md)
 │   │
 │   └── themes/                 # TUI themes
 │       ├── claude.py           # Claude theme CSS (RGB)
