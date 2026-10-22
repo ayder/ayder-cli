@@ -160,7 +160,7 @@ provider = "openai"           # Active provider profile name
 editor = "vim"                # Editor for /task-edit command
 verbose = false               # Show file contents after write + LLM debug
 max_background_processes = 5  # Max concurrent background processes (1-20)
-max_iterations = 10           # Max agentic iterations per message (1-100)
+max_iterations = 200          # LLM calls per message before the loop stops (0 = unlimited)
 max_output_tokens = 32768     # Max tokens in LLM response
 max_history_messages = 30     # Messages kept in history
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
