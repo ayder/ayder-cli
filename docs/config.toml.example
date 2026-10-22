@@ -92,6 +92,8 @@ max_output_tokens = 8192            # orchestrator response cap
 # window on a large-context model and wastes most of it. Set a finite number
 # only if you want a hard message cap regardless of window size.
 max_history_messages = 0
+# LLM calls per user message before the loop stops and asks for input. 0 = unlimited.
+max_iterations = 200
 agent_timeout = 1800               # seconds before a background agent is cancelled (30 min; reasoning+coding can be slow)
 # Tools the agents inherit. A coding harness needs file/shell/search (core),
 # tasks/notes (metadata), background process control for test suites
@@ -232,6 +234,7 @@ model = "glm-5.2:cloud"
 # skills = ["development-workflow"] # wins over the provider profile's skills; [app] is never read
 temperature = 0.4
 max_output_tokens = 8192
+# max_iterations = 100           # LLM calls per run (default 100; 0 = unlimited)
 reasoning_effort = "high"
 system_prompt = """
 You are Project Manager #1 — the requirements analyst and spec author.
