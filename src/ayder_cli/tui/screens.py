@@ -741,6 +741,10 @@ class AgentListScreen(ModalScreen[str | None]):
             self.dismiss(None)
 
 
+# Mouse support captures the mouse, so the terminal's own selection needs a modifier.
+SELECT_TEXT_HINT = "Hold Shift to select text with the mouse (Option in iTerm2 and Terminal.app)."
+
+
 class CLIHelpScreen(ModalScreen[None]):
     """Centered help modal showing all keybindings, dynamically generated."""
 
@@ -758,6 +762,8 @@ class CLIHelpScreen(ModalScreen[None]):
             for key, desc in entries:
                 lines.append(f"    {key:<16}{desc}")
             lines.append("")
+        lines.append(f"  {SELECT_TEXT_HINT}")
+        lines.append("")
         lines.append("          Press Esc to close")
         return "\n".join(lines)
 

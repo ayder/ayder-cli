@@ -10,7 +10,7 @@ from textual.app import App, ComposeResult, InvalidThemeError
 from textual.css.query import NoMatches
 from textual.widgets import Static
 from textual.timer import Timer
-from textual import on
+from textual import messages, on
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -208,7 +208,7 @@ class AyderApp(App):
     # switches App.theme (the palette) live — handy for previewing palettes on
     # the ayder layout before pinning one via [ui] palette.
     ENABLE_COMMAND_PALETTE = True
-    ENABLE_MOUSE_SUPPORT = False
+    ENABLE_MOUSE_SUPPORT = True
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
@@ -721,10 +721,11 @@ class AyderApp(App):
 
     def compose(self) -> ComposeResult:
         """Compose the UI layout - terminal style with scrolling content."""
-        yield ChatView(id="chat-view")
+        # Toggle panels open at the top; the chat stays next to the input bar.
         yield ToolPanel(id="tool-panel")
         yield ThinkingPanel(id="thinking-panel")
         yield AgentPanel(id="agent-panel")
+        yield ChatView(id="chat-view")
         yield ActivityBar(id="activity-bar")
         yield CLIInputBar(commands=self.commands, id="input-bar")
         yield StatusBar(
@@ -733,6 +734,17 @@ class AyderApp(App):
             effort=get_effort_label(self.config),
             id="status-bar",
         )
+
+    def _on_terminal_supports_synchronized_output(
+        self, message: messages.TerminalSupportsSynchronizedOutput
+    ) -> None:
+        # EXPERIMENT, judged live by the operator: textual 8.2.7 leaves synchronized
+        # output (DEC 2026) off in inline mode, yet App._display already writes each
+        # inline frame as one sequence between _begin_update/_end_update, so the
+        # terminal can apply a whole frame atomically. Relies on private textual
+        # 8.2.7 API (exact pin); drop this if it does not help.
+        if self._driver is not None:
+            self._sync_available = True
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
@@ -776,7 +788,6 @@ class AyderApp(App):
         )
         spacer_h = max(0, viewport_h - content_h)
         self._banner_spacer.styles.height = spacer_h
-        chat_view.scroll_end(animate=False)
 
     @property
     def _is_processing(self) -> bool:
@@ -1092,9 +1103,11 @@ class AyderApp(App):
     def _after_turn_finished(self) -> None:
         """UI teardown after a turn fully exits; the consumer pulls the next one."""
         self._set_inbox_status("idle")
-        self._maybe_stop_activity_timer()
         try:
+            # Clear first: a text-only turn ends with the bar still "generating",
+            # which keeps the stop check below from ever seeing an idle bar.
             self.query_one("#activity-bar", ActivityBar).clear()
+            self._maybe_stop_activity_timer()
             self.query_one("#input-bar", CLIInputBar).focus_input()
         except Exception:  # noqa: BLE001 - teardown guard: post-turn UI cleanup is cosmetic and must not kill the app
             logger.opt(exception=True).debug("Post-turn UI teardown failed")
@@ -1146,28 +1159,15 @@ class AyderApp(App):
 
     def action_toggle_tools(self) -> None:
         """Toggle the tool context panel."""
-        tool_panel = self.query_one("#tool-panel", ToolPanel)
-        visible = tool_panel.toggle()
-        chat_view = self.query_one("#chat-view", ChatView)
-        state = "visible" if visible else "hidden"
-        chat_view.add_system_message(f"Tool panel {state} (Ctrl+O to toggle)")
+        self.query_one("#tool-panel", ToolPanel).toggle()
 
     def action_toggle_thinking(self) -> None:
         """Toggle the thinking/reasoning panel (mirrors Ctrl+O / Ctrl+G)."""
-        thinking_panel = self.query_one("#thinking-panel", ThinkingPanel)
-        visible = thinking_panel.toggle()
-        self._show_thinking = visible
-        chat_view = self.query_one("#chat-view", ChatView)
-        state = "visible" if visible else "hidden"
-        chat_view.add_system_message(f"Thinking panel {state} (Ctrl+T to toggle)")
+        self._show_thinking = self.query_one("#thinking-panel", ThinkingPanel).toggle()
 
     def action_toggle_agents(self) -> None:
         """Toggle the agent panel."""
-        agent_panel = self.query_one("#agent-panel", AgentPanel)
-        visible = agent_panel.toggle()
-        chat_view = self.query_one("#chat-view", ChatView)
-        state = "visible" if visible else "hidden"
-        chat_view.add_system_message(f"Agent panel {state} (Ctrl+G to toggle)")
+        self.query_one("#agent-panel", AgentPanel).toggle()
 
     def action_show_help(self) -> None:
         """Show help modal with keybindings."""
@@ -1187,8 +1187,6 @@ class AyderApp(App):
             return
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.scroll_page_down(animate=False)
-        if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
-            chat_view.enable_follow_mode()
 
     def _scroll_open_panel(self, motion: str) -> bool:
         """Scroll a visible scrollable panel — the agents (Ctrl+G) or thinking

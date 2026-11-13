@@ -492,6 +492,7 @@ inside the Ollama summary.
 | `Ctrl+L` | Clear chat |
 | `Ctrl+O` | Toggle tool panel |
 | `Ctrl+T` | Toggle thinking/reasoning blocks |
+| `Shift` + drag | Select text with the mouse (Option in iTerm2 and Terminal.app) |
 | `PageUp` / `PageDown` | Scroll chat view |
 | `Tab` | Auto-complete slash commands |
 

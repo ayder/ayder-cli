@@ -57,6 +57,7 @@ Session start: {started_at}{scratch_line}
 Your workspace is {workspace}.
 Outside it, read only paths the user names or the task requires, and create,
 modify or initialize nothing (including `git init`) without the user's consent.{scratch_rule}
+Replies are rendered as Markdown. Separate paragraphs with a blank line; do not wrap lines at a fixed width.
 """
 
 # REASON: Models put temporary files in /tmp by habit. A per-session directory

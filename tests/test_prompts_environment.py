@@ -8,14 +8,23 @@ prompts.
 """
 
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.application import runtime_factory
 from ayder_cli.core.config import Config
 from ayder_cli.core.context import ProjectContext, new_scratch_dir
+from ayder_cli.prompts import (
+    AGENTIC_PROMPT,
+    EXTENDED_SYSTEM_PROMPT,
+    MINIMAL_SYSTEM_PROMPT,
+    STANDARD_SYSTEM_PROMPT,
+    build_environment_prompt,
+)
 from ayder_cli.tools.builtins.skill_definitions import SKILL_TOOL_PROMPT
 
 
@@ -100,3 +109,74 @@ def test_no_scratch_dir_no_scratch_line(tmp_path, monkeypatch):
 
     assert _scratch_line(rt.system_prompt) is None
     assert str(tmp_path.resolve()) in rt.system_prompt
+
+
+# The Markdown rendering line: structure only (it exists, it is injected, it is said
+# once), never its wording semantics.
+MARKDOWN_LINE = (
+    "Replies are rendered as Markdown. "
+    "Separate paragraphs with a blank line; do not wrap lines at a fixed width."
+)
+
+
+def test_markdown_line_is_ascii():
+    assert MARKDOWN_LINE.isascii()
+
+
+@pytest.mark.parametrize("with_scratch", [False, True])
+def test_environment_section_has_the_markdown_line_once_on_its_own_line(tmp_path, with_scratch):
+    prompt = build_environment_prompt(
+        tmp_path, datetime.now().astimezone(), tmp_path / "scratch" if with_scratch else None
+    )
+
+    assert prompt.count(MARKDOWN_LINE) == 1
+    assert MARKDOWN_LINE in prompt.splitlines()
+    # After the workspace rules, which come first.
+    assert prompt.index("Your workspace is") < prompt.index(MARKDOWN_LINE)
+
+
+@pytest.mark.parametrize("tier", ["MINIMAL", "STANDARD", "EXTENDED", "AGENTIC"])
+def test_runtime_prompt_has_the_markdown_line_for_every_tier(tmp_path, monkeypatch, tier):
+    rt = _runtime(tmp_path, monkeypatch, prompt_tier=tier)
+
+    assert rt.system_prompt.count(MARKDOWN_LINE) == 1
+    assert MARKDOWN_LINE in rt.environment_prompt
+    assert rt.system_prompt.index(MARKDOWN_LINE) < rt.system_prompt.index(SKILL_TOOL_PROMPT)
+
+
+def test_override_prompt_has_the_markdown_line(tmp_path, monkeypatch):
+    prompt = _runtime(tmp_path, monkeypatch, system_prompt_override="Custom base.").system_prompt
+
+    assert prompt.count(MARKDOWN_LINE) == 1
+
+
+def test_agent_prompt_has_the_markdown_line(tmp_path, monkeypatch):
+    rt = _agent_runtime(ProjectContext(str(tmp_path)), monkeypatch)
+
+    assert rt.system_prompt.count(MARKDOWN_LINE) == 1
+
+
+def test_base_prompts_do_not_repeat_the_markdown_line():
+    for base in (MINIMAL_SYSTEM_PROMPT, STANDARD_SYSTEM_PROMPT, EXTENDED_SYSTEM_PROMPT, AGENTIC_PROMPT):
+        assert MARKDOWN_LINE not in base
+
+
+def test_tui_prompt_builds_carry_the_markdown_line(tmp_path):
+    """Startup and the model-switch rebuild both reuse the session's environment section."""
+    from ayder_cli.tui.app import AyderApp
+
+    app = AyderApp.__new__(AyderApp)
+    app.registry = MagicMock()
+    app.registry.get_system_prompts.return_value = "[TOOLS]"
+    app.config = Config()
+    app._system_prompt_override = None
+    app._environment_prompt = build_environment_prompt(tmp_path, datetime.now().astimezone())
+    app._capability_prompts = ""
+    app.messages = []
+    app.chat_loop = MagicMock()
+    app.chat_loop.config.tool_tags = frozenset({"core"})
+
+    app._init_system_prompt()
+    assert app.messages[0]["content"].count(MARKDOWN_LINE) == 1
+    app.update_system_prompt_model()
+    assert app.messages[0]["content"].count(MARKDOWN_LINE) == 1

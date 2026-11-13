@@ -329,11 +329,13 @@ AyderApp (Textual App)
 ├── CSS (from theme_manager.py)
 ├── Compose:
 │   ├── Banner (Static)
+│   ├── ToolPanel (custom widget) ← Tool calls; hidden until Ctrl+O, opens at the top (fixed 10% height)
+│   ├── ThinkingPanel (custom widget) ← Reasoning stream; Ctrl+T, opens at the top (fixed 30% height)
+│   ├── AgentPanel (custom widget) ← Agent runs; Ctrl+G, opens at the top (fixed 10% height)
 │   ├── ChatView (custom widget) ← Messages displayed here
-│   ├── ToolPanel (custom widget) ← Tool calls shown here
 │   ├── ActivityBar (custom widget) ← Status indicators
 │   ├── CLIInputBar (custom widget) ← User input
-│   └── StatusBar (custom widget) ← Model, tokens, iterations
+│   └── StatusBar (custom widget) ← Working directory (~ for home, shortened from the left), model, effort, mode, context usage, files
 │
 ├── Screens (Modal):
 │   ├── CLIConfirmScreen ← Tool confirmation with diff
@@ -574,15 +576,15 @@ The TUI module provides a clean, terminal-like interface with:
 - Simple text output with prefixes
 - Minimal borders and chrome design
 - Slash command auto-completion
-- Status bar with contextual information
-- Mouse-free operation optimized for keyboard
+- Status bar with contextual information, starting with the working directory (home shown as `~`; a long path is shortened from the left to at most a third of the bar, never below `…/<last component>`, regardless of the other items, which may overflow the bar's right edge)
+- Keyboard-first operation, with mouse support enabled
 
 It exposes key components like AyderApp, widgets (ChatView, ToolPanel), and screens (CLIConfirmScreen) for building the terminal interface.
 
 ### TUI Application File Summary (src/ayder_cli/tui/app.py)
 
 AyderApp is the main Textual application implementing a chat-style interface:
-- **Layout**: Banner, ChatView, ToolPanel, ActivityBar, CLIInputBar, StatusBar
+- **Layout**: ToolPanel, ThinkingPanel and AgentPanel (hidden by default; they open at the top, above the chat, at a fixed 10% / 30% / 10% of the screen height with their content scrolling inside, and toggling prints no chat message), ChatView, ActivityBar, CLIInputBar, StatusBar
 - **Keybindings**: Ctrl+Q (quit), Ctrl+C/X (cancel), Ctrl+L (clear), Ctrl+O (toggle tools)
 - **Features**:
   - Async processing with worker threads
@@ -594,7 +596,7 @@ AyderApp is the main Textual application implementing a chat-style interface:
 The application manages:
 - LLM provider setup and configuration
 - Tool registry initialization with middleware
-- System prompt construction (base prompt + environment section + tool prompts + skill catalog; no project tree). The environment section (`prompts.build_environment_prompt`) gives the absolute working directory and the session start date and time (ISO 8601, local time with UTC offset). It is built once per session and reused on `/model` rebuilds. A resumed session (`--resume`) restores the provider it last used (the session file stores it; a provider no longer configured falls back to the default with a warning) and its `--system-prompt` text, keeps its history, and rebuilds the system prompt for the current session, so the scratch directory, start time, tool prompts and agent capability prompts are current; `/model` rebuilds keep the capability prompts.
+- System prompt construction (base prompt + environment section + tool prompts + skill catalog; no project tree). The environment section (`prompts.build_environment_prompt`) gives the absolute working directory and the session start date and time (ISO 8601, local time with UTC offset). It also tells the model that replies render as Markdown (paragraphs separated by a blank line, no fixed-width wrapping). It is built once per session and reused on `/model` rebuilds. A resumed session (`--resume`) restores the provider it last used (the session file stores it; a provider no longer configured falls back to the default with a warning) and its `--system-prompt` text, keeps its history, and rebuilds the system prompt for the current session, so the scratch directory, start time, tool prompts and agent capability prompts are current; `/model` rebuilds keep the capability prompts.
 - Process manager for background operations
 
 ### Chat Loop Summary (src/ayder_cli/loops/chat_loop.py)

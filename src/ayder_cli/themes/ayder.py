@@ -659,16 +659,15 @@ BannerWidget .banner-version {
     color: $success;
 }
 
-/* ToolPanel - The panel that slides up/appears above the input bar showing running tools.
-   Targets 'ToolPanel' in widgets.py. */
+/* ToolPanel - The panel that opens at the top of the screen, above the chat view, showing running tools.
+   Fixed at 10% of the screen height from the moment it opens, whatever it holds;
+   its content scrolls inside. Targets 'ToolPanel' in widgets.py. */
 ToolPanel {
     layout: vertical;
-    height: auto;
-    min-height: 6;
-    max-height: 24%;
+    height: 10%;
     background: $background;
-    border-top: solid ansi_bright_black;
-    padding: 1 1;
+    border-bottom: solid ansi_bright_black;
+    padding: 0 1;
     overflow-y: scroll;
     display: none;
 }
@@ -688,14 +687,14 @@ ToolPanel .tool-item.completed {
 }
 
 /* AgentPanel - Scrollable panel for agent run history.
-   Toggled with Ctrl+G. Targets 'AgentPanel' in widgets.py. */
+   Toggled with Ctrl+G. Fixed at 10% of the screen height; content scrolls inside.
+   Targets 'AgentPanel' in widgets.py. */
 AgentPanel {
     layout: vertical;
-    height: auto;
-    max-height: 40%;
+    height: 10%;
     background: $background;
-    border-top: solid ansi_bright_black;
-    padding: 1 1;
+    border-bottom: solid ansi_bright_black;
+    padding: 0 1;
     overflow-y: scroll;
     display: none;
 }
@@ -734,15 +733,15 @@ AgentPanel .agent-detail {
 }
 
 /* ThinkingPanel - Scrollable panel showing the model's reasoning stream.
-   Toggled with Ctrl+T. Taller than the tool/agent panels because reasoning is
-   long-form. Targets 'ThinkingPanel' in widgets.py. */
+   Toggled with Ctrl+T. Fixed at 30% of the screen height, three times the
+   tool/agent panels, because reasoning is long-form; content scrolls inside.
+   Targets 'ThinkingPanel' in widgets.py. */
 ThinkingPanel {
     layout: vertical;
-    height: auto;
-    max-height: 60%;
+    height: 30%;
     background: $background;
-    border-top: solid ansi_bright_black;
-    padding: 1 1;
+    border-bottom: solid ansi_bright_black;
+    padding: 0 1;
     overflow-y: scroll;
     display: none;
 }
@@ -778,21 +777,14 @@ Screen:inline {
 }
 
 #tool-panel {
-    height: auto;
-    min-height: 0;
-    max-height: 20%;
     width: 100%;
 }
 
 #agent-panel {
-    min-height: 0;
-    max-height: 40%;
     width: 100%;
 }
 
 #thinking-panel {
-    min-height: 0;
-    max-height: 60%;
     width: 100%;
 }
 
