@@ -80,11 +80,6 @@ async def _conversation(app, pilot, turns=3):
     app.chat_loop.llm = _FakeProvider(config=None)
     for n in range(turns):
         await _submit_and_wait(app, pilot, f"question number {n}")
-    # A turn leaves the 10 fps activity timer running; it can fire after the DOM is
-    # gone at teardown and raise NoMatches, so stop it once the turns are done.
-    if app._activity_timer is not None:
-        app._activity_timer.stop()
-        app._activity_timer = None
     chat_view = app.query_one("#chat-view", ChatView)
     assert chat_view.max_scroll_y > 0
     assert chat_view.scroll_y == chat_view.max_scroll_y
@@ -250,3 +245,16 @@ async def test_newest_rows_stay_painted_through_open_close_open_cycles(panel_id,
                 assert chat_view.scroll_y == chat_view.max_scroll_y
                 assert _newest_row_is_painted(chat_view), f"cycle {cycle} {step}"
 
+
+@pytest.mark.anyio
+async def test_activity_timer_is_stopped_when_a_real_turn_ends():
+    """The 10 fps spinner timer used to outlive every turn: the stop check ran
+    before the activity state was cleared, so the timer kept ticking."""
+    app = AyderApp(model="test")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        app.chat_loop.llm = _FakeProvider(config=None)
+
+        await _submit_and_wait(app, pilot, "one question")
+
+        assert app._activity_timer is None

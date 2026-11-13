@@ -1103,9 +1103,11 @@ class AyderApp(App):
     def _after_turn_finished(self) -> None:
         """UI teardown after a turn fully exits; the consumer pulls the next one."""
         self._set_inbox_status("idle")
-        self._maybe_stop_activity_timer()
         try:
+            # Clear first: a text-only turn ends with the bar still "generating",
+            # which keeps the stop check below from ever seeing an idle bar.
             self.query_one("#activity-bar", ActivityBar).clear()
+            self._maybe_stop_activity_timer()
             self.query_one("#input-bar", CLIInputBar).focus_input()
         except Exception:  # noqa: BLE001 - teardown guard: post-turn UI cleanup is cosmetic and must not kill the app
             logger.opt(exception=True).debug("Post-turn UI teardown failed")

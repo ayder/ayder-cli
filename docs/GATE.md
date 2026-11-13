@@ -12,7 +12,7 @@ Input: the candidate SHA.
    gates and the test suite, and stops at the first failing task.
 4. Copy the final pytest summary line (`=== N passed, M skipped in …s ===`) verbatim.
 
-Last measured: `3014 passed, 2 skipped` on `feat/tui-tweaks` (2026-11-13, TUI panels, scrolling and status bar).
+Last measured: `3015 passed, 2 skipped` on `feat/tui-tweaks` (2026-11-13, activity timer stops after a turn).
 
 ## Report format
 
