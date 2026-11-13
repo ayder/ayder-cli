@@ -81,10 +81,11 @@ def run_tui(
         raise SystemExit(1)
 
     try:
-        app.run(inline=True, mouse=False)
+        app.run(inline=True, mouse=True)
     finally:
-        # Ensure mouse reporting is disabled after exit — Textual's driver may
-        # leave it on if the shutdown path doesn't fully complete (e.g. Ctrl+Q).
+        # Mouse is enabled for the session; make sure reporting is switched off
+        # on exit — Textual's driver may leave it on if the shutdown path doesn't
+        # fully complete (e.g. Ctrl+Q or a crash).
         sys.stdout.write(
             "\033[?1000l"  # disable mouse click tracking
             "\033[?1002l"  # disable mouse button-event tracking

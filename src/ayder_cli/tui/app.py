@@ -208,7 +208,7 @@ class AyderApp(App):
     # switches App.theme (the palette) live — handy for previewing palettes on
     # the ayder layout before pinning one via [ui] palette.
     ENABLE_COMMAND_PALETTE = True
-    ENABLE_MOUSE_SUPPORT = False
+    ENABLE_MOUSE_SUPPORT = True
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),

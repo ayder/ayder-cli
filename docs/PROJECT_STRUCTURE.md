@@ -575,7 +575,7 @@ The TUI module provides a clean, terminal-like interface with:
 - Minimal borders and chrome design
 - Slash command auto-completion
 - Status bar with contextual information
-- Mouse-free operation optimized for keyboard
+- Keyboard-first operation, with mouse support enabled
 
 It exposes key components like AyderApp, widgets (ChatView, ToolPanel), and screens (CLIConfirmScreen) for building the terminal interface.
 
