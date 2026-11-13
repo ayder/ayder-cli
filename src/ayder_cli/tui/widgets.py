@@ -8,10 +8,13 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
 from textual.css.query import NoMatches
+from textual.geometry import Size
 from textual.message import Message
 from textual.reactive import reactive
 from textual.suggester import SuggestFromList
+from textual.widget import Widget
 from textual.widgets import Static, Input, Label, TextArea
+from rich.cells import cell_len
 from rich.text import Text
 from rich.markdown import Markdown
 from rich.spinner import Spinner
@@ -52,15 +55,58 @@ class ChatView(VerticalScroll):
         super().__init__(**kwargs)
         self._message_widgets: list[Static] = []
         self._thinking_visible: bool = False
-        self._follow_mode: bool = True
+
+    def on_mount(self) -> None:
+        """Anchor to the bottom: follow the end of the chat.
+
+        Textual re-pins an anchored widget to its end inside the same layout
+        pass as any resize or new content, so a panel opening or a message
+        arriving never draws a frame at a stale offset. Scrolling up releases
+        the anchor; scrolling back to the end re-arms it.
+        """
+        self.anchor()
+
+    def _size_updated(
+        self, size: Size, virtual_size: Size, container_size: Size, layout: bool = True
+    ) -> bool:
+        # Textual pins an anchored widget using the pre-resize container_size, so
+        # the first frame after a resize (a panel opening) draws at a stale offset.
+        # Re-pin once the new size is in, then ask for another layout: the
+        # compositor placed the children with the stale offset, and a silent
+        # set_reactive does not move them (without it every open after the first
+        # left the newest rows cut off). Relies on private Widget/scrollbar
+        # attributes of textual 8.2.7; the draw-spy and painted-rows tests in
+        # test_panel_layout guard it.
+        updated = super()._size_updated(size, virtual_size, container_size, layout)
+        if updated and self._anchored and not self._anchor_released:
+            stale = self.scroll_y
+            end = self.max_scroll_y
+            self.set_reactive(Widget.scroll_y, end)
+            self.set_reactive(Widget.scroll_target_y, end)
+            self.vertical_scrollbar._reactive_position = end  # type: ignore[attr-defined]
+            if end != stale:
+                self.refresh(layout=True)
+        return updated
+
+    def release_anchor(self) -> None:
+        # Textual re-arms an anchor only in watch_scroll_y, so a scroll that lands
+        # where it already is (PageDown at the end) would leave it released for
+        # good. Re-check once the scroll has landed; a user who scrolled up stays
+        # released because scroll_y is then below the end.
+        super().release_anchor()
+        self.call_after_refresh(self._reanchor_at_end)
+
+    def _reanchor_at_end(self) -> None:
+        if self.scroll_y >= self.max_scroll_y:
+            self.anchor()
 
     def disable_follow_mode(self) -> None:
-        """Disable auto-scroll on new messages (user is reading history)."""
-        self._follow_mode = False
+        """Stop following the end (user is reading history)."""
+        self.release_anchor()
 
     def enable_follow_mode(self) -> None:
-        """Re-enable auto-scroll on new messages."""
-        self._follow_mode = True
+        """Follow the end again and jump to it."""
+        self.anchor()
 
     def _create_text(
         self, content: str, msg_type: MessageType, metadata: dict | None = None
@@ -137,8 +183,6 @@ class ChatView(VerticalScroll):
                     text = self._create_text(full_content, msg_type, metadata)
                     if text:
                         last_widget.update(text)
-                if self._follow_mode:
-                    self.scroll_end(animate=False)
                 return
 
         self.messages.append(
@@ -162,9 +206,6 @@ class ChatView(VerticalScroll):
                 # Hide thinking blocks by default
                 if msg_type == MessageType.THINKING and not self._thinking_visible:
                     msg_widget.display = False
-
-        if self._follow_mode:
-            self.scroll_end(animate=False)
 
     def add_user_message(self, content: str) -> None:
         """Add a user message."""
@@ -241,6 +282,7 @@ class ToolPanel(Container):
         widget = Static(spinner, classes="tool-item running")
         self._tools[tool_call_id] = (widget, spinner, tool_name, args_str, False)
         self.mount(widget)
+        self.call_after_refresh(self.scroll_end, animate=False)
 
     def complete_tool(self, tool_call_id: str, result: str = "") -> None:
         """Mark a tool as completed."""
@@ -260,6 +302,7 @@ class ToolPanel(Container):
         widget.remove_class("running")
         widget.add_class("completed")
         self._tools[tool_call_id] = (widget, None, tool_name, args_str, True)
+        self.call_after_refresh(self.scroll_end, animate=False)
 
     def update_spinners(self) -> None:
         """Re-render running tool spinners (they auto-advance based on time)."""
@@ -298,8 +341,9 @@ class ThinkingPanel(Container):
     Toggled with Ctrl+T, mirroring ToolPanel (Ctrl+O) and AgentPanel (Ctrl+G):
     reasoning is streamed in silently while the ActivityBar spinner shows the
     ambient "Thinking..." status, and the user opens the panel to read the full
-    chain. It is taller than the other panels because reasoning is long-form,
-    and shows the complete accumulated text (scrollable) rather than a tail.
+    chain. Its height is a fixed 30% of the screen (three times the other
+    panels) because reasoning is long-form; it shows the complete accumulated text,
+    scrolling inside the panel, rather than a tail.
     """
 
     # Minimum seconds between re-renders while the panel is open. Reasoning
@@ -934,8 +978,6 @@ class _SubmitTextArea(TextArea):
                 return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.scroll_page_down(animate=False)
-            if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
-                chat_view.enable_follow_mode()
             return
 
         if event.key == "ctrl+pageup":
@@ -955,8 +997,6 @@ class _SubmitTextArea(TextArea):
                 return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.scroll_down(animate=False)
-            if chat_view.scroll_offset.y >= chat_view.max_scroll_y:
-                chat_view.enable_follow_mode()
             return
 
         if event.key == "home":
@@ -976,7 +1016,6 @@ class _SubmitTextArea(TextArea):
                 return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.enable_follow_mode()
-            chat_view.scroll_end(animate=False)
             return
 
         self._reset_tab_cycle()
@@ -1147,6 +1186,69 @@ class CLIInputBar(Horizontal):
         self._input.insert(text)
 
 
+_STATUS_SEP = " | "
+
+
+def _abbreviate_home(path: Path | str) -> str:
+    """Show a path with the home directory as ``~`` (``~`` itself for home)."""
+    path = Path(path)
+    try:
+        relative = path.relative_to(Path.home())
+    except (ValueError, RuntimeError):  # not under home, or no home to compare to
+        return str(path)
+    return "~" if not relative.parts else f"~/{relative.as_posix()}"
+
+
+def _shorten_left(text: str, width: int) -> str:
+    """Fit a path into ``width`` cells, dropping leading components for ``…``.
+
+    ``~/Vscode/ayder-cli/src`` in 15 cells becomes ``…/ayder-cli/src``. When even
+    the last component is too wide, its tail is kept: ``…ongname``.
+    """
+    if width <= 0:
+        return ""
+    if cell_len(text) <= width:
+        return text
+    parts = [part for part in text.split("/") if part]
+    if width == 1 or not parts:
+        return "…"
+    kept: list[str] = []
+    for part in reversed(parts):
+        if cell_len("…/" + "/".join([part, *kept])) > width:
+            break
+        kept.insert(0, part)
+    if kept:
+        return "…/" + "/".join(kept)
+    return "…" + parts[-1][-(width - 1):]
+
+
+class _CwdLabel(Label):
+    """The working directory, shortened from the left to the width it is given."""
+
+    def __init__(self, display: str, **kwargs):
+        super().__init__("", **kwargs)
+        self.display_text = display
+
+    def get_content_width(self, container: Size, viewport: Size) -> int:
+        """Width from the path and the bar alone, never from the other items.
+
+        The path is shortened from the left to at most a third of the bar, but
+        never below ``…/<last component>`` (or the whole path, if shorter). The
+        items on its right may overflow the bar; the cwd stays visible.
+        """
+        sep = cell_len(_STATUS_SEP)
+        last = self.display_text.rsplit("/", 1)[-1]
+        budget = max(container.width // 3, cell_len(f"…/{last}"))
+        shown = _shorten_left(self.display_text, min(budget, container.width - sep))
+        return cell_len(shown) + sep
+
+    def render(self) -> Text:
+        room = self.size.width - cell_len(_STATUS_SEP)
+        if room < 1:
+            return Text("")
+        return Text(_shorten_left(self.display_text, room) + _STATUS_SEP)
+
+
 class StatusBar(Horizontal):
     """
     CLI-style status bar showing context info.
@@ -1157,9 +1259,11 @@ class StatusBar(Horizontal):
         model: str = "default",
         permissions: set | None = None,
         effort: str = "default",
+        cwd: Path | str | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._cwd_display = _abbreviate_home(cwd if cwd is not None else Path.cwd())
         self.model = model
         self.effort = effort
         self.token_count = 0
@@ -1168,6 +1272,7 @@ class StatusBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         mode_str = "".join(sorted(self._permissions))
+        yield _CwdLabel(self._cwd_display, id="cwd-label")
         yield Label(markup_or_plain(f"model: {self.model}"), id="model-label")
         yield Label(f" | effort: {self.effort}", id="effort-label")
         yield Label(markup_or_plain(f" | mode: {mode_str}"), id="mode-label")
@@ -1342,6 +1447,7 @@ class AgentPanel(Container):
         )
         self._entries[run_id] = entry
         self.mount(status_widget)
+        self.call_after_refresh(self.scroll_end, animate=False)
 
     def complete_agent(self, run_id: int, summary: str, status: str = "completed") -> None:
         """Mark agent as completed with full summary. Lookup by run_id."""
