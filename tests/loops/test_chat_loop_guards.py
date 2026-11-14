@@ -144,8 +144,8 @@ def test_reasoning_then_text_completes():
 
 
 def test_config_max_iterations():
-    """New interface: [app] max_iterations, default 200, 0 = unlimited."""
-    assert Config().max_iterations == 200
+    """Baseline regression: [app] max_iterations defaults to 0 (unlimited); was 200."""
+    assert Config().max_iterations == 0
     assert Config(**{"app": {"max_iterations": 50}}).max_iterations == 50
     assert Config(**{"app": {"max_iterations": 0}}).max_iterations == 0
     with pytest.raises(ValidationError):
@@ -158,13 +158,15 @@ def test_agent_config_max_iterations():
     assert AgentConfig(name="a", max_iterations="7").max_iterations == 7
 
 
-@pytest.mark.parametrize("configured, expected", [(None, 100), (7, 7), (0, 0)])
+@pytest.mark.parametrize("configured, expected", [(None, 0), (7, 7), (0, 0)])
 def test_agent_runner_passes_max_iterations(configured, expected):
-    """New interface: an agent run uses its own cap, or 100."""
+    """Baseline regression: an agent run uses its own cap, or 0 (unlimited); was 100.
+    The parent's [app] max_iterations (50) is never inherited."""
     from ayder_cli.agents.runner import AgentRunner
 
     parent = MagicMock(model="m", num_ctx=4096, max_output_tokens=2048, stop_sequences=[],
-                       tool_tags=["core"], provider="openai", max_history_messages=0)
+                       tool_tags=["core"], provider="openai", max_history_messages=0,
+                       max_iterations=50)
     runner = AgentRunner(
         agent_config=AgentConfig(name="a", max_iterations=configured),
         parent_config=parent, project_ctx=MagicMock(), process_manager=MagicMock(),

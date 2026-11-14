@@ -374,8 +374,8 @@ class Config(BaseModel):
     # bound. The old fixed 30 predates large-context models and thrashes a tiny
     # history window on a big context.
     max_history_messages: int = Field(default=0)
-    # LLM calls per user turn before the loop stops; 0 = unlimited.
-    max_iterations: int = Field(default=200)
+    # LLM calls per user turn before the loop stops; 0 = unlimited (default).
+    max_iterations: int = Field(default=0)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     # Ollama thinking mode. Defaults on because most local models in the

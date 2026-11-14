@@ -31,7 +31,7 @@ class AgentConfig(BaseModel):
     num_ctx: int | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
-    # LLM calls per run before the loop stops; None = 100, 0 = unlimited.
+    # LLM calls per run before the loop stops; None or 0 = unlimited. [app] is not inherited.
     max_iterations: int | None = None
     think: ThinkOption = None
     reasoning_effort: ReasoningEffort = None
