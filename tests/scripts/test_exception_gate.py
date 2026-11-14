@@ -320,7 +320,7 @@ def test_plain_marker_draws_no_ruff_noqa_warning(tmp_path):
 
 
 def test_full_tree_census_is_frozen():
-    """132 is the §C10 census. A different number means the gate is reading the
+    """129 is the §C10 census. A different number means the gate is reading the
     wrong tree, or the census moved without the plan being updated.
 
     Step 5-04 moved it from 119/113 in two measured steps. Commit 1 reached
@@ -349,6 +349,11 @@ def test_full_tree_census_is_frozen():
 
     Removing the retired Temporal integration removed two (134 -> 132): the
     `/temporal` plugin probe and the task-metadata rewrite boundary.
+
+    Replacing the top panels with in-chat items removed three (132 -> 129): the
+    thinking-panel flush in `on_thinking_stop`, and the two panel scroll
+    lookups, `AyderApp._scroll_open_panel` and
+    `_SubmitTextArea._scroll_agent_panel`.
     """
     # Built-in MCP adds two modules and three remote failure boundaries:
     # server session, tool dispatch, and per-server discovery.
@@ -356,8 +361,8 @@ def test_full_tree_census_is_frozen():
     # driver's list_models no longer swallows server errors (one fewer), and
     # the evren terms paths catch named errors only.
     code, out = _run()
-    assert "broad=132" in out, out
+    assert "broad=129" in out, out
     assert "files=120/120" in out, out
     code, out = _run("--expect-broad", "137")
     assert code == 1
-    assert "census: found 132" in out
+    assert "census: found 129" in out

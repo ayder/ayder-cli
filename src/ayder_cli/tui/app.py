@@ -45,10 +45,7 @@ from ayder_cli.agents.tool import (
     create_agent_handler,
 )
 from ayder_cli.tui.widgets import (
-    AgentPanel,
     ChatView,
-    ThinkingPanel,
-    ToolPanel,
     ActivityBar,
     CLIInputBar,
     StatusBar,
@@ -85,17 +82,12 @@ class AppCallbacks:
     def on_thinking_start(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_thinking(True)
-        # Separate this reasoning phase from any earlier one in the same turn.
-        self._app.query_one("#thinking-panel", ThinkingPanel).start_phase()
+        # A new reasoning phase: its box appears with the first text.
+        self._app.query_one("#chat-view", ChatView).start_thinking()
         self._app._start_activity_timer()
 
     def on_thinking_stop(self) -> None:
-        # Reasoning was buffered without rendering while it streamed; show the
-        # tail now that the phase is over (a no-op while the panel is hidden).
-        try:
-            self._app.query_one("#thinking-panel", ThinkingPanel).flush()
-        except Exception:  # noqa: BLE001 - panel flush is cosmetic and must not stop the turn
-            logger.opt(exception=True).debug("Could not flush the thinking panel")
+        self._app.query_one("#chat-view", ChatView).stop_thinking()
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_thinking(False)
         # Transition to "Generating" so the user sees activity while content streams
@@ -106,10 +98,8 @@ class AppCallbacks:
         chat_view.add_assistant_message(text)
 
     def on_thinking_content(self, text: str) -> None:
-        # Reasoning streams silently into the dedicated panel (Ctrl+T to view),
-        # the same way tools stream into the tool panel. The ActivityBar spinner
-        # provides ambient "Thinking..." status in the meantime.
-        self._app.query_one("#thinking-panel", ThinkingPanel).add_thinking(text)
+        # Reasoning streams into its box in the chat (Ctrl+T shows all of it).
+        self._app.query_one("#chat-view", ChatView).add_thinking_text(text)
 
     def on_token_usage(self, total_tokens: int) -> None:
         # Show LIVE context-window fill (current / window size), not the
@@ -134,26 +124,22 @@ class AppCallbacks:
         )
 
     def on_tool_start(self, call_id: str, name: str, arguments: dict) -> None:
-        tool_panel = self._app.query_one("#tool-panel", ToolPanel)
-        tool_panel.add_tool(call_id, name, arguments)
+        self._app.query_one("#chat-view", ChatView).tool_started(call_id, name, arguments)
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_generating(False)
         activity.set_tools_working(True)
         self._app._start_activity_timer()
 
     def on_tool_complete(self, call_id: str, result: str) -> None:
-        tool_panel = self._app.query_one("#tool-panel", ToolPanel)
+        chat_view = self._app.query_one("#chat-view", ChatView)
         self._app.call_later(
-            lambda tid=call_id, res=result: tool_panel.complete_tool(tid, res)
+            lambda tid=call_id, res=result: chat_view.tool_completed(tid, res)
         )
 
     def on_tools_cleanup(self) -> None:
         activity = self._app.query_one("#activity-bar", ActivityBar)
         activity.set_tools_working(False)
         activity.set_generating(False)
-        # Schedule panel cleanup after a short delay
-        tool_panel = self._app.query_one("#tool-panel", ToolPanel)
-        self._app.set_timer(2.0, lambda: tool_panel.clear_completed())
         # Each skill call in a batch reads the history from before the batch, so
         # the label it set can be stale. The batch's results are in the history
         # now (ChatLoop calls this after appending them): show the final set.
@@ -224,9 +210,9 @@ class AyderApp(App):
         ("ctrl+x", "cancel", "Cancel"),
         ("ctrl+c", "cancel", "Cancel"),
         ("ctrl+l", "clear", "Clear Chat"),
-        ("ctrl+o", "toggle_tools", "Toggle Tools"),
-        ("ctrl+t", "toggle_thinking", "Toggle Thinking"),
-        ("ctrl+g", "toggle_agents", "Toggle Agents"),
+        ("ctrl+o", "toggle_tools", "Expand tool and agent items"),
+        ("ctrl+t", "toggle_thinking", "Expand thinking"),
+        ("ctrl+g", "toggle_agents", "Expand agent items"),
         ("ctrl+h", "show_help", "Help"),
         ("pageup", "scroll_chat_up", "Scroll Up"),
         ("pagedown", "scroll_chat_down", "Scroll Down"),
@@ -393,15 +379,15 @@ class AyderApp(App):
             self._agent_ui_sync_off = False
 
             def _agent_progress(run_id, name, event, data):
-                """Forward agent events to AgentPanel and sync activity bar."""
+                """Forward agent events to the chat items and sync activity bar."""
                 if self._agent_ui_sync_off:
                     return
                 try:
-                    panel = self.query_one("#agent-panel", AgentPanel)
+                    chat = self.query_one("#chat-view", ChatView)
                     label = self._agent_registry.run_label(run_id) if self._agent_registry else None
-                    self.call_later(lambda: panel.update_agent(run_id, name, event, data, label))
+                    self.call_later(lambda: chat.agent_event(run_id, name, event, data, label))
                 except NoMatches:
-                    pass                      # panel not mounted (yet) — nothing to mirror
+                    pass                      # chat not mounted (yet) — nothing to mirror
                 except Exception:  # noqa: BLE001 - agent-event guard: residual after NoMatches; a raise in this callback would kill the app
                     self._agent_ui_sync_off = True
                     logger.opt(exception=True).warning(
@@ -425,8 +411,10 @@ class AyderApp(App):
             def _agent_complete(run_id, run):
                 """Handle agent completion: update UI and nudge the idle LLM."""
                 try:
-                    panel = self.query_one("#agent-panel", AgentPanel)
-                    self.call_later(lambda: panel.complete_agent(run_id, run.result, run.status))
+                    chat = self.query_one("#chat-view", ChatView)
+                    self.call_later(
+                        lambda: chat.agent_completed(run_id, run.agent_name, run.result, run.status)
+                    )
                 except Exception:  # noqa: BLE001 - agent-completion guard: panel mirroring is cosmetic and must not kill the app
                     logger.opt(exception=True).debug(
                         "Agent panel completion update failed for run {}", run_id
@@ -575,19 +563,18 @@ class AyderApp(App):
             )
 
     def _animate_activity(self) -> None:
-        """Animate spinners in the activity bar and tool panel.
+        """Animate spinners in the activity bar and refresh the running chat items.
 
         Both updates are wrapped in a single ``batch_update`` so the 10fps tick
-        produces one repaint instead of two, and the tool panel is skipped when
-        it is empty — under load (streaming + tools + agents) this keeps the
-        per-tick redraw cost (and the flicker that comes with it) down.
+        produces one repaint instead of two — under load (streaming + tools +
+        agents) this keeps the per-tick redraw cost (and the flicker that comes
+        with it) down.
         """
         activity = self.query_one("#activity-bar", ActivityBar)
-        tool_panel = self.query_one("#tool-panel", ToolPanel)
+        chat_view = self.query_one("#chat-view", ChatView)
         with self.batch_update():
             activity.update_spinners()
-            if tool_panel._tools:
-                tool_panel.update_spinners()
+            chat_view.tick_live_items()
 
     def _start_activity_timer(self) -> None:
         """Start the shared activity animation timer if not running."""
@@ -608,7 +595,7 @@ class AyderApp(App):
 
         Note: Registry callbacks run inside asyncio.to_thread() (background thread),
         so they MUST NOT mount widgets on the ChatView (not thread-safe in Textual).
-        Tool call/result display is handled by the ToolPanel and by TuiChatLoop
+        Tool call/result display is handled by the ChatView items and by TuiChatLoop
         which runs on the main event loop.
         """
         pass
@@ -721,10 +708,6 @@ class AyderApp(App):
 
     def compose(self) -> ComposeResult:
         """Compose the UI layout - terminal style with scrolling content."""
-        # Toggle panels open at the top; the chat stays next to the input bar.
-        yield ToolPanel(id="tool-panel")
-        yield ThinkingPanel(id="thinking-panel")
-        yield AgentPanel(id="agent-panel")
         yield ChatView(id="chat-view")
         yield ActivityBar(id="activity-bar")
         yield CLIInputBar(commands=self.commands, id="input-bar")
@@ -983,7 +966,6 @@ class AyderApp(App):
             return
 
         chat_view.add_user_message(text)
-        self.query_one("#thinking-panel", ThinkingPanel).clear()
 
         should_run = False
 
@@ -1013,8 +995,6 @@ class AyderApp(App):
             return
         try:
             self.query_one("#chat-view", ChatView).add_user_message(user_input)  # echo now
-            # Start each turn's reasoning fresh in the thinking panel.
-            self.query_one("#thinking-panel", ThinkingPanel).clear()
         except Exception:  # noqa: BLE001 - echo guard: failing to echo the submission must not stop the turn from running
             logger.opt(exception=True).debug(
                 "Could not echo the submitted message into the chat view"
@@ -1155,67 +1135,35 @@ class AyderApp(App):
         chat_view.add_system_message("Turn cancelled.")
 
     def action_toggle_tools(self) -> None:
-        """Toggle the tool context panel."""
-        self.query_one("#tool-panel", ToolPanel).toggle()
+        """Ctrl+O: expand (or collapse) every tool and agent item in the chat."""
+        self.query_one("#chat-view", ChatView).toggle_tools_expanded()
 
     def action_toggle_thinking(self) -> None:
-        """Toggle the thinking/reasoning panel (mirrors Ctrl+O / Ctrl+G)."""
-        self._show_thinking = self.query_one("#thinking-panel", ThinkingPanel).toggle()
+        """Ctrl+T: show the full reasoning in every thinking box, or the tail."""
+        self._show_thinking = self.query_one("#chat-view", ChatView).toggle_thinking_expanded()
 
     def action_toggle_agents(self) -> None:
-        """Toggle the agent panel."""
-        self.query_one("#agent-panel", AgentPanel).toggle()
+        """Ctrl+G: expand (or collapse) every agent item in the chat."""
+        self.query_one("#chat-view", ChatView).toggle_agents_expanded()
 
     def action_show_help(self) -> None:
         """Show help modal with keybindings."""
         self.push_screen(CLIHelpScreen())
 
     def action_scroll_chat_up(self) -> None:
-        """PageUp: scroll an open panel (agents/thinking) if any, else the chat view."""
-        if self._scroll_open_panel("page_up"):
-            return
+        """PageUp: scroll the chat view."""
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.disable_follow_mode()
         chat_view.scroll_page_up(animate=False)
 
     def action_scroll_chat_down(self) -> None:
-        """PageDown: scroll an open panel (agents/thinking) if any, else the chat view."""
-        if self._scroll_open_panel("page_down"):
-            return
+        """PageDown: scroll the chat view."""
         chat_view = self.query_one("#chat-view", ChatView)
         chat_view.scroll_page_down(animate=False)
-
-    def _scroll_open_panel(self, motion: str) -> bool:
-        """Scroll a visible scrollable panel — the agents (Ctrl+G) or thinking
-        (Ctrl+T) panel — instead of the chat view.
-
-        ``motion`` is a Widget.scroll_* suffix ('page_up', 'page_down', 'up',
-        'down', 'home', 'end'). Returns True when a panel handled the scroll so
-        the caller leaves the chat view alone; False otherwise (none open).
-        """
-        for panel_id, panel_cls in (
-            ("#agent-panel", AgentPanel),
-            ("#thinking-panel", ThinkingPanel),
-        ):
-            try:
-                panel = self.query_one(panel_id, panel_cls)
-            except NoMatches:
-                continue                  # panel not mounted — try the next one
-            except Exception:  # noqa: BLE001 - panel lookup guard: residual after NoMatches; the loop must continue to the next panel
-                logger.opt(exception=True).debug(
-                    "Panel lookup failed for {}", panel_id
-                )
-                continue
-            if not panel.display:
-                continue
-            getattr(panel, f"scroll_{motion}")(animate=False)
-            return True
-        return False
 
     def action_clear(self) -> None:
         """Clear chat history."""
         chat_view = self.query_one("#chat-view", ChatView)
-        self.query_one("#thinking-panel", ThinkingPanel).clear()
         do_clear(self, chat_view)
 
     def on_app_focus(self) -> None:

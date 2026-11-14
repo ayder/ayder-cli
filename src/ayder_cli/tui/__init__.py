@@ -23,7 +23,6 @@ from ayder_cli.tui.screens import (
 )
 from ayder_cli.tui.widgets import (
     ChatView,
-    ToolPanel,
     AutoCompleteInput,
     CLIInputBar,
     StatusBar,
@@ -197,7 +196,6 @@ __all__ = [
     "CLISelectScreen",
     "TaskEditScreen",
     "ChatView",
-    "ToolPanel",
     "AutoCompleteInput",
     "CLIInputBar",
     "StatusBar",

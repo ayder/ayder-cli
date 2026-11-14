@@ -87,7 +87,6 @@
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio error: {}","method":"error","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"normalized","message":"Unhandled asyncio exception: {}","method":"critical","path":"diagnostics.py","qualname":"_handle_asyncio"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"num_ctx","message":"Context budget: {} tokens (derived from num_ctx; max_context_tokens unset)","method":"info","path":"core/default_context_manager.py","qualname":"DefaultContextManager.__init__"}}
-{"class":"R-name","site":{"arg_index":"pos:0","expr":"panel_id","message":"Panel lookup failed for {}","method":"debug","path":"tui/app.py","qualname":"AyderApp._scroll_open_panel"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"path","message":"Could not remove {}","method":"debug","path":"services/messaging_inbox.py","qualname":"MessagingInbox.stop"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"path","message":"Failed to read note file {}","method":"error","path":"tui/commands.py","qualname":"_open_note_in_editor"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"path","message":"Failed to read task file {}","method":"error","path":"tui/commands.py","qualname":"_open_task_in_editor"}}

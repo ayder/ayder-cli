@@ -121,7 +121,7 @@ def test_ayder_body_text_follows_palette_foreground():
     for block_anchor in (
         "ChatView .assistant-message {",
         "CLIInputBar #chat-input {",
-        "ToolPanel .tool-item {",
+        "ChatView > .toolbox,",
     ):
         block = css.split(block_anchor, 1)[1].split("}", 1)[0]
         assert "color: $foreground;" in block, f"{block_anchor} not palette-fg"

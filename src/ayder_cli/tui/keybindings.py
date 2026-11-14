@@ -16,10 +16,10 @@ KEYBINDING_REGISTRY: list[tuple[str, str, str]] = [
     ("Shift+Enter / Ctrl+J", "New line", "Chat"),
     ("\u2191/\u2193", "History (at first/last char) / move line", "Chat"),
     ("Tab", "Complete /command", "Chat"),
-    # Panels
-    ("Ctrl+O", "Toggle Tools panel", "Panels"),
-    ("Ctrl+T", "Toggle Thinking panel", "Panels"),
-    ("Ctrl+G", "Toggle Agents panel", "Panels"),
+    # Items
+    ("Ctrl+O", "Expand tool and agent items", "Items"),
+    ("Ctrl+T", "Expand thinking", "Items"),
+    ("Ctrl+G", "Expand agent items", "Items"),
     # General
     ("Ctrl+L", "Clear chat", "General"),
     ("Ctrl+C", "Copy selected text, else cancel", "General"),
@@ -29,7 +29,7 @@ KEYBINDING_REGISTRY: list[tuple[str, str, str]] = [
     ("Ctrl+Q", "Quit", "General"),
 ]
 
-_CATEGORY_ORDER = ["Navigation", "Chat", "Panels", "General"]
+_CATEGORY_ORDER = ["Navigation", "Chat", "Items", "General"]
 
 
 def get_keybindings_by_category() -> dict[str, list[tuple[str, str]]]:

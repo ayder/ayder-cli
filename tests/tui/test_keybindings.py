@@ -18,7 +18,7 @@ class TestKeybindingRegistry:
             assert cat and isinstance(cat, str)
 
     def test_categories_are_known(self):
-        valid = {"Navigation", "Chat", "Panels", "General"}
+        valid = {"Navigation", "Chat", "Items", "General"}
         for _, _, cat in KEYBINDING_REGISTRY:
             assert cat in valid, f"Unknown category: {cat}"
 
@@ -32,7 +32,7 @@ class TestGetKeybindingsByCategory:
         grouped = get_keybindings_by_category()
         assert isinstance(grouped, dict)
         categories = list(grouped.keys())
-        assert categories == ["Navigation", "Chat", "Panels", "General"]
+        assert categories == ["Navigation", "Chat", "Items", "General"]
 
     def test_each_group_has_entries(self):
         grouped = get_keybindings_by_category()

@@ -65,7 +65,7 @@ async def test_inline_frames_are_wrapped_in_sync_markers(inline_driver, monkeypa
         await pilot.pause()
         writes.clear()
 
-        app.action_toggle_tools()
+        app.query_one("#chat-view").add_system_message("forces a frame")
         await pilot.pause()
         await pilot.pause()
 

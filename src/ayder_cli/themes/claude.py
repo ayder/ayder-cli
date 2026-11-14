@@ -687,100 +687,6 @@ BannerWidget .banner-version {
     color: #5cb870;
 }
 
-/* ToolPanel - The panel that opens at the top of the screen, above the chat view, showing running tools.
-   Fixed at 10% of the screen height from the moment it opens, whatever it holds;
-   its content scrolls inside. Targets 'ToolPanel' in widgets.py. */
-ToolPanel {
-    layout: vertical;
-    height: 10%;
-    background: #0a0a18;
-    border-bottom: solid #333350;
-    padding: 0 1;
-    overflow-y: scroll;
-    display: none;
-}
-
-ToolPanel .tool-item {
-    height: auto;
-    color: #e0e0e8;
-    padding: 0 1;
-}
-
-ToolPanel .tool-item.running {
-    color: #d4a043;
-}
-
-ToolPanel .tool-item.completed {
-    color: #5cb870;
-}
-
-/* AgentPanel - Scrollable panel for agent run history.
-   Toggled with Ctrl+G. Fixed at 10% of the screen height; content scrolls inside.
-   Targets 'AgentPanel' in widgets.py. */
-AgentPanel {
-    layout: vertical;
-    height: 10%;
-    background: #0a0a18;
-    border-bottom: solid #333350;
-    padding: 0 1;
-    overflow-y: scroll;
-    display: none;
-}
-
-AgentPanel .agent-entry {
-    height: auto;
-    padding: 0 1;
-}
-
-AgentPanel .agent-status {
-    height: auto;
-    color: #d4a043;
-    padding: 0 1;
-}
-
-AgentPanel .agent-status.running {
-    color: #d4a043;
-}
-
-AgentPanel .agent-status.completed {
-    color: #5cb870;
-}
-
-AgentPanel .agent-status.error {
-    color: #ff5555;
-}
-
-AgentPanel .agent-status.timeout {
-    color: #d4a043;
-}
-
-AgentPanel .agent-detail {
-    height: auto;
-    color: #666680;
-    padding: 0 0 0 4;
-}
-
-/* ThinkingPanel - Scrollable panel showing the model's reasoning stream.
-   Toggled with Ctrl+T. Fixed at 30% of the screen height, three times the
-   tool/agent panels, because reasoning is long-form; content scrolls inside.
-   Targets 'ThinkingPanel' in widgets.py. */
-ThinkingPanel {
-    layout: vertical;
-    height: 30%;
-    background: #0a0a18;
-    border-bottom: solid #333350;
-    padding: 0 1;
-    overflow-y: scroll;
-    display: none;
-}
-
-ThinkingPanel .thinking-content {
-    height: auto;
-    color: #8888aa;
-    text-style: italic;
-    padding: 0 1;
-}
-
 /* AyderApp - The root application screen. */
 Screen {
     layout: vertical;
@@ -802,18 +708,6 @@ Screen:inline {
     scrollbar-size: 0 0;
     scrollbar-size-horizontal: 0;
     scrollbar-size-vertical: 0;
-}
-
-#tool-panel {
-    width: 100%;
-}
-
-#agent-panel {
-    width: 100%;
-}
-
-#thinking-panel {
-    width: 100%;
 }
 
 #input-bar {

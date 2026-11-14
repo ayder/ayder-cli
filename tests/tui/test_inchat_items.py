@@ -475,3 +475,26 @@ async def test_rendered_items_have_a_transparent_background(themed_app, theme_na
         await _settle(app, pilot, chat)
         for widget in (*chat.query(ThinkingItem), *chat.query(ToolBox), *chat.query(AgentBox)):
             assert widget.styles.background.a == 0, type(widget).__name__
+
+
+# -- Discoverability ---------------------------------------------------------
+
+
+def test_help_and_the_registry_name_the_expand_shortcuts():
+    from unittest.mock import MagicMock
+
+    from ayder_cli.tui.commands import handle_help
+    from ayder_cli.tui.keybindings import get_keybindings_by_category
+
+    view = MagicMock()
+    handle_help(None, "", view)
+    text = view.add_assistant_message.call_args.args[0]
+    for key in ("`Ctrl+O`", "`Ctrl+T`", "`Ctrl+G`"):
+        assert key in text
+
+    items = dict(get_keybindings_by_category()["Items"])
+    assert items == {
+        "Ctrl+O": "Expand tool and agent items",
+        "Ctrl+T": "Expand thinking",
+        "Ctrl+G": "Expand agent items",
+    }

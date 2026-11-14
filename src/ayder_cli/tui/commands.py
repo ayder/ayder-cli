@@ -30,7 +30,7 @@ from ayder_cli.tui.screens import (
     CLIPermissionScreen,
     TaskEditScreen,
 )
-from ayder_cli.tui.widgets import AgentPanel, ActivityBar, ChatView, StatusBar
+from ayder_cli.tui.widgets import ActivityBar, ChatView, StatusBar
 
 if TYPE_CHECKING:
     from ayder_cli.tui.app import AyderApp
@@ -52,6 +52,9 @@ def handle_help(app: AyderApp, args: str, chat_view: ChatView) -> None:
     help_text += "- `Ctrl+Q` — Quit\n"
     help_text += "- `Ctrl+C` — Copy selected text; cancel when nothing is selected\n"
     help_text += "- `Ctrl+X` — Cancel operation\n"
+    help_text += "- `Ctrl+O` — Expand tool and agent items in the chat\n"
+    help_text += "- `Ctrl+T` — Expand thinking\n"
+    help_text += "- `Ctrl+G` — Expand agent items\n"
     help_text += "- `Ctrl+P` — Command palette; **Theme** sets the colours for the session\n"
     help_text += "- `Ctrl+L` — Clear chat\n"
 
@@ -1277,15 +1280,16 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
         chat_view.add_system_message(f"Unknown agent: '{agent_name}'")
         return
 
-    # Show agent in panel and create the run (runs on the event loop)
+    # Create the run (runs on the event loop) and show it in the chat
     result = app._agent_registry.create_run(agent_name, task)
 
     if isinstance(result, int):
         # Success — run_id returned
         run_id = result
         try:
-            agent_panel = app.query_one("#agent-panel", AgentPanel)
-            agent_panel.add_agent(agent_name, run_id)
+            chat_view.agent_event(
+                run_id, agent_name, "dispatch", None, app._agent_registry.run_label(run_id)
+            )
         except Exception:  # noqa: BLE001 - agent panel guard: showing the new run is cosmetic and must not kill the app
             # agent_name is a validated key of the configured agents mapping.
             logger.opt(exception=True).debug(

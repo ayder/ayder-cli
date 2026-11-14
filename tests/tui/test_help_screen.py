@@ -18,7 +18,7 @@ class TestHelpScreen:
         content = screen._build_help_text()
         assert "Navigation" in content
         assert "Chat" in content
-        assert "Panels" in content
+        assert "Items" in content
         assert "General" in content
 
     def test_content_includes_all_keys(self):
