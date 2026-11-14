@@ -147,6 +147,9 @@ class ChatLoop:
         self.config = config
         self.cb = callbacks
         self._total_tokens = 0
+        # Set when run() stops with an error (stream failure, empty response,
+        # reasoning-only limit, max_iterations). The CLI exits 1 on it.
+        self.error: str | None = None
         if context_manager is not None:
             self.context_manager = context_manager
         else:
@@ -239,8 +242,14 @@ class ChatLoop:
             **self._correlation(),
         )
 
+    def _fail(self, text: str) -> None:
+        """Report a stop that ends the turn with an error; the CLI exits 1."""
+        self.error = text
+        self.cb.on_system_message(text)
+
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
+        self.error = None  # the TUI reuses one loop across turns
         # Lazy init: detect real context length for Ollama models
         if hasattr(self.context_manager, "detect_context_length"):
             await self.context_manager.detect_context_length()
@@ -260,7 +269,7 @@ class ChatLoop:
                     )
                 else:
                     remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
-                self.cb.on_system_message(
+                self._fail(
                     f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}"
                 )
                 return
@@ -463,7 +472,7 @@ class ChatLoop:
                     return
                 except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
                     llm_log.exception("LLM stream failed")
-                    self.cb.on_system_message(f"Error: {_describe_llm_error(e)}")
+                    self._fail(f"Error: {_describe_llm_error(e)}")
                     return
                 finally:
                     self.cb.on_thinking_stop()
@@ -479,7 +488,7 @@ class ChatLoop:
                         self.config.model,
                         self.config.provider,
                     )
-                    self.cb.on_system_message(
+                    self._fail(
                         "LLM returned an empty response. Check model compatibility "
                         "or try switching chat_protocol in config."
                     )
@@ -509,7 +518,7 @@ class ChatLoop:
                     )
                     reasoning_only += 1
                     if reasoning_only > _MAX_REASONING_RETRIES:
-                        self.cb.on_system_message(
+                        self._fail(
                             f"Error: the model returned only reasoning {reasoning_only} "
                             "times in a row; stopped."
                         )

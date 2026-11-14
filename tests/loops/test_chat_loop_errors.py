@@ -16,7 +16,7 @@ import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from tests.loops.test_chat_loop_guards import _loop
+from tests.loops.test_chat_loop_guards import _loop, _Provider, _Registry, _tool
 
 
 def _http_client(status: int, **response_kwargs) -> httpx2.AsyncClient:
@@ -138,3 +138,83 @@ def test_a_long_body_is_cut_at_2000_characters_with_a_tail():
     shown, _, tail = message[len(prefix) :].partition("... (")
     assert len(shown) == 2000
     assert tail == f"{len('<html>' + 'x' * 5000 + '</html>') - 2000} more chars)"
+
+
+# --- loop.error: which stops end the turn in an error (the CLI exits 1) -----------
+
+def _run(loop) -> None:
+    asyncio.run(asyncio.wait_for(loop.run(), timeout=5))
+
+
+def test_a_stream_failure_sets_error():
+    """New interface: ChatLoop has no ``error`` today."""
+    loop = _loop(_Raising(RuntimeError("boom")))
+    _run(loop)
+
+    assert loop.error == "Error: boom"
+    assert loop.cb.system == ["Error: boom"]
+
+
+def test_the_max_iterations_stop_sets_error():
+    """New interface: ChatLoop has no ``error`` today."""
+    loop = _loop(_Provider(_tool()), max_iterations=3)
+    _run(loop)
+
+    assert loop.error is not None and loop.error.startswith("Error:")
+    assert "max_iterations = 3" in loop.error
+    assert loop.cb.system == [loop.error]
+
+
+def test_an_empty_response_sets_error():
+    """New interface: ChatLoop has no ``error`` today."""
+    loop = _loop(_Provider({}))
+    _run(loop)
+
+    assert loop.error is not None and "empty response" in loop.error
+    assert loop.cb.system == [loop.error]
+
+
+def test_the_reasoning_only_limit_sets_error():
+    """New interface: ChatLoop has no ``error`` today."""
+    loop = _loop(_Provider({"reasoning": "hmm"}))
+    _run(loop)
+
+    assert loop.error is not None and loop.error.startswith("Error:")
+    assert "only reasoning" in loop.error
+    assert loop.cb.system == [loop.error]
+
+
+def test_a_text_reply_leaves_error_unset():
+    """Preservation: a normal turn is not an error."""
+    loop = _loop(_Provider({"content": "hi"}))
+    _run(loop)
+
+    assert loop.error is None
+
+
+def test_an_escalation_stop_leaves_error_unset():
+    """Preservation: escalation hands control back to the user; it is not a failure."""
+
+    class _EscalatingRegistry(_Registry):
+        def execute(self, name, arguments):
+            super().execute(name, arguments)
+            return '{"action": "escalate"}'
+
+    loop = _loop(_Provider(_tool()), registry=_EscalatingRegistry())
+    _run(loop)
+
+    assert any("Escalation requested" in s for s in loop.cb.system)
+    assert loop.error is None
+
+
+def test_error_is_cleared_when_the_loop_runs_again():
+    """The TUI reuses one loop: a later good turn must not inherit an earlier failure."""
+    loop = _loop(_Raising(RuntimeError("boom")))
+    _run(loop)
+    assert loop.error == "Error: boom"
+
+    loop.llm = _Provider({"content": "recovered"})
+    loop.messages.append({"role": "user", "content": "again"})
+    _run(loop)
+
+    assert loop.error is None
