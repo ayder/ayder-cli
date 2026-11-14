@@ -160,9 +160,13 @@ reserve_ratio = 0.30
 compaction_threshold = 0.80
 
 [retry]
+# Transient provider errors (e.g. HTTP 503 "model busy") are retried with
+# exponential backoff + jitter. Defaults: 6 attempts; waits of about 10, 20, 30,
+# 30 and 30 s between them (each wait is jittered to 50-100% of that value).
+# max_delay_seconds must stay >= initial_delay_seconds.
 enabled = true
-max_attempts = 3
-initial_delay_seconds = 0.5
+max_attempts = 6
+initial_delay_seconds = 10.0
 max_delay_seconds = 30.0
 backoff_coefficient = 2.0
 jitter = true

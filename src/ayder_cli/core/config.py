@@ -179,8 +179,8 @@ class RetryConfigSection(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = Field(default=True)
-    max_attempts: int = Field(default=3)
-    initial_delay_seconds: float = Field(default=0.5)
+    max_attempts: int = Field(default=6)
+    initial_delay_seconds: float = Field(default=10.0)
     max_delay_seconds: float = Field(default=30.0)
     backoff_coefficient: float = Field(default=2.0)
     jitter: bool = Field(default=True)

@@ -10,12 +10,54 @@ from ayder_cli.core.config import Config, RetryConfigSection
 def test_retry_section_defaults():
     cfg = Config()
     assert cfg.retry.enabled is True
-    assert cfg.retry.max_attempts == 3
-    assert cfg.retry.initial_delay_seconds == 0.5
+    assert cfg.retry.max_attempts == 6
+    assert cfg.retry.initial_delay_seconds == 10.0
     assert cfg.retry.max_delay_seconds == 30.0
     assert cfg.retry.backoff_coefficient == 2.0
     assert cfg.retry.jitter is True
     assert cfg.retry.retry_on_names == ()
+
+
+def test_retry_defaults_without_retry_table_in_toml():
+    toml = b"""
+config_version = "2.0"
+[app]
+provider = "openai"
+
+[llm.openai]
+driver = "openai"
+base_url = "http://localhost:11434/v1"
+api_key = "ollama"
+model = "x"
+num_ctx = 8192
+"""
+    cfg = Config(**tomllib.load(BytesIO(toml)))
+    assert cfg.retry.enabled is True
+    assert cfg.retry.max_attempts == 6
+    assert cfg.retry.initial_delay_seconds == 10.0
+
+
+def test_first_run_config_loads_with_new_retry_defaults(tmp_path, monkeypatch):
+    """A config file generated on first run has no [retry] table, so the
+    section defaults apply."""
+    from ayder_cli.core import config as config_module
+
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = config_module.load_config()
+    assert cfg.retry.max_attempts == 6
+    assert cfg.retry.initial_delay_seconds == 10.0
+
+
+def test_retry_section_and_runtime_config_defaults_agree():
+    from ayder_cli.providers.retry import RetryConfig
+
+    section = RetryConfigSection()
+    runtime = RetryConfig()
+    assert section.max_attempts == runtime.max_attempts
+    assert section.initial_delay_seconds == runtime.initial_delay_seconds
+    assert section.max_delay_seconds == runtime.max_delay_seconds
+    assert section.backoff_coefficient == runtime.backoff_coefficient
+    assert section.jitter == runtime.jitter
 
 
 def test_retry_section_parses_from_toml():

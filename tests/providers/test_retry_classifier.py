@@ -14,8 +14,8 @@ from ayder_cli.providers.retry import (
 def test_retry_config_defaults():
     cfg = RetryConfig()
     assert cfg.enabled is True
-    assert cfg.max_attempts == 3
-    assert cfg.initial_delay_seconds == 0.5
+    assert cfg.max_attempts == 6
+    assert cfg.initial_delay_seconds == 10.0
     assert cfg.max_delay_seconds == 30.0
     assert cfg.backoff_coefficient == 2.0
     assert cfg.jitter is True
