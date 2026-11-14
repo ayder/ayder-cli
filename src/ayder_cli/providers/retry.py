@@ -77,6 +77,9 @@ _RETRYABLE_NAMES: frozenset[tuple[str, str]] = frozenset({
     ("anthropic", "APITimeoutError"),
     ("anthropic", "RateLimitError"),
     ("anthropic", "InternalServerError"),
+    # google-genai — 5xx (503 "high demand"); a 429 ClientError is matched in
+    # classify_error. The SDK itself does not retry (retry_options=None).
+    ("google", "ServerError"),
     # ollama — covers bare "EOF (status code: -1)" mid-stream (transport
     # drop, server crash, OOM kill) and other transient server failures.
     # The committed=False gate above ensures we never retry after content
@@ -109,6 +112,14 @@ def classify_error(
     if isinstance(exc, ProviderStallTimeout):
         return RetryVerdict.RETRYABLE
     if _match_name(exc, retry_on_names):
+        return RetryVerdict.RETRYABLE
+    # google-genai raises one ClientError class for every 4xx; only 429 is transient.
+    # By name and module, so retry.py does not import google-genai.
+    if (
+        type(exc).__name__ == "ClientError"
+        and type(exc).__module__.startswith("google.genai")
+        and getattr(exc, "code", None) == 429
+    ):
         return RetryVerdict.RETRYABLE
     return RetryVerdict.FATAL
 

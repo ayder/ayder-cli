@@ -113,3 +113,42 @@ def test_compute_delay_with_jitter_stays_in_range():
                    cfg.initial_delay_seconds * (cfg.backoff_coefficient ** attempt))
         d = compute_delay(cfg, attempt=attempt)
         assert base / 2 <= d <= base
+
+
+# --- google-genai: 5xx and 429 retry like the other cloud drivers --------------
+
+
+def _genai_error(cls_name: str, code: int, status: str):
+    from google.genai import errors
+
+    body = {"error": {"code": code, "message": "try again", "status": status}}
+    return getattr(errors, cls_name)(code, body)
+
+
+@pytest.mark.parametrize("code", [500, 503, 504])
+def test_classify_gemini_server_error_is_retryable(code):
+    """Baseline regression: a Gemini 503 'high demand' fails at once today."""
+    err = _genai_error("ServerError", code, "UNAVAILABLE")
+    assert classify_error(err) == RetryVerdict.RETRYABLE
+
+
+def test_classify_gemini_rate_limit_is_retryable():
+    """Baseline regression: a Gemini 429 fails at once today."""
+    err = _genai_error("ClientError", 429, "RESOURCE_EXHAUSTED")
+    assert classify_error(err) == RetryVerdict.RETRYABLE
+
+
+@pytest.mark.parametrize("code, status", [(400, "INVALID_ARGUMENT"), (401, "UNAUTHENTICATED"), (404, "NOT_FOUND")])
+def test_classify_other_gemini_client_errors_stay_fatal(code, status):
+    """Preservation: a bad request or credential is not transient."""
+    err = _genai_error("ClientError", code, status)
+    assert classify_error(err) == RetryVerdict.FATAL
+
+
+def test_a_429_from_another_sdk_named_client_error_is_not_matched():
+    """The 429 rule is tied to google.genai, not to any class called ClientError."""
+
+    class ClientError(Exception):
+        code = 429
+
+    assert classify_error(ClientError("quota")) == RetryVerdict.FATAL
