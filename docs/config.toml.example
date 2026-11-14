@@ -94,6 +94,12 @@ max_output_tokens = 8192            # orchestrator response cap
 max_history_messages = 0
 # LLM calls per user message before the loop stops and asks for input. 0 = unlimited (default).
 max_iterations = 0
+# Seconds the LLM stream may stay silent (before its first chunk, or between chunks)
+# before the attempt is cancelled and retried (see [retry]). 0 = no timeout (default):
+# the cap is your choice. Set it per [llm.<name>] profile; here it is a default for
+# every profile. Thinking models and cold local models can stay silent for minutes,
+# so pick a value above the longest silence you expect.
+# request_timeout_seconds = 0
 agent_timeout = 1800               # seconds before a background agent is cancelled (30 min; reasoning+coding can be slow)
 # Tools the agents inherit. A coding harness needs file/shell/search (core),
 # tasks/notes (metadata), background process control for test suites
@@ -173,6 +179,8 @@ compaction_threshold = 0.80
 # max_delay_seconds must stay >= initial_delay_seconds. If you set only
 # max_delay_seconds below 10, the first delay is capped at it automatically; if
 # you set both, keep them consistent.
+# A stream that goes silent is cancelled and retried too, but only when
+# request_timeout_seconds is set (it is 0, no timeout, by default).
 enabled = true
 max_attempts = 6
 initial_delay_seconds = 10.0
@@ -199,6 +207,7 @@ driver = "ollama"
 base_url = "http://localhost:11434"
 model = "qwen3.6:35b-a3b-coding-nvfp4"
 num_ctx = 32768                     # keep modest: local VRAM is the constraint
+# request_timeout_seconds = 300     # cancel and retry a stream silent for 5 min (default 0 = no timeout)
 # skills = "none"                   # wins over [app].skills; agents on this profile inherit it
 reasoning_effort = "default"
 think = true                        # default; set false if the selected model rejects thinking
