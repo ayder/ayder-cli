@@ -18,7 +18,7 @@ class TestHelpScreen:
         content = screen._build_help_text()
         assert "Navigation" in content
         assert "Chat" in content
-        assert "Panels" in content
+        assert "Items" in content
         assert "General" in content
 
     def test_content_includes_all_keys(self):
@@ -34,7 +34,10 @@ class TestHelpScreen:
         assert "Esc" in content
 
 
-SELECT_HINT = "Hold Shift to select text with the mouse (Option in iTerm2 and Terminal.app)."
+SELECT_HINT = (
+    "Drag to select text; Ctrl+C copies it if the terminal allows clipboard access."
+    " Hold Shift (Option in iTerm2 and Terminal.app) for the terminal's own selection."
+)
 
 
 @pytest.fixture

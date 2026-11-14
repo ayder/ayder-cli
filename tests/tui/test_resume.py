@@ -76,6 +76,7 @@ class _FakeApp:
         self.model = kwargs.get("model", "test")
         self.safe_mode = kwargs.get("safe_mode", False)
         self.permissions = kwargs.get("permissions") or {"r"}
+        self.return_code = 0
 
     def run(self, **kwargs):
         return None

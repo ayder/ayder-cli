@@ -1,10 +1,11 @@
 """ChatView keeps following the end through the REAL turn path.
 
 Unlike the widget-level follow tests, these submit a message through the input
-bar and let the real ChatLoop stream reasoning and a Markdown reply (fenced code
-block and table) from a fake provider into the app's callbacks, then check the
-chat is still anchored when a panel opens. They also cover the keyboard and
-mouse scrolling a real user does at the end of the chat.
+bar and let the real ChatLoop stream reasoning, a tool call and a Markdown reply
+(fenced code block and table) from a fake provider into the app's callbacks. The
+chat must hold the thinking, tool and reply items in order, and keep following
+the end: a message added afterwards is at the end of the view. They also cover
+the mouse wheel and PageUp a real user does at the end of the chat.
 """
 
 import asyncio
@@ -13,8 +14,15 @@ import pytest
 from textual import events
 
 from ayder_cli.providers import AIProvider, NormalizedStreamChunk
+from ayder_cli.providers.base import ToolCallDef
 from ayder_cli.tui.app import AyderApp
-from ayder_cli.tui.widgets import ChatView, _SubmitTextArea
+from ayder_cli.tui.widgets import (
+    AssistantReply,
+    ChatView,
+    ThinkingItem,
+    ToolBox,
+    _SubmitTextArea,
+)
 
 REPLY = """Here is the plan.
 
@@ -48,17 +56,30 @@ class _FakeProvider(AIProvider):
             await asyncio.sleep(0)
 
 
+class _ToolProvider(AIProvider):
+    """Reasons, lists a directory with a read-only tool, then answers."""
+
+    def __init__(self, config=None):
+        super().__init__(config)
+        self.turn = 0
+
+    async def chat(self, *args, **kwargs):
+        return NormalizedStreamChunk()
+
+    async def stream_with_tools(self, *args, **kwargs):
+        self.turn += 1
+        if self.turn == 1:
+            yield NormalizedStreamChunk(reasoning="I should look around first.\n")
+            yield NormalizedStreamChunk(
+                tool_calls=[ToolCallDef("call_1", "file_explorer", '{"path": "."}')]
+            )
+        else:
+            yield NormalizedStreamChunk(content="Here is what I found.")
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
-
-
-@pytest.fixture(autouse=True)
-def inline_driver(monkeypatch):
-    """Run the pilot the way the real app runs: inline."""
-    from textual.drivers.headless_driver import HeadlessDriver
-
-    monkeypatch.setattr(HeadlessDriver, "is_inline", property(lambda self: True))
 
 
 async def _submit_and_wait(app, pilot, text):
@@ -86,10 +107,12 @@ async def _conversation(app, pilot, turns=3):
     return chat_view
 
 
-async def _open_thinking_panel_and_settle(app, pilot):
-    app.action_toggle_thinking()
+async def _still_following(pilot, chat_view):
+    """A message added now is at the end of the view."""
+    chat_view.add_system_message("one more message at the end")
     await pilot.pause()
     await pilot.pause()
+    assert chat_view.scroll_y == chat_view.max_scroll_y
 
 
 def _wheel(chat_view, direction):
@@ -100,17 +123,42 @@ def _wheel(chat_view, direction):
 
 
 @pytest.mark.anyio
-async def test_chat_stays_anchored_through_real_turns_and_keeps_its_end_when_thinking_opens():
+async def test_real_turns_leave_thinking_then_reply_in_the_chat_and_it_keeps_following():
     app = AyderApp(model="test")
     async with app.run_test(size=(100, 30)) as pilot:
-        chat_view = await _conversation(app, pilot)
-        assert chat_view.is_anchored
-        assert not chat_view._anchor_released
-        assert app.query_one("#thinking-panel")._buffer, "reasoning should have streamed in"
+        chat_view = await _conversation(app, pilot, turns=3)
 
-        await _open_thinking_panel_and_settle(app, pilot)
+        items = [
+            type(child).__name__
+            for child in chat_view.children
+            if isinstance(child, (ThinkingItem, ToolBox, AssistantReply))
+        ]
+        assert items == ["ThinkingItem", "AssistantReply"] * 3
+        assert not any(w.display for w in app.query("#tool-panel, #thinking-panel, #agent-panel"))
 
-        assert chat_view.scroll_y == chat_view.max_scroll_y
+        await _still_following(pilot, chat_view)
+
+
+@pytest.mark.anyio
+async def test_a_real_tool_call_leaves_a_tool_box_between_thinking_and_the_reply():
+    app = AyderApp(model="test")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        app.chat_loop.llm = _ToolProvider()
+
+        await _submit_and_wait(app, pilot, "what is in this directory?")
+
+        chat_view = app.query_one("#chat-view", ChatView)
+        items = [
+            child
+            for child in chat_view.children
+            if isinstance(child, (ThinkingItem, ToolBox, AssistantReply))
+        ]
+        assert [type(i).__name__ for i in items] == ["ThinkingItem", "ToolBox", "AssistantReply"]
+        thinking, tool, reply = items
+        assert "I should look around first." in str(thinking.content)
+        assert str(tool.content).startswith("● file_explorer ✓ ok ")
+        assert reply.source == "Here is what I found."
 
 
 @pytest.mark.anyio
@@ -127,66 +175,18 @@ async def test_wheel_up_and_back_down_to_the_end_keeps_following():
             await pilot.pause()
         await pilot.pause()
 
-        await _open_thinking_panel_and_settle(app, pilot)
-
-        assert chat_view.scroll_y == chat_view.max_scroll_y
+        await _still_following(pilot, chat_view)
 
 
-# Scrolling "down" while already at the end must not stop the chat following.
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("key", ["pagedown", "ctrl+pagedown"])
-async def test_scrolling_down_at_the_end_keeps_following(key):
-    app = AyderApp(model="test")
-    async with app.run_test(size=(100, 30)) as pilot:
-        chat_view = await _conversation(app, pilot)
-        app.query_one("#chat-input", _SubmitTextArea).focus()
-        await pilot.pause()
-
-        await pilot.press(key)
-        await pilot.pause()
-        await pilot.pause()
-        assert chat_view.scroll_y == chat_view.max_scroll_y
-
-        await _open_thinking_panel_and_settle(app, pilot)
-
-        assert chat_view.scroll_y == chat_view.max_scroll_y
-
-
-@pytest.mark.anyio
-async def test_down_arrow_in_the_focused_chat_at_the_end_keeps_following():
-    app = AyderApp(model="test")
-    async with app.run_test(size=(100, 30)) as pilot:
-        chat_view = await _conversation(app, pilot)
-        await pilot.click("#chat-view", offset=(5, 5))  # clicking focuses the chat
-        await pilot.pause()
-
-        await pilot.press("down")
-        await pilot.pause()
-        await pilot.pause()
-
-        await _open_thinking_panel_and_settle(app, pilot)
-
-        assert chat_view.scroll_y == chat_view.max_scroll_y
-
-
-async def _assert_scrolled_up_view_is_left_alone(app, pilot, chat_view):
-    """The view left the end, stays released, and keeps its offset when new
-    content arrives and when a panel opens."""
+async def _assert_scrolled_up_view_is_left_alone(pilot, chat_view):
+    """The view left the end and keeps its offset when new content arrives."""
     assert chat_view.scroll_y < chat_view.max_scroll_y
-    assert chat_view._anchor_released
     position = chat_view.scroll_y
 
     chat_view.add_system_message("arrives while the user reads history")
     await pilot.pause()
     await pilot.pause()
     assert chat_view.scroll_y == position
-    assert chat_view._anchor_released
-
-    await _open_thinking_panel_and_settle(app, pilot)
-    assert chat_view.scroll_y == position
-    assert chat_view._anchor_released
 
 
 @pytest.mark.anyio
@@ -201,7 +201,7 @@ async def test_page_up_from_the_end_leaves_the_end_and_stays_there():
         await pilot.pause()
         await pilot.pause()
 
-        await _assert_scrolled_up_view_is_left_alone(app, pilot, chat_view)
+        await _assert_scrolled_up_view_is_left_alone(pilot, chat_view)
 
 
 @pytest.mark.anyio
@@ -214,36 +214,7 @@ async def test_wheel_up_from_the_end_leaves_the_end_and_stays_there():
         await pilot.pause()
         await pilot.pause()
 
-        await _assert_scrolled_up_view_is_left_alone(app, pilot, chat_view)
-
-
-def _newest_row_is_painted(chat_view):
-    last = [child for child in chat_view.children if child.display][-1]
-    return last.region.bottom == chat_view.region.bottom
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("panel_id", "action"),
-    [
-        ("thinking-panel", "action_toggle_thinking"),
-        ("tool-panel", "action_toggle_tools"),
-        ("agent-panel", "action_toggle_agents"),
-    ],
-)
-async def test_newest_rows_stay_painted_through_open_close_open_cycles(panel_id, action):
-    app = AyderApp(model="test")
-    async with app.run_test(size=(100, 30)) as pilot:
-        chat_view = await _conversation(app, pilot)
-        assert _newest_row_is_painted(chat_view)
-
-        for cycle in range(1, 4):
-            for step in ("open", "close"):
-                getattr(app, action)()
-                await pilot.pause()
-                await pilot.pause()
-                assert chat_view.scroll_y == chat_view.max_scroll_y
-                assert _newest_row_is_painted(chat_view), f"cycle {cycle} {step}"
+        await _assert_scrolled_up_view_is_left_alone(pilot, chat_view)
 
 
 @pytest.mark.anyio

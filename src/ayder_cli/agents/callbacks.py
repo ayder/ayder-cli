@@ -1,7 +1,7 @@
 """AgentCallbacks — ChatCallbacks implementation for autonomous agent runs.
 
 Agents auto-approve all tool confirmations. Events are optionally forwarded
-to a progress callback (used by AgentPanel in the TUI).
+to a progress callback (used by the agent items in the TUI chat).
 """
 
 from __future__ import annotations

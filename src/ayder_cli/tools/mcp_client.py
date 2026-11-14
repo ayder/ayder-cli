@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import json
 import os
 import threading
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -23,9 +25,36 @@ from mcp.types import TextContent, Tool
 
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.log import get_logger
+from ayder_cli.logging_config import get_log_dir
 
 logger = get_logger("tool")
 TIMEOUT = 30
+# The stderr file of the server being started; _run_server sets it in its own task.
+_errlog: contextvars.ContextVar[TextIO | None] = contextvars.ContextVar(
+    "mcp_errlog", default=None
+)
+
+
+def _open_errlog(name: str, project_root: Path) -> TextIO:
+    """Open ``<log dir>/mcp-<name>.log`` for a stdio server's stderr.
+
+    stdio_client binds ``errlog=sys.stderr`` when ``mcp`` is imported. That is
+    whatever stderr is at that moment (a lazy import after the TUI took over the
+    terminal binds the terminal itself), so a server's stderr would otherwise
+    land on the user's screen. Always pass an explicit file. If the log file
+    cannot be opened, the server still starts, with its stderr discarded.
+    """
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
+    log_dir = get_log_dir()
+    path = (log_dir if log_dir.is_absolute() else project_root / log_dir) / f"mcp-{safe}.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        return open(os.devnull, "w")
+    stamp = datetime.now().isoformat(timespec="seconds")
+    handle.write(f"--- {name} started {stamp} (ayder pid {os.getpid()}) ---\n")
+    return handle
 
 
 class MCPClient:
@@ -50,7 +79,8 @@ class MCPClient:
             env={**os.environ, **config.get("env", {})},
             cwd=str(self.project_root),
         )
-        return stdio_client(params)
+        errlog = _errlog.get()
+        return stdio_client(params, errlog=errlog) if errlog else stdio_client(params)
 
     async def _run_server(
         self,
@@ -61,7 +91,11 @@ class MCPClient:
         task = asyncio.current_task()
         assert task is not None
         self._tasks.add(task)
+        errlog: TextIO | None = None  # held for the server's lifetime
         try:
+            if "url" not in config:
+                errlog = _open_errlog(name, self.project_root)
+                _errlog.set(errlog)
             # stdio yields two streams; Streamable HTTP also yields a session-id
             # callback. Both use the first two entries for ClientSession.
             async with self._build_transport(config) as transport:
@@ -85,6 +119,8 @@ class MCPClient:
         finally:
             self.sessions.pop(name, None)
             self._tasks.discard(task)
+            if errlog is not None:
+                errlog.close()
 
     def connect_server(self, name: str, config: dict[str, Any]) -> list[Tool]:
         """Connect, initialize, and list tools, with a bounded startup wait."""

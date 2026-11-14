@@ -1,9 +1,11 @@
 """MCP session transport, lifecycle, and tool-call tests."""
 
 import asyncio
+import os
 import sys
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -156,3 +158,87 @@ server.run(transport="stdio")
     )
     assert [tool.name for tool in tools] == ["echo"]
     assert client.make_handler("local", "echo")(message="test") == "echo: test"
+
+
+# -- a stdio server's stderr goes to its own log file, never the terminal -------
+
+
+def _fake_stdio(monkeypatch):
+    """Stand in for the SDK: record what stdio_client was given, serve one empty session."""
+    calls = []
+
+    @asynccontextmanager
+    async def transport(params, **kwargs):
+        calls.append(kwargs)
+        yield ("read", "write")
+
+    session = MagicMock()
+    session.initialize = AsyncMock()
+    session.list_tools = AsyncMock(return_value=ListToolsResult(tools=[]))
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock()
+    monkeypatch.setattr(mcp_client, "stdio_client", transport)
+    monkeypatch.setattr(mcp_client, "ClientSession", MagicMock(return_value=session))
+    return calls
+
+
+def test_stdio_server_gets_its_own_errlog_file(client, monkeypatch, tmp_path):
+    calls = _fake_stdio(monkeypatch)
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(mcp_client, "get_log_dir", lambda: log_dir)
+
+    client.connect_server("news digest/1", {"command": "x"})
+
+    errlog = calls[0]["errlog"]
+    path = log_dir / "mcp-news_digest_1.log"
+    assert errlog.name == str(path) and errlog.mode == "a"
+    assert not errlog.closed  # held while the server runs
+    assert path.read_text().startswith("--- news digest/1 started ")
+    client.close()
+    assert errlog.closed  # and released when it stops
+
+
+def test_relative_log_dir_is_taken_from_the_project_root(client, monkeypatch):
+    calls = _fake_stdio(monkeypatch)
+    monkeypatch.setattr(mcp_client, "get_log_dir", lambda: Path(".ayder/log"))
+
+    client.connect_server("srv", {"command": "x"})
+
+    expected = client.project_root / ".ayder" / "log" / "mcp-srv.log"
+    assert calls[0]["errlog"].name == str(expected)
+    client.close()
+
+
+def test_url_server_opens_no_errlog_file(client, monkeypatch, tmp_path):
+    session = MagicMock()
+    session.initialize = AsyncMock()
+    session.list_tools = AsyncMock(return_value=ListToolsResult(tools=[]))
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock()
+
+    @asynccontextmanager
+    async def http(url):
+        yield ("read", "write", lambda: "id")
+
+    monkeypatch.setattr(mcp_client, "streamablehttp_client", http)
+    monkeypatch.setattr(mcp_client, "ClientSession", MagicMock(return_value=session))
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(mcp_client, "get_log_dir", lambda: log_dir)
+
+    client.connect_server("remote", {"url": "http://localhost/mcp"})
+
+    assert not log_dir.exists()
+    client.close()
+
+
+def test_unwritable_log_dir_falls_back_to_devnull(client, monkeypatch, tmp_path):
+    calls = _fake_stdio(monkeypatch)
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    monkeypatch.setattr(mcp_client, "get_log_dir", lambda: blocker / "logs")
+
+    tools = client.connect_server("srv", {"command": "x"})  # still starts
+
+    assert tools == []
+    assert calls[0]["errlog"].name == os.devnull
+    client.close()

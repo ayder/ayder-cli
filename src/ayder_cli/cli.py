@@ -9,7 +9,7 @@ from pathlib import Path
 from ayder_cli.version import get_app_version
 from ayder_cli.diagnostics import install_exception_hooks
 from ayder_cli.log import LOG_LEVELS, get_logger
-from ayder_cli.logging_config import LoggingSettings, setup_logging
+from ayder_cli.logging_config import LoggingSettings, set_log_dir, setup_logging
 
 logger = get_logger("core")
 
@@ -289,6 +289,7 @@ def main():
     log_settings = build_logging_settings(args, cfg)
     setup_logging(log_settings)
     install_exception_hooks()
+    set_log_dir(log_settings.file_path)
 
     # Imported only now: importing cli_runner runs tool discovery, which logs,
     # and a record logged before setup_logging() goes to Loguru's stderr default.

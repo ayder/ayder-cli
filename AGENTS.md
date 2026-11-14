@@ -22,7 +22,7 @@ This document provides coding standards, tool configurations, and workflows for 
 | **httpx** | HTTP client for `fetch_web` | latest |
 | **mcp** | Model Context Protocol client (built-in MCP) | >=1.19,<2 |
 | **rich** | Rich text and beautiful formatting | >=13.0.0 |
-| **textual** | Terminal User Interface (TUI) framework | ==8.2.7 |
+| **textual** | Terminal User Interface (TUI) framework | ==8.2.8 |
 | **python-dotenv** | Environment variable management | >=1.0.0 |
 | **tiktoken** | Token counting for context management | >=0.7.0 |
 
@@ -163,7 +163,7 @@ ayder-cli/
 │   │   ├── screens.py          # Modal screens (confirm, select, permission, task edit, …)
 │   │   ├── theme_manager.py    # Theme loading and CSS
 │   │   ├── types.py            # MessageType, ConfirmResult
-│   │   └── widgets.py          # ChatView, ToolPanel, CLIInputBar, StatusBar, …
+│   │   └── widgets.py          # ChatView (+ thinking/tool/agent items), CLIInputBar, StatusBar, …
 │   │
 │   ├── skills/                 # Packaged built-in skills (development-workflow/SKILL.md)
 │   │

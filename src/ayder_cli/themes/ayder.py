@@ -409,8 +409,9 @@ ChatView {
     background: $background;
 }
 
-/* Base style for all message lines within ChatView. */
-ChatView Static {
+/* Base style for the message widgets. Direct children only: the blocks inside
+   an assistant reply are Statics too and are styled by the reply rules below. */
+ChatView > Static {
     height: auto;
     margin: 0;
     padding: 0;
@@ -486,6 +487,97 @@ ChatView .tool-completed {
     color: $success;
     margin: 0;
     padding-left: 2;
+}
+
+/* AssistantReply - An assistant reply: Textual's Markdown widget, so its text can
+   be selected with the mouse (AssistantReply in widgets.py). One blank row
+   between blocks and none around the reply, as rich.markdown drew it. */
+ChatView > AssistantReply {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    background: $background;
+    color: $foreground;
+}
+
+ChatView AssistantReply > MarkdownBlock {
+    margin: 1 0 0 0;
+}
+
+/* Not :first-child: Textual restyles every block on each mount for an
+   order-dependent rule (see AssistantReply). */
+ChatView AssistantReply > .-first-block {
+    margin: 0;
+}
+
+/* Headings: bold, no background bar; the top two levels in the accent colour. */
+ChatView AssistantReply MarkdownHeader {
+    background: $background;
+    color: $foreground;
+    text-style: bold;
+}
+
+ChatView AssistantReply MarkdownH1 {
+    content-align: center middle;
+    color: $accent;
+}
+
+ChatView AssistantReply MarkdownH2 {
+    color: $accent;
+}
+
+/* Code blocks: no box, so the terminal's background shows through; indented,
+   and long lines wrap as they did under rich.markdown. The colours come from
+   the palette (AssistantFence). */
+ChatView AssistantReply MarkdownFence {
+    background: $background;
+    overflow-x: hidden;
+}
+
+ChatView AssistantReply MarkdownFence > Label {
+    width: 1fr;
+    padding: 0 0 0 2;
+    text-wrap: wrap;
+}
+
+/* Tables: as wide as their content. */
+ChatView AssistantReply MarkdownTable {
+    width: auto;
+    background: $background;
+}
+
+/* In-chat items: thinking, tool calls and agent runs. Statics built from Content, so the mouse can
+   select their text. Tool and agent items are one line until expanded (Ctrl+O,
+   Ctrl+G), then a bordered box; the thinking item is a bordered box that grows
+   with the reasoning up to 8 rows and stays. Borders only, never a
+   background; literal ANSI border colours, never an auto colour such as $text-muted. */
+ChatView > .thinking-item {
+    width: 100%;
+    color: $foreground;
+    background: transparent;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border: round ansi_bright_black;
+}
+
+ChatView > .toolbox,
+ChatView > .agentbox {
+    color: $foreground;
+    background: transparent;
+    margin: 0;
+}
+
+ChatView > .toolbox.-expanded,
+ChatView > .agentbox.-expanded {
+    width: 100%;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border: round ansi_bright_black;
+}
+
+ChatView > .toolbox.-expanded.-error,
+ChatView > .agentbox.-expanded.-error {
+    border: round ansi_red;
 }
 
 /* AutoCompleteInput - The input field widget with slash command suggestions.
@@ -659,110 +751,10 @@ BannerWidget .banner-version {
     color: $success;
 }
 
-/* ToolPanel - The panel that opens at the top of the screen, above the chat view, showing running tools.
-   Fixed at 10% of the screen height from the moment it opens, whatever it holds;
-   its content scrolls inside. Targets 'ToolPanel' in widgets.py. */
-ToolPanel {
-    layout: vertical;
-    height: 10%;
-    background: $background;
-    border-bottom: solid ansi_bright_black;
-    padding: 0 1;
-    overflow-y: scroll;
-    display: none;
-}
-
-ToolPanel .tool-item {
-    height: auto;
-    color: $foreground;
-    padding: 0 1;
-}
-
-ToolPanel .tool-item.running {
-    color: $warning;
-}
-
-ToolPanel .tool-item.completed {
-    color: $success;
-}
-
-/* AgentPanel - Scrollable panel for agent run history.
-   Toggled with Ctrl+G. Fixed at 10% of the screen height; content scrolls inside.
-   Targets 'AgentPanel' in widgets.py. */
-AgentPanel {
-    layout: vertical;
-    height: 10%;
-    background: $background;
-    border-bottom: solid ansi_bright_black;
-    padding: 0 1;
-    overflow-y: scroll;
-    display: none;
-}
-
-AgentPanel .agent-entry {
-    height: auto;
-    padding: 0 1;
-}
-
-AgentPanel .agent-status {
-    height: auto;
-    color: $warning;
-    padding: 0 1;
-}
-
-AgentPanel .agent-status.running {
-    color: $warning;
-}
-
-AgentPanel .agent-status.completed {
-    color: $success;
-}
-
-AgentPanel .agent-status.error {
-    color: $error;
-}
-
-AgentPanel .agent-status.timeout {
-    color: $warning;
-}
-
-AgentPanel .agent-detail {
-    height: auto;
-    color: $text-muted;
-    padding: 0 0 0 4;
-}
-
-/* ThinkingPanel - Scrollable panel showing the model's reasoning stream.
-   Toggled with Ctrl+T. Fixed at 30% of the screen height, three times the
-   tool/agent panels, because reasoning is long-form; content scrolls inside.
-   Targets 'ThinkingPanel' in widgets.py. */
-ThinkingPanel {
-    layout: vertical;
-    height: 30%;
-    background: $background;
-    border-bottom: solid ansi_bright_black;
-    padding: 0 1;
-    overflow-y: scroll;
-    display: none;
-}
-
-ThinkingPanel .thinking-content {
-    height: auto;
-    color: $foreground;
-    text-style: italic;
-    padding: 0 1;
-}
-
 /* AyderApp - The root application screen. */
 Screen {
     layout: vertical;
     background: $background;
-}
-
-/* Inline mode - Configures the app to run within the terminal flow rather than full screen. */
-Screen:inline {
-    height: 100vh;
-    min-height: 20;
 }
 
 /* ID-based selectors for the main layout components in app.py compose() */
@@ -774,18 +766,6 @@ Screen:inline {
     scrollbar-size: 0 0;
     scrollbar-size-horizontal: 0;
     scrollbar-size-vertical: 0;
-}
-
-#tool-panel {
-    width: 100%;
-}
-
-#agent-panel {
-    width: 100%;
-}
-
-#thinking-panel {
-    width: 100%;
 }
 
 #input-bar {

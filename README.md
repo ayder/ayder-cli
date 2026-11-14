@@ -30,7 +30,7 @@ Most AI coding assistants require cloud APIs, subscriptions, or heavy IDE plugin
 - **Fully local or cloud** -- run locally with Ollama, or connect to any cloud provider.
 - **Agentic workflow** -- the LLM reads files, edits code, runs shell commands, and iterates autonomously with configurable iteration limits per message.
 - **Multi-agent** -- define specialized sub-agents in `config.toml`. Each agent runs independently with its own LLM, model, and context. Results are injected back into the main conversation when complete.
-- **Textual TUI** -- an inline terminal interface with chat view, tool panel, thinking block toggle, slash command auto-completion, permission toggles, and tool confirmation modals with diff previews.
+- **Textual TUI** -- a full-screen terminal interface whose chat view shows the model's reasoning, tool calls and agent runs as items, in order, next to the conversation (one line each until you expand them), with slash command auto-completion, permission toggles, and tool confirmation modals with diff previews.
 - **Batteries included** -- the OpenAI and Ollama SDKs ship with ayder-cli core. Anthropic, Google, Qwen, and GLM are optional extras (install only what you need). The terminal UI is built on Rich and Textual.
 
 ### Tools
@@ -468,6 +468,10 @@ inside the Ollama summary.
   `.ayder/log/errors.log`. Records in flight are lost on `SIGKILL` (`kill -9`),
   which no process can intercept.
 - Narrative logs go to `.ayder/log/ayder.log` when a level is set.
+- Beside `file_path`, the TUI writes `stderr.log` (anything that writes to the
+  terminal's stdout or stderr while the UI runs, and a crash traceback) so it
+  cannot draw over the screen, and each stdio MCP server writes its stderr to
+  `mcp-<server>.log`.
 - `--trace` writes structured events to `.ayder/log/trace.jsonl`. It is not a
   log level.
 - `--log-channel llm,tool` limits console and narrative output to those
@@ -478,16 +482,43 @@ inside the Ollama summary.
 
 ### Keyboard Shortcuts
 
+ayder runs full-screen. When you quit, the terminal is restored and the session
+is saved; continue it later with `ayder --resume <id>`.
+
 | Shortcut | Action |
 | -------- | ------ |
 | `Ctrl+Q` | Quit |
-| `Ctrl+X` / `Ctrl+C` | Cancel current operation |
+| `Ctrl+X` | Cancel current operation |
+| `Ctrl+C` | Copy selected text; cancel the current operation when nothing is selected |
 | `Ctrl+L` | Clear chat |
-| `Ctrl+O` | Toggle tool panel |
-| `Ctrl+T` | Toggle thinking/reasoning blocks |
-| `Shift` + drag | Select text with the mouse (Option in iTerm2 and Terminal.app) |
+| `Ctrl+O` | Expand or collapse every tool and agent item in the chat |
+| `Ctrl+T` | Show the full reasoning in every thinking box, or the last few lines |
+| `Ctrl+G` | Expand or collapse every agent item |
+| Drag | Select text in the chat, including assistant replies; `Ctrl+C` copies it through OSC 52, which needs the terminal's clipboard access (Terminal.app has none) |
+| `Esc` | Clear the selection |
+| `Shift` + drag | The terminal's own selection (Option in iTerm2 and Terminal.app) |
+| `Ctrl+P` | Command palette; **Theme** switches the colour scheme for this session |
 | `PageUp` / `PageDown` | Scroll chat view |
 | `Tab` | Auto-complete slash commands |
+
+### Colour Scheme
+
+The TUI's colours, including the syntax colours of code blocks in replies, come from a
+Textual theme. Set it in `~/.ayder/config.toml`:
+
+```toml
+[ui]
+theme = "ayder"     # layout: ayder (default), ayder-dark, ayder-light or claude
+palette = "auto"    # colour scheme of the ayder layout
+```
+
+- `auto`, the default, keeps your terminal's own colours; code uses its ANSI palette.
+- Any Textual theme (`monokai`, `dracula`, `nord`, `gruvbox`, `tokyo-night`,
+  `catppuccin-mocha`, `solarized-light`, …) paints its own colours, code included,
+  and its own background.
+- `Ctrl+P` → **Theme** lists every theme and switches for the current session only.
+- An unknown name falls back to the layout's own palette and says so in the chat.
+- The `claude` layout keeps its fixed colours and ignores `palette`.
 
 ## Efficiency & Optimization
 

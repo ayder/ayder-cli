@@ -24,8 +24,8 @@ class RetryConfig:
     Config section so retry.py has zero dependencies on core.config."""
 
     enabled: bool = True
-    max_attempts: int = 3
-    initial_delay_seconds: float = 0.5
+    max_attempts: int = 6
+    initial_delay_seconds: float = 10.0
     max_delay_seconds: float = 30.0
     backoff_coefficient: float = 2.0
     jitter: bool = True

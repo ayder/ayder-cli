@@ -8,6 +8,10 @@ Provides a clean, terminal-like interface:
 - Status bar with context info
 """
 
+import os
+import sys
+from pathlib import Path
+
 from ayder_cli.tui.types import MessageType, ConfirmResult
 from ayder_cli.tui.screens import (
     CLIConfirmScreen,
@@ -19,15 +23,69 @@ from ayder_cli.tui.screens import (
 )
 from ayder_cli.tui.widgets import (
     ChatView,
-    ToolPanel,
     AutoCompleteInput,
     CLIInputBar,
     StatusBar,
 )
 from ayder_cli.tui.app import AyderApp
 from ayder_cli.log import get_logger
+from ayder_cli.logging_config import get_log_dir
 
 logger = get_logger("ui")
+
+
+class _StderrCapture:
+    """Keep stray output off the screen while the TUI runs.
+
+    Textual draws the whole screen to ``sys.__stderr__`` and sizes it from
+    ``sys.__stdout__``, so anything else that writes to fd 1 or 2 would show on
+    top of the UI until the next repaint: C libraries, child processes that
+    inherit the fds, plugins. This gives Textual a private dup of the terminal
+    and points fds 1 and 2, and ``sys.stderr``, at ``stderr.log``. No Textual
+    method is overridden. ``restore`` undoes it in reverse order; if the log
+    cannot be opened, stray output is discarded instead.
+    """
+
+    def __init__(self, log_path: Path) -> None:
+        for stream in (sys.stdout, sys.stderr):
+            stream.flush()  # earlier output belongs to the terminal, not the file
+        self.log_path = log_path
+        self._saved_sys = (sys.__stdout__, sys.__stderr__, sys.stdout, sys.stderr)
+        self._saved_fds = (os.dup(1), os.dup(2))
+        self._tty = os.fdopen(
+            os.dup(2), "w", buffering=1, encoding="utf-8", errors="replace"
+        )
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._log = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)
+        except OSError:
+            self._log = open(os.devnull, "w")
+        self._log.write(f"--- ayder TUI pid {os.getpid()} ---\n")
+        for name in ("__stdout__", "__stderr__", "stdout"):
+            setattr(sys, name, self._tty)
+        sys.stderr = self._log
+        os.dup2(self._log.fileno(), 1)
+        os.dup2(self._log.fileno(), 2)
+        self._active = True
+
+    def restore(self) -> None:
+        if not self._active:
+            return
+        self._active = False
+        self._tty.flush()
+        self._log.flush()
+        for stream in {id(s): s for s in self._saved_sys if s is not None}.values():
+            stream.flush()  # whatever old-stream writers buffered goes to the file
+        os.dup2(self._saved_fds[0], 1)
+        os.dup2(self._saved_fds[1], 2)
+        for name, stream in zip(
+            ("__stdout__", "__stderr__", "stdout", "stderr"), self._saved_sys
+        ):
+            setattr(sys, name, stream)
+        for fd in self._saved_fds:
+            os.close(fd)
+        self._log.close()
+        self._tty.close()
 
 
 def run_tui(
@@ -65,10 +123,11 @@ def run_tui(
             When None, AyderApp resolves its own (e.g. when constructed directly
             in tests).
     """
-    import sys
     from ayder_cli.providers import ProviderUnavailableError
     from ayder_cli.core.session import persist_and_announce
 
+    capture = _StderrCapture(get_log_dir() / "stderr.log")
+    built = False
     try:
         app = AyderApp(
             model=model, safe_mode=safe_mode, permissions=permissions,
@@ -76,13 +135,20 @@ def run_tui(
             provider=provider, initial_messages=initial_messages, resume_session_id=resume_session_id,
             session_name=session_name, log_settings=log_settings,
         )
+        built = True
     except ProviderUnavailableError as e:
+        capture.restore()  # the message is for the terminal, not the log
         print(str(e), file=sys.stderr)
         raise SystemExit(1)
+    finally:
+        if not built:
+            capture.restore()
 
     try:
-        app.run(inline=True, mouse=True)
+        app.run(inline=False, mouse=True)
     finally:
+        # First, so the mouse reset and everything printed below reach the terminal.
+        capture.restore()
         # Mouse is enabled for the session; make sure reporting is switched off
         # on exit — Textual's driver may leave it on if the shutdown path doesn't
         # fully complete (e.g. Ctrl+Q or a crash).
@@ -111,6 +177,14 @@ def run_tui(
             logger.opt(exception=True).warning("Session auto-save failed on exit")
             print(f"Warning: could not save session: {exc}", file=sys.stderr)
 
+    if app.return_code:
+        # Textual prints a crash traceback through sys.stderr while the capture
+        # is on, so it is in the log; say so, or the user sees nothing.
+        print(
+            f"ayder exited with an error; traceback in {capture.log_path}",
+            file=sys.stderr,
+        )
+
 
 __all__ = [
     "MessageType",
@@ -122,7 +196,6 @@ __all__ = [
     "CLISelectScreen",
     "TaskEditScreen",
     "ChatView",
-    "ToolPanel",
     "AutoCompleteInput",
     "CLIInputBar",
     "StatusBar",

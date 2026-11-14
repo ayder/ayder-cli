@@ -1,22 +1,29 @@
-"""TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar, AgentPanel."""
+"""TUI widget classes: ChatView (with its thinking, tool and agent items), ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar."""
 
+import json
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from textual import events
 from textual.app import ComposeResult
-from textual.containers import Horizontal, VerticalScroll, Container
+from textual.containers import Horizontal, VerticalScroll
+from textual.content import Content
 from textual.css.query import NoMatches
 from textual.geometry import Size
+from textual.highlight import (
+    ANSIDarkHighlightTheme,
+    ANSILightHighlightTheme,
+    HighlightTheme,
+    highlight,
+)
 from textual.message import Message
 from textual.reactive import reactive
 from textual.suggester import SuggestFromList
-from textual.widget import Widget
 from textual.widgets import Static, Input, Label, TextArea
+from textual.widgets.markdown import Markdown, MarkdownFence
 from rich.cells import cell_len
 from rich.text import Text
-from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.style import Style
 
@@ -43,6 +50,355 @@ def _sanitize_for_assistant_render(content: str) -> str:
     return content_processor.strip_for_display(content)
 
 
+# textual 8.2.7's ANSI code themes misspell four colour names, and a colour it
+# cannot parse is dropped: under the ayder palettes, single-quoted strings,
+# magic methods, attributes and (light) errors rendered uncoloured.
+_ANSI_COLOUR_TYPOS = {
+    "ans_red": "ansi_red",
+    "ansi_blow": "ansi_blue",
+    "ansi_greenb": "ansi_green",
+    "ansi_yelllow": "ansi_yellow",
+}
+
+
+def _fix_colour_names(styles: dict[tuple[str, ...], str]) -> dict[tuple[str, ...], str]:
+    """Return a code theme's styles with the misspelt ANSI colour names corrected."""
+    return {
+        token: " ".join(_ANSI_COLOUR_TYPOS.get(word, word) for word in style.split())
+        for token, style in styles.items()
+    }
+
+
+class _AnsiDarkCodeTheme(ANSIDarkHighlightTheme):
+    """Code colours under an ANSI palette on a dark terminal."""
+
+    STYLES = _fix_colour_names(ANSIDarkHighlightTheme.STYLES)
+
+
+class _AnsiLightCodeTheme(ANSILightHighlightTheme):
+    """Code colours under an ANSI palette on a light terminal."""
+
+    STYLES = _fix_colour_names(ANSILightHighlightTheme.STYLES)
+
+
+class AssistantFence(MarkdownFence):
+    """A fenced code block in an assistant reply, highlighted as rich.markdown did.
+
+    The language is the first word of the info string (```python title="x.py"
+    is Python). No info string means plain text: Textual would guess, and
+    Pygments guesses short snippets badly (a Python def comes out as
+    "teratermmacro"). ANSI palettes use the corrected code themes above.
+    """
+
+    @classmethod
+    def highlight(
+        cls, code: str, language: str, ansi: bool = False, dark: bool = False
+    ) -> Content:
+        words = (language or "").split()
+        theme: type[HighlightTheme] = HighlightTheme
+        if ansi:
+            theme = _AnsiDarkCodeTheme if dark else _AnsiLightCodeTheme
+        return highlight(code, language=words[0] if words else "text", theme=theme)
+
+
+class AssistantReply(Markdown):
+    """An assistant reply, drawn with Textual's Markdown widget so the mouse can
+    select its text: Textual extracts a selection only from Text/Content
+    visuals, and a rich.markdown renderable gave none.
+
+    ``set_text`` takes the whole reply so far. One worker brings the widget up
+    to date, and only through ``append``, because in textual 8.2.7:
+    * ``append`` reads the source when it is called, so two appends that are
+      not awaited one after the other duplicate blocks;
+    * ``update(text)`` leaves the next ``append`` parsing from the last line
+      rather than the last block, which breaks an open code fence.
+    When the text no longer extends what is shown (the sanitizer removed
+    tool-call markup that had streamed in), the document is cleared and
+    rebuilt. Links do not open on click.
+
+    The first block carries the ``-first-block`` class, which the themes use
+    to drop its top margin. A ``:first-child`` rule would do the same, but
+    Textual restyles every block with an order-dependent rule on each mount,
+    which made a long reply stream slower than rich.markdown did.
+    """
+
+    BLOCKS = {**Markdown.BLOCKS, "fence": AssistantFence, "code_block": AssistantFence}
+
+    def __init__(self, text: str = "", **kwargs: Any) -> None:
+        super().__init__(None, open_links=False, **kwargs)
+        self._target = text
+        self._draining = False
+
+    def on_mount(self) -> None:
+        self._drain_soon()
+
+    def set_text(self, text: str) -> None:
+        """Show ``text``, the whole reply so far; the widget catches up in the background."""
+        self._target = text
+        if self.is_mounted:
+            self._drain_soon()
+
+    def _drain_soon(self) -> None:
+        if not self._draining and self._target != self.source:
+            self._draining = True
+            self.run_worker(self._drain(), group="assistant-reply")
+
+    async def _drain(self) -> None:
+        try:
+            while self._target != self.source:
+                target, shown = self._target, self.source
+                # One batch: no frame shows a cleared document, or a new first
+                # block before it is marked.
+                with self.app.batch_update():
+                    if not target.startswith(shown):
+                        await self.update("")
+                        shown = ""
+                    await self.append(target[len(shown):])
+                    if self.children:
+                        self.children[0].add_class("-first-block")
+        finally:
+            self._draining = False
+
+
+_THINK_ROWS = 8  # most tail rows a thinking box shows (plus its header line)
+
+
+def _fmt_secs(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def _full_lines(result: str) -> list[Content]:
+    return [Content(line.expandtabs(4)) for line in result.splitlines()]
+
+
+def _tail_rows(text: str, width: int, rows: int) -> list[Content]:
+    """The last ``rows`` wrapped lines of ``text``. Only a suffix is wrapped, so
+    the cost does not grow with the length of the reasoning."""
+    text = text.strip("\n")
+    window = text[-width * rows * 3 :]
+    return Content(window).wrap(width, overflow="fold")[-rows:]
+
+
+class _InChatItem(Static):
+    """An item in the chat: a Static whose Content is rebuilt from its state.
+
+    Content, not a Rich renderable, so the mouse can select its text. Live items
+    (a running thinking phase or agent) are refreshed by ChatView.tick_live_items,
+    which the app's shared activity timer calls.
+    """
+
+    live = False
+
+    def __init__(self, classes: str) -> None:
+        super().__init__("", classes=classes)
+        self._last_width = 0
+        self._shown_secs = -1
+
+    def _build(self, width: int) -> Content:
+        raise NotImplementedError
+
+    def _elapsed(self) -> float:
+        return 0.0
+
+    def refresh_item(self) -> None:
+        self._last_width = max(10, self.content_size.width or 80)
+        self._shown_secs = int(self._elapsed())
+        self.update(self._build(self._last_width))
+
+    def tick(self) -> None:
+        if int(self._elapsed()) != self._shown_secs:
+            self.refresh_item()
+
+    def on_mount(self) -> None:
+        self.refresh_item()
+
+    def on_resize(self, event: events.Resize) -> None:
+        if max(10, self.content_size.width) != self._last_width:
+            self.refresh_item()
+
+
+class _Expandable(_InChatItem):
+    """A tool or agent item: one line collapsed, a bordered box with the full
+    output expanded (the ``-expanded`` class carries the border)."""
+
+    def __init__(self, classes: str, expanded: bool) -> None:
+        super().__init__(f"{classes} -expanded" if expanded else classes)
+        self.expanded = expanded
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.expanded = expanded
+        self.set_class(expanded, "-expanded")
+        self.refresh_item()
+
+
+class ThinkingItem(_InChatItem):
+    """One reasoning phase, a bordered box in the chat. It grows with the text up
+    to ``_THINK_ROWS`` tail rows, then stays that tall and shows the tail. When
+    thinking ends the box stays as it is and only its header changes. Ctrl+T
+    swaps the tail for the full reasoning text."""
+
+    def __init__(self, expanded: bool, started: float, text: str) -> None:
+        super().__init__("thinking-item")
+        self.text = text
+        self.expanded = expanded
+        self.started = started
+        self.finished: float | None = None
+        self.live = True
+        self._dirty = True
+
+    def _elapsed(self) -> float:
+        return (self.finished or time.monotonic()) - self.started
+
+    def add_text(self, delta: str) -> None:
+        self.text += delta
+        self._dirty = True  # rendered by tick(), not per delta
+
+    def tick(self) -> None:
+        if self._dirty:
+            self._dirty = False
+            self.refresh_item()
+        else:
+            super().tick()
+
+    def finish(self) -> None:
+        self.finished = time.monotonic()
+        self.live = False
+        self.refresh_item()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.expanded = expanded
+        self.refresh_item()
+
+    def _build(self, width: int) -> Content:
+        secs = _fmt_secs(self._elapsed())
+        if self.finished is None:
+            title = f"∴ thinking… {secs}"
+        else:
+            verb = "collapse" if self.expanded else "expand"
+            title = f"∴ thought for {secs} · Ctrl+T to {verb}"
+        head = Content.styled(title, "dim")
+        if self.expanded:
+            return Content("\n").join([head, Content(self.text.strip())])
+        return Content("\n").join([head, *_tail_rows(self.text, width, _THINK_ROWS)])
+
+
+def _one_line(
+    name: str, state: tuple[str, str], args: str, suffix: str, width: int
+) -> Content:
+    """``● name ✓ ok {args} · 168 lines``; the args give way to fit the width."""
+    head = Content.assemble(("● ", state[1]), (name, "bold $accent"), " ", state)
+    tail = Content.styled(suffix, "dim")
+    budget = width - head.cell_length - tail.cell_length - 1
+    if args and budget >= 4:
+        return Content.assemble(
+            head, " ", Content.styled(args, "dim").truncate(budget, ellipsis=True), tail
+        )
+    return Content.assemble(head, tail)
+
+
+class ToolBox(_Expandable):
+    """One tool call, mounted when the call starts and updated in place."""
+
+    def __init__(self, name: str, arguments: dict, expanded: bool) -> None:
+        super().__init__("toolbox running", expanded)
+        self.tool_name = name
+        self.arguments = arguments
+        self.result: str | None = None
+
+    def update_call(self, name: str, arguments: dict) -> None:
+        # The loop announces a call by name first and again once the arguments are in.
+        self.tool_name = name or self.tool_name
+        self.arguments = arguments or self.arguments
+        self.refresh_item()
+
+    def finish(self, result: str) -> None:
+        self.result = result
+        self.remove_class("running")
+        if result.lstrip().startswith("Error"):
+            self.add_class("-error")
+        self.refresh_item()
+
+    def _build(self, width: int) -> Content:
+        if self.result is None:
+            state = ("… running", "$warning")
+        elif self.has_class("-error"):
+            state = ("✗ error", "$error")
+        else:
+            state = ("✓ ok", "$success")
+        args = (
+            json.dumps(self.arguments, separators=(",", ":"), ensure_ascii=False, default=str)
+            if self.arguments
+            else ""
+        )
+        lines = (self.result or "").splitlines()
+        if not self.expanded:
+            n = len(lines)
+            suffix = f" · {n} line{'s' if n != 1 else ''}" if n else ""
+            return _one_line(self.tool_name, state, args, suffix, width)
+        header = Content.assemble(
+            (self.tool_name, "bold $accent"), " ", state, (f" {args}", "dim") if args else ""
+        ).truncate(width, ellipsis=True)
+        return Content("\n").join([header, *_full_lines(self.result or "")])
+
+
+class AgentBox(_Expandable):
+    """One agent run with a ticking status line, then its result."""
+
+    def __init__(self, name: str, expanded: bool) -> None:
+        super().__init__("agentbox running", expanded)
+        self.agent_name = name
+        self.started = time.monotonic()
+        self.finished: float | None = None
+        self.status = "running"
+        self.result = ""
+        self.tool_ids: set[str] = set()
+        self.assignment: str | None = None  # AgentRegistry.run_label, set by the first event
+        self.live = True
+
+    def _elapsed(self) -> float:
+        return (self.finished or time.monotonic()) - self.started
+
+    def set_assignment(self, label: str | None) -> None:
+        if label and not self.assignment:
+            self.assignment = label
+            self.refresh_item()
+
+    def note_tool(self, call_id: str) -> None:
+        if call_id not in self.tool_ids:
+            self.tool_ids.add(call_id)
+            self.refresh_item()
+
+    def finish(self, result: str, status: str) -> None:
+        self.finished = time.monotonic()
+        self.live = False
+        self.status = status
+        self.result = result or ""
+        self.remove_class("running")
+        if status not in ("done", "completed"):
+            self.add_class("-error")
+        self.refresh_item()
+
+    def _build(self, width: int) -> Content:
+        secs = _fmt_secs(self._elapsed())
+        n = len(self.tool_ids)
+        tools = f" · {n} tool{'s' if n != 1 else ''}"
+        if self.finished is None:
+            state = (f"running {secs}", "$warning")
+        elif self.status in ("done", "completed"):
+            state = (f"✓ done {secs}", "$success")
+        else:
+            state = (f"✗ failed {secs}", "$error")
+        label = f"— {self.assignment}" if self.assignment else ""
+        if not self.expanded:
+            return _one_line(self.agent_name, state, label, tools, width)
+        head = Content.assemble(
+            (self.agent_name, "bold $accent"), " ", state,
+            (f" {label}", "dim") if label else "", (tools, "dim"),
+        ).truncate(width, ellipsis=True)
+        return Content("\n").join([head, *_full_lines(self.result)])
+
+
 class ChatView(VerticalScroll):
     """
     CLI-style chat display.
@@ -53,52 +409,48 @@ class ChatView(VerticalScroll):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._message_widgets: list[Static] = []
+        self._message_widgets: list[Static | AssistantReply] = []
         self._thinking_visible: bool = False
+        # In-chat items (see the methods below the message ones).
+        self._thinking_item: ThinkingItem | None = None
+        self._thinking_started = 0.0
+        self._thinking_pending = ""
+        self._tool_boxes: dict[str, ToolBox] = {}
+        self._agent_boxes: dict[int, AgentBox] = {}
+        self._thinking_expanded = False
+        self._tools_expanded = False
+        self._agents_expanded = False
 
     def on_mount(self) -> None:
         """Anchor to the bottom: follow the end of the chat.
 
-        Textual re-pins an anchored widget to its end inside the same layout
-        pass as any resize or new content, so a panel opening or a message
-        arriving never draws a frame at a stale offset. Scrolling up releases
+        Textual's public ``Widget.anchor()`` keeps an anchored widget pinned to
+        its end as content arrives or the size changes. Scrolling up releases
         the anchor; scrolling back to the end re-arms it.
         """
         self.anchor()
 
-    def _size_updated(
-        self, size: Size, virtual_size: Size, container_size: Size, layout: bool = True
-    ) -> bool:
-        # Textual pins an anchored widget using the pre-resize container_size, so
-        # the first frame after a resize (a panel opening) draws at a stale offset.
-        # Re-pin once the new size is in, then ask for another layout: the
-        # compositor placed the children with the stale offset, and a silent
-        # set_reactive does not move them (without it every open after the first
-        # left the newest rows cut off). Relies on private Widget/scrollbar
-        # attributes of textual 8.2.7; the draw-spy and painted-rows tests in
-        # test_panel_layout guard it.
-        updated = super()._size_updated(size, virtual_size, container_size, layout)
-        if updated and self._anchored and not self._anchor_released:
-            stale = self.scroll_y
-            end = self.max_scroll_y
-            self.set_reactive(Widget.scroll_y, end)
-            self.set_reactive(Widget.scroll_target_y, end)
-            self.vertical_scrollbar._reactive_position = end  # type: ignore[attr-defined]
-            if end != stale:
-                self.refresh(layout=True)
-        return updated
+    def page_down(self) -> None:
+        """Scroll one page down; at the end, do nothing.
 
-    def release_anchor(self) -> None:
-        # Textual re-arms an anchor only in watch_scroll_y, so a scroll that lands
-        # where it already is (PageDown at the end) would leave it released for
-        # good. Re-check once the scroll has landed; a user who scrolled up stays
-        # released because scroll_y is then below the end.
-        super().release_anchor()
-        self.call_after_refresh(self._reanchor_at_end)
+        Textual releases the anchor on any scroll and re-arms it only when the
+        scroll position changes, so a scroll that lands where it already is (down
+        at the end) would leave the chat un-anchored and the next content would
+        not be followed.
+        """
+        if not self.is_vertical_scroll_end:
+            self.scroll_page_down(animate=False)
 
-    def _reanchor_at_end(self) -> None:
-        if self.scroll_y >= self.max_scroll_y:
-            self.anchor()
+    def line_down(self) -> None:
+        """Scroll one line down; at the end, do nothing (see ``page_down``)."""
+        if not self.is_vertical_scroll_end:
+            self.scroll_down(animate=False)
+
+    def action_page_down(self) -> None:
+        self.page_down()
+
+    def action_scroll_down(self) -> None:
+        self.line_down()
 
     def disable_follow_mode(self) -> None:
         """Stop following the end (user is reading history)."""
@@ -175,9 +527,9 @@ class ChatView(VerticalScroll):
                 full_content = self.messages[-1]["content"]
                 last_widget = self._message_widgets[-1]
 
-                if msg_type == MessageType.ASSISTANT:
-                    last_widget.update(
-                        Markdown(_sanitize_for_assistant_render(full_content).strip())
+                if isinstance(last_widget, AssistantReply):
+                    last_widget.set_text(
+                        _sanitize_for_assistant_render(full_content).strip()
                     )
                 else:
                     text = self._create_text(full_content, msg_type, metadata)
@@ -190,13 +542,12 @@ class ChatView(VerticalScroll):
         )
 
         if msg_type == MessageType.ASSISTANT:
-            content = _sanitize_for_assistant_render(content).strip()
-
-            content_widget = Static(
-                Markdown(content), classes=f"message {msg_type.value}"
+            reply = AssistantReply(
+                _sanitize_for_assistant_render(content).strip(),
+                classes=f"message {msg_type.value}",
             )
-            self._message_widgets.append(content_widget)
-            self.mount(content_widget)
+            self._message_widgets.append(reply)
+            self.mount(reply)
         else:
             text = self._create_text(content, msg_type, metadata)
             if text:
@@ -206,6 +557,108 @@ class ChatView(VerticalScroll):
                 # Hide thinking blocks by default
                 if msg_type == MessageType.THINKING and not self._thinking_visible:
                     msg_widget.display = False
+
+    # ── Thinking, tool calls and agent runs, drawn in the chat in order ──
+
+    def _add_item(self, item: Static, msg_type: MessageType) -> None:
+        """Mount an in-chat item in order. Registering it in ``messages`` also
+        stops the next assistant chunk from merging into a reply above it."""
+        self.messages.append({"content": "", "type": msg_type, "metadata": {"inchat": True}})
+        self._message_widgets.append(item)
+        self.mount(item)
+
+    def start_thinking(self) -> None:
+        """A reasoning phase begins. The item is mounted with the first reasoning
+        text, so a phase with none leaves no trace."""
+        self._thinking_started = time.monotonic()
+        self._thinking_pending = ""
+
+    def add_thinking_text(self, text: str) -> None:
+        if self._thinking_item is None:
+            self._thinking_pending += text
+            if not self._thinking_pending.strip():
+                return
+            item = ThinkingItem(
+                self._thinking_expanded, self._thinking_started, self._thinking_pending
+            )
+            self._thinking_item = item
+            self._add_item(item, MessageType.THINKING)
+            return
+        self._thinking_item.add_text(text)
+
+    def stop_thinking(self) -> None:
+        if self._thinking_item is not None:
+            self._thinking_item.finish()
+            self._thinking_item = None
+        self._thinking_pending = ""
+
+    def tool_started(self, call_id: str, name: str, arguments: dict) -> None:
+        box = self._tool_boxes.get(call_id)
+        if box is not None:
+            box.update_call(name, arguments)
+            return
+        box = ToolBox(name, arguments, self._tools_expanded)
+        self._tool_boxes[call_id] = box
+        self._add_item(box, MessageType.TOOL_CALL)
+
+    def tool_completed(self, call_id: str, result: str) -> None:
+        box = self._tool_boxes.get(call_id)
+        if box is not None:
+            box.finish(str(result))
+
+    def _agent_box(self, run_id: int, name: str) -> AgentBox:
+        box = self._agent_boxes.get(run_id)
+        if box is None:
+            box = AgentBox(name, self._agents_expanded)
+            self._agent_boxes[run_id] = box
+            self._add_item(box, MessageType.TOOL_CALL)
+        return box
+
+    def agent_event(
+        self, run_id: int, name: str, event: str, data: Any = None,
+        assignment: str | None = None,
+    ) -> None:
+        """An agent progress event; the first one for a run mounts its box.
+        ``assignment`` is the run's label; the first one given is kept."""
+        box = self._agent_box(run_id, name)
+        box.set_assignment(assignment)
+        if event == "tool_start" and isinstance(data, dict):
+            box.note_tool(str(data.get("call_id") or data.get("name") or ""))
+
+    def agent_completed(self, run_id: int, name: str, result: str, status: str) -> None:
+        self._agent_box(run_id, name).finish(result, status)
+
+    def tick_live_items(self) -> None:
+        """Refresh running items (elapsed seconds); called by the activity timer."""
+        for item in self._message_widgets:
+            if isinstance(item, _InChatItem) and item.live:
+                item.tick()
+
+    def toggle_thinking_expanded(self) -> bool:
+        self._thinking_expanded = not self._thinking_expanded
+        for item in self._message_widgets:
+            if isinstance(item, ThinkingItem):
+                item.set_expanded(self._thinking_expanded)
+        return self._thinking_expanded
+
+    def toggle_tools_expanded(self, agents: bool = True) -> bool:
+        """Ctrl+O: every tool box (and, with ``agents``, every agent box)."""
+        self._tools_expanded = not self._tools_expanded
+        if agents:
+            self._agents_expanded = self._tools_expanded
+        for item in self._message_widgets:
+            if isinstance(item, ToolBox):
+                item.set_expanded(self._tools_expanded)
+            elif agents and isinstance(item, AgentBox):
+                item.set_expanded(self._agents_expanded)
+        return self._tools_expanded
+
+    def toggle_agents_expanded(self) -> bool:
+        self._agents_expanded = not self._agents_expanded
+        for item in self._message_widgets:
+            if isinstance(item, AgentBox):
+                item.set_expanded(self._agents_expanded)
+        return self._agents_expanded
 
     def add_user_message(self, content: str) -> None:
         """Add a user message."""
@@ -229,218 +682,10 @@ class ChatView(VerticalScroll):
             widget.remove()
         self._message_widgets.clear()
         self.messages.clear()
-
-
-class ToolPanel(Container):
-    """
-    A dedicated panel for displaying running/completed tools.
-    Toggled with Ctrl+O. Content is added silently; visibility is user-controlled.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # tool_call_id -> (widget, spinner, tool_name, args_str, is_done)
-        self._tools: dict[str, tuple[Static, Spinner | None, str, str, bool]] = {}
-        self._user_visible = False
-
-    def compose(self) -> ComposeResult:
-        """Compose starts empty."""
-        return
-        yield
-
-    def on_mount(self) -> None:
-        """Start hidden - user toggles with Ctrl+O."""
-        self.display = False
-
-    def toggle(self) -> bool:
-        """Toggle panel visibility. Returns new visibility state."""
-        self._user_visible = not self._user_visible
-        self.display = self._user_visible
-        return self._user_visible
-
-    def add_tool(self, tool_call_id: str, tool_name: str, arguments: dict) -> None:
-        """Add a new running tool to the panel or update an existing one."""
-        args_str = self._format_preview(str(arguments), max_len=80)
-
-        tool_text = Text()
-        tool_text.append(f"{tool_name}", style="yellow")
-        tool_text.append(f" {args_str}", style="dim")
-
-        if tool_call_id in self._tools:
-            widget, spinner, _, _, completed = self._tools[tool_call_id]
-            if not completed:
-                # Update the existing widget in place. Remounting (remove + mount)
-                # re-runs layout and causes a visible flash under load; a fresh
-                # Spinner pushed via Static.update() refreshes the row without
-                # reflowing the panel.
-                spinner = Spinner("aesthetic", text=tool_text, style="bold yellow")
-                widget.update(spinner)
-                self._tools[tool_call_id] = (widget, spinner, tool_name, args_str, False)
-            return
-
-        spinner = Spinner("aesthetic", text=tool_text, style="bold yellow")
-        widget = Static(spinner, classes="tool-item running")
-        self._tools[tool_call_id] = (widget, spinner, tool_name, args_str, False)
-        self.mount(widget)
-        self.call_after_refresh(self.scroll_end, animate=False)
-
-    def complete_tool(self, tool_call_id: str, result: str = "") -> None:
-        """Mark a tool as completed."""
-        if tool_call_id not in self._tools:
-            return
-
-        widget, _, tool_name, args_str, _ = self._tools[tool_call_id]
-        result_preview = self._format_preview(str(result), max_len=80)
-
-        text = Text()
-        text.append("✓ ", style="bold green")
-        text.append(f"{tool_name}", style="green")
-        if result_preview:
-            text.append(f" → {result_preview}", style="dim")
-
-        widget.update(text)
-        widget.remove_class("running")
-        widget.add_class("completed")
-        self._tools[tool_call_id] = (widget, None, tool_name, args_str, True)
-        self.call_after_refresh(self.scroll_end, animate=False)
-
-    def update_spinners(self) -> None:
-        """Re-render running tool spinners (they auto-advance based on time)."""
-        for tool_id, (
-            widget,
-            spinner,
-            tool_name,
-            args_str,
-            is_done,
-        ) in self._tools.items():
-            if not is_done and spinner is not None:
-                widget.update(spinner)
-
-    def _format_preview(self, text: str, max_len: int = 80) -> str:
-        """Format text to be a short preview."""
-        preview = text.replace("\n", " ").replace("  ", " ").strip()
-        if len(preview) > max_len:
-            preview = preview[: max_len - 3] + "..."
-        return preview
-
-    def clear_completed(self) -> None:
-        """Remove all completed tools (does not change visibility)."""
-        to_remove = [
-            tid for tid, (_, _, _, _, is_done) in self._tools.items() if is_done
-        ]
-        for tool_id in to_remove:
-            widget, _, _, _, _ = self._tools[tool_id]
-            widget.remove()
-            del self._tools[tool_id]
-
-
-class ThinkingPanel(Container):
-    """
-    A dedicated panel for the model's reasoning / thinking stream.
-
-    Toggled with Ctrl+T, mirroring ToolPanel (Ctrl+O) and AgentPanel (Ctrl+G):
-    reasoning is streamed in silently while the ActivityBar spinner shows the
-    ambient "Thinking..." status, and the user opens the panel to read the full
-    chain. Its height is a fixed 30% of the screen (three times the other
-    panels) because reasoning is long-form; it shows the complete accumulated text,
-    scrolling inside the panel, rather than a tail.
-    """
-
-    # Minimum seconds between re-renders while the panel is open. Reasoning
-    # arrives far faster than anyone can read it; coalescing keeps the event
-    # loop responsive without a visible lag.
-    RENDER_INTERVAL_S = 0.1
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._user_visible: bool = False
-        self._buffer: str = ""
-        self._widget: Static | None = None
-        self._needs_separator: bool = False
-        self._dirty: bool = False
-        self._last_render: float = 0.0
-
-    def compose(self) -> ComposeResult:
-        """Compose starts empty; the content widget is mounted on first stream."""
-        return
-        yield
-
-    def on_mount(self) -> None:
-        """Start hidden - user toggles with Ctrl+T."""
-        self.display = False
-
-    def toggle(self) -> bool:
-        """Toggle panel visibility. Returns new visibility state."""
-        self._user_visible = not self._user_visible
-        self.display = self._user_visible
-        if self._user_visible:
-            # Catch up on everything buffered while hidden, in one render.
-            self._render_buffer()
-        return self._user_visible
-
-    def start_phase(self) -> None:
-        """Mark the start of a new reasoning phase within the same turn.
-
-        A blank line is inserted before the next streamed delta so successive
-        phases (think -> tool -> think) stay visually separated.
-        """
-        if self._buffer:
-            self._needs_separator = True
-
-    def add_thinking(self, text: str) -> None:
-        """Buffer a streamed reasoning delta. Never auto-shows.
-
-        Rendering re-parses and re-lays-out the WHOLE accumulated buffer, so
-        doing it per delta is quadratic in reasoning length and runs on the UI
-        event loop — a model that emits a lot of reasoning freezes the
-        interface, spinner included. The buffer always grows, but rendering is
-        skipped entirely while the panel is hidden (the default) and coalesced
-        while it is open. ``toggle`` and ``flush`` catch up.
-        """
-        if not text:
-            return
-        if self._needs_separator:
-            self._buffer += "\n\n"
-            self._needs_separator = False
-        self._buffer += text
-        self._dirty = True
-
-        if not self._user_visible:
-            return
-        if time.monotonic() - self._last_render < self.RENDER_INTERVAL_S:
-            return
-        self._render_buffer()
-
-    def flush(self) -> None:
-        """Render whatever is buffered — called when a reasoning phase ends."""
-        if self._user_visible:
-            self._render_buffer()
-
-    def _render_buffer(self) -> None:
-        """Re-render the accumulated buffer. Cost scales with total length."""
-        if not self._dirty:
-            return
-        self._dirty = False
-        self._last_render = time.monotonic()
-
-        content = self._buffer.strip()
-        renderable = markup_or_plain(content)
-        if self._widget is None:
-            self._widget = Static(renderable, classes="thinking-content")
-            self.mount(self._widget)
-        else:
-            self._widget.update(renderable)
-        self.scroll_end(animate=False)
-
-    def clear(self) -> None:
-        """Reset the panel for a new turn (does not change visibility)."""
-        self._buffer = ""
-        self._needs_separator = False
-        self._dirty = False
-        self._last_render = 0.0
-        if self._widget is not None:
-            self._widget.remove()
-            self._widget = None
+        self._thinking_item = None
+        self._thinking_pending = ""
+        self._tool_boxes.clear()
+        self._agent_boxes.clear()
 
 
 class ActivityBar(Horizontal):
@@ -964,8 +1209,6 @@ class _SubmitTextArea(TextArea):
         if event.key == "pageup":
             event.prevent_default()
             event.stop()
-            if self._scroll_agent_panel("page_up"):
-                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.disable_follow_mode()
             chat_view.scroll_page_up(animate=False)
@@ -974,17 +1217,13 @@ class _SubmitTextArea(TextArea):
         if event.key == "pagedown":
             event.prevent_default()
             event.stop()
-            if self._scroll_agent_panel("page_down"):
-                return
             chat_view = self.app.query_one("#chat-view", ChatView)
-            chat_view.scroll_page_down(animate=False)
+            chat_view.page_down()
             return
 
         if event.key == "ctrl+pageup":
             event.prevent_default()
             event.stop()
-            if self._scroll_agent_panel("up"):
-                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.disable_follow_mode()
             chat_view.scroll_up(animate=False)
@@ -993,17 +1232,13 @@ class _SubmitTextArea(TextArea):
         if event.key == "ctrl+pagedown":
             event.prevent_default()
             event.stop()
-            if self._scroll_agent_panel("down"):
-                return
             chat_view = self.app.query_one("#chat-view", ChatView)
-            chat_view.scroll_down(animate=False)
+            chat_view.line_down()
             return
 
         if event.key == "home":
             event.prevent_default()
             event.stop()
-            if self._scroll_agent_panel("home"):
-                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.disable_follow_mode()
             chat_view.scroll_home(animate=False)
@@ -1012,32 +1247,11 @@ class _SubmitTextArea(TextArea):
         if event.key == "end":
             event.prevent_default()
             event.stop()
-            if self._scroll_agent_panel("end"):
-                return
             chat_view = self.app.query_one("#chat-view", ChatView)
             chat_view.enable_follow_mode()
             return
 
         self._reset_tab_cycle()
-
-    def _scroll_agent_panel(self, motion: str) -> bool:
-        """Route a scroll motion to the agents panel when it is open (Ctrl+G).
-
-        ``motion`` is a Widget.scroll_* suffix: 'page_up', 'page_down', 'up',
-        'down', 'home', 'end'. Returns True when the panel is visible and
-        handled the scroll, so the caller leaves the chat view alone.
-        """
-        try:
-            panel = self.app.query_one("#agent-panel", AgentPanel)
-        except NoMatches:
-            return False              # panel not mounted — chat view handles it
-        except Exception:  # noqa: BLE001 - scroll guard: residual after NoMatches; the chat view handles the key instead
-            logger.opt(exception=True).debug("Agent panel lookup failed")
-            return False
-        if not panel.display:
-            return False
-        getattr(panel, f"scroll_{motion}")(animate=False)
-        return True
 
     async def _on_paste(self, event) -> None:
         """Handle bracketed paste — collapse multi-line pastes.
@@ -1379,154 +1593,3 @@ class StatusBar(Horizontal):
             logger.opt(exception=True).debug("Plugin badge label lookup failed")
             return
         label.update(self._render_badges(plugin_status.get_all(), self._enabled_tags()))
-
-
-@dataclass
-class _AgentEntry:
-    """Internal data for one agent run in the panel.
-
-    No Container wrapper — status and detail are mounted as siblings
-    in the panel for simplicity (per user request).
-    """
-    status_widget: Static   # Status line (updated in real-time)
-    detail_widget: Static | None  # Full output (added on completion)
-    name: str
-    completed: bool = False
-    assignment: str | None = None  # short '<prompt> · <task_id>' label for this run
-
-
-class AgentPanel(Container):
-    """Scrollable panel for agent runs. Toggled with Ctrl+G.
-
-    Never auto-shows. Content updates silently regardless of visibility.
-    The ActivityBar spinner provides ambient status.
-    """
-
-    MAX_ENTRIES = 50
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._user_visible: bool = False
-        self._entries: dict[int, _AgentEntry] = {}
-
-    def compose(self) -> ComposeResult:
-        # Empty generator — widgets mounted dynamically
-        return
-        yield
-
-    def on_mount(self) -> None:
-        self.display = False
-
-    def toggle(self) -> bool:
-        """Toggle panel visibility. Returns new visibility state."""
-        self._user_visible = not self._user_visible
-        self.display = self._user_visible
-        return self._user_visible
-
-    def add_agent(self, name: str, run_id: int, assignment: str | None = None) -> None:
-        """Add a new agent run entry. Never auto-shows the panel.
-
-        `assignment` is a short '<prompt> · <task_id>' label for the dispatched
-        task; when present it is shown between the agent name and its status.
-        """
-        self._prune_if_needed()
-
-        text = Text()
-        text.append("  ▶ ", style="bold yellow")
-        text.append(f"{name}", style="bold magenta")
-        if assignment:
-            text.append(f" — {assignment}", style="cyan")
-        text.append(" running...", style="dim")
-
-        status_widget = Static(text, classes="agent-status running")
-        entry = _AgentEntry(
-            status_widget=status_widget,
-            detail_widget=None,
-            name=name,
-            assignment=assignment,
-        )
-        self._entries[run_id] = entry
-        self.mount(status_widget)
-        self.call_after_refresh(self.scroll_end, animate=False)
-
-    def complete_agent(self, run_id: int, summary: str, status: str = "completed") -> None:
-        """Mark agent as completed with full summary. Lookup by run_id."""
-        if run_id not in self._entries:
-            return
-        entry = self._entries[run_id]
-        if entry.completed:
-            return
-        entry.completed = True
-
-        # Update status line. A successful run reports status "done" (the pull
-        # delivery vocabulary); treat that — and the legacy "completed" — as
-        # success so it gets the green check, not the red ✗.
-        text = Text()
-        if status in ("done", "completed"):
-            text.append("  ✓ ", style="bold green")
-        elif status == "timeout":
-            text.append("  ⏱ ", style="bold yellow")
-        else:
-            text.append("  ✗ ", style="bold red")
-        text.append(f"{entry.name}", style="bold")
-        preview = summary[:80] + "..." if len(summary) > 80 else summary
-        text.append(f" — {preview}", style="dim")
-        entry.status_widget.update(text)
-        entry.status_widget.remove_class("running")
-        status_class = "completed" if status in ("done", "completed") else status
-        entry.status_widget.add_class(status_class)
-
-        # Add detail block with full summary
-        detail = Static(
-            Text(f"    {summary}", style="dim"),
-            classes="agent-detail",
-        )
-        entry.detail_widget = detail
-        self.mount(detail, after=entry.status_widget)
-        self.scroll_end(animate=False)
-
-    def update_agent(self, run_id: int, name: str, event: str, data: Any = None,
-                     assignment: str | None = None) -> None:
-        """Handle an agent progress event. Lookup by run_id."""
-        if run_id not in self._entries:
-            self.add_agent(name, run_id, assignment)
-
-        entry = self._entries.get(run_id)
-        if entry is None or entry.completed:
-            return
-        if assignment and not entry.assignment:
-            entry.assignment = assignment  # first event that carried it wins
-
-        if event == "tool_start" and isinstance(data, dict):
-            tool_name = data.get("name", "?")
-            self._update_status(entry, f"Running tool: {tool_name}")
-        elif event == "thinking_start":
-            self._update_status(entry, "Thinking...")
-        elif event == "tools_cleanup":
-            self._update_status(entry, "Processing...")
-
-    def _update_status(self, entry: _AgentEntry, status_text: str) -> None:
-        """Update the status line text for a running agent."""
-        text = Text()
-        text.append("  ▶ ", style="bold yellow")
-        text.append(f"{entry.name}", style="bold magenta")
-        if entry.assignment:
-            text.append(f" — {entry.assignment}", style="cyan")
-        text.append(f" — {status_text}", style="dim")
-        entry.status_widget.update(text)
-
-    def _prune_if_needed(self) -> None:
-        """Remove oldest completed entry if at capacity."""
-        if len(self._entries) < self.MAX_ENTRIES:
-            return
-        to_prune = None
-        for run_id, entry in self._entries.items():
-            if entry.completed:
-                to_prune = run_id
-                break
-        if to_prune is not None:
-            entry = self._entries[to_prune]
-            entry.status_widget.remove()
-            if entry.detail_widget:
-                entry.detail_widget.remove()
-            del self._entries[to_prune]

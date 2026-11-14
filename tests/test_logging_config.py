@@ -86,3 +86,26 @@ def test_setup_logging_fallbacks_when_enqueue_fd_is_invalid():
     assert mock_add.call_count == 2
     assert mock_add.call_args_list[0].kwargs["enqueue"] is True
     assert mock_add.call_args_list[1].kwargs["enqueue"] is False
+
+
+def test_log_dir_defaults_to_dot_ayder_log():
+    """Checked in a fresh interpreter: other tests may have moved the module's value."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from ayder_cli.logging_config import get_log_dir; print(get_log_dir())"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip().splitlines()[-1]
+    assert out == str(Path(".ayder/log"))
+
+
+def test_set_log_dir_follows_the_main_log_file(tmp_path, monkeypatch):
+    from ayder_cli import logging_config
+    from ayder_cli.logging_config import get_log_dir, set_log_dir
+
+    monkeypatch.setattr(logging_config, "_log_dir", Path(".ayder/log"))  # restored on teardown
+    monkeypatch.chdir(tmp_path)
+    set_log_dir("x/y/ayder.log")
+    assert get_log_dir() == (tmp_path / "x" / "y").resolve()

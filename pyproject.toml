@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "2.5.4"
+version = "2.5.5"
 description = "AI agent for any LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,7 +31,9 @@ dependencies = [
     # Pinned exactly to match the runtime: 8.2.5+ replaced the single
     # "textual-ansi" builtin with per-theme `ansi` flags and ansi-dark/
     # ansi-light themes. The ayder-dark/ayder-light themes rely on this API.
-    "textual==8.2.7",
+    # The pin stays exact because Textual changes public behaviour in patch
+    # releases (8.2.5 did) and users install whatever this file allows.
+    "textual==8.2.8",
     "python-dotenv>=1.0.0",
     "tiktoken>=0.7.0",
 ]

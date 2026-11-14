@@ -58,18 +58,14 @@ def _shell_app(monkeypatch, *, permissions=None):
     monkeypatch.setattr(app, "_report_turn_error", lambda e: None, raising=False)
 
     chat = MagicMock()
-    thinking = MagicMock()
 
     def query_one(selector, *args, **kwargs):
         if selector == "#chat-view":
             return chat
-        if selector == "#thinking-panel":
-            return thinking
         return MagicMock()
 
     app.query_one = query_one
     app._test_chat = chat
-    app._test_thinking = thinking
     return app
 
 

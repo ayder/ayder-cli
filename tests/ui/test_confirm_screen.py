@@ -308,12 +308,15 @@ class TestGenerateDiff:
 class TestRunTuiPermissions:
     """Tests for run_tui permission passthrough."""
 
-    def test_run_tui_passes_permissions_to_app(self):
+    def test_run_tui_passes_permissions_to_app(self, tmp_path, monkeypatch):
         """Test that run_tui passes permissions to AyderApp."""
+        import ayder_cli.tui as tui
         from ayder_cli.tui import run_tui
 
+        monkeypatch.setattr(tui, "get_log_dir", lambda: tmp_path)  # stderr.log goes here
         with patch('ayder_cli.tui.AyderApp') as MockApp:
             mock_instance = MagicMock()
+            mock_instance.return_code = 0  # a bare MagicMock is truthy
             MockApp.return_value = mock_instance
             run_tui(permissions={"r", "w"})
             MockApp.assert_called_once_with(
@@ -329,12 +332,15 @@ class TestRunTuiPermissions:
                 log_settings=None,
             )
 
-    def test_run_tui_default_permissions(self):
+    def test_run_tui_default_permissions(self, tmp_path, monkeypatch):
         """Test that run_tui defaults to None permissions."""
+        import ayder_cli.tui as tui
         from ayder_cli.tui import run_tui
 
+        monkeypatch.setattr(tui, "get_log_dir", lambda: tmp_path)  # stderr.log goes here
         with patch('ayder_cli.tui.AyderApp') as MockApp:
             mock_instance = MagicMock()
+            mock_instance.return_code = 0  # a bare MagicMock is truthy
             MockApp.return_value = mock_instance
             run_tui()
             MockApp.assert_called_once_with(

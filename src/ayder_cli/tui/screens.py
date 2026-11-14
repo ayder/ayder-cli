@@ -741,8 +741,12 @@ class AgentListScreen(ModalScreen[str | None]):
             self.dismiss(None)
 
 
-# Mouse support captures the mouse, so the terminal's own selection needs a modifier.
-SELECT_TEXT_HINT = "Hold Shift to select text with the mouse (Option in iTerm2 and Terminal.app)."
+# Ctrl+C copies through OSC 52, which some terminals ignore or ask about; the
+# terminal's own selection still works with a modifier (mouse support is on).
+SELECT_TEXT_HINT = (
+    "Drag to select text; Ctrl+C copies it if the terminal allows clipboard access."
+    " Hold Shift (Option in iTerm2 and Terminal.app) for the terminal's own selection."
+)
 
 
 class CLIHelpScreen(ModalScreen[None]):
