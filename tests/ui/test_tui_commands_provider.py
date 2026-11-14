@@ -3,7 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ayder_cli.core.config import Config
+from ayder_cli.core.config import Config, RetryConfigSection
+from ayder_cli.providers.retry import RetryingProvider
 from ayder_cli.tui.commands import COMMAND_MAP, _apply_provider_switch, handle_provider
 from ayder_cli.tui.screens import CLISelectScreen
 
@@ -119,8 +120,10 @@ def test_apply_provider_switch_updates_runtime_for_dynamic_profile():
         _apply_provider_switch(app, "deepseek", chat_view)
 
     assert app.config is new_config
-    assert app.llm is new_llm
-    assert app.chat_loop.llm is new_llm
+    # The switched provider is wrapped like the startup one: retry and timeout.
+    assert isinstance(app.llm, RetryingProvider)
+    assert app.llm._inner is new_llm
+    assert app.chat_loop.llm is app.llm
     assert app.model == "deepseek-chat"
     assert app.chat_loop.config.model == "deepseek-chat"
     assert app.chat_loop.config.num_ctx == 32768
@@ -129,6 +132,37 @@ def test_apply_provider_switch_updates_runtime_for_dynamic_profile():
     chat_view.add_system_message.assert_called_once_with(
         "Switched to provider: deepseek (model: deepseek-chat)"
     )
+
+
+def _switch(app, **config):
+    new_llm = MagicMock()
+    new_config = Config(provider="deepseek", driver="openai", model="deepseek-chat", **config)
+    with (
+        patch("ayder_cli.tui.commands.load_config_for_provider", return_value=new_config),
+        patch("ayder_cli.tui.commands.provider_orchestrator.create", return_value=new_llm),
+    ):
+        _apply_provider_switch(app, "deepseek", MagicMock())
+    return new_llm
+
+
+def test_apply_provider_switch_passes_the_profiles_timeout_to_the_wrapper():
+    app = _make_app()
+
+    new_llm = _switch(app, request_timeout_seconds=5)
+
+    assert isinstance(app.llm, RetryingProvider)
+    assert app.llm._inner is new_llm
+    assert app.llm._request_timeout == 5
+    assert app.chat_loop.llm is app.llm
+
+
+def test_apply_provider_switch_leaves_the_provider_bare_without_retry_or_timeout():
+    app = _make_app()
+
+    new_llm = _switch(app, retry=RetryConfigSection(enabled=False))
+
+    assert app.llm is new_llm
+    assert app.chat_loop.llm is new_llm
 
 
 def test_apply_provider_switch_rolls_back_on_invalid_driver():
