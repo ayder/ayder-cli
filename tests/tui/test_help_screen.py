@@ -34,7 +34,10 @@ class TestHelpScreen:
         assert "Esc" in content
 
 
-SELECT_HINT = "Hold Shift to select text with the mouse (Option in iTerm2 and Terminal.app)."
+SELECT_HINT = (
+    "Drag to select text; Ctrl+C copies it if the terminal allows clipboard access."
+    " Hold Shift (Option in iTerm2 and Terminal.app) for the terminal's own selection."
+)
 
 
 @pytest.fixture

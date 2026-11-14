@@ -22,7 +22,9 @@ KEYBINDING_REGISTRY: list[tuple[str, str, str]] = [
     ("Ctrl+G", "Toggle Agents panel", "Panels"),
     # General
     ("Ctrl+L", "Clear chat", "General"),
+    ("Ctrl+C", "Copy selected text, else cancel", "General"),
     ("Ctrl+X", "Cancel generation", "General"),
+    ("Ctrl+P", "Command palette; Theme sets the colours", "General"),
     ("Ctrl+H", "Show help", "General"),
     ("Ctrl+Q", "Quit", "General"),
 ]

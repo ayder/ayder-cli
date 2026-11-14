@@ -280,6 +280,9 @@ class AyderApp(App):
         for _ansi_theme in AYDER_TEXTUAL_THEMES:
             self.register_theme(_ansi_theme)
         _palette = get_theme_palette()
+        # The palette also colours code blocks, so a silent fallback would look
+        # like the setting did nothing; on_mount shows this in the chat.
+        self._palette_notice: str | None = None
         if _palette:
             try:
                 self.theme = _palette
@@ -292,6 +295,10 @@ class AyderApp(App):
                         self.ansi_color = True
                 except InvalidThemeError:
                     self.ansi_color = True
+                self._palette_notice = (
+                    f"Unknown [ui] palette {_palette!r}; using {self.theme!r}."
+                    " Ctrl+P > Theme lists the available themes."
+                )
         self.safe_mode = safe_mode
         self.permissions = permissions or {"r"}
         self._system_prompt_override = system_prompt_override
@@ -762,6 +769,9 @@ class AyderApp(App):
         self._banner_spacer = Static("", id="banner-spacer")
         chat_view.mount(self._banner_spacer)
         chat_view.mount(Static(banner, classes="banner-content"))
+
+        if self._palette_notice:
+            chat_view.add_system_message(self._palette_notice)
 
         if self._resuming:
             chat_view.add_system_message(f"↻ Resumed session {self.resume_session_id}")

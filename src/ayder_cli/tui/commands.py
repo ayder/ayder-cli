@@ -50,7 +50,9 @@ def handle_help(app: AyderApp, args: str, chat_view: ChatView) -> None:
 
     help_text += "\n**Keyboard Shortcuts:**\n"
     help_text += "- `Ctrl+Q` — Quit\n"
-    help_text += "- `Ctrl+X` / `Ctrl+C` — Cancel operation\n"
+    help_text += "- `Ctrl+C` — Copy selected text; cancel when nothing is selected\n"
+    help_text += "- `Ctrl+X` — Cancel operation\n"
+    help_text += "- `Ctrl+P` — Command palette; **Theme** sets the colours for the session\n"
     help_text += "- `Ctrl+L` — Clear chat\n"
 
     chat_view.add_assistant_message(help_text)

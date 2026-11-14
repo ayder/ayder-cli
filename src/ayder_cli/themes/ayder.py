@@ -409,8 +409,9 @@ ChatView {
     background: $background;
 }
 
-/* Base style for all message lines within ChatView. */
-ChatView Static {
+/* Base style for the message widgets. Direct children only: the blocks inside
+   an assistant reply are Statics too and are styled by the reply rules below. */
+ChatView > Static {
     height: auto;
     margin: 0;
     padding: 0;
@@ -486,6 +487,63 @@ ChatView .tool-completed {
     color: $success;
     margin: 0;
     padding-left: 2;
+}
+
+/* AssistantReply - An assistant reply: Textual's Markdown widget, so its text can
+   be selected with the mouse (AssistantReply in widgets.py). One blank row
+   between blocks and none around the reply, as rich.markdown drew it. */
+ChatView > AssistantReply {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    background: $background;
+    color: $foreground;
+}
+
+ChatView AssistantReply > MarkdownBlock {
+    margin: 1 0 0 0;
+}
+
+/* Not :first-child: Textual restyles every block on each mount for an
+   order-dependent rule (see AssistantReply). */
+ChatView AssistantReply > .-first-block {
+    margin: 0;
+}
+
+/* Headings: bold, no background bar; the top two levels in the accent colour. */
+ChatView AssistantReply MarkdownHeader {
+    background: $background;
+    color: $foreground;
+    text-style: bold;
+}
+
+ChatView AssistantReply MarkdownH1 {
+    content-align: center middle;
+    color: $accent;
+}
+
+ChatView AssistantReply MarkdownH2 {
+    color: $accent;
+}
+
+/* Code blocks: no box, so the terminal's background shows through; indented,
+   and long lines wrap as they did under rich.markdown. The colours come from
+   the palette (AssistantFence). */
+ChatView AssistantReply MarkdownFence {
+    background: $background;
+    overflow-x: hidden;
+}
+
+ChatView AssistantReply MarkdownFence > Label {
+    width: 1fr;
+    padding: 0 0 0 2;
+    text-wrap: wrap;
+}
+
+/* Tables: as wide as their content. */
+ChatView AssistantReply MarkdownTable {
+    width: auto;
+    background: $background;
 }
 
 /* AutoCompleteInput - The input field widget with slash command suggestions.

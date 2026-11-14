@@ -365,8 +365,9 @@ ChatView {
     background: transparent;
 }
 
-/* Base style for all message lines within ChatView. */
-ChatView Static {
+/* Base style for the message widgets. Direct children only: the blocks inside
+   an assistant reply are Statics too and are styled by the reply rules below. */
+ChatView > Static {
     height: auto;
     margin: 0;
     padding: 0;
@@ -442,6 +443,62 @@ ChatView .tool-completed {
     color: #5cb870;
     margin: 0;
     padding-left: 2;
+}
+
+/* AssistantReply - An assistant reply: Textual's Markdown widget, so its text can
+   be selected with the mouse (AssistantReply in widgets.py). One blank row
+   between blocks and none around the reply, as rich.markdown drew it. */
+ChatView > AssistantReply {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #b8b8c8;
+}
+
+ChatView AssistantReply > MarkdownBlock {
+    margin: 1 0 0 0;
+}
+
+/* Not :first-child: Textual restyles every block on each mount for an
+   order-dependent rule (see AssistantReply). */
+ChatView AssistantReply > .-first-block {
+    margin: 0;
+}
+
+/* Headings: bold, no background bar; the top two levels in the accent blue. */
+ChatView AssistantReply MarkdownHeader {
+    background: transparent;
+    color: #e0e0e8;
+    text-style: bold;
+}
+
+ChatView AssistantReply MarkdownH1 {
+    content-align: center middle;
+    color: #5eaff5;
+}
+
+ChatView AssistantReply MarkdownH2 {
+    color: #5eaff5;
+}
+
+/* Code blocks: a navy box with one row and two columns of padding, as
+   rich.markdown's padded code box; long lines wrap. */
+ChatView AssistantReply MarkdownFence {
+    background: #12122a;
+    overflow-x: hidden;
+}
+
+ChatView AssistantReply MarkdownFence > Label {
+    width: 1fr;
+    padding: 1 2;
+    text-wrap: wrap;
+}
+
+/* Tables: as wide as their content. */
+ChatView AssistantReply MarkdownTable {
+    width: auto;
+    background: transparent;
 }
 
 /* AutoCompleteInput - The input field widget with slash command suggestions.

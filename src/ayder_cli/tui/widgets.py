@@ -7,16 +7,23 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
+from textual.content import Content
 from textual.css.query import NoMatches
 from textual.geometry import Size
+from textual.highlight import (
+    ANSIDarkHighlightTheme,
+    ANSILightHighlightTheme,
+    HighlightTheme,
+    highlight,
+)
 from textual.message import Message
 from textual.reactive import reactive
 from textual.suggester import SuggestFromList
 from textual.widget import Widget
 from textual.widgets import Static, Input, Label, TextArea
+from textual.widgets.markdown import Markdown, MarkdownFence
 from rich.cells import cell_len
 from rich.text import Text
-from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.style import Style
 
@@ -43,6 +50,116 @@ def _sanitize_for_assistant_render(content: str) -> str:
     return content_processor.strip_for_display(content)
 
 
+# textual 8.2.7's ANSI code themes misspell four colour names, and a colour it
+# cannot parse is dropped: under the ayder palettes, single-quoted strings,
+# magic methods, attributes and (light) errors rendered uncoloured.
+_ANSI_COLOUR_TYPOS = {
+    "ans_red": "ansi_red",
+    "ansi_blow": "ansi_blue",
+    "ansi_greenb": "ansi_green",
+    "ansi_yelllow": "ansi_yellow",
+}
+
+
+def _fix_colour_names(styles: dict[tuple[str, ...], str]) -> dict[tuple[str, ...], str]:
+    """Return a code theme's styles with the misspelt ANSI colour names corrected."""
+    return {
+        token: " ".join(_ANSI_COLOUR_TYPOS.get(word, word) for word in style.split())
+        for token, style in styles.items()
+    }
+
+
+class _AnsiDarkCodeTheme(ANSIDarkHighlightTheme):
+    """Code colours under an ANSI palette on a dark terminal."""
+
+    STYLES = _fix_colour_names(ANSIDarkHighlightTheme.STYLES)
+
+
+class _AnsiLightCodeTheme(ANSILightHighlightTheme):
+    """Code colours under an ANSI palette on a light terminal."""
+
+    STYLES = _fix_colour_names(ANSILightHighlightTheme.STYLES)
+
+
+class AssistantFence(MarkdownFence):
+    """A fenced code block in an assistant reply, highlighted as rich.markdown did.
+
+    The language is the first word of the info string (```python title="x.py"
+    is Python). No info string means plain text: Textual would guess, and
+    Pygments guesses short snippets badly (a Python def comes out as
+    "teratermmacro"). ANSI palettes use the corrected code themes above.
+    """
+
+    @classmethod
+    def highlight(
+        cls, code: str, language: str, ansi: bool = False, dark: bool = False
+    ) -> Content:
+        words = (language or "").split()
+        theme: type[HighlightTheme] = HighlightTheme
+        if ansi:
+            theme = _AnsiDarkCodeTheme if dark else _AnsiLightCodeTheme
+        return highlight(code, language=words[0] if words else "text", theme=theme)
+
+
+class AssistantReply(Markdown):
+    """An assistant reply, drawn with Textual's Markdown widget so the mouse can
+    select its text: Textual extracts a selection only from Text/Content
+    visuals, and a rich.markdown renderable gave none.
+
+    ``set_text`` takes the whole reply so far. One worker brings the widget up
+    to date, and only through ``append``, because in textual 8.2.7:
+    * ``append`` reads the source when it is called, so two appends that are
+      not awaited one after the other duplicate blocks;
+    * ``update(text)`` leaves the next ``append`` parsing from the last line
+      rather than the last block, which breaks an open code fence.
+    When the text no longer extends what is shown (the sanitizer removed
+    tool-call markup that had streamed in), the document is cleared and
+    rebuilt. Links do not open on click.
+
+    The first block carries the ``-first-block`` class, which the themes use
+    to drop its top margin. A ``:first-child`` rule would do the same, but
+    Textual restyles every block with an order-dependent rule on each mount,
+    which made a long reply stream slower than rich.markdown did.
+    """
+
+    BLOCKS = {**Markdown.BLOCKS, "fence": AssistantFence, "code_block": AssistantFence}
+
+    def __init__(self, text: str = "", **kwargs: Any) -> None:
+        super().__init__(None, open_links=False, **kwargs)
+        self._target = text
+        self._draining = False
+
+    def on_mount(self) -> None:
+        self._drain_soon()
+
+    def set_text(self, text: str) -> None:
+        """Show ``text``, the whole reply so far; the widget catches up in the background."""
+        self._target = text
+        if self.is_mounted:
+            self._drain_soon()
+
+    def _drain_soon(self) -> None:
+        if not self._draining and self._target != self.source:
+            self._draining = True
+            self.run_worker(self._drain(), group="assistant-reply")
+
+    async def _drain(self) -> None:
+        try:
+            while self._target != self.source:
+                target, shown = self._target, self.source
+                # One batch: no frame shows a cleared document, or a new first
+                # block before it is marked.
+                with self.app.batch_update():
+                    if not target.startswith(shown):
+                        await self.update("")
+                        shown = ""
+                    await self.append(target[len(shown):])
+                    if self.children:
+                        self.children[0].add_class("-first-block")
+        finally:
+            self._draining = False
+
+
 class ChatView(VerticalScroll):
     """
     CLI-style chat display.
@@ -53,7 +170,7 @@ class ChatView(VerticalScroll):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._message_widgets: list[Static] = []
+        self._message_widgets: list[Static | AssistantReply] = []
         self._thinking_visible: bool = False
 
     def on_mount(self) -> None:
@@ -175,9 +292,9 @@ class ChatView(VerticalScroll):
                 full_content = self.messages[-1]["content"]
                 last_widget = self._message_widgets[-1]
 
-                if msg_type == MessageType.ASSISTANT:
-                    last_widget.update(
-                        Markdown(_sanitize_for_assistant_render(full_content).strip())
+                if isinstance(last_widget, AssistantReply):
+                    last_widget.set_text(
+                        _sanitize_for_assistant_render(full_content).strip()
                     )
                 else:
                     text = self._create_text(full_content, msg_type, metadata)
@@ -190,13 +307,12 @@ class ChatView(VerticalScroll):
         )
 
         if msg_type == MessageType.ASSISTANT:
-            content = _sanitize_for_assistant_render(content).strip()
-
-            content_widget = Static(
-                Markdown(content), classes=f"message {msg_type.value}"
+            reply = AssistantReply(
+                _sanitize_for_assistant_render(content).strip(),
+                classes=f"message {msg_type.value}",
             )
-            self._message_widgets.append(content_widget)
-            self.mount(content_widget)
+            self._message_widgets.append(reply)
+            self.mount(reply)
         else:
             text = self._create_text(content, msg_type, metadata)
             if text:
