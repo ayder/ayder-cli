@@ -884,65 +884,6 @@ def handle_permission(app: AyderApp, args: str, chat_view: ChatView) -> None:
     app.push_screen(CLIPermissionScreen(app.permissions), on_result)
 
 
-def handle_temporal(app: AyderApp, args: str, chat_view: ChatView) -> None:
-    """Handle /temporal command - start/status local temporal queue runner."""
-    try:
-        from ayder_cli.tools.plugin_manager import _find_plugin_module
-        temporal_worker = _find_plugin_module("temporal-tools", "temporal_worker")
-        TemporalWorker = getattr(temporal_worker, "TemporalWorker")
-        TemporalWorkerConfig = getattr(temporal_worker, "TemporalWorkerConfig")
-    except Exception:  # noqa: BLE001 - optional plugin probe: the temporal worker module may be absent or fail to import
-        logger.opt(exception=True).debug(
-            "Temporal plugin worker module unavailable"
-        )
-        chat_view.add_system_message(
-            "Temporal plugin not installed. Install with: "
-            "ayder install-plugin <path-to-temporal-tools>"
-        )
-        return
-
-    queue_name = args.strip()
-    current_queue = getattr(app, "_temporal_queue_name", None)
-    current_worker = getattr(app, "_temporal_worker_instance", None)
-    current_worker_task = getattr(app, "_temporal_worker_task", None)
-
-    if not queue_name:
-        if current_queue:
-            status = "running"
-            if current_worker_task is not None and getattr(
-                current_worker_task, "is_finished", False
-            ):
-                status = "stopped"
-            chat_view.add_system_message(
-                f"Temporal queue: {current_queue} ({status})"
-            )
-            return
-
-        chat_view.add_system_message("No temporal queue active. Usage: /temporal <queue-name>")
-        return
-
-    if current_worker is not None:
-        current_worker.stop()
-    if current_worker_task is not None and hasattr(current_worker_task, "cancel"):
-        current_worker_task.cancel()
-
-    worker_config = TemporalWorkerConfig(
-        queue_name=queue_name,
-        prompt_path=None,
-        permissions=set(app.permissions),
-    )
-    worker = TemporalWorker(worker_config)
-    worker_task = app.run_worker(worker.run_async(), exclusive=False)
-
-    setattr(app, "_temporal_queue_name", queue_name)
-    setattr(app, "_temporal_worker_instance", worker)
-    setattr(app, "_temporal_worker_task", worker_task)
-
-    chat_view.add_system_message(
-        f"Temporal queue runner started: {queue_name}. Use Ctrl+C to stop."
-    )
-
-
 def _load_skill_for_user(
     app: "AyderApp",
     info: SkillInfo,
@@ -1179,7 +1120,7 @@ def _refresh_status_badges(app: "AyderApp") -> None:
 
 
 def handle_plugin(app: "AyderApp", args: str, chat_view: ChatView) -> None:
-    """Toggle dynamic tool plugins (e.g. venv, http, background, temporal)."""
+    """Toggle dynamic tool plugins (e.g. venv, http, background)."""
     from ayder_cli.tools.definition import TOOL_DEFINITIONS
     from ayder_cli.tools import plugin_status
 
@@ -1391,7 +1332,6 @@ COMMAND_MAP: dict[str, Callable] = {
     "/notes": handle_notes,
     "/archive-completed-tasks": handle_archive,
     "/permission": handle_permission,
-    "/temporal": handle_temporal,
     "/skill": handle_skill,
     "/plugin": handle_plugin,
     "/agent": handle_agent,

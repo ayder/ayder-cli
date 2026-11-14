@@ -420,7 +420,6 @@ You can also manually manage context with the `context` tool and its slash-comma
 | `/list-contexts` | List saved context slots |
 | `/context-stats` | Show current token and KV-cache usage |
 | `/archive-completed-tasks` | Move completed tasks to `.ayder/task_archive/` |
-| `/temporal` | Start/status Temporal queue worker |
 | `/agent list` | List configured agents and their current status |
 | `/agent <name> <task>` | Dispatch an agent to run a task in the background |
 | `/agent cancel <name>` | Cancel a running agent |
@@ -500,7 +499,7 @@ inside the Ollama summary.
 
 ayder-cli is optimized for both large and small (local) LLMs:
 
-- **Dynamic Tool Loading**: Only `core` and `metadata` tools are loaded by default. Use `/plugin` to enable specialized toolsets (venv, python, http, background, dbs, temporal, env) only when needed.
+- **Dynamic Tool Loading**: Only `core` and `metadata` tools are loaded by default. Use `/plugin` to enable specialized toolsets (venv, python, http, background, dbs, env) only when needed.
 - **Tiered Prompts**: Use `prompt = "MINIMAL"` in config for smaller models (7B-14B) to strip complex reasoning frameworks and improve follow-through.
 - **Automatic Context Bounding**: Conversation history is bounded based on `max_history_messages` to prevent context rot.
 - **Tool System Prompts**: Tool-specific prompt blocks (e.g., DBS instructions) are only injected when their tag is enabled, keeping the system prompt lean.
@@ -583,7 +582,7 @@ The tool system:
 
 When agents are configured, the `call_agent` tool is also registered so the main LLM can dispatch them (see [Multi-Agent System](#multi-agent-system)).
 
-**Plugin tools** — `python_editor`, `dbs_tool`, `temporal_workflow`, virtualenv tools, and MCP integrations ship as optional plugins in the [ayder/ayder-plugins](https://github.com/ayder/ayder-plugins) repo (see [Plugins](#plugins)). Once installed they are auto-discovered exactly like built-ins.
+**Plugin tools** — `python_editor`, `dbs_tool`, virtualenv tools, and MCP integrations ship as optional plugins in the [ayder/ayder-plugins](https://github.com/ayder/ayder-plugins) repo (see [Plugins](#plugins)). Once installed they are auto-discovered exactly like built-ins.
 
 ## Multi-Agent System
 
@@ -773,7 +772,7 @@ built-in support; your existing `.ayder/mcp.json` continues to work. The legacy
 
 ## Plugins
 
-Official plugins (venv, python, dbs, temporal) are maintained in the **[ayder/ayder-plugins](https://github.com/ayder/ayder-plugins)** repository. Install any plugin directly from GitHub:
+Official plugins (venv, python, dbs) are maintained in the **[ayder/ayder-plugins](https://github.com/ayder/ayder-plugins)** repository. Install any plugin directly from GitHub:
 
 ```bash
 ayder install-plugin https://github.com/ayder/ayder-plugins/tree/main/venv-tools
