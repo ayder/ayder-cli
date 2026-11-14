@@ -501,6 +501,40 @@ ChatView AssistantReply MarkdownTable {
     background: transparent;
 }
 
+/* In-chat items: thinking, tool calls and agent runs. Statics built from Content, so the mouse can
+   select their text. Tool and agent items are one line until expanded (Ctrl+O,
+   Ctrl+G), then a bordered box; the thinking item is a bordered box that grows
+   with the reasoning up to 8 rows and stays. Borders only, never a
+   background. */
+ChatView > .thinking-item {
+    width: 100%;
+    color: #b8b8c8;
+    background: transparent;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border: round #333350;
+}
+
+ChatView > .toolbox,
+ChatView > .agentbox {
+    color: #b8b8c8;
+    background: transparent;
+    margin: 0;
+}
+
+ChatView > .toolbox.-expanded,
+ChatView > .agentbox.-expanded {
+    width: 100%;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border: round #333350;
+}
+
+ChatView > .toolbox.-expanded.-error,
+ChatView > .agentbox.-expanded.-error {
+    border: round #ff5555;
+}
+
 /* AutoCompleteInput - The input field widget with slash command suggestions.
    Targets 'AutoCompleteInput' in widgets.py. */
 AutoCompleteInput {

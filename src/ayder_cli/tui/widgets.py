@@ -1,10 +1,12 @@
 """TUI widget classes: ChatView, ToolPanel, ActivityBar, AutoCompleteInput, CLIInputBar, StatusBar, AgentPanel."""
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll, Container
 from textual.content import Content
@@ -160,6 +162,245 @@ class AssistantReply(Markdown):
             self._draining = False
 
 
+_THINK_ROWS = 8  # most tail rows a thinking box shows (plus its header line)
+
+
+def _fmt_secs(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def _full_lines(result: str) -> list[Content]:
+    return [Content(line.expandtabs(4)) for line in result.splitlines()]
+
+
+def _tail_rows(text: str, width: int, rows: int) -> list[Content]:
+    """The last ``rows`` wrapped lines of ``text``. Only a suffix is wrapped, so
+    the cost does not grow with the length of the reasoning."""
+    text = text.strip("\n")
+    window = text[-width * rows * 3 :]
+    return Content(window).wrap(width, overflow="fold")[-rows:]
+
+
+class _InChatItem(Static):
+    """An item in the chat: a Static whose Content is rebuilt from its state.
+
+    Content, not a Rich renderable, so the mouse can select its text. Live items
+    (a running thinking phase or agent) are refreshed by ChatView.tick_live_items,
+    which the app's shared activity timer calls.
+    """
+
+    live = False
+
+    def __init__(self, classes: str) -> None:
+        super().__init__("", classes=classes)
+        self._last_width = 0
+        self._shown_secs = -1
+
+    def _build(self, width: int) -> Content:
+        raise NotImplementedError
+
+    def _elapsed(self) -> float:
+        return 0.0
+
+    def refresh_item(self) -> None:
+        self._last_width = max(10, self.content_size.width or 80)
+        self._shown_secs = int(self._elapsed())
+        self.update(self._build(self._last_width))
+
+    def tick(self) -> None:
+        if int(self._elapsed()) != self._shown_secs:
+            self.refresh_item()
+
+    def on_mount(self) -> None:
+        self.refresh_item()
+
+    def on_resize(self, event: events.Resize) -> None:
+        if max(10, self.content_size.width) != self._last_width:
+            self.refresh_item()
+
+
+class _Expandable(_InChatItem):
+    """A tool or agent item: one line collapsed, a bordered box with the full
+    output expanded (the ``-expanded`` class carries the border)."""
+
+    def __init__(self, classes: str, expanded: bool) -> None:
+        super().__init__(f"{classes} -expanded" if expanded else classes)
+        self.expanded = expanded
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.expanded = expanded
+        self.set_class(expanded, "-expanded")
+        self.refresh_item()
+
+
+class ThinkingItem(_InChatItem):
+    """One reasoning phase, a bordered box in the chat. It grows with the text up
+    to ``_THINK_ROWS`` tail rows, then stays that tall and shows the tail. When
+    thinking ends the box stays as it is and only its header changes. Ctrl+T
+    swaps the tail for the full reasoning text."""
+
+    def __init__(self, expanded: bool, started: float, text: str) -> None:
+        super().__init__("thinking-item")
+        self.text = text
+        self.expanded = expanded
+        self.started = started
+        self.finished: float | None = None
+        self.live = True
+        self._dirty = True
+
+    def _elapsed(self) -> float:
+        return (self.finished or time.monotonic()) - self.started
+
+    def add_text(self, delta: str) -> None:
+        self.text += delta
+        self._dirty = True  # rendered by tick(), not per delta
+
+    def tick(self) -> None:
+        if self._dirty:
+            self._dirty = False
+            self.refresh_item()
+        else:
+            super().tick()
+
+    def finish(self) -> None:
+        self.finished = time.monotonic()
+        self.live = False
+        self.refresh_item()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.expanded = expanded
+        self.refresh_item()
+
+    def _build(self, width: int) -> Content:
+        secs = _fmt_secs(self._elapsed())
+        if self.finished is None:
+            title = f"∴ thinking… {secs}"
+        else:
+            verb = "collapse" if self.expanded else "expand"
+            title = f"∴ thought for {secs} · Ctrl+T to {verb}"
+        head = Content.styled(title, "dim")
+        if self.expanded:
+            return Content("\n").join([head, Content(self.text.strip())])
+        return Content("\n").join([head, *_tail_rows(self.text, width, _THINK_ROWS)])
+
+
+def _one_line(
+    name: str, state: tuple[str, str], args: str, suffix: str, width: int
+) -> Content:
+    """``● name ✓ ok {args} · 168 lines``; the args give way to fit the width."""
+    head = Content.assemble(("● ", state[1]), (name, "bold $accent"), " ", state)
+    tail = Content.styled(suffix, "dim")
+    budget = width - head.cell_length - tail.cell_length - 1
+    if args and budget >= 4:
+        return Content.assemble(
+            head, " ", Content.styled(args, "dim").truncate(budget, ellipsis=True), tail
+        )
+    return Content.assemble(head, tail)
+
+
+class ToolBox(_Expandable):
+    """One tool call, mounted when the call starts and updated in place."""
+
+    def __init__(self, name: str, arguments: dict, expanded: bool) -> None:
+        super().__init__("toolbox running", expanded)
+        self.tool_name = name
+        self.arguments = arguments
+        self.result: str | None = None
+
+    def update_call(self, name: str, arguments: dict) -> None:
+        # The loop announces a call by name first and again once the arguments are in.
+        self.tool_name = name or self.tool_name
+        self.arguments = arguments or self.arguments
+        self.refresh_item()
+
+    def finish(self, result: str) -> None:
+        self.result = result
+        self.remove_class("running")
+        if result.lstrip().startswith("Error"):
+            self.add_class("-error")
+        self.refresh_item()
+
+    def _build(self, width: int) -> Content:
+        if self.result is None:
+            state = ("… running", "$warning")
+        elif self.has_class("-error"):
+            state = ("✗ error", "$error")
+        else:
+            state = ("✓ ok", "$success")
+        args = (
+            json.dumps(self.arguments, separators=(",", ":"), ensure_ascii=False, default=str)
+            if self.arguments
+            else ""
+        )
+        lines = (self.result or "").splitlines()
+        if not self.expanded:
+            n = len(lines)
+            suffix = f" · {n} line{'s' if n != 1 else ''}" if n else ""
+            return _one_line(self.tool_name, state, args, suffix, width)
+        header = Content.assemble(
+            (self.tool_name, "bold $accent"), " ", state, (f" {args}", "dim") if args else ""
+        ).truncate(width, ellipsis=True)
+        return Content("\n").join([header, *_full_lines(self.result or "")])
+
+
+class AgentBox(_Expandable):
+    """One agent run with a ticking status line, then its result."""
+
+    def __init__(self, name: str, expanded: bool) -> None:
+        super().__init__("agentbox running", expanded)
+        self.agent_name = name
+        self.started = time.monotonic()
+        self.finished: float | None = None
+        self.status = "running"
+        self.result = ""
+        self.tool_ids: set[str] = set()
+        self.assignment: str | None = None  # AgentRegistry.run_label, set by the first event
+        self.live = True
+
+    def _elapsed(self) -> float:
+        return (self.finished or time.monotonic()) - self.started
+
+    def set_assignment(self, label: str | None) -> None:
+        if label and not self.assignment:
+            self.assignment = label
+            self.refresh_item()
+
+    def note_tool(self, call_id: str) -> None:
+        if call_id not in self.tool_ids:
+            self.tool_ids.add(call_id)
+            self.refresh_item()
+
+    def finish(self, result: str, status: str) -> None:
+        self.finished = time.monotonic()
+        self.live = False
+        self.status = status
+        self.result = result or ""
+        self.remove_class("running")
+        if status not in ("done", "completed"):
+            self.add_class("-error")
+        self.refresh_item()
+
+    def _build(self, width: int) -> Content:
+        secs = _fmt_secs(self._elapsed())
+        n = len(self.tool_ids)
+        tools = f" · {n} tool{'s' if n != 1 else ''}"
+        if self.finished is None:
+            state = (f"running {secs}", "$warning")
+        elif self.status in ("done", "completed"):
+            state = (f"✓ done {secs}", "$success")
+        else:
+            state = (f"✗ failed {secs}", "$error")
+        label = f"— {self.assignment}" if self.assignment else ""
+        if not self.expanded:
+            return _one_line(self.agent_name, state, label, tools, width)
+        head = Content.assemble(
+            (self.agent_name, "bold $accent"), " ", state,
+            (f" {label}", "dim") if label else "", (tools, "dim"),
+        ).truncate(width, ellipsis=True)
+        return Content("\n").join([head, *_full_lines(self.result)])
+
+
 class ChatView(VerticalScroll):
     """
     CLI-style chat display.
@@ -172,6 +413,15 @@ class ChatView(VerticalScroll):
         super().__init__(**kwargs)
         self._message_widgets: list[Static | AssistantReply] = []
         self._thinking_visible: bool = False
+        # In-chat items (see the methods below the message ones).
+        self._thinking_item: ThinkingItem | None = None
+        self._thinking_started = 0.0
+        self._thinking_pending = ""
+        self._tool_boxes: dict[str, ToolBox] = {}
+        self._agent_boxes: dict[int, AgentBox] = {}
+        self._thinking_expanded = False
+        self._tools_expanded = False
+        self._agents_expanded = False
 
     def on_mount(self) -> None:
         """Anchor to the bottom: follow the end of the chat.
@@ -323,6 +573,108 @@ class ChatView(VerticalScroll):
                 if msg_type == MessageType.THINKING and not self._thinking_visible:
                     msg_widget.display = False
 
+    # ── Thinking, tool calls and agent runs, drawn in the chat in order ──
+
+    def _add_item(self, item: Static, msg_type: MessageType) -> None:
+        """Mount an in-chat item in order. Registering it in ``messages`` also
+        stops the next assistant chunk from merging into a reply above it."""
+        self.messages.append({"content": "", "type": msg_type, "metadata": {"inchat": True}})
+        self._message_widgets.append(item)
+        self.mount(item)
+
+    def start_thinking(self) -> None:
+        """A reasoning phase begins. The item is mounted with the first reasoning
+        text, so a phase with none leaves no trace."""
+        self._thinking_started = time.monotonic()
+        self._thinking_pending = ""
+
+    def add_thinking_text(self, text: str) -> None:
+        if self._thinking_item is None:
+            self._thinking_pending += text
+            if not self._thinking_pending.strip():
+                return
+            item = ThinkingItem(
+                self._thinking_expanded, self._thinking_started, self._thinking_pending
+            )
+            self._thinking_item = item
+            self._add_item(item, MessageType.THINKING)
+            return
+        self._thinking_item.add_text(text)
+
+    def stop_thinking(self) -> None:
+        if self._thinking_item is not None:
+            self._thinking_item.finish()
+            self._thinking_item = None
+        self._thinking_pending = ""
+
+    def tool_started(self, call_id: str, name: str, arguments: dict) -> None:
+        box = self._tool_boxes.get(call_id)
+        if box is not None:
+            box.update_call(name, arguments)
+            return
+        box = ToolBox(name, arguments, self._tools_expanded)
+        self._tool_boxes[call_id] = box
+        self._add_item(box, MessageType.TOOL_CALL)
+
+    def tool_completed(self, call_id: str, result: str) -> None:
+        box = self._tool_boxes.get(call_id)
+        if box is not None:
+            box.finish(str(result))
+
+    def _agent_box(self, run_id: int, name: str) -> AgentBox:
+        box = self._agent_boxes.get(run_id)
+        if box is None:
+            box = AgentBox(name, self._agents_expanded)
+            self._agent_boxes[run_id] = box
+            self._add_item(box, MessageType.TOOL_CALL)
+        return box
+
+    def agent_event(
+        self, run_id: int, name: str, event: str, data: Any = None,
+        assignment: str | None = None,
+    ) -> None:
+        """An agent progress event; the first one for a run mounts its box.
+        ``assignment`` is the run's label; the first one given is kept."""
+        box = self._agent_box(run_id, name)
+        box.set_assignment(assignment)
+        if event == "tool_start" and isinstance(data, dict):
+            box.note_tool(str(data.get("call_id") or data.get("name") or ""))
+
+    def agent_completed(self, run_id: int, name: str, result: str, status: str) -> None:
+        self._agent_box(run_id, name).finish(result, status)
+
+    def tick_live_items(self) -> None:
+        """Refresh running items (elapsed seconds); called by the activity timer."""
+        for item in self._message_widgets:
+            if isinstance(item, _InChatItem) and item.live:
+                item.tick()
+
+    def toggle_thinking_expanded(self) -> bool:
+        self._thinking_expanded = not self._thinking_expanded
+        for item in self._message_widgets:
+            if isinstance(item, ThinkingItem):
+                item.set_expanded(self._thinking_expanded)
+        return self._thinking_expanded
+
+    def toggle_tools_expanded(self, agents: bool = True) -> bool:
+        """Ctrl+O: every tool box (and, with ``agents``, every agent box)."""
+        self._tools_expanded = not self._tools_expanded
+        if agents:
+            self._agents_expanded = self._tools_expanded
+        for item in self._message_widgets:
+            if isinstance(item, ToolBox):
+                item.set_expanded(self._tools_expanded)
+            elif agents and isinstance(item, AgentBox):
+                item.set_expanded(self._agents_expanded)
+        return self._tools_expanded
+
+    def toggle_agents_expanded(self) -> bool:
+        self._agents_expanded = not self._agents_expanded
+        for item in self._message_widgets:
+            if isinstance(item, AgentBox):
+                item.set_expanded(self._agents_expanded)
+        return self._agents_expanded
+
     def add_user_message(self, content: str) -> None:
         """Add a user message."""
         self.add_message(content, MessageType.USER)
@@ -345,6 +697,10 @@ class ChatView(VerticalScroll):
             widget.remove()
         self._message_widgets.clear()
         self.messages.clear()
+        self._thinking_item = None
+        self._thinking_pending = ""
+        self._tool_boxes.clear()
+        self._agent_boxes.clear()
 
 
 class ToolPanel(Container):

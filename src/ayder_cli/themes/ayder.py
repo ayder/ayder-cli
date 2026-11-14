@@ -546,6 +546,40 @@ ChatView AssistantReply MarkdownTable {
     background: $background;
 }
 
+/* In-chat items: thinking, tool calls and agent runs. Statics built from Content, so the mouse can
+   select their text. Tool and agent items are one line until expanded (Ctrl+O,
+   Ctrl+G), then a bordered box; the thinking item is a bordered box that grows
+   with the reasoning up to 8 rows and stays. Borders only, never a
+   background; literal ANSI border colours, never an auto colour such as $text-muted. */
+ChatView > .thinking-item {
+    width: 100%;
+    color: $foreground;
+    background: transparent;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border: round ansi_bright_black;
+}
+
+ChatView > .toolbox,
+ChatView > .agentbox {
+    color: $foreground;
+    background: transparent;
+    margin: 0;
+}
+
+ChatView > .toolbox.-expanded,
+ChatView > .agentbox.-expanded {
+    width: 100%;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border: round ansi_bright_black;
+}
+
+ChatView > .toolbox.-expanded.-error,
+ChatView > .agentbox.-expanded.-error {
+    border: round ansi_red;
+}
+
 /* AutoCompleteInput - The input field widget with slash command suggestions.
    Targets 'AutoCompleteInput' in widgets.py. */
 AutoCompleteInput {
