@@ -20,7 +20,6 @@ from textual.highlight import (
 from textual.message import Message
 from textual.reactive import reactive
 from textual.suggester import SuggestFromList
-from textual.widget import Widget
 from textual.widgets import Static, Input, Label, TextArea
 from textual.widgets.markdown import Markdown, MarkdownFence
 from rich.cells import cell_len
@@ -425,46 +424,11 @@ class ChatView(VerticalScroll):
     def on_mount(self) -> None:
         """Anchor to the bottom: follow the end of the chat.
 
-        Textual re-pins an anchored widget to its end inside the same layout
-        pass as any resize or new content, so a panel opening or a message
-        arriving never draws a frame at a stale offset. Scrolling up releases
+        Textual's public ``Widget.anchor()`` keeps an anchored widget pinned to
+        its end as content arrives or the size changes. Scrolling up releases
         the anchor; scrolling back to the end re-arms it.
         """
         self.anchor()
-
-    def _size_updated(
-        self, size: Size, virtual_size: Size, container_size: Size, layout: bool = True
-    ) -> bool:
-        # Textual pins an anchored widget using the pre-resize container_size, so
-        # the first frame after a resize (a panel opening) draws at a stale offset.
-        # Re-pin once the new size is in, then ask for another layout: the
-        # compositor placed the children with the stale offset, and a silent
-        # set_reactive does not move them (without it every open after the first
-        # left the newest rows cut off). Relies on private Widget/scrollbar
-        # attributes of textual 8.2.7; the draw-spy and painted-rows tests in
-        # test_panel_layout guard it.
-        updated = super()._size_updated(size, virtual_size, container_size, layout)
-        if updated and self._anchored and not self._anchor_released:
-            stale = self.scroll_y
-            end = self.max_scroll_y
-            self.set_reactive(Widget.scroll_y, end)
-            self.set_reactive(Widget.scroll_target_y, end)
-            self.vertical_scrollbar._reactive_position = end  # type: ignore[attr-defined]
-            if end != stale:
-                self.refresh(layout=True)
-        return updated
-
-    def release_anchor(self) -> None:
-        # Textual re-arms an anchor only in watch_scroll_y, so a scroll that lands
-        # where it already is (PageDown at the end) would leave it released for
-        # good. Re-check once the scroll has landed; a user who scrolled up stays
-        # released because scroll_y is then below the end.
-        super().release_anchor()
-        self.call_after_refresh(self._reanchor_at_end)
-
-    def _reanchor_at_end(self) -> None:
-        if self.scroll_y >= self.max_scroll_y:
-            self.anchor()
 
     def disable_follow_mode(self) -> None:
         """Stop following the end (user is reading history)."""

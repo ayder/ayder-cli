@@ -10,7 +10,7 @@ from textual.app import App, ComposeResult, InvalidThemeError
 from textual.css.query import NoMatches
 from textual.widgets import Static
 from textual.timer import Timer
-from textual import messages, on
+from textual import on
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -717,17 +717,6 @@ class AyderApp(App):
             effort=get_effort_label(self.config),
             id="status-bar",
         )
-
-    def _on_terminal_supports_synchronized_output(
-        self, message: messages.TerminalSupportsSynchronizedOutput
-    ) -> None:
-        # EXPERIMENT, judged live by the operator: textual 8.2.7 leaves synchronized
-        # output (DEC 2026) off in inline mode, yet App._display already writes each
-        # inline frame as one sequence between _begin_update/_end_update, so the
-        # terminal can apply a whole frame atomically. Relies on private textual
-        # 8.2.7 API (exact pin); drop this if it does not help.
-        if self._driver is not None:
-            self._sync_available = True
 
     def on_mount(self) -> None:
         """Called when app is mounted."""

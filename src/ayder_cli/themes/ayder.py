@@ -757,12 +757,6 @@ Screen {
     background: $background;
 }
 
-/* Inline mode - Configures the app to run within the terminal flow rather than full screen. */
-Screen:inline {
-    height: 100vh;
-    min-height: 20;
-}
-
 /* ID-based selectors for the main layout components in app.py compose() */
 
 #chat-view {
