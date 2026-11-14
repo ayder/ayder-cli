@@ -468,3 +468,93 @@ def test_ayder_app_on_mount_installs_handler_directly():
     assert _installs_running_loop(installs[0]), (
         "AyderApp.on_mount must pass asyncio.get_running_loop()"
     )
+
+
+def _install_capture_sink(records: list, on_first_write):
+    """A Loguru sink (no queue) that records messages and runs ``on_first_write``
+    once, while this thread holds the sink's handler lock."""
+    state = {"armed": True}
+
+    def sink(message):
+        records.append(message.record["message"])
+        if state["armed"]:
+            state["armed"] = False
+            on_first_write()
+
+    return logger.add(sink, enqueue=False, level="DEBUG")
+
+
+def test_signal_during_a_log_call_is_not_lost(tmp_path, monkeypatch, capsys):
+    """Baseline regression: Ctrl+C landing inside a log call was swallowed.
+
+    The handler used to call the logger on the thread the signal interrupted. If
+    that thread was inside a Loguru emit, Loguru's re-entrancy guard raised, the
+    exception escaped the handler before the previous handler ran, and the
+    interrupt was lost (with a queued sink it could also deadlock). The handler
+    is called directly, from inside a sink write, which is exactly the state a
+    real signal lands in; the process is never signalled.
+    """
+    import signal
+    import threading
+
+    import ayder_cli.diagnostics as diag
+
+    _setup(tmp_path)
+    monkeypatch.setattr(diag, "_SIGNAL_LOG_WAIT_SECONDS", 0.05)
+
+    def _default_int_handler(signum, frame):
+        raise KeyboardInterrupt  # what Python's default SIGINT handler does
+
+    saved = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _default_int_handler)
+    records: list[str] = []
+    sink_id = None
+    try:
+        install_exception_hooks()
+        handler = signal.getsignal(signal.SIGINT)
+        assert handler is not _default_int_handler, "hooks did not wrap SIGINT"
+        sink_id = _install_capture_sink(
+            records, lambda: handler(signal.SIGINT, None)
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            diag._log.info("record emitted on the main thread")
+
+        for thread in threading.enumerate():
+            if thread.name == "ayder-signal-log":
+                thread.join(2)
+    finally:
+        signal.signal(signal.SIGINT, saved)
+        if sink_id is not None:
+            logger.remove(sink_id)
+
+    assert "Could not acquire internal lock" not in capsys.readouterr().err
+    assert any(r.startswith("Received signal SIGINT") for r in records), records
+
+
+def test_signal_still_chains_when_no_thread_can_start(tmp_path, monkeypatch):
+    """Preservation: at interpreter shutdown no new thread can start; the previous
+    handler (Textual's terminal cleanup, or the default) must still run."""
+    import signal
+    import threading
+
+    _setup(tmp_path)
+    order: list[str] = []
+
+    def _prior(signum, frame):
+        order.append("prior")
+
+    def _no_thread(self):
+        raise RuntimeError("can't create new thread at interpreter shutdown")
+
+    saved = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _prior)
+    try:
+        install_exception_hooks()
+        wrapper = signal.getsignal(signal.SIGTERM)
+        monkeypatch.setattr(threading.Thread, "start", _no_thread)
+        wrapper(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, saved)
+
+    assert order == ["prior"]
