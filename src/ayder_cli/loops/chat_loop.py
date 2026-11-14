@@ -386,6 +386,12 @@ class ChatLoop:
                                             "arguments": tc.arguments
                                         },
                                     }
+                                    # Gemini needs its thought_signature replayed with
+                                    # the call. getattr: tests and plugins feed
+                                    # SimpleNamespace tool calls.
+                                    signature = getattr(tc, "thought_signature", None)
+                                    if signature:
+                                        new_tc["thought_signature"] = signature
 
                                     # If we have a stream_index, ensure our array grows to that size
                                     if stream_idx is not None:
