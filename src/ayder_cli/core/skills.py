@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from ayder_cli.core.config import CONFIG_DIR
 from ayder_cli.core.context import PathOutsideSandboxError, ProjectContext
 from ayder_cli.core.result import ToolError
 from ayder_cli.log import get_logger
@@ -33,8 +32,11 @@ logger = get_logger("core")
 # Layer roots. Module globals so tests can point them at temporary
 # directories (tests/conftest.py does this for every test).
 PACKAGED_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
-USER_SKILLS_DIR = CONFIG_DIR / "skills"
-BUILTIN_HOME = CONFIG_DIR / "builtin"
+# Always ~/.ayder, never the -c config's directory (README, "Skills"). Not
+# CONFIG_DIR: set_config_path() moves that, and this module may load after it.
+_AYDER_HOME = Path("~/.ayder").expanduser()
+USER_SKILLS_DIR = _AYDER_HOME / "skills"
+BUILTIN_HOME = _AYDER_HOME / "builtin"
 
 SKILL_FILE = "SKILL.md"
 MAX_SKILL_BYTES = 64 * 1024

@@ -32,19 +32,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Implement all pending tasks sequentially and exit",
     )
-    # Conditional: only add --temporal-task-queue if temporal plugin is loaded
-    try:
-        from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
-        if "temporal_workflow" in TOOL_DEFINITIONS_BY_NAME:
-            parser.add_argument(
-                "--temporal-task-queue",
-                type=str,
-                metavar="QUEUE",
-                default=None,
-                help="Start Temporal worker bound to the given task queue",
-            )
-    except ImportError:
-        pass
 
     # Mutually exclusive group for file and stdin
     input_group = parser.add_mutually_exclusive_group()
@@ -58,13 +45,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     input_group.add_argument(
         "--stdin", action="store_true", help="Read prompt from stdin"
-    )
-    parser.add_argument(
-        "--temporal-prompt",
-        type=str,
-        default=None,
-        metavar="FILE",
-        help="Prompt file for the Temporal worker (only used with --temporal-task-queue)",
     )
     parser.add_argument(
         "--system-prompt",
@@ -267,14 +247,6 @@ def build_logging_settings(args, cfg) -> LoggingSettings:
 
 def main():
     """Main entry point for the CLI."""
-    from ayder_cli.cli_runner import (
-        run_command,
-        _run_tasks_cli,
-        _run_implement_cli,
-        _run_implement_all_cli,
-        _run_temporal_queue_cli,
-    )
-
     _PLUGIN_SUBCOMMANDS = {
         "install-plugin", "uninstall-plugin", "list-plugins", "update-plugin"
     }
@@ -317,6 +289,15 @@ def main():
     log_settings = build_logging_settings(args, cfg)
     setup_logging(log_settings)
     install_exception_hooks()
+
+    # Imported only now: importing cli_runner runs tool discovery, which logs,
+    # and a record logged before setup_logging() goes to Loguru's stderr default.
+    from ayder_cli.cli_runner import (
+        run_command,
+        _run_tasks_cli,
+        _run_implement_cli,
+        _run_implement_all_cli,
+    )
 
     # Handle plugin subcommands
     if args.subcommand == "install-plugin":
@@ -428,10 +409,6 @@ def main():
             _conflicts.append("--implement-all")
         if getattr(args, "tasks", False):
             _conflicts.append("--tasks")
-        if getattr(args, "temporal_task_queue", None):
-            _conflicts.append("--temporal-task-queue")
-        if getattr(args, "temporal_prompt", None):
-            _conflicts.append("--temporal-prompt")
         if _conflicts:
             print(
                 "Error: --resume takes no other options — it restores the "
@@ -507,14 +484,6 @@ def main():
         )
     if args.implement_all:
         sys.exit(_run_implement_all_cli(permissions=granted))
-    if getattr(args, "temporal_task_queue", None):
-        sys.exit(
-            _run_temporal_queue_cli(
-                queue_name=args.temporal_task_queue,
-                prompt_path=args.temporal_prompt,
-                permissions=granted,
-            )
-        )
 
     # Read the --system-prompt override file (overrides prompts.py base prompt).
     system_prompt_override = None

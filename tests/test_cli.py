@@ -853,18 +853,6 @@ class TestCreateParser:
         assert args.x is True
         assert args.http is True
 
-    def test_parser_temporal_prompt_flag(self):
-        """--prompt was renamed to --temporal-prompt (temporal worker only)."""
-        from ayder_cli.cli import create_parser
-
-        parser = create_parser()
-
-        args = parser.parse_args([])
-        assert args.temporal_prompt is None
-
-        args = parser.parse_args(["--temporal-prompt", "prompts/dev.md"])
-        assert args.temporal_prompt == "prompts/dev.md"
-
     def test_parser_prompt_flag_removed(self):
         """The old --prompt flag no longer exists after the rename."""
         from ayder_cli.cli import create_parser
