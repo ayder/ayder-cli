@@ -3,8 +3,6 @@
 Each driver owns one model family's prompt template, parser, and detection.
 Drivers are independent: adding, modifying, or removing one should not
 require edits to other drivers, the registry, or the provider.
-
-See docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md section 6.1.
 """
 
 from __future__ import annotations

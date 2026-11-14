@@ -40,7 +40,7 @@ LLMs on their own can only generate text. To be a useful coding assistant, the m
 Each tool has an OpenAI-compatible JSON schema so models that support function calling can use them natively. For models that don't, ayder-cli also parses a custom XML-like syntax (`<function=name><parameter=key>value</parameter></function>`) as a fallback.
 
 - **Path sandboxing**: All file operations are confined to the project root via `ProjectContext`. Path traversal attacks (`../`) and absolute paths outside the project are blocked. The one exception is the session scratch directory, `/tmp/ayder-<uid>/<project>-<hash>/<session>/` (mode 0700, one subdirectory per agent run), which the system prompt names as the place for temporary files and which the file tools accept. It is not cleaned up; the OS clears `/tmp`.
-- **Safe mode** (TUI): Blocks `file_editor`, `run_shell_command`, `run_background_process`, `kill_background_process`, and `fetch_web`.
+- **Safe mode** (TUI): Blocks `file_editor`, `bash`, `background_process`, and `fetch_web`.
 - Every tool call requires your confirmation before it runs -- you always stay in control. Use `-r`, `-w`, `-x` flags to auto-approve tool categories.
 - You may also prefer to run ayder-cli in a container for additional security.
 
@@ -162,7 +162,7 @@ verbose = false               # Show file contents after write + LLM debug
 max_background_processes = 5  # Max concurrent background processes (1-20)
 max_iterations = 0            # LLM calls per message before the loop stops (default 0 = unlimited)
 max_output_tokens = 32768     # Max tokens in LLM response
-max_history_messages = 30     # Messages kept in history
+max_history_messages = 0      # Messages kept in history (default 0 = unlimited)
 prompt = "STANDARD"           # System prompt tier: MINIMAL, STANDARD, EXTENDED
 tool_tags = ["core", "metadata"]  # Enabled tool tags (see /plugin)
 # skills = ["development-workflow"]    # or "none"; default: the built-in skills
@@ -332,9 +332,9 @@ By default, every tool call requires user confirmation. Use permission flags to 
 
 | Flag | Category | Built-in tools |
 | ---- | -------- | -------------- |
-| `-r` | Read | `file_explorer`, `read_file`, `search_codebase`, `get_project_structure`, `get_background_output`, `list_background_processes`, `list_tasks`, `show_task` |
-| `-w` | Write | `file_editor`, `context`, `create_note`, `manage_environment_vars` |
-| `-x` | Execute | `run_shell_command`, `run_background_process`, `kill_background_process` |
+| `-r` | Read | `file_explorer`, `read_file`, `search_codebase`, `get_project_structure`, `skill`, `agent` (when agents are configured) |
+| `-w` | Write | `file_editor`, `context`, `note`, `task`, `manage_environment_vars` |
+| `-x` | Execute | `bash`, `background_process` |
 | `--http` | Web/Network | `fetch_web` |
 
 Installed plugins extend these categories (e.g. `python_editor` → write, virtualenv tools → execute, `dbs_tool` → web).
@@ -560,21 +560,22 @@ The tool system:
 - Supports tag-based filtering for dynamic enable/disable
 - Injects tool-specific system prompts when enabled
 
-**Built-in tools (16):**
+**Built-in tools (13):**
 
 | Category | Tools |
 |----------|-------|
 | **Filesystem** | `file_explorer`, `read_file`, `file_editor` |
 | **Search** | `search_codebase`, `get_project_structure` |
-| **Shell** | `run_shell_command` |
+| **Shell** | `bash` |
 | **Context** | `context` (save / load / list / stats / clear session context slots) |
-| **Notes** | `create_note` |
-| **Background Processes** | `run_background_process`, `get_background_output`, `kill_background_process`, `list_background_processes` |
-| **Tasks** | `list_tasks`, `show_task` |
+| **Notes** | `note` (create / read / update / list / delete) |
+| **Background Processes** | `background_process` (start / logs / stop / list / info) |
+| **Tasks** | `task` (create / list / show / status / update_status / update / update_dependencies) |
+| **Skills** | `skill` (list / load / read / unload) |
 | **Environment** | `manage_environment_vars` |
 | **Web** | `fetch_web` |
 
-When agents are configured, the `call_agent` tool is also registered so the main LLM can dispatch them (see [Multi-Agent System](#multi-agent-system)).
+When agents are configured, the `agent` tool is also registered so the main LLM can dispatch them (see [Multi-Agent System](#multi-agent-system)).
 
 **Plugin tools** — `python_editor`, `dbs_tool`, virtualenv tools, and MCP integrations ship as optional plugins in the [ayder/ayder-plugins](https://github.com/ayder/ayder-plugins) repo (see [Plugins](#plugins)). Once installed they are auto-discovered exactly like built-ins.
 
@@ -587,7 +588,7 @@ ayder-cli supports user-defined **specialized agents**: each agent is an indepen
 ```
 Main LLM (your conversation)
     │
-    ├─ calls `call_agent` tool  ─────────────────────────────────┐
+    ├─ calls `agent` tool  ──────────────────────────────────────┐
     │   OR you type `/agent <name> <task>`                       │
     │                                                            ▼
     │                                            AgentRunner (background asyncio task)
@@ -611,10 +612,10 @@ pre_iteration_hook drains queue
 
 Key properties:
 - **Separate context** — agents have no access to the main conversation history. They receive only their system prompt and the task description.
-- **Non-blocking** — dispatching an agent returns immediately. Both `/agent` and `call_agent` are fire-and-forget.
+- **Non-blocking** — dispatching an agent returns immediately. Both `/agent` and the `agent` tool are fire-and-forget.
 - **Concurrent** — multiple agents can run simultaneously, each in its own async task.
 - **Summary injection** — when an agent finishes, its structured `<agent-summary>` block is injected as a system message into the main LLM's context at the start of the next turn.
-- **Timeout** — agents are automatically cancelled after `agent_timeout` seconds (default: 300).
+- **Timeout** — agents are automatically cancelled after `agent_timeout` seconds (default: 600).
 
 ### Configuring Agents
 
@@ -683,14 +684,14 @@ Each agent field:
 
 **Via the main LLM (automatic):**
 
-When agents are configured, the main LLM is told about them via its system prompt and can call `call_agent` autonomously:
+When agents are configured, the main LLM is told about them via its system prompt and can call the `agent` tool autonomously:
 
 ```
 You: Review the authentication module and write tests for it.
 
 LLM: I'll dispatch two agents to handle this in parallel.
-     [calls call_agent: name="code-reviewer", task="Review src/auth.py..."]
-     [calls call_agent: name="test-writer", task="Write tests for src/auth.py..."]
+     [calls agent: action="call", name="code-reviewer", task="Review src/auth.py..."]
+     [calls agent: action="call", name="test-writer", task="Write tests for src/auth.py..."]
 
      Both agents are running in the background. I'll incorporate
      their findings when they complete.

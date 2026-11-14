@@ -281,5 +281,4 @@ Run probe (method 1) or curl test A (method 2).
 - [`src/ayder_cli/providers/impl/ollama_inspector.py`](../src/ayder_cli/providers/impl/ollama_inspector.py) — `OllamaInspector`, `NativeToolProbe`, `probe_native_tool_calling`.
 - [`src/ayder_cli/providers/impl/ollama_drivers/matrix.py`](../src/ayder_cli/providers/impl/ollama_drivers/matrix.py) — resolution matrix and rules for adding/removing rows.
 - [`src/ayder_cli/providers/impl/ollama_drivers/_errors.py`](../src/ayder_cli/providers/impl/ollama_drivers/_errors.py) — `OllamaServerToolBug` and the curated bug-signature list.
-- [`docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md`](superpowers/specs/2026-05-02-ollama-chat-drivers-design.md) — full design rationale.
 - [`tests/providers/test_ollama_inspector.py`](../tests/providers/test_ollama_inspector.py) — probe test cases that double as usage examples.
