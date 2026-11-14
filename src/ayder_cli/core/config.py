@@ -186,6 +186,29 @@ class RetryConfigSection(BaseModel):
     jitter: bool = Field(default=True)
     retry_on_names: tuple[str, ...] = Field(default_factory=tuple)
 
+    @model_validator(mode="before")
+    @classmethod
+    def cap_default_initial_delay(cls, data: Any) -> Any:
+        """Cap an unset initial delay at an explicit, smaller max delay.
+
+        The runtime RetryConfig requires max_delay_seconds >= initial_delay_seconds,
+        so a table with only ``max_delay_seconds = 5`` must not inherit the 10 s
+        default first delay. An explicit initial_delay_seconds is never touched,
+        and nothing is raised here (an invalid [retry] must not make load_config()
+        fall back to defaults for the whole file).
+        """
+        if not isinstance(data, dict) or "initial_delay_seconds" in data:
+            return data
+        max_delay = data.get("max_delay_seconds")
+        default_initial = cls.model_fields["initial_delay_seconds"].default
+        if (
+            isinstance(max_delay, (int, float))
+            and not isinstance(max_delay, bool)
+            and 0 <= max_delay < default_initial
+        ):
+            return {**data, "initial_delay_seconds": float(max_delay)}
+        return data
+
     @field_validator("max_attempts")
     @classmethod
     def validate_max_attempts(cls, v: int) -> int:
