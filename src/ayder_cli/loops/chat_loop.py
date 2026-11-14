@@ -463,7 +463,7 @@ class ChatLoop:
                     return
                 except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
                     llm_log.exception("LLM stream failed")
-                    self.cb.on_system_message(f"Error: {e}")
+                    self.cb.on_system_message(f"Error: {_describe_llm_error(e)}")
                     return
                 finally:
                     self.cb.on_thinking_stop()
@@ -1168,6 +1168,27 @@ def _unwrap_exec_result(exec_result) -> str:
     if hasattr(exec_result, "success"):
         return exec_result.result if exec_result.success else str(exec_result.error)
     return str(exec_result)
+
+
+_ERROR_BODY_CHARS = 2000
+
+
+def _describe_llm_error(exc: BaseException) -> str:
+    """str(exc), plus the API error body when the SDK's message is only the status.
+
+    openai 3.x builds "Error code: <status>" and appends only a body's
+    error.message; a body of another shape (Gemini's OpenAI-compat endpoint
+    sends a JSON list) is kept on exc.body and never shown.
+    """
+    text = str(exc)
+    status = getattr(exc, "status_code", None)
+    body = getattr(exc, "body", None)
+    if status is None or body is None or body == "" or text.strip() != f"Error code: {status}":
+        return text
+    detail = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, default=str)
+    if len(detail) > _ERROR_BODY_CHARS:
+        detail = f"{detail[:_ERROR_BODY_CHARS]}... ({len(detail) - _ERROR_BODY_CHARS} more chars)"
+    return f"{text} - {detail}"
 
 
 def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
