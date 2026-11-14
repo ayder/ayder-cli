@@ -43,12 +43,18 @@ class RetryConfig:
 
 
 _RETRYABLE_NAMES: frozenset[tuple[str, str]] = frozenset({
-    # httpx — shared by ollama, openai (sync transport), anthropic
+    # httpx — ollama's transport
     ("httpx", "ConnectError"),
     ("httpx", "ReadError"),
     ("httpx", "ReadTimeout"),
     ("httpx", "RemoteProtocolError"),
     ("httpx", "TransportError"),
+    # httpx2 — openai 3.x and anthropic 2.x transport; raw errors can escape a stream
+    ("httpx2", "ConnectError"),
+    ("httpx2", "ReadError"),
+    ("httpx2", "ReadTimeout"),
+    ("httpx2", "RemoteProtocolError"),
+    ("httpx2", "TransportError"),
     # openai
     ("openai", "APIConnectionError"),
     ("openai", "APITimeoutError"),

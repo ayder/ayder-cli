@@ -313,30 +313,3 @@ def _run_implement_cli(task_query: str, permissions=None) -> int:
 def _run_implement_all_cli(permissions=None) -> int:
     """Implement all pending tasks sequentially."""
     return TaskRunner.implement_all(permissions=permissions)
-
-
-def _run_temporal_queue_cli(
-    queue_name: str,
-    prompt_path: str | None = None,
-    permissions=None,
-) -> int:
-    """Start a Temporal worker queue session."""
-    from ayder_cli.tools.plugin_manager import _find_plugin_module, PluginError
-
-    try:
-        temporal_worker = _find_plugin_module("temporal-tools", "temporal_worker")
-        TemporalWorker = getattr(temporal_worker, "TemporalWorker")
-        TemporalWorkerConfig = getattr(temporal_worker, "TemporalWorkerConfig")
-    except (ImportError, PluginError) as exc:
-        raise RuntimeError(
-            "temporal-tools plugin is not installed. "
-            "Run: ayder plugin install temporal-tools"
-        ) from exc
-
-    worker_config = TemporalWorkerConfig(
-        queue_name=queue_name,
-        prompt_path=prompt_path,
-        permissions=set(permissions or {"r"}),
-    )
-    worker = TemporalWorker(worker_config)
-    return worker.run()

@@ -97,7 +97,7 @@ ayder-cli is an AI agent chat client with a modular, layered architecture:
 1. **Layered Architecture**: Clear separation between entry → app → service → core → tools
 2. **Protocol-Based**: `ChatCallbacks` protocol decouples the chat loop from UI concerns; `InteractionSink` decouples LLM providers from UI for debug events
 3. **Single Composition Root**: `application/runtime_factory.create_runtime()` assembles all dependencies — no duplicated wiring between CLI and TUI
-4. **Single Loop**: `ChatLoop` (in `loops/chat_loop.py`) owns the full async LLM + tool execution loop; both CLI and TUI route through it. A run ends on a text-only reply, a cancel, an error, `max_iterations` LLM calls (`[app]` 200, agents 100), or 3 reasoning-only replies in a row; from the 3rd identical tool call in a row, the result carries a `[harness]` note
+4. **Single Loop**: `ChatLoop` (in `loops/chat_loop.py`) owns the full async LLM + tool execution loop; both CLI and TUI route through it. A run ends on a text-only reply, a cancel, an error, `max_iterations` LLM calls when set (default 0 = unlimited; `[agents.<name>]` does not inherit `[app]`), or 3 reasoning-only replies in a row; from the 3rd identical tool call in a row, the result carries a `[harness]` note
 5. **Single Execution Path**: `ExecutionPolicy.execute_with_registry()` is the sole tool execution entry point; validation → permission → execute, no inline policy in loop code
 6. **Single Validation Path**: `ValidationAuthority → SchemaValidator` is the only validation stage; schema derived from live `TOOL_DEFINITIONS` registry (no hardcoded lists)
 7. **Sandboxed Paths**: All file operations go through `ProjectContext` for security (project root plus the session scratch directory from `new_scratch_dir`). Only a path outside the sandbox (`PathOutsideSandboxError`) is reported as a security error; other bad input, such as a binary file or a non-numeric line number, is a validation error
@@ -187,13 +187,13 @@ cli.py:main()
 | `agents/callbacks.py` | `AgentCallbacks` — `ChatCallbacks` for autonomous agents |
 | `agents/runner.py` | `AgentRunner` — wraps one `ChatLoop` per agent dispatch |
 | `agents/registry.py` | `AgentRegistry` — dispatch, cancel, status, capability prompts |
-| `agents/tool.py` | `call_agent` tool definition + handler factory |
+| `agents/tool.py` | `agent` tool definition (`action`: call / list / status / read_result) + handler factory |
 
 **Agent dispatch flow (Approach A — all non-blocking):**
 1. Config parsed → `AgentConfig` objects in `Config.agents`
 2. `AyderApp.__init__` creates `AgentRegistry` if agents configured
-3. LLM calls `call_agent` tool → `registry.dispatch()` (sync, fire-and-forget)
-4. User runs `/agent <name> <task>` → same `registry.dispatch()`
+3. LLM calls the `agent` tool with `action="call"` → `registry.create_run()` (sync, fire-and-forget)
+4. User runs `/agent <name> <task>` → same `registry.create_run()`
 5. Agent runs `ChatLoop` with isolated runtime + `AgentCallbacks` in background
 6. Summary parsed from `<agent-summary>` block → `AgentSummary` → `_summary_queue`
 7. `pre_iteration_hook` drains queue → injects summaries as system messages
@@ -274,9 +274,6 @@ drivers, the registry, or `OllamaProvider` are required.
 | `deepseek.py` | deepseek-r1/v3/coder `<function_calls><invoke>` format |
 | `minimax.py` | MiniMax-M1 namespaced `<minimax:tool_call>` format |
 
-See `docs/superpowers/specs/2026-05-02-ollama-chat-drivers-design.md` for
-the design rationale.
-
 ### Tool Modules
 
 | Module | Purpose | Key Classes/Functions |
@@ -295,12 +292,14 @@ the design rationale.
 | `tools/builtins/search.py` | Search tool impls | `search_codebase()`, `get_project_structure()` |
 | `tools/builtins/shell.py` | Shell execution impl: own session, closed stdin, prompts/pagers off (`GIT_TERMINAL_PROMPT=0`, `PAGER`/`GIT_PAGER=cat`; `environment` overrides), process-group kill on timeout with partial output, per-stream output bounds | `bash()` |
 | `tools/builtins/context.py` | Session context snapshots | `context` |
-| `tools/builtins/notes.py` | Note-taking tool | `create_note()` |
-| `tools/builtins/tasks.py` | Task-management tools | `list_tasks()`, `show_task()` |
+| `tools/builtins/note_tool.py` | `note` tool (`action`: create / read / update / list / delete) | `note()` |
+| `tools/builtins/notes.py` | Note file helpers used by the `note` tool | `write_note_file()`, `read_note_file()`, `update_note_file()`, `list_note_ids()`, `delete_note_file()` |
+| `tools/builtins/task_tool.py` | `task` tool (`action`: create / list / show / status / update_status / update / update_dependencies) | `task()` |
+| `tools/builtins/tasks.py` | Task file helpers used by the `task` tool and `TaskRunner` | `create_task()`, `list_tasks()`, `show_task()`, `resolve_task_path()` |
 | `tools/builtins/skill.py` | Skill tool impl | `skill()`, `discover_skills()` |
 | `tools/builtins/web.py` | HTTP fetch tool | `fetch_web()` |
 | `tools/builtins/utils_tools.py` | Misc utility tools | `manage_environment_vars()` |
-| `tools/builtins/*_definitions.py` | Per-domain tool definitions (9 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
+| `tools/builtins/*_definitions.py` | Per-domain tool definitions (10 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
 
 ### Feature Modules
 
@@ -653,18 +652,21 @@ Schema-driven tool definitions with auto-discovery:
 - **Schema generation**: `to_openai_schema()` returns the OpenAI function-calling dict
 - **Plugin loading**: `tools/plugin_manager.py` can augment `TOOL_DEFINITIONS` at runtime from local or GitHub-sourced plugins
 
-16 built-in tools across 9 definition files:
+13 built-in tools across 10 definition files:
 - Filesystem (3): `file_explorer`, `read_file`, `file_editor`
 - Search (2): `search_codebase`, `get_project_structure`
 - Shell (1): `bash`
-- Context (1): `context`
-- Notes (1): `create_note`
+- Context (1): `context` (action=save|load|list|stats|clear)
+- Notes (1): `note` (action=create|read|update|list|delete)
 - Background Process (1): `background_process` (action=start|logs|stop|list|info)
-- Tasks (2): `list_tasks`, `show_task`
+- Tasks (1): `task` (action=create|list|show|status|update_status|update|update_dependencies)
+- Skills (1): `skill` (action=list|load|read|unload)
 - Environment (1): `manage_environment_vars`
 - Web (1): `fetch_web`
 
-> The authoritative count comes from `len(TOOL_DEFINITIONS)`; run `python -c "from ayder_cli.tools.definition import TOOL_DEFINITIONS; print(len(TOOL_DEFINITIONS))"` to verify.
+Registered at run time, not counted above: `agent` (when agents are configured) and the tools of configured MCP servers.
+
+> The authoritative count comes from `len(_BUILTIN_DEFINITIONS)` (`TOOL_DEFINITIONS` also includes installed plugins); run `python -c "from ayder_cli.tools.definition import _BUILTIN_DEFINITIONS; print(len(_BUILTIN_DEFINITIONS))"` to verify.
 
 ---
 

@@ -135,6 +135,7 @@ class TestFactoryTUIIntegration:
             mock_components.config.stop_sequences = []
             mock_components.config.tool_tags = ["core", "metadata"]
             mock_components.config.driver = "openai"
+            mock_components.config.agents = {}
             mock_components.config.logging_level = None
             mock_components.config.logging_channels = {}
             mock_components.config.logging_trace_enabled = False

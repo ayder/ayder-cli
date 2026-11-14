@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ayder-cli"
-version = "2.5.3"
+version = "2.5.4"
 description = "AI agent for any LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -42,7 +42,9 @@ google = ["google-genai"]
 qwen = ["dashscope"]
 # The provider uses the v2 client; do not let MCP's shared PyJWT dependency
 # make the resolver select the incompatible v1 SDK.
-glm = ["zhipuai>=2"]
+# zhipuai 2 caps PyJWT below 2.9, which holds mcp at 1.19.0; mcp 1.19.0 imports
+# a private pydantic helper that pydantic 2.14 removed.
+glm = ["zhipuai>=2", "pydantic<2.14"]
 all = ["ayder-cli[anthropic,google,qwen,glm]"]
 # Compatibility extra: MCP is now included in every installation.
 mcp = []

@@ -65,6 +65,5 @@ def test_render_preserves_existing_channel_overrides():
 def test_rendered_config_is_still_valid_toml_end_to_end():
     """`[logging.channels]` must not swallow the sections that follow it."""
     data = tomllib.loads(render_v2_config(DEFAULTS, logging_overrides={"channels": {"ui": "NONE"}}))
-    assert "temporal" in data
-    assert "timeouts" in data["temporal"]
+    assert data["logging"]["channels"] == {"ui": "NONE"}
     assert any(k.startswith("llm") for k in data)

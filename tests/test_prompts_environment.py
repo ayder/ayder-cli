@@ -180,3 +180,14 @@ def test_tui_prompt_builds_carry_the_markdown_line(tmp_path):
     assert app.messages[0]["content"].count(MARKDOWN_LINE) == 1
     app.update_system_prompt_model()
     assert app.messages[0]["content"].count(MARKDOWN_LINE) == 1
+
+
+def test_agentic_prompt_asks_before_git_init(tmp_path, monkeypatch):
+    """Baseline regression: Phase 0 told the orchestrator to initialize a git repo
+    without asking. Presence only, never wording: in the built AGENTIC prompt the
+    old instruction is gone and the one Phase 0 bullet about `git init` asks."""
+    prompt = _runtime(tmp_path, monkeypatch, prompt_tier="AGENTIC").system_prompt
+    phase0 = prompt.split("**Phase 0")[1].split("**Phase 1")[0]
+    bullets = [b for b in re.split(r"\n\s*-", phase0) if "git init" in b]
+    assert "initialize git repo" not in prompt
+    assert len(bullets) == 1 and "ask" in bullets[0], bullets

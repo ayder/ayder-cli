@@ -69,23 +69,6 @@ DEFAULTS: Dict[str, Any] = {
     },
     "max_background_processes": 5,
     "max_concurrent_agents": 5,
-    "temporal": {
-        "enabled": False,
-        "host": "localhost:7233",
-        "namespace": "default",
-        "metadata_dir": ".ayder/temporal",
-        "timeouts": {
-            "workflow_schedule_to_close_seconds": 7200,
-            "activity_start_to_close_seconds": 900,
-            "activity_heartbeat_seconds": 30,
-        },
-        "retry": {
-            "initial_interval_seconds": 5,
-            "backoff_coefficient": 2.0,
-            "maximum_interval_seconds": 60,
-            "maximum_attempts": 3,
-        },
-    },
 }
 
 _PROVIDER_SECTIONS = ("openai", "anthropic", "gemini")
@@ -122,23 +105,6 @@ retention = "{logging_retention}"
 # Accept prompts from peer processes over a local Unix socket.
 enabled = true
 
-[temporal]
-enabled = {temporal_enabled}
-host = "{temporal_host}"
-namespace = "{temporal_namespace}"
-metadata_dir = "{temporal_metadata_dir}"
-
-[temporal.timeouts]
-workflow_schedule_to_close_seconds = {temporal_workflow_schedule_to_close_seconds}
-activity_start_to_close_seconds = {temporal_activity_start_to_close_seconds}
-activity_heartbeat_seconds = {temporal_activity_heartbeat_seconds}
-
-[temporal.retry]
-initial_interval_seconds = {temporal_initial_interval_seconds}
-backoff_coefficient = {temporal_backoff_coefficient}
-maximum_interval_seconds = {temporal_maximum_interval_seconds}
-maximum_attempts = {temporal_maximum_attempts}
-
 [llm.openai]
 driver = "openai"
 base_url = "{openai_base_url}"
@@ -172,52 +138,6 @@ num_ctx = {gemini_num_ctx}
 # reasoning_effort = "high"
 # system_prompt = "Review code and report findings."
 """
-
-
-class TemporalTimeoutsConfig(BaseModel):
-    """Temporal timeout settings."""
-
-    model_config = ConfigDict(frozen=True)
-
-    workflow_schedule_to_close_seconds: int = Field(default=7200)
-    activity_start_to_close_seconds: int = Field(default=900)
-    activity_heartbeat_seconds: int = Field(default=30)
-
-    @field_validator(
-        "workflow_schedule_to_close_seconds",
-        "activity_start_to_close_seconds",
-        "activity_heartbeat_seconds",
-    )
-    @classmethod
-    def validate_positive_seconds(cls, v: int) -> int:
-        if v <= 0:
-            raise ValueError("temporal timeout values must be positive")
-        return v
-
-
-class TemporalRetryConfig(BaseModel):
-    """Temporal retry policy settings."""
-
-    model_config = ConfigDict(frozen=True)
-
-    initial_interval_seconds: int = Field(default=5)
-    backoff_coefficient: float = Field(default=2.0)
-    maximum_interval_seconds: int = Field(default=60)
-    maximum_attempts: int = Field(default=3)
-
-    @field_validator("initial_interval_seconds", "maximum_interval_seconds", "maximum_attempts")
-    @classmethod
-    def validate_positive_retry_values(cls, v: int) -> int:
-        if v <= 0:
-            raise ValueError("temporal retry values must be positive")
-        return v
-
-    @field_validator("backoff_coefficient")
-    @classmethod
-    def validate_backoff_coefficient(cls, v: float) -> float:
-        if v < 1.0:
-            raise ValueError("backoff_coefficient must be >= 1.0")
-        return v
 
 
 class ContextManagerConfigSection(BaseModel):
@@ -295,26 +215,6 @@ class RetryConfigSection(BaseModel):
         return v
 
 
-class TemporalConfig(BaseModel):
-    """Optional Temporal runtime configuration."""
-
-    model_config = ConfigDict(frozen=True)
-
-    enabled: bool = Field(default=False)
-    host: str = Field(default="localhost:7233")
-    namespace: str = Field(default="default")
-    metadata_dir: str = Field(default=".ayder/temporal")
-    timeouts: TemporalTimeoutsConfig = Field(default_factory=TemporalTimeoutsConfig)
-    retry: TemporalRetryConfig = Field(default_factory=TemporalRetryConfig)
-
-    @field_validator("host", "namespace", "metadata_dir")
-    @classmethod
-    def validate_non_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("temporal host/namespace/metadata_dir must be non-empty")
-        return v
-
-
 def _coerce_skills_setting(value: Any) -> Any:
     """Accept None, a list of names, or "none" (any case). [] means "none"."""
     if value is None:
@@ -374,8 +274,8 @@ class Config(BaseModel):
     # bound. The old fixed 30 predates large-context models and thrashes a tiny
     # history window on a big context.
     max_history_messages: int = Field(default=0)
-    # LLM calls per user turn before the loop stops; 0 = unlimited.
-    max_iterations: int = Field(default=200)
+    # LLM calls per user turn before the loop stops; 0 = unlimited (default).
+    max_iterations: int = Field(default=0)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     # Ollama thinking mode. Defaults on because most local models in the
@@ -391,7 +291,6 @@ class Config(BaseModel):
     # it. Agents read [agents.<name>].skills, then their own profile_skills.
     skills: list[str] | Literal["none"] | None = Field(default=None)
     profile_skills: list[str] | Literal["none"] | None = Field(default=None)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     context_manager: ContextManagerConfigSection = Field(default_factory=ContextManagerConfigSection)
     retry: RetryConfigSection = Field(default_factory=RetryConfigSection)
     agent_timeout: int = Field(default=600)
@@ -471,10 +370,6 @@ class Config(BaseModel):
                     key if key.startswith("messaging_") else f"messaging_{key}"
                 )
                 new_data[field_name] = value
-
-        # Keep temporal section as nested config object
-        if "temporal" in data and isinstance(data["temporal"], dict):
-            new_data["temporal"] = data["temporal"]
 
         # Parse [agents.*] sections into AgentConfig objects
         agents_section = data.get("agents")

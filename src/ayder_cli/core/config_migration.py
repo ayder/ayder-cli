@@ -50,7 +50,6 @@ def render_v2_config(
     *,
     app_overrides: dict[str, Any] | None = None,
     logging_overrides: dict[str, Any] | None = None,
-    temporal_overrides: dict[str, Any] | None = None,
     llm_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Render a v2.0 config TOML using defaults + overrides."""
@@ -66,8 +65,6 @@ def render_v2_config(
     logging_cfg = dict(defaults.get("logging", {}))
     if logging_overrides:
         logging_cfg.update(logging_overrides)
-
-    temporal_cfg = _deep_merge_dict(dict(defaults.get("temporal", {})), temporal_overrides or {})
 
     llm_profiles: dict[str, dict[str, Any]] = {}
     for provider in LEGACY_PROVIDER_TABLES:
@@ -123,38 +120,6 @@ def render_v2_config(
     for name, level_value in sorted((logging_cfg.get("channels") or {}).items()):
         lines.append(f'{name} = {_toml_str(str(level_value))}')
 
-    lines.extend(
-        [
-            "",
-            "[temporal]",
-            f"enabled = {_toml_bool(bool(temporal_cfg.get('enabled', False)))}",
-            f'host = {_toml_str(str(temporal_cfg.get("host", "localhost:7233")))}',
-            f'namespace = {_toml_str(str(temporal_cfg.get("namespace", "default")))}',
-            f'metadata_dir = {_toml_str(str(temporal_cfg.get("metadata_dir", ".ayder/temporal")))}',
-            "",
-            "[temporal.timeouts]",
-        ]
-    )
-    timeouts = temporal_cfg.get("timeouts", {})
-    lines.extend(
-        [
-            f"workflow_schedule_to_close_seconds = {int(timeouts.get('workflow_schedule_to_close_seconds', 7200))}",
-            f"activity_start_to_close_seconds = {int(timeouts.get('activity_start_to_close_seconds', 900))}",
-            f"activity_heartbeat_seconds = {int(timeouts.get('activity_heartbeat_seconds', 30))}",
-            "",
-            "[temporal.retry]",
-        ]
-    )
-    retry = temporal_cfg.get("retry", {})
-    lines.extend(
-        [
-            f"initial_interval_seconds = {int(retry.get('initial_interval_seconds', 5))}",
-            f"backoff_coefficient = {float(retry.get('backoff_coefficient', 2.0))}",
-            f"maximum_interval_seconds = {int(retry.get('maximum_interval_seconds', 60))}",
-            f"maximum_attempts = {int(retry.get('maximum_attempts', 3))}",
-        ]
-    )
-
     for name in sorted(llm_profiles):
         profile = llm_profiles[name]
         driver = str(profile.get("driver", _DRIVER_BY_PROVIDER.get(name, "openai")))
@@ -181,10 +146,9 @@ def render_v2_config(
 
 def _extract_legacy_overrides(
     data: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     app_overrides: dict[str, Any] = {}
     logging_overrides: dict[str, Any] = {}
-    temporal_overrides: dict[str, Any] = {}
     llm_overrides: dict[str, dict[str, Any]] = {}
 
     provider = data.get("provider")
@@ -211,10 +175,6 @@ def _extract_legacy_overrides(
     logging_section = data.get("logging")
     if isinstance(logging_section, dict):
         logging_overrides = dict(logging_section)
-
-    temporal_section = data.get("temporal")
-    if isinstance(temporal_section, dict):
-        temporal_overrides = dict(temporal_section)
 
     for provider_name in LEGACY_PROVIDER_TABLES:
         section = data.get(provider_name)
@@ -259,7 +219,7 @@ def _extract_legacy_overrides(
                     llm_overrides.get(target_provider, {}), section
                 )
 
-    return app_overrides, logging_overrides, temporal_overrides, llm_overrides
+    return app_overrides, logging_overrides, llm_overrides
 
 
 def _backup_config(config_path: Path) -> Path:
@@ -316,14 +276,12 @@ def ensure_latest_config(
             (
                 app_overrides,
                 logging_overrides,
-                temporal_overrides,
                 llm_overrides,
             ) = _extract_legacy_overrides(parsed)
             new_content = render_v2_config(
                 defaults,
                 app_overrides=app_overrides,
                 logging_overrides=logging_overrides,
-                temporal_overrides=temporal_overrides,
                 llm_overrides=llm_overrides,
             )
         except Exception:  # noqa: BLE001 - migration boundary: legacy user config of any shape must still yield a usable v2 file

@@ -381,22 +381,6 @@ def update_plugin(
     return updated
 
 
-def _find_plugin_module(plugin_name: str, module_name: str, project_path: Path | None = None):
-    """Import a module from an installed plugin directory."""
-    for plugins_dir in _search_plugin_dirs(project_path):
-        plugin_dir = plugins_dir / plugin_name
-        if plugin_dir.exists():
-            plugin_path = str(plugin_dir)
-            sys.path.insert(0, plugin_path)
-            try:
-                sys.modules.pop(module_name, None)
-                return importlib.import_module(module_name)
-            finally:
-                if plugin_path in sys.path:
-                    sys.path.remove(plugin_path)
-    raise PluginError(f"Plugin '{plugin_name}' not found")
-
-
 def _get_builtin_tags() -> set[str]:
     """Get the set of builtin tool tags to prevent conflicts."""
     try:

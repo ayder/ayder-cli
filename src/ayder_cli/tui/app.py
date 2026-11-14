@@ -154,6 +154,15 @@ class AppCallbacks:
         # Schedule panel cleanup after a short delay
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
         self._app.set_timer(2.0, lambda: tool_panel.clear_completed())
+        # Each skill call in a batch reads the history from before the batch, so
+        # the label it set can be stale. The batch's results are in the history
+        # now (ChatLoop calls this after appending them): show the final set.
+        from ayder_cli.core.skills import active_skills
+        from ayder_cli.tools.builtins.skill import status_text
+
+        self._app.query_one("#status-bar", StatusBar).set_skill(
+            status_text([load.name for load in active_skills(self._app.messages)])
+        )
 
     def on_system_message(self, text: str) -> None:
         chat_view = self._app.query_one("#chat-view", ChatView)
@@ -334,10 +343,7 @@ class AyderApp(App):
             setup_logging(self._log_settings)
         self._logging_level = get_effective_log_level()
 
-        if isinstance(self.config, dict):
-            actual_model = self.config.get("model", model)
-        else:
-            actual_model = self.config.model
+        actual_model = self.config.model
         self.model = actual_model if actual_model != "default" else model
 
         self.llm = rt.llm_provider
@@ -372,7 +378,7 @@ class AyderApp(App):
 
         # Initialize agent registry if agents are configured (Part 1)
         self._agent_registry: AgentRegistry | None = None
-        if hasattr(self.config, 'agents') and isinstance(self.config.agents, dict) and self.config.agents:
+        if self.config.agents:
             # Agent progress fires once per streamed chunk. A persistent failure
             # would otherwise write one traceback per chunk, so the first
             # unexpected error records its stack and then switches this purely
@@ -434,8 +440,8 @@ class AyderApp(App):
                 project_ctx=rt.project_ctx,
                 process_manager=self._process_manager,
                 permissions=self.permissions,
-                agent_timeout=getattr(self.config, 'agent_timeout', 600),
-                max_concurrent_agents=getattr(self.config, 'max_concurrent_agents', 5),
+                agent_timeout=self.config.agent_timeout,
+                max_concurrent_agents=self.config.max_concurrent_agents,
                 on_progress=_agent_progress,
                 on_complete=_agent_complete,
                 session_id=self._session_id,
@@ -474,23 +480,11 @@ class AyderApp(App):
         self._activity_timer: Timer | None = None
 
         # Create chat loop
-        num_ctx = (
-            self.config.num_ctx
-            if not isinstance(self.config, dict)
-            else self.config.get("num_ctx", 65536)
-        )
+        num_ctx = self.config.num_ctx
         self._callbacks = AppCallbacks(self)
-        if isinstance(self.config, dict):
-            max_output_tokens = self.config.get("max_output_tokens", 32768)
-            stop_sequences = self.config.get("stop_sequences", [])
-            tool_tags_list = self.config.get("tool_tags", ["core", "metadata"])
-        else:
-            max_output_tokens = getattr(self.config, "max_output_tokens", 32768)
-            raw_stop = getattr(self.config, "stop_sequences", [])
-            stop_sequences = list(raw_stop) if raw_stop is not None else []
-            raw_tags = getattr(self.config, "tool_tags", ["core", "metadata"])
-            tool_tags_list = list(raw_tags) if raw_tags is not None else []
-        tool_tags = frozenset(tool_tags_list) if tool_tags_list else None
+        max_output_tokens = self.config.max_output_tokens
+        stop_sequences = list(self.config.stop_sequences)
+        tool_tags = frozenset(self.config.tool_tags) if self.config.tool_tags else None
         # Auto-enable installed plugins so they work without a manual /plugin toggle.
         from ayder_cli.tools import plugin_status
         from ayder_cli.tools.definition import _GLOBAL_PLUGIN_DEFS
@@ -510,8 +504,8 @@ class AyderApp(App):
                 stop_sequences=stop_sequences,
                 permissions=self.permissions,
                 tool_tags=tool_tags,
-                max_history=getattr(self.config, 'max_history_messages', 0),
-                max_iterations=getattr(self.config, 'max_iterations', 200),
+                max_history=self.config.max_history_messages,
+                max_iterations=self.config.max_iterations,
                 session_id=self._session_id,
             ),
             callbacks=self._callbacks,
@@ -543,8 +537,7 @@ class AyderApp(App):
             base_prompt = self._system_prompt_override
         else:
             base_prompt = get_system_prompt(self.config.prompt)
-        raw_tags = getattr(self.config, "tool_tags", None) if not isinstance(self.config, dict) else self.config.get("tool_tags")
-        tags = frozenset(raw_tags) if raw_tags else None
+        tags = frozenset(self.config.tool_tags) if self.config.tool_tags else None
         tool_prompts = self.registry.get_system_prompts(tags=tags)
         system_prompt = base_prompt + self._environment_prompt + tool_prompts
         self.messages.append({"role": "system", "content": system_prompt})
@@ -1026,13 +1019,7 @@ class AyderApp(App):
 
     def _messaging_enabled(self) -> bool:
         """Whether the peer inbox should be published for this session."""
-        cfg = self.config
-        if isinstance(cfg, dict):
-            section = cfg.get("messaging")
-            if isinstance(section, dict):
-                return bool(section.get("enabled", True))
-            return bool(cfg.get("messaging_enabled", True))
-        return bool(getattr(cfg, "messaging_enabled", True))
+        return self.config.messaging_enabled
 
     async def _start_inbox(self) -> None:
         """Bind the peer inbox; a failure leaves the session running without one."""

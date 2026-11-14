@@ -17,27 +17,33 @@ This document provides coding standards, tool configurations, and workflows for 
 | Package | Purpose | Version |
 |---------|---------|---------|
 | **openai** | OpenAI-compatible API client for LLM calls | latest |
-| **textual** | Terminal User Interface (TUI) framework | >=0.50.0 |
+| **ollama** | Native Ollama API client (Ollama provider) | >=0.6.2 |
+| **loguru** | Logging backend (channel loggers, masking sinks) | >=0.7,<0.8 |
+| **httpx** | HTTP client for `fetch_web` | latest |
+| **mcp** | Model Context Protocol client (built-in MCP) | >=1.19,<2 |
 | **rich** | Rich text and beautiful formatting | >=13.0.0 |
-| **prompt-toolkit** | Interactive CLI prompts and auto-completion | latest |
+| **textual** | Terminal User Interface (TUI) framework | ==8.2.7 |
 | **python-dotenv** | Environment variable management | >=1.0.0 |
-| **httpx** | Async HTTP client (Ollama API, fetch_web) | latest |
+| **tiktoken** | Token counting for context management | >=0.7.0 |
+
+Optional extras: `anthropic`, `google` (google-genai), `qwen` (dashscope), `glm` (zhipuai>=2, with pydantic<2.14 because zhipuai holds mcp at 1.19.0), `all` (the four provider extras), `libcst` (for plugins that do CST code transforms); `mcp` is an empty compatibility extra.
 
 ### Development Dependencies
 
 | Package | Purpose | Version |
 |---------|---------|---------|
-| **pytest** | Testing framework | >=9.0.2 |
-| **pytest-xdist** | Parallel test execution | >=3.5.0 |
-| **pytest-timeout** | Test timeout protection | >=2.2.0 |
+| **pytest** | Testing framework | >=9.0.3 |
+| **pytest-cov** | Code coverage | >=7.1.0 |
+| **pytest-xdist** | Parallel test execution | >=3.8.0 |
+| **pytest-timeout** | Test timeout protection | >=2.4.0 |
 | **pytest-instafail** | Show failures immediately | >=0.5.0 |
-| **pytest-sugar** | Beautiful progress bar | >=1.0.0 |
-| **pytest-cov** | Code coverage | >=7.0.0 |
-| **ruff** | Fast Python linter | latest |
-| **mypy** | Static type checker | latest |
-| **pyright** | Static type checker (Microsoft) | >=1.1.0 |
-| **uv** | Fast Python package manager | >=0.10.0 |
-| **poethepoet** | Task runner | >=0.24.0 |
+| **pytest-asyncio** | Async test support | >=1.3.0 |
+| **poethepoet** | Task runner | >=0.44.0 |
+| **ruff** | Fast Python linter | >=0.15.12 |
+| **mypy** | Static type checker | >=1.20.2 |
+| **pyright** | Static type checker (Microsoft) | >=1.1.409 |
+
+The dev group also installs the optional provider SDKs (`anthropic`, `google-genai`, `dashscope`, `zhipuai>=2`) so their tests run.
 
 ### Build System
 
@@ -211,7 +217,7 @@ This project uses `uv` as the package manager with a pre-configured `.venv`:
 Poe the Poet is the preferred task runner. It automatically uses the `.venv`:
 
 ```bash
-# Run tests (excludes slow TUI tests) - uses pytest-timeout, instafail, sugar
+# Run tests (excludes slow TUI tests) - uses pytest-timeout
 uv run --active poe test
 
 # Run tests in parallel (fastest - uses pytest-xdist)
@@ -248,7 +254,7 @@ uv run poe --help
 **Pytest Plugins Used:**
 - **pytest-timeout** (30s) - Prevents tests from hanging
 - **pytest-instafail** - Shows failures immediately
-- **pytest-sugar** - Beautiful progress bar
+- **pytest-asyncio** - Async test support
 - **pytest-xdist** (-n auto) - Parallel execution (test-fast only)
 - **pytest-cov** - Coverage reporting (test-cov only)
 
@@ -343,10 +349,15 @@ uv run ruff check src/ --fix
 
 ### Ruff Standards
 
-- **F Rules**: Pyflakes (undefined names, unused imports)
-- **E/W Rules**: pycodestyle (formatting)
-- **I Rules**: isort (import sorting)
-- **N Rules**: pep8-naming (naming conventions)
+The rule set is `select` under `[tool.ruff.lint]` in pyproject.toml:
+
+- **E4, E7, E9**: pycodestyle import, statement and runtime-error rules (no formatting rules)
+- **F**: Pyflakes (undefined names, unused imports)
+- **TRY400, TRY401**: tryceratops `error-instead-of-exception` and `verbose-log-message`
+- **BLE001**: flake8-blind-except `blind-except`
+- **LOG, G**: flake8-logging and flake8-logging-format
+
+`tests/**/*.py` ignores `BLE001` and `G004`. `poe lint` checks `src/` only.
 
 **Before committing, ensure:**
 ```bash
