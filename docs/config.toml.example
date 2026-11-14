@@ -113,10 +113,14 @@ tool_tags = ["core", "metadata", "background", "http"]
 #   "claude"           — dark navy aesthetic with explicit RGB colors.
 theme = "ayder"
 #
-# Palette — the colour palette the "ayder" layout is painted with (App.theme).
-# Ignored by the self-contained "claude" theme.
+# Palette — the colour scheme the "ayder" layout is painted with (App.theme),
+# including the syntax colours of code blocks in replies. Ignored by the
+# self-contained "claude" theme. Any name Ctrl+P > Theme lists is valid;
+# Ctrl+P > Theme also switches the scheme for the current session only. An
+# unknown name falls back to the layout's own palette, with a message in the chat.
 #   "auto" (default)   — the layout's own ANSI palette: passthrough that respects
-#                        your terminal's background and palette on every terminal.
+#                        your terminal's background and palette on every terminal;
+#                        code blocks use the terminal's ANSI colours.
 #   "ansi-dark"/"ansi-light" — force the ANSI passthrough palette explicitly.
 #   "monokai", "dracula", "nord", "gruvbox", "tokyo-night", … — any Textual theme
 #                        overlays a fixed RGB palette on the ayder layout. NOTE:

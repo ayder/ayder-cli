@@ -331,7 +331,7 @@ AyderApp (Textual App)
 │   ├── ToolPanel (custom widget) ← Tool calls; hidden until Ctrl+O, opens at the top (fixed 10% height)
 │   ├── ThinkingPanel (custom widget) ← Reasoning stream; Ctrl+T, opens at the top (fixed 30% height)
 │   ├── AgentPanel (custom widget) ← Agent runs; Ctrl+G, opens at the top (fixed 10% height)
-│   ├── ChatView (custom widget) ← Messages displayed here
+│   ├── ChatView (custom widget) ← Messages displayed here; assistant replies are AssistantReply widgets (Textual Markdown, selectable with the mouse, streamed through Markdown.append; code-block colours follow the Textual theme, `[ui] palette`)
 │   ├── ActivityBar (custom widget) ← Status indicators
 │   ├── CLIInputBar (custom widget) ← User input
 │   └── StatusBar (custom widget) ← Working directory (~ for home, shortened from the left), model, effort, mode, context usage, files
@@ -584,7 +584,7 @@ It exposes key components like AyderApp, widgets (ChatView, ToolPanel), and scre
 
 AyderApp is the main Textual application implementing a chat-style interface:
 - **Layout**: ToolPanel, ThinkingPanel and AgentPanel (hidden by default; they open at the top, above the chat, at a fixed 10% / 30% / 10% of the screen height with their content scrolling inside, and toggling prints no chat message), ChatView, ActivityBar, CLIInputBar, StatusBar
-- **Keybindings**: Ctrl+Q (quit), Ctrl+C/X (cancel), Ctrl+L (clear), Ctrl+O (toggle tools)
+- **Keybindings**: Ctrl+Q (quit), Ctrl+C (copy the mouse selection, else cancel), Ctrl+X (cancel), Esc (clear the selection), Ctrl+L (clear), Ctrl+O (toggle tools)
 - **Features**:
   - Async processing with worker threads
   - Tool confirmation with diff previews

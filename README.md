@@ -481,13 +481,36 @@ inside the Ollama summary.
 | Shortcut | Action |
 | -------- | ------ |
 | `Ctrl+Q` | Quit |
-| `Ctrl+X` / `Ctrl+C` | Cancel current operation |
+| `Ctrl+X` | Cancel current operation |
+| `Ctrl+C` | Copy selected text; cancel the current operation when nothing is selected |
 | `Ctrl+L` | Clear chat |
 | `Ctrl+O` | Toggle tool panel |
 | `Ctrl+T` | Toggle thinking/reasoning blocks |
-| `Shift` + drag | Select text with the mouse (Option in iTerm2 and Terminal.app) |
+| Drag | Select text in the chat, including assistant replies; `Ctrl+C` copies it through OSC 52, which needs the terminal's clipboard access (Terminal.app has none) |
+| `Esc` | Clear the selection |
+| `Shift` + drag | The terminal's own selection (Option in iTerm2 and Terminal.app) |
+| `Ctrl+P` | Command palette; **Theme** switches the colour scheme for this session |
 | `PageUp` / `PageDown` | Scroll chat view |
 | `Tab` | Auto-complete slash commands |
+
+### Colour Scheme
+
+The TUI's colours, including the syntax colours of code blocks in replies, come from a
+Textual theme. Set it in `~/.ayder/config.toml`:
+
+```toml
+[ui]
+theme = "ayder"     # layout: ayder (default), ayder-dark, ayder-light or claude
+palette = "auto"    # colour scheme of the ayder layout
+```
+
+- `auto`, the default, keeps your terminal's own colours; code uses its ANSI palette.
+- Any Textual theme (`monokai`, `dracula`, `nord`, `gruvbox`, `tokyo-night`,
+  `catppuccin-mocha`, `solarized-light`, …) paints its own colours, code included,
+  and its own background.
+- `Ctrl+P` → **Theme** lists every theme and switches for the current session only.
+- An unknown name falls back to the layout's own palette and says so in the chat.
+- The `claude` layout keeps its fixed colours and ignores `palette`.
 
 ## Efficiency & Optimization
 
