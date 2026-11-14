@@ -154,6 +154,15 @@ class AppCallbacks:
         # Schedule panel cleanup after a short delay
         tool_panel = self._app.query_one("#tool-panel", ToolPanel)
         self._app.set_timer(2.0, lambda: tool_panel.clear_completed())
+        # Each skill call in a batch reads the history from before the batch, so
+        # the label it set can be stale. The batch's results are in the history
+        # now (ChatLoop calls this after appending them): show the final set.
+        from ayder_cli.core.skills import active_skills
+        from ayder_cli.tools.builtins.skill import status_text
+
+        self._app.query_one("#status-bar", StatusBar).set_skill(
+            status_text([load.name for load in active_skills(self._app.messages)])
+        )
 
     def on_system_message(self, text: str) -> None:
         chat_view = self._app.query_one("#chat-view", ChatView)
