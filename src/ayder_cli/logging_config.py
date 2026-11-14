@@ -20,6 +20,20 @@ from ayder_cli.masking import mask
 
 _configured = False
 _current_level = "NONE"
+_log_dir = Path(".ayder/log")
+
+
+def set_log_dir(file_path: str) -> None:
+    """Remember the directory of the main log file (cli.py calls this after
+    setup_logging), for files that live beside it: stderr.log, mcp-<name>.log."""
+    global _log_dir
+    _log_dir = Path(file_path).expanduser().resolve().parent
+
+
+def get_log_dir() -> Path:
+    """Where files beside the main log go; ``.ayder/log`` until set_log_dir runs."""
+    return _log_dir
+
 
 # Floored at INFO. Logger names are dot-hierarchical: openai's httpx2/httpcore2
 # stack is not under httpx/httpcore, so it needs its own entries.
