@@ -4,7 +4,7 @@ import ayder_cli.tui as tui
 from ayder_cli.providers import ProviderUnavailableError
 
 
-def test_run_tui_exits_when_provider_unavailable(monkeypatch, capsys):
+def test_run_tui_exits_when_provider_unavailable(monkeypatch, capsys, tmp_path):
     """run_tui() prints the actionable error and raises SystemExit(1)."""
     def boom(*a, **k):
         raise ProviderUnavailableError(
@@ -14,6 +14,7 @@ def test_run_tui_exits_when_provider_unavailable(monkeypatch, capsys):
         )
     # run_tui constructs AyderApp (module-global in ayder_cli.tui); patch it to raise.
     monkeypatch.setattr(tui, "AyderApp", boom)
+    monkeypatch.setattr(tui, "get_log_dir", lambda: tmp_path)  # stderr.log goes here
 
     with pytest.raises(SystemExit) as ei:
         tui.run_tui(permissions=set())
