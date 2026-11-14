@@ -1,5 +1,6 @@
 """Unit tests for retry config and error classifier."""
 import httpx
+import httpx2
 import pytest
 
 from ayder_cli.providers.retry import (
@@ -32,6 +33,16 @@ def test_classify_httpx_connect_error_is_retryable():
 
 def test_classify_httpx_read_timeout_is_retryable():
     err = httpx.ReadTimeout("read timed out")
+    assert classify_error(err) == RetryVerdict.RETRYABLE
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    ["ConnectError", "ReadError", "ReadTimeout", "RemoteProtocolError", "TransportError"],
+)
+def test_classify_httpx2_transport_errors_are_retryable(error_type):
+    """openai 3.x and anthropic 2.x run on httpx2; its transport errors retry like httpx's."""
+    err = getattr(httpx2, error_type)("transport failure")
     assert classify_error(err) == RetryVerdict.RETRYABLE
 
 
