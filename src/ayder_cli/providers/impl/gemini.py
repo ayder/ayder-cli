@@ -16,6 +16,18 @@ from ayder_cli.providers.base import (
 
 logger = get_logger("llm")
 
+# Keywords a Gemini function declaration's ``parameters`` Schema accepts, in the
+# JSON-Schema spelling ayder's tool definitions use. This is google-genai 3.3.0's
+# ``types.Schema`` field set minus ``additional_properties`` (the Gemini API rejects
+# it: 400 "Unknown name 'additional_properties'") and ``defs``/``ref`` (the SDK cannot
+# take them from ``$defs``/``$ref``). Anything else is dropped.
+_GEMINI_SCHEMA_KEYS = frozenset({
+    "type", "format", "title", "description", "nullable", "enum", "default",
+    "example", "items", "properties", "required", "propertyOrdering", "anyOf",
+    "minItems", "maxItems", "minLength", "maxLength", "minProperties",
+    "maxProperties", "minimum", "maximum", "pattern",
+})
+
 
 class GeminiProvider(AIProvider):
     """Provider for Google Gemini models."""
@@ -223,6 +235,41 @@ class GeminiProvider(AIProvider):
         return system_prompt.strip(), gemini_messages
 
     @staticmethod
+    def _gemini_schema(schema: Any) -> Any:
+        """Keep only the JSON-Schema keywords Gemini function declarations accept.
+
+        Recurses into ``properties`` (a name -> schema map: every property NAME is
+        kept), ``items`` and ``anyOf``. ``oneOf`` is sent as ``anyOf`` (Gemini has no
+        oneOf). A JSON-Schema type list such as ["string", "null"] becomes type
+        "string" with nullable true.
+        """
+        if not isinstance(schema, dict):
+            return schema
+        out: Dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "oneOf" and "anyOf" not in schema:
+                key = "anyOf"
+            if key not in _GEMINI_SCHEMA_KEYS:
+                continue
+            if key == "properties" and isinstance(value, dict):
+                out[key] = {
+                    name: GeminiProvider._gemini_schema(sub) for name, sub in value.items()
+                }
+            elif key == "items":
+                out[key] = GeminiProvider._gemini_schema(value)
+            elif key == "anyOf" and isinstance(value, list):
+                out[key] = [GeminiProvider._gemini_schema(sub) for sub in value]
+            elif key == "type" and isinstance(value, list):
+                concrete = [t for t in value if t != "null"]
+                if concrete:
+                    out["type"] = concrete[0]
+                if "null" in value:
+                    out["nullable"] = True
+            else:
+                out[key] = value
+        return out
+
+    @staticmethod
     def _convert_tools(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert OpenAI schema to Gemini schema."""
         gemini_tools = []
@@ -232,7 +279,9 @@ class GeminiProvider(AIProvider):
                 "function_declarations": [{
                     "name": func.get("name"),
                     "description": func.get("description", ""),
-                    "parameters": func.get("parameters", {"type": "object", "properties": {}})
+                    "parameters": GeminiProvider._gemini_schema(
+                        func.get("parameters", {"type": "object", "properties": {}})
+                    )
                 }]
             })
         return gemini_tools
