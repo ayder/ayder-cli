@@ -137,6 +137,9 @@ trace_enabled = false
 trace_path    = ".ayder/log/trace.jsonl"
 rotation      = "10 MB"
 retention     = "7 days"
+# Beside file_path the TUI also writes stderr.log (what writes to the terminal's
+# stdout/stderr while the UI runs, and a crash traceback) and each stdio MCP
+# server writes its stderr to mcp-<server>.log. There are no keys for them.
 # level = "INFO"   # optional; omitted entirely when unset, which means NONE.
                    # NONE, ERROR, WARNING, INFO, DEBUG, TRACE
 

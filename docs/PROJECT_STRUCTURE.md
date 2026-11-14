@@ -222,7 +222,7 @@ cli.py:main()
 | `tui/app.py` | Main TUI application | `AyderApp`, `AppCallbacks` |
 | `tui/adapter.py` | Adapter glue between `AyderApp` and `ChatLoop` | callback wiring helpers |
 | `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()` |
-| `tui/widgets.py` | Custom widgets | `ChatView`, `ToolPanel`, `CLIInputBar`, `StatusBar`, `AutoCompleteInput` |
+| `tui/widgets.py` | Custom widgets | `ChatView` (with `ThinkingItem`, `ToolBox`, `AgentBox`), `ActivityBar`, `CLIInputBar`, `StatusBar`, `AutoCompleteInput` |
 | `tui/screens.py` | Modal screens | `AgentListScreen`, `CLIConfirmScreen`, `CLIHelpScreen`, `CLIMultiSelectScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `EvrenTermsScreen`, `TaskEditScreen` |
 | `tui/parser.py` | TUI-specific parsing | `content_processor()` |
 | `tui/helpers.py` | UI helpers | `create_tui_banner()` |
@@ -328,10 +328,7 @@ AyderApp (Textual App)
 ├── CSS (from theme_manager.py)
 ├── Compose:
 │   ├── Banner (Static)
-│   ├── ToolPanel (custom widget) ← Tool calls; hidden until Ctrl+O, opens at the top (fixed 10% height)
-│   ├── ThinkingPanel (custom widget) ← Reasoning stream; Ctrl+T, opens at the top (fixed 30% height)
-│   ├── AgentPanel (custom widget) ← Agent runs; Ctrl+G, opens at the top (fixed 10% height)
-│   ├── ChatView (custom widget) ← Messages displayed here; assistant replies are AssistantReply widgets (Textual Markdown, selectable with the mouse, streamed through Markdown.append; code-block colours follow the Textual theme, `[ui] palette`)
+│   ├── ChatView (custom widget) ← Messages displayed here, and the thinking, tool and agent items in order (ThinkingItem: a bordered box that grows to 8 tail rows; ToolBox and AgentBox: one line until Ctrl+O / Ctrl+G expand them to the full output); assistant replies are AssistantReply widgets (Textual Markdown, selectable with the mouse, streamed through Markdown.append; code-block colours follow the Textual theme, `[ui] palette`)
 │   ├── ActivityBar (custom widget) ← Status indicators
 │   ├── CLIInputBar (custom widget) ← User input
 │   └── StatusBar (custom widget) ← Working directory (~ for home, shortened from the left), model, effort, mode, context usage, files
@@ -455,7 +452,7 @@ from ayder_cli.tools.builtins.filesystem import read_file, file_editor
 # TUI
 from ayder_cli.tui.app import AyderApp
 from ayder_cli.tui.commands import COMMAND_MAP
-from ayder_cli.tui.widgets import ChatView, ToolPanel
+from ayder_cli.tui.widgets import ChatView, CLIInputBar
 from ayder_cli.tui.screens import CLIConfirmScreen
 ```
 
@@ -578,13 +575,14 @@ The TUI module provides a clean, terminal-like interface with:
 - Status bar with contextual information, starting with the working directory (home shown as `~`; a long path is shortened from the left to at most a third of the bar, never below `…/<last component>`, regardless of the other items, which may overflow the bar's right edge)
 - Keyboard-first operation, with mouse support enabled
 
-It exposes key components like AyderApp, widgets (ChatView, ToolPanel), and screens (CLIConfirmScreen) for building the terminal interface.
+It exposes key components like AyderApp, widgets (ChatView, CLIInputBar), and screens (CLIConfirmScreen) for building the terminal interface.
 
 ### TUI Application File Summary (src/ayder_cli/tui/app.py)
 
 AyderApp is the main Textual application implementing a chat-style interface:
-- **Layout**: ToolPanel, ThinkingPanel and AgentPanel (hidden by default; they open at the top, above the chat, at a fixed 10% / 30% / 10% of the screen height with their content scrolling inside, and toggling prints no chat message), ChatView, ActivityBar, CLIInputBar, StatusBar
-- **Keybindings**: Ctrl+Q (quit), Ctrl+C (copy the mouse selection, else cancel), Ctrl+X (cancel), Esc (clear the selection), Ctrl+L (clear), Ctrl+O (toggle tools)
+- **Layout**: ChatView (messages plus the thinking, tool and agent items, so the chat never shrinks while a turn runs), ActivityBar, CLIInputBar, StatusBar. The app runs full-screen (`app.run(inline=False)`).
+- **Keybindings**: Ctrl+Q (quit), Ctrl+C (copy the mouse selection, else cancel), Ctrl+X (cancel), Esc (clear the selection), Ctrl+L (clear), Ctrl+O (expand tool and agent items), Ctrl+T (expand thinking), Ctrl+G (expand agent items)
+- **Stray output**: `run_tui` always captures fds 1 and 2 into `<log dir>/stderr.log` and gives Textual a private dup of the terminal (`_StderrCapture`), restored before the exit path; a stdio MCP server's stderr goes to `<log dir>/mcp-<server>.log`. A crash leaves a one-line notice pointing at `stderr.log`.
 - **Features**:
   - Async processing with worker threads
   - Tool confirmation with diff previews

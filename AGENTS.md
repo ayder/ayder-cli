@@ -163,7 +163,7 @@ ayder-cli/
 │   │   ├── screens.py          # Modal screens (confirm, select, permission, task edit, …)
 │   │   ├── theme_manager.py    # Theme loading and CSS
 │   │   ├── types.py            # MessageType, ConfirmResult
-│   │   └── widgets.py          # ChatView, ToolPanel, CLIInputBar, StatusBar, …
+│   │   └── widgets.py          # ChatView (+ thinking/tool/agent items), CLIInputBar, StatusBar, …
 │   │
 │   ├── skills/                 # Packaged built-in skills (development-workflow/SKILL.md)
 │   │
