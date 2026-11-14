@@ -26,7 +26,7 @@ This document provides coding standards, tool configurations, and workflows for 
 | **python-dotenv** | Environment variable management | >=1.0.0 |
 | **tiktoken** | Token counting for context management | >=0.7.0 |
 
-Optional extras: `anthropic`, `google` (google-genai), `qwen` (dashscope), `glm` (zhipuai>=2), `all` (the four provider extras), `libcst` (for plugins that do CST code transforms); `mcp` is an empty compatibility extra.
+Optional extras: `anthropic`, `google` (google-genai), `qwen` (dashscope), `glm` (zhipuai>=2, with pydantic<2.14 because zhipuai holds mcp at 1.19.0), `all` (the four provider extras), `libcst` (for plugins that do CST code transforms); `mcp` is an empty compatibility extra.
 
 ### Development Dependencies
 
