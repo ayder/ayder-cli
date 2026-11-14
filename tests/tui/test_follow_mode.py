@@ -130,3 +130,61 @@ async def test_scrolling_down_but_not_to_the_end_keeps_the_position():
         await _settle(pilot)
 
         assert chat_view.scroll_y == position
+
+
+# Scrolling "down" while already at the end must not stop the chat following:
+# the next content is still pinned to the end. Each case adds content AFTER the
+# key, which is what a real stream does.
+
+
+async def _assert_follows_new_content(chat_view, pilot):
+    chat_view.add_system_message("arrives after the key")
+    await _settle(pilot)
+    assert chat_view.scroll_y == chat_view.max_scroll_y
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("key", ["pagedown", "ctrl+pagedown"])
+async def test_down_key_at_the_end_from_the_input_keeps_following(key):
+    app = AyderApp(model="test")
+    async with app.run_test(size=(100, 40)) as pilot:
+        chat_view = await _filled_app_chat(app, pilot)  # the input has focus
+
+        await pilot.press(key)
+        await _settle(pilot)
+
+        await _assert_follows_new_content(chat_view, pilot)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("key", ["down", "pagedown"])
+async def test_down_key_at_the_end_in_the_focused_chat_keeps_following(key):
+    app = AyderApp(model="test")
+    async with app.run_test(size=(100, 40)) as pilot:
+        chat_view = await _filled_app_chat(app, pilot)
+        await pilot.click("#chat-view", offset=(5, 5))  # clicking focuses the chat
+        await pilot.pause()
+        assert app.focused is chat_view
+
+        await pilot.press(key)
+        await _settle(pilot)
+
+        await _assert_follows_new_content(chat_view, pilot)
+
+
+@pytest.mark.anyio
+async def test_page_up_then_ten_page_downs_keeps_following():
+    app = AyderApp(model="test")
+    async with app.run_test(size=(100, 40)) as pilot:
+        chat_view = await _filled_app_chat(app, pilot)
+        await pilot.press("pageup")
+        await _settle(pilot)
+        assert chat_view.scroll_y < chat_view.max_scroll_y
+
+        for _ in range(10):  # more than needed to get back to the end
+            await pilot.press("pagedown")
+            await pilot.pause()
+        await _settle(pilot)
+        assert chat_view.scroll_y == chat_view.max_scroll_y
+
+        await _assert_follows_new_content(chat_view, pilot)

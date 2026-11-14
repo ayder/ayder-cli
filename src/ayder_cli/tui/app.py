@@ -1148,7 +1148,7 @@ class AyderApp(App):
     def action_scroll_chat_down(self) -> None:
         """PageDown: scroll the chat view."""
         chat_view = self.query_one("#chat-view", ChatView)
-        chat_view.scroll_page_down(animate=False)
+        chat_view.page_down()
 
     def action_clear(self) -> None:
         """Clear chat history."""

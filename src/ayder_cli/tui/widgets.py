@@ -430,6 +430,28 @@ class ChatView(VerticalScroll):
         """
         self.anchor()
 
+    def page_down(self) -> None:
+        """Scroll one page down; at the end, do nothing.
+
+        Textual releases the anchor on any scroll and re-arms it only when the
+        scroll position changes, so a scroll that lands where it already is (down
+        at the end) would leave the chat un-anchored and the next content would
+        not be followed.
+        """
+        if not self.is_vertical_scroll_end:
+            self.scroll_page_down(animate=False)
+
+    def line_down(self) -> None:
+        """Scroll one line down; at the end, do nothing (see ``page_down``)."""
+        if not self.is_vertical_scroll_end:
+            self.scroll_down(animate=False)
+
+    def action_page_down(self) -> None:
+        self.page_down()
+
+    def action_scroll_down(self) -> None:
+        self.line_down()
+
     def disable_follow_mode(self) -> None:
         """Stop following the end (user is reading history)."""
         self.release_anchor()
@@ -1196,7 +1218,7 @@ class _SubmitTextArea(TextArea):
             event.prevent_default()
             event.stop()
             chat_view = self.app.query_one("#chat-view", ChatView)
-            chat_view.scroll_page_down(animate=False)
+            chat_view.page_down()
             return
 
         if event.key == "ctrl+pageup":
@@ -1211,7 +1233,7 @@ class _SubmitTextArea(TextArea):
             event.prevent_default()
             event.stop()
             chat_view = self.app.query_one("#chat-view", ChatView)
-            chat_view.scroll_down(animate=False)
+            chat_view.line_down()
             return
 
         if event.key == "home":
