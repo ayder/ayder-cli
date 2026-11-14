@@ -191,12 +191,6 @@ retention     = "7 days"
 enabled = true
 max_context_tokens = 8192
 
-[temporal]
-enabled = false
-host = "localhost:7233"
-namespace = "default"
-metadata_dir = ".ayder/temporal"
-
 # --- Provider Profiles ---
 
 [llm.my_local_ollama]

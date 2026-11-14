@@ -139,39 +139,6 @@ class TestConfigValidationLoggingLevel:
         assert "TRACE" in message, "the message must list the full current level set"
 
 
-class TestConfigValidationTemporal:
-    """Tests for temporal nested validation rules."""
-
-    def test_temporal_timeout_non_positive_raises_error(self):
-        with pytest.raises(ValidationError) as exc_info:
-            Config(
-                temporal={
-                    "timeouts": {
-                        "workflow_schedule_to_close_seconds": 0,
-                    }
-                }
-            )
-        assert "temporal timeout values must be positive" in str(exc_info.value)
-
-    def test_temporal_retry_backoff_invalid_raises_error(self):
-        with pytest.raises(ValidationError) as exc_info:
-            Config(
-                temporal={
-                    "retry": {
-                        "backoff_coefficient": 0.5,
-                    }
-                }
-            )
-        assert "backoff_coefficient must be >= 1.0" in str(exc_info.value)
-
-    def test_temporal_required_strings_non_empty(self):
-        with pytest.raises(ValidationError) as exc_info:
-            Config(temporal={"host": "  "})
-        assert "temporal host/namespace/metadata_dir must be non-empty" in str(
-            exc_info.value
-        )
-
-
 class TestConfigMaxHistoryDefault:
     """max_history_messages defaults to 0 (unlimited) directly, no sentinel magic.
 

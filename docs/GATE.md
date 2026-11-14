@@ -12,7 +12,7 @@ Input: the candidate SHA.
    gates and the test suite, and stops at the first failing task.
 4. Copy the final pytest summary line (`=== N passed, M skipped in …s ===`) verbatim.
 
-Last measured: `3042 passed, 2 skipped` on `fix/backlog-one-liners` (2026-11-14).
+Last measured: `3037 passed, 2 skipped` on `fix/remove-temporal` (2026-11-14).
 
 ## Report format
 
