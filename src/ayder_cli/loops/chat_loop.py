@@ -640,6 +640,7 @@ class ChatLoop:
                     err_msg = (
                         f"Error: tool call '{tc.function.name}' has missing required "
                         f"arguments: {', '.join(missing)}. "
+                        f"{_allowed_values(tc.function.name, missing)}"
                         f"Raw arguments received: {_bounded_echo(tc.function.arguments)}. "
                         f"You must provide all required arguments in the function call."
                     )
@@ -652,10 +653,11 @@ class ChatLoop:
                     self.cb.on_tool_start(tc.id, tc.function.name, args)
                     self.cb.on_tool_complete(tc.id, err_msg)
                     tool_log.warning(
-                        "Tool '{}' called with missing args {} ({} chars raw)",
+                        "Tool '{}' called with missing args {} ({} chars raw, keys={})",
                         tc.function.name,
                         missing,
                         len(tc.function.arguments),
+                        [k[:40] for k in sorted(args)][:20],
                     )
                     continue
 
@@ -986,6 +988,32 @@ def _bounded_echo(arguments) -> str:
     if len(echo) <= _ECHO_MAX_CHARS:
         return echo
     return f"{echo[:_ECHO_MAX_CHARS]}… ({len(echo)} chars)"
+
+
+def _allowed_values(tool_name: str, missing: list[str]) -> str:
+    """'Allowed values for <arg>: ...' for each missing argument whose schema has an enum.
+
+    Generic over every registered definition, MCP schemas included, so the list
+    is cut to ``_ECHO_MAX_CHARS`` like the argument echo. Returns "" or text
+    ending in a space.
+    """
+    from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+
+    tool_def = TOOL_DEFINITIONS_BY_NAME.get(tool_name)
+    props = (tool_def.parameters or {}).get("properties") if tool_def else None
+    if not isinstance(props, dict):
+        return ""
+    hints = []
+    for name in missing:
+        spec = props.get(name)
+        enum = spec.get("enum") if isinstance(spec, dict) else None
+        if not isinstance(enum, list) or not enum:
+            continue
+        values = ", ".join(json.dumps(v) for v in enum)
+        if len(values) > _ECHO_MAX_CHARS:
+            values = f"{values[:_ECHO_MAX_CHARS]}… ({len(enum)} values)"
+        hints.append(f"Allowed values for {name}: {values}. ")
+    return "".join(hints)
 
 
 def _truncate_for_tool(tool_name: str, content: str) -> str:

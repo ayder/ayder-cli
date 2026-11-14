@@ -282,3 +282,66 @@ def test_repaired_read_that_raises_gets_prefix():
     loop = _loop(None, registry=_RaisingRegistry())
     out = _batch(loop, _call("read_file", '{"file_path": "a.py", "start_line": 1', "c1"))
     assert "boom" in out["c1"] and out["c1"].startswith(REPAIRED)
+
+
+# --- missing-args diagnostics ----------------------------------------------------
+
+from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME, ToolDefinition  # noqa: E402
+
+
+def _missing_args_log(loguru_caplog):
+    hits = [r["message"] for r in loguru_caplog.records
+            if "called with missing args" in r["message"]]
+    assert len(hits) == 1, hits
+    return hits[0]
+
+
+def test_missing_arg_log_names_the_keys_that_arrived(loguru_caplog):
+    """New interface: the refusal log names the arguments that arrived, never their values."""
+    raw = json.dumps({"file_path": "a.py", "content": "VALUE-NOT-LOGGED"})
+    _batch(_loop(None), _call("file_editor", raw, "c1"))
+    hit = _missing_args_log(loguru_caplog)
+    assert "keys=['content', 'file_path']" in hit, hit
+    assert "VALUE-NOT-LOGGED" not in hit, hit
+
+
+def test_missing_arg_log_keys_are_capped(loguru_caplog):
+    """New interface: a name that is really content, or a flood of names, stays short."""
+    args = {f"k{i:02d}": 1 for i in range(30)}
+    args["A" * 5000] = 1  # sorts first
+    _batch(_loop(None), _call("file_editor", json.dumps(args), "c1"))
+    hit = _missing_args_log(loguru_caplog)
+    assert "A" * 40 in hit and "A" * 41 not in hit, hit
+    assert "k18" in hit and "k19" not in hit, hit
+    assert len(hit) < 1000, len(hit)
+
+
+def test_missing_enum_arg_lists_its_allowed_values():
+    """New interface: a missing argument whose schema has an enum gets its values."""
+    out = _batch(_loop(None), _call("file_editor", '{"file_path": "a.py"}', "c1"))["c1"]
+    enum = TOOL_DEFINITIONS_BY_NAME["file_editor"].parameters["properties"]["operation"]["enum"]
+    assert "missing required arguments: operation" in out, out
+    assert all(v in out for v in enum), out
+
+
+def test_enum_hint_is_generic_and_bounded(monkeypatch):
+    """New interface: any registered tool's enum is listed, and a huge one is cut short."""
+    values = [f"value{i:03d}" for i in range(200)]
+    probe = ToolDefinition(name="probe_tool", description="", parameters={
+        "type": "object",
+        "properties": {"mode": {"type": "string", "enum": values},
+                       "path": {"type": "string"}},
+        "required": ["mode", "path"],
+    })
+    monkeypatch.setitem(TOOL_DEFINITIONS_BY_NAME, "probe_tool", probe)
+    out = _batch(_loop(None), _call("probe_tool", "{}", "c1"))["c1"]
+    assert "missing required arguments: mode, path" in out, out
+    assert values[0] in out and values[-1] not in out, out
+    assert len(out) < 1000, len(out)
+
+
+def test_enum_hint_only_for_missing_arguments():
+    """Preservation: an enum argument that arrived is not listed."""
+    out = _batch(_loop(None), _call("file_editor", '{"operation": "write"}', "c1"))["c1"]
+    assert "missing required arguments: file_path" in out, out
+    assert "replace" not in out and "insert" not in out, out
