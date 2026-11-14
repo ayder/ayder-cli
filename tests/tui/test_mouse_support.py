@@ -17,4 +17,4 @@ def test_run_tui_runs_app_with_mouse_enabled():
         MockApp.return_value = mock_instance
         run_tui()
 
-    mock_instance.run.assert_called_once_with(inline=True, mouse=True)
+    mock_instance.run.assert_called_once_with(inline=False, mouse=True)

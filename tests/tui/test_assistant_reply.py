@@ -9,7 +9,7 @@ are now drawn with Textual's own Markdown widget (AssistantReply in widgets.py).
 Code colours come from the Textual theme the user picks ([ui] palette, or
 Ctrl+P > Theme for the session), never from a fixed scheme.
 
-Every test drives the real app inline, as `ayder` runs it, under a pinned
+Every test drives the real app under a pinned
 theme (the default one would come from the user's config). Painted rows are
 read from the screen compositor, a private Textual API used only here; it is
 on the Textual internals watch.
@@ -82,14 +82,6 @@ THEMES = ["ayder-dark", "ayder-light", "claude"]
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
-
-
-@pytest.fixture(autouse=True)
-def inline_driver(monkeypatch):
-    """Run the pilot the way the real app runs: inline."""
-    from textual.drivers.headless_driver import HeadlessDriver
-
-    monkeypatch.setattr(HeadlessDriver, "is_inline", property(lambda self: True))
 
 
 @pytest.fixture

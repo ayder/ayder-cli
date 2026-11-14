@@ -81,7 +81,7 @@ def run_tui(
         raise SystemExit(1)
 
     try:
-        app.run(inline=True, mouse=True)
+        app.run(inline=False, mouse=True)
     finally:
         # Mouse is enabled for the session; make sure reporting is switched off
         # on exit — Textual's driver may leave it on if the shutdown path doesn't
