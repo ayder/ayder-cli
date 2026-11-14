@@ -21,7 +21,11 @@ from ayder_cli.masking import mask
 _configured = False
 _current_level = "NONE"
 
-_SUPPRESSED_LIBS = ("markdown_it", "httpcore", "httpx", "openai", "anthropic")
+# Floored at INFO. Logger names are dot-hierarchical: openai's httpx2/httpcore2
+# stack is not under httpx/httpcore, so it needs its own entries.
+_SUPPRESSED_LIBS = (
+    "markdown_it", "httpcore", "httpx", "httpcore2", "httpx2", "openai", "anthropic",
+)
 
 
 @dataclass(frozen=True)

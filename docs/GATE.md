@@ -12,7 +12,7 @@ Input: the candidate SHA.
    gates and the test suite, and stops at the first failing task.
 4. Copy the final pytest summary line (`=== N passed, M skipped in …s ===`) verbatim.
 
-Last measured: `3031 passed, 2 skipped` on `fix/missing-args-diagnostics` (2026-11-14).
+Last measured: `3035 passed, 2 skipped` on `fix/httpcore2-log-noise` (2026-11-14).
 
 ## Report format
 

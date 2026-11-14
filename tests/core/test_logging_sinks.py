@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import pytest
 from loguru import logger
 
 from ayder_cli.logging_config import LoggingSettings, setup_logging
@@ -52,6 +53,26 @@ def test_third_party_records_get_external_channel(tmp_path):
         logger.remove(sid)
     assert seen and seen[0].get("channel") == "external"
     assert seen[0].get("lib") == "httpx"
+
+
+@pytest.mark.parametrize("name", [
+    pytest.param("httpcore.http11", id="httpcore"),
+    pytest.param("httpx", id="httpx"),
+    pytest.param("httpcore2.http11", id="httpcore2"),
+    pytest.param("httpx2", id="httpx2"),
+])
+def test_http_client_debug_is_floored_at_info(tmp_path, name):
+    """openai's newer HTTP stack logs under httpcore2/httpx2, which are not
+    children of httpcore/httpx: each family needs its own INFO floor. DEBUG
+    never reaches the main log; INFO still does."""
+    setup_logging(_settings(tmp_path, level="DEBUG"))
+    stdlib = logging.getLogger(name)
+    stdlib.debug("floored debug line")
+    stdlib.info("info line kept")
+    logger.complete()
+    main = (tmp_path / "ayder.log").read_text()
+    assert "floored debug line" not in main, main
+    assert "info line kept" in main, main
 
 
 def test_unbound_record_does_not_break_the_filter(tmp_path):
