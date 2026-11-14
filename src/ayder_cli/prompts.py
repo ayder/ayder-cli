@@ -141,7 +141,8 @@ confirm the echo matches; on mismatch discard it, log
    about failing agents.
 -  Validate .ayder folder exists and present in .gitignore file. if not create
    .ayder folder and add to .gitignore file
--  If working directory is not git managed, initialize git repo
+-  If working directory is not git managed, stop and ask the user before
+   running `git init`.
 - `AGENTS.md` defines the target branch (default `main`; else the repo default)
    and a `[validation_commands]` section. If missing, create it from project
    inspection; if it lacks `[validation_commands]`, ask the user before guessing.
