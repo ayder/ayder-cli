@@ -3,22 +3,22 @@
 {"class":"R-count","site":{"arg_index":"kw:arg_chars","expr":"arg_chars","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-count","site":{"arg_index":"kw:args_len","expr":"len(str(args or ''))","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-id","site":{"arg_index":"kw:call_id","expr":"call_id","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
-{"class":"R-count","site":{"arg_index":"kw:content_len","expr":"len(final_content)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-count","site":{"arg_index":"kw:content_len","expr":"content_len","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-class","site":{"arg_index":"kw:err_type","expr":"None if ok else type(exec_result.error).__name__","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-count","site":{"arg_index":"kw:hist_tokens","expr":"self._total_tokens","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-name","site":{"arg_index":"kw:model","expr":"self.config.model","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
-{"class":"R-count","site":{"arg_index":"kw:ms","expr":"int((time.perf_counter() - iter_started) * 1000)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-count","site":{"arg_index":"kw:ms","expr":"elapsed_ms","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-count","site":{"arg_index":"kw:ms","expr":"int((time.perf_counter() - started) * 1000)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-count","site":{"arg_index":"kw:n","expr":"iteration_n","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-name","site":{"arg_index":"kw:name","expr":"name","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
 {"class":"R-name","site":{"arg_index":"kw:name","expr":"name","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call_received"}}
 {"class":"R-status","site":{"arg_index":"kw:ok","expr":"ok","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop._emit_tool_call"}}
-{"class":"R-count","site":{"arg_index":"kw:reasoning_len","expr":"len(final_reasoning)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-count","site":{"arg_index":"kw:reasoning_len","expr":"reasoning_len","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-id","site":{"arg_index":"kw:run_id","expr":"run.run_id","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
 {"class":"R-count","site":{"arg_index":"kw:secs","expr":"run.working_time(now=run.finished_at)","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
 {"class":"R-id","site":{"arg_index":"kw:session_id","expr":"self._session_id","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
 {"class":"R-status","site":{"arg_index":"kw:status","expr":"run.status","message":null,"method":"emit_event","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
-{"class":"R-count","site":{"arg_index":"kw:tool_calls","expr":"len(normalized_tool_calls)","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-count","site":{"arg_index":"kw:tool_calls","expr":"tool_call_count","message":null,"method":"emit_event","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"' -> '.join(history_summary)","message":"Calling LLM with history: {}","method":"debug","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"', '.join(sorted((k for k in kwargs if k != 'messages')))","message":"Stream kwargs keys: {}","method":"trace","path":"providers/impl/openai.py","qualname":"OpenAIProvider.stream_with_tools"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"CONFIG_PATH","message":"Failed to load config at {}; no provider profiles available","method":"warning","path":"core/config.py","qualname":"list_provider_profiles"}}
@@ -28,6 +28,7 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"agent_name","message":"write_agent_note failed for agent '{}' run {}","method":"warning","path":"tools/builtins/notes.py","qualname":"write_agent_note"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"attempt + 1","message":"Provider retry budget exhausted after {} attempts; raising {}","method":"warning","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"attempt + 1","message":"Provider returned empty response after {} attempts; yielding final usage-only chunk","method":"warning","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
+{"class":"R-count","site":{"arg_index":"pos:0","expr":"cap","message":"Turn stopped after {} LLM calls (max_iterations)","method":"error","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"chunk.type","message":"Claude Chunk: type={}","method":"trace","path":"providers/impl/claude.py","qualname":"ClaudeProvider.stream_with_tools"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"chunk_count","message":"Stream completed: {} chunks total","method":"debug","path":"providers/impl/openai.py","qualname":"OpenAIProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"cmd_name if cmd_name in COMMAND_MAP else '<unknown command>'","message":"Slash command handler failed for {}","method":"error","path":"tui/app.py","qualname":"AyderApp._handle_command"}}
@@ -43,6 +44,7 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"driver.name","message":"{} ({}) failed mid-stream (error_type={}); transparently retrying with {} ({})","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"err_name","message":"Appending Tool Error [{}] to history: {} chars","method":"trace","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"existing_tc['function']['name']","message":"Tool call id reused by a different tool ({} then {}); calls would merge","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-status","site":{"arg_index":"pos:0","expr":"failed_stage","message":"Chat turn raised (stage={})","method":"error","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Diff preview generation failed for {}","method":"debug","path":"ui.py","qualname":"generate_diff_preview"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Failed to render file panel for {}","method":"warning","path":"ui.py","qualname":"print_file_content"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Failed to render file panel for {}","method":"warning","path":"ui.py","qualname":"print_file_content_rich"}}
@@ -106,6 +108,7 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"provider","message":"Provider {!r} has no [llm.{}] profile and no default [llm.{}] profile exists; the driver will default to 'openai' with built-in endpoint defaults. Available profiles: {}. Fix the provider name or add an [llm.{}] section.","method":"error","path":"core/config.py","qualname":"Config.flatten_nested_sections"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"provider","message":"Provider {!r} has no [llm.{}] profile; falling back to the default [llm.{}] profile. Available profiles: {}. Fix the provider name or add an [llm.{}] section.","method":"error","path":"core/config.py","qualname":"Config.flatten_nested_sections"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"raw_tc['function']['name']","message":"Expanding concatenated tool call '{}' into {} separate calls","method":"debug","path":"loops/chat_loop.py","qualname":"_expand_concatenated_tool_calls"}}
+{"class":"R-count","site":{"arg_index":"pos:0","expr":"reasoning_only","message":"Turn stopped: the model returned only reasoning {} times in a row","method":"error","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"rel_path","message":"Line count failed for {}","method":"debug","path":"tools/builtins/filesystem.py","qualname":"file_explorer"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"response.status_code","message":"Qwen streaming error: status={} message_chars={}","method":"error","path":"providers/impl/qwen.py","qualname":"QwenNativeProvider.stream_with_tools"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"result.category","message":"Recovery snapshot save returned error: category={} chars={}","method":"warning","path":"tools/builtins/context.py","qualname":"snapshot_conversation_for_clear"}}

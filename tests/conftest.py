@@ -8,6 +8,7 @@ bound with `ayder_cli.log.get_logger`.
 from __future__ import annotations
 
 import contextlib
+import functools
 import pathlib
 import sys
 
@@ -101,6 +102,48 @@ def capture_loguru():
     ModuleNotFoundError from any subdirectory.
     """
     return loguru_capture
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "allows_internal_turn_failure: the test expects a chat turn to end "
+        "failed/internal (the R2 fixture would otherwise fail it)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _turn_integrity(request, monkeypatch):
+    """R2: every chat turn publishes an outcome, and none ends ``failed``/``internal``.
+
+    Wraps ``ChatLoop.run`` and records the outcome of every turn the test
+    enters, reused loops included. A turn that ends ``failed``/``internal``
+    means the loop's own code broke, so it fails the test unless the test
+    carries ``@pytest.mark.allows_internal_turn_failure``. A turn that ends
+    with no outcome fails it too: the outer ``finally`` publishes one.
+    """
+    from ayder_cli.loops.chat_loop import ChatLoop
+
+    original = ChatLoop.run
+    outcomes: list = []
+
+    @functools.wraps(original)
+    async def run(self, *args, **kwargs):
+        try:
+            return await original(self, *args, **kwargs)
+        finally:
+            outcomes.append(self.outcome)
+
+    monkeypatch.setattr(ChatLoop, "run", run)
+    yield
+    problems = []
+    if any(outcome is None for outcome in outcomes):
+        problems.append("a chat turn ended with no outcome")
+    internal = [o for o in outcomes if o is not None and o.status == "failed" and o.stage == "internal"]
+    if internal and request.node.get_closest_marker("allows_internal_turn_failure") is None:
+        problems.append(f"a chat turn ended failed/internal: {internal[0].message}")
+    if problems:
+        pytest.fail("; ".join(problems), pytrace=False)
 
 
 @pytest.fixture(autouse=True)
