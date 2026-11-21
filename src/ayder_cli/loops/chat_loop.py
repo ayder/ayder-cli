@@ -548,6 +548,7 @@ class ChatLoop:
                         # bound above the outer try — one assignment point each.
                         # (Raw is kept for appending to history exactly as it arrived)
                         raw_tool_calls_for_history: list[dict] = []
+                        assembler = _ToolCallAssembler()
 
                         options: dict[str, Any] = {}
                         if getattr(self.config, "num_ctx", None):
@@ -592,84 +593,11 @@ class ChatLoop:
                                     self.cb.on_thinking_stop()
                                 stage = "internal"
                                 for tc in chunk.tool_calls:
-                                    # We use `_stream_index` if available, otherwise fallback to `len()` positioning
-                                    stream_idx = getattr(tc, "_stream_index", None)
-
-                                    # Find if we are already building this tool call
-                                    existing_tc = None
-
-                                    if stream_idx is not None:
-                                        # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
-                                        if stream_idx < len(raw_tool_calls_for_history):
-                                            existing_tc = raw_tool_calls_for_history[stream_idx]
-                                    else:
-                                        # Fallback: try matching by ID
-                                        existing_tc = next(
-                                            (x for x in raw_tool_calls_for_history if x["id"] == tc.id),
-                                            None
-                                        )
-
-                                    if existing_tc is None:
-                                        # New tool call start
-                                        new_tc = {
-                                            "id": tc.id,
-                                            "type": "function",
-                                            "function": {
-                                                "name": tc.name,
-                                                "arguments": tc.arguments
-                                            },
-                                        }
-                                        # Gemini needs its thought_signature replayed with
-                                        # the call. getattr: tests and plugins feed
-                                        # SimpleNamespace tool calls.
-                                        signature = getattr(tc, "thought_signature", None)
-                                        if signature:
-                                            new_tc["thought_signature"] = signature
-
-                                        # If we have a stream_index, ensure our array grows to that size
-                                        if stream_idx is not None:
-                                            while len(raw_tool_calls_for_history) < stream_idx:
-                                                raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
-                                            raw_tool_calls_for_history.append(new_tc)
-                                        else:
-                                            raw_tool_calls_for_history.append(new_tc)
-
-                                        # Only trigger UI start if we have a name
-                                        if tc.name:
-                                            stage = "ui"
-                                            self.cb.on_tool_start(tc.id, tc.name, {})
-                                            stage = "internal"
-                                    else:
-                                        # Update ID if the existing one was a dummy or fallback ID, and the new one is real
-                                        if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
-                                            existing_tc["id"] = tc.id
-
-                                        # Append arguments to existing tool call
-                                        # An id reused by a different tool means two
-                                        # distinct calls are about to merge into one
-                                        # entry, concatenating their arguments and
-                                        # dropping the later name. Never silent again.
-                                        if (
-                                            tc.name
-                                            and existing_tc["function"]["name"]
-                                            and tc.name != existing_tc["function"]["name"]
-                                        ):
-                                            tool_log.warning(
-                                                "Tool call id reused by a different tool "
-                                                "({} then {}); calls would merge",
-                                                existing_tc["function"]["name"],
-                                                tc.name,
-                                            )
-
-                                        # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
-                                        if tc.name and not existing_tc["function"]["name"]:
-                                            existing_tc["function"]["name"] = tc.name
-                                            stage = "ui"
-                                            self.cb.on_tool_start(existing_tc["id"], tc.name, {})
-                                            stage = "internal"
-
-                                        if tc.arguments:
-                                            existing_tc["function"]["arguments"] += tc.arguments
+                                    started = assembler.add(tc)
+                                    if started is not None:
+                                        stage = "ui"
+                                        self.cb.on_tool_start(started[0], started[1], {})
+                                        stage = "internal"
 
                             stage = "llm"  # the next chunk comes from the provider
 
@@ -679,8 +607,11 @@ class ChatLoop:
                         # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
                         # these into individual tool calls before normalizing.
                         raw_tool_calls_for_history = _expand_concatenated_tool_calls(
-                            raw_tool_calls_for_history
+                            assembler.calls()
                         )
+                        # Identity is settled after the split and before anything is
+                        # recorded or run (R9a).
+                        assembler.settle_ids(raw_tool_calls_for_history)
 
                         # Now that streaming is done, build the normalized objects for execution
                         for raw_tc in raw_tool_calls_for_history:
@@ -1633,6 +1564,115 @@ def _describe_llm_error(exc: BaseException) -> str:
     if len(detail) > _ERROR_BODY_CHARS:
         detail = f"{detail[:_ERROR_BODY_CHARS]}... ({len(detail) - _ERROR_BODY_CHARS} more chars)"
     return f"{text} - {detail}"
+
+
+class _ToolCallAssembler:
+    """Builds one response's tool calls from the provider's streamed deltas (seam A, R9).
+
+    A delta carries an optional stream index, an id, a name and an argument fragment. With an
+    index it addresses that slot; without one it continues the most recent call with the same id,
+    unless it names a different tool, which opens a new call. A name that arrives after the id
+    still names the call, a placeholder ``idx_`` id gives way to the real one, and a slot that was
+    padded to reach a later index takes the id and name of the first delta that fills it. A slot no
+    delta fills is absent. Arguments accumulate in a parts list, joined once per call.
+    """
+
+    def __init__(self) -> None:
+        # Each slot: {"id", "name", "parts", "signature", "filled"}.
+        self._slots: list[dict] = []
+
+    def add(self, tc: Any) -> tuple[str, str] | None:
+        """Apply one delta. Returns ``(id, name)`` when the call is now announced by name."""
+        slots = self._slots
+        index = getattr(tc, "_stream_index", None)
+        call = None
+        if index is not None:
+            if index < len(slots):
+                call = slots[index]
+        else:
+            for candidate in reversed(slots):
+                if candidate["filled"] and candidate["id"] == tc.id:
+                    call = candidate
+                    break
+            # An id reused by a different tool is a new call, not a continuation.
+            if call is not None and tc.name and call["name"] and tc.name != call["name"]:
+                call = None
+
+        if call is None or not call["filled"]:
+            signature = getattr(tc, "thought_signature", None)
+            fields = {
+                "id": tc.id,
+                "name": tc.name,
+                "parts": [tc.arguments] if tc.arguments else [],
+                "signature": signature or None,
+                "filled": True,
+            }
+            if call is not None:  # a padded slot that this delta fills
+                call.update(fields)
+            else:
+                call = fields
+                while index is not None and len(slots) < index:
+                    slots.append({"id": None, "name": "", "parts": [], "signature": None, "filled": False})
+                slots.append(call)
+            return (tc.id, tc.name) if tc.name else None
+
+        # A placeholder id gives way to the real one.
+        if tc.id and not tc.id.startswith("idx_") and call["id"].startswith("idx_"):
+            call["id"] = tc.id
+        started = None
+        # Some providers send the name only on a later delta.
+        if tc.name and not call["name"]:
+            call["name"] = tc.name
+            started = (call["id"], tc.name)
+        if tc.arguments:
+            call["parts"].append(tc.arguments)
+        return started
+
+    def calls(self) -> list[dict]:
+        """The assembled calls in the history's own shape; unfilled slots are absent."""
+        calls = []
+        for slot in self._slots:
+            if not slot["filled"]:
+                continue
+            call = {
+                "id": slot["id"],
+                "type": "function",
+                "function": {"name": slot["name"], "arguments": "".join(slot["parts"])},
+            }
+            # Gemini needs its thought_signature replayed with the call.
+            if slot["signature"]:
+                call["thought_signature"] = slot["signature"]
+            calls.append(call)
+        return calls
+
+    @staticmethod
+    def settle_ids(calls: list[dict]) -> None:
+        """Give every call a non-empty id that no other call of the response uses (R9a).
+
+        First occurrences keep their ids. A missing id becomes ``call_<position>``, and the k-th
+        occurrence (k >= 2) of an id ``X`` becomes ``X_<k>``; both skip ids the response already
+        uses. Each id generated is logged once, with metadata only.
+        """
+        used = {call["id"] for call in calls if call["id"]}
+        occurrences: dict[str, int] = {}
+        for position, call in enumerate(calls):
+            current = call["id"]
+            if not current:
+                reason, base, k = "missing", f"call_{position}", 1
+            else:
+                k = occurrences.get(current, 0) + 1
+                occurrences[current] = k
+                if k == 1:
+                    continue
+                reason, base = "repeated", current
+            candidate = base if reason == "missing" else f"{base}_{k}"
+            while candidate in used:
+                k += 1
+                candidate = f"{base}_{k}"
+            used.add(candidate)
+            call["id"] = candidate
+            name = call["function"]["name"]
+            tool_log.warning("Tool call id {} in one response; generated a new id for '{}'", reason, name)
 
 
 def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:

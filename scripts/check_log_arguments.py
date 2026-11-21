@@ -218,10 +218,10 @@ CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 101, "patch": 0}
 # unchanged - so the composition is gated too. Caller-supplied baselines (the
 # gate's own synthetic fixtures) are exempt: this is a fact about one file.
 FROZEN_TALLY: dict[str, int] = {
-    "R-name": 100,
+    "R-name": 99,
     "R-id": 40,
     "R-count": 92,
-    "R-status": 30,
+    "R-status": 31,
     "R-class": 12,
     "R-path": 25,
     # Both 5-04 deferrals are closed: the two asyncio rows now interpolate the

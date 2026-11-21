@@ -205,7 +205,7 @@ def test_committed_baseline_is_ordered_and_collision_free():
 
 
 FROZEN_TALLY = {
-    "R-name": 100, "R-id": 40, "R-count": 92, "R-status": 30, "R-class": 12,
+    "R-name": 99, "R-id": 40, "R-count": 92, "R-status": 31, "R-class": 12,
     "R-path": 25, "dynamic-trusted": 1,
     "dynamic-residual:known-shape-masked": 2,
 }
@@ -246,7 +246,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     code, out = _run(*invocation, cwd=tmp_path, gate=gate)
     assert code == 1, out
     assert "CLASS-TALLY" in out, out
-    assert "101 'R-name'" in out and "is 100" in out, out
+    assert "100 'R-name'" in out and "is 99" in out, out
     assert "24 'R-path'" in out and "is 25" in out, out
     # The retag is invisible to every row-level report - that is the point.
     assert "NEW unclassified" not in out, out
