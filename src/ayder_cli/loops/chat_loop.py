@@ -161,6 +161,11 @@ class ChatCallbacks(Protocol):
 
 # Consecutive reasoning-only replies the loop prompts again before stopping.
 _MAX_REASONING_RETRIES = 2
+# The result of a call that lost part of its arguments to fragments the stream could not attribute.
+_UNATTRIBUTED_CALL = (
+    "Error: part of this call's arguments could not be attributed to it, so it was not run. "
+    "Send the call again."
+)
 # The repeat count of an identical tool call from which its result gets a note.
 _REPEAT_NOTE_AT = 3
 # How much of a refused call's raw arguments the missing-argument error echoes.
@@ -612,6 +617,7 @@ class ChatLoop:
                         # Identity is settled after the split and before anything is
                         # recorded or run (R9a).
                         assembler.settle_ids(raw_tool_calls_for_history)
+                        unattributed = assembler.refusals(raw_tool_calls_for_history)
 
                         # Now that streaming is done, build the normalized objects for execution
                         for raw_tc in raw_tool_calls_for_history:
@@ -757,7 +763,9 @@ class ChatLoop:
                             # The batch settles every call it takes, however it ends.
                             end.unsettled = []
                             # We use the existing unified execution path
-                            escalated = await self._execute_tool_calls(normalized_tool_calls)
+                            escalated = await self._execute_tool_calls(
+                                normalized_tool_calls, unattributed
+                            )
                             self._batch_stage = None
                             if escalated:
                                 stage = "ui"
@@ -839,8 +847,13 @@ class ChatLoop:
 
     # -- Tool execution ------------------------------------------------------
 
-    async def _execute_tool_calls(self, tool_calls: List[_ToolCall]) -> bool:
+    async def _execute_tool_calls(
+        self, tool_calls: List[_ToolCall], unattributed: frozenset[str] | set[str] = frozenset()
+    ) -> bool:
         """Run a batch in emission order; parallelize safe auto-approved runs.
+
+        A call in ``unattributed`` lost part of its arguments to fragments the stream could not
+        attribute (R9b): it is refused, not run.
 
         Every call gets exactly one tool message, however the batch ends. The
         ``finally`` settles any call the normal path did not append (Ctrl+C
@@ -878,6 +891,17 @@ class ChatLoop:
                     tool_results_map[tc.id] = rd
                     self._display(self.cb.on_tool_start, tc.id, "unknown", {})
                     self._display(self.cb.on_tool_complete, tc.id, _completion(rd["result"], "error"))
+                    continue
+
+                if tc.id in unattributed:
+                    rd = {
+                        "tool_call_id": tc.id,
+                        "name": tc.function.name,
+                        "result": _UNATTRIBUTED_CALL,
+                    }
+                    tool_results_map[tc.id] = rd
+                    self._display(self.cb.on_tool_start, tc.id, tc.function.name, {})
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(_UNATTRIBUTED_CALL, "error"))
                     continue
 
                 # Validate that arguments parsed correctly — some providers
@@ -1575,23 +1599,38 @@ class _ToolCallAssembler:
     still names the call, a placeholder ``idx_`` id gives way to the real one, and a slot that was
     padded to reach a later index takes the id and name of the first delta that fills it. A slot no
     delta fills is absent. Arguments accumulate in a parts list, joined once per call.
+
+    A fragment with no key at all (no index, id or name; GLM and Qwen drop the index) continues the
+    most recent call only while every earlier call is sealed, that is, its arguments are non-empty
+    text that decodes to a JSON object. A call is judged once, when the next call opens, so a long
+    argument stream is never decoded per fragment. Any other fragment is refused (R9b, D6): it joins
+    one shared nameless call, which is refused for its missing name, and every call that is not
+    sealed at that point is marked, so that it does not run.
     """
 
     def __init__(self) -> None:
-        # Each slot: {"id", "name", "parts", "signature", "filled"}.
+        # Each slot: {"id", "name", "parts", "signature", "filled", "sealed", "unattributed"}.
         self._slots: list[dict] = []
+        self._latest: dict | None = None  # the call opened last
+        self._earlier_unsealed = False  # a call was judged unsealed when the next one opened
+        self._refused: dict | None = None  # the nameless call that collects refused fragments
+        self._refused_count = 0
+        self._refused_chars = 0
 
     def add(self, tc: Any) -> tuple[str, str] | None:
         """Apply one delta. Returns ``(id, name)`` when the call is now announced by name."""
         slots = self._slots
         index = getattr(tc, "_stream_index", None)
+        if index is None and not tc.id and not tc.name:
+            self._keyless(tc)
+            return None
         call = None
         if index is not None:
             if index < len(slots):
                 call = slots[index]
         else:
             for candidate in reversed(slots):
-                if candidate["filled"] and candidate["id"] == tc.id:
+                if candidate["filled"] and candidate["id"] == tc.id and candidate is not self._refused:
                     call = candidate
                     break
             # An id reused by a different tool is a new call, not a continuation.
@@ -1606,14 +1645,20 @@ class _ToolCallAssembler:
                 "parts": [tc.arguments] if tc.arguments else [],
                 "signature": signature or None,
                 "filled": True,
+                "sealed": None,
+                "unattributed": False,
             }
+            self._supersede_latest()
             if call is not None:  # a padded slot that this delta fills
                 call.update(fields)
             else:
                 call = fields
                 while index is not None and len(slots) < index:
-                    slots.append({"id": None, "name": "", "parts": [], "signature": None, "filled": False})
+                    slots.append(
+                        {"id": None, "name": "", "parts": [], "signature": None, "filled": False}
+                    )
                 slots.append(call)
+            self._latest = call
             return (tc.id, tc.name) if tc.name else None
 
         # A placeholder id gives way to the real one.
@@ -1628,8 +1673,49 @@ class _ToolCallAssembler:
             call["parts"].append(tc.arguments)
         return started
 
+    @staticmethod
+    def _judge(slot: dict) -> bool:
+        """Whether the call is sealed: non-empty arguments that decode to a JSON object. Cached."""
+        if slot["sealed"] is None:
+            try:
+                slot["sealed"] = isinstance(json.loads("".join(slot["parts"])), dict)
+            except ValueError:  # includes the empty string and every truncated text
+                slot["sealed"] = False
+        return slot["sealed"]
+
+    def _supersede_latest(self) -> None:
+        """A call opens: the one before it is judged, once."""
+        if self._latest is not None and not self._judge(self._latest):
+            self._earlier_unsealed = True
+
+    def _keyless(self, tc: Any) -> None:
+        """A fragment with no key: it continues the latest call, or it is refused."""
+        latest = self._latest
+        if self._refused is None and latest is not None and not self._earlier_unsealed:
+            if tc.arguments:
+                latest["parts"].append(tc.arguments)
+            return
+        if self._refused is None:
+            self._refused = {
+                "id": "", "name": "", "parts": [], "signature": None, "filled": True,
+                "sealed": False, "unattributed": False,
+            }
+            self._slots.append(self._refused)
+        self._refused_count += 1
+        self._refused_chars += len(tc.arguments)
+        if tc.arguments:
+            self._refused["parts"].append(tc.arguments)
+        # The calls that are not sealed at this point do not run. Each call is judged once, and
+        # one that was sealed here stays sealed.
+        for slot in self._slots:
+            if slot is not self._refused and slot["filled"] and not self._judge(slot):
+                slot["unattributed"] = True
+
     def calls(self) -> list[dict]:
-        """The assembled calls in the history's own shape; unfilled slots are absent."""
+        """The assembled calls in the history's own shape; unfilled slots are absent.
+
+        A call that must not run carries ``_unattributed``; ``refusals`` takes the mark off.
+        """
         calls = []
         for slot in self._slots:
             if not slot["filled"]:
@@ -1642,8 +1728,23 @@ class _ToolCallAssembler:
             # Gemini needs its thought_signature replayed with the call.
             if slot["signature"]:
                 call["thought_signature"] = slot["signature"]
+            if slot["unattributed"]:
+                call["_unattributed"] = True
             calls.append(call)
         return calls
+
+    def refusals(self, calls: list[dict]) -> set[str]:
+        """Take the marks off the settled calls; returns the ids of those that must not run.
+
+        Logs the refused fragments once for the response, as counts only.
+        """
+        if self._refused_count:
+            tool_log.warning(
+                "Refused {} unattributable tool-call fragment(s) ({} chars)",
+                self._refused_count,
+                self._refused_chars,
+            )
+        return {call["id"] for call in calls if call.pop("_unattributed", False)}
 
     @staticmethod
     def settle_ids(calls: list[dict]) -> None:
@@ -1687,8 +1788,8 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
     decoder = json.JSONDecoder()
     for raw_tc in raw_tool_calls:
         args_str = raw_tc["function"].get("arguments", "")
-        if not isinstance(args_str, str):
-            result.append(raw_tc)
+        if not isinstance(args_str, str) or raw_tc.get("_unattributed"):
+            result.append(raw_tc)  # a call that must not run is never split
             continue
         objects: list[str] = []
         pos = 0

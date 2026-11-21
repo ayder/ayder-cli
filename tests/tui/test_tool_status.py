@@ -22,12 +22,6 @@ from mcp.types import CallToolResult, TextContent
 
 from ayder_cli.core.result import ToolError, ToolResultText, ToolSuccess
 from ayder_cli.tools import mcp_client
-from ayder_cli.tools.definition import (
-    TOOL_DEFINITIONS_BY_NAME,
-    ToolDefinition,
-    register_dynamic_definition,
-)
-from ayder_cli.tools.schemas import TOOL_PERMISSIONS
 from ayder_cli.tui.app import AyderApp
 from ayder_cli.tui.types import ConfirmResult
 from ayder_cli.tui.widgets import ChatView, ToolBox, _SubmitTextArea
@@ -40,27 +34,6 @@ _WRITE = '{"file_path": "a.py", "operation": "write", "content": "x"}'
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
-
-
-@pytest.fixture
-def mcp_lookup_tool():
-    """Register the tool name an MCP server's tool gets, so the policy accepts the call."""
-    definition = ToolDefinition(
-        name="mcp_lookup",
-        description="an MCP tool",
-        func_ref="tests.tui.test_tool_status:_unused",
-        parameters={"type": "object", "properties": {}, "required": []},
-        permission="r",
-    )
-    register_dynamic_definition(definition)
-    TOOL_PERMISSIONS["mcp_lookup"] = "r"
-    yield "mcp_lookup"
-    TOOL_DEFINITIONS_BY_NAME.pop("mcp_lookup", None)
-    TOOL_PERMISSIONS.pop("mcp_lookup", None)
-
-
-def _unused(**kwargs):  # pragma: no cover - func_ref target, never imported
-    return "unused"
 
 
 async def _drain(app, pilot) -> None:
@@ -154,13 +127,14 @@ async def test_the_call_after_an_instruct_answer_shows_as_skipped():
 
 @pytest.mark.anyio
 async def test_an_mcp_result_that_begins_with_error_but_succeeded_shows_as_ok(
-    tmp_path, mcp_lookup_tool
+    tmp_path, probe_tool
 ):
     """Baseline regression: the text rule shows a successful MCP reply as ``✗ error`` today.
 
     The MCP client's handler is the production one; only the server's session is faked, replying
     successfully with text that begins with "Error".
     """
+    probe_tool("mcp_lookup")  # the name an MCP server's tool gets, so the policy accepts the call
     client = mcp_client.MCPClient(tmp_path)
     try:
         session = MagicMock()

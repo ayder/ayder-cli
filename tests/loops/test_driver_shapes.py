@@ -9,9 +9,12 @@ that the extraction and the identity rules (R9a, R9e) cannot change a shape a dr
 - Claude: argument deltas carry the ``tool_use`` block's id;
 - Gemini: the thought signature travels with its call;
 - Ollama: complete calls, one per chunk;
-- complete calls in content: the XML driver's parsed calls.
+- complete calls in content: the XML driver's parsed calls;
+- GLM and Qwen (step 14): the drivers drop the stream index, so a call's argument fragments carry
+  no key. In sequence they continue the latest call; interleaved they cannot be attributed (D6).
 
-Kind: preservation (every row passes before and after). Environment: local-faked. Layer: unit.
+Kind: preservation (the first six rows pass before and after step 13; the GLM and Qwen rows are
+baseline regressions of step 14). Environment: local-faked. Layer: unit.
 No request leaves the process: the OpenAI and DeepSeek rows build their SDK stream with
 ``httpx2.MockTransport`` passed to the SDK client, and the others use the fake SDK stream their
 provider's own tests use.
@@ -20,8 +23,12 @@ provider's own tests use.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
 
 import httpx2
 from google.genai import types
@@ -341,3 +348,147 @@ def test_complete_calls_parsed_out_of_content():
     assert [calls[i][0] for i in calls] == ["read_file", "file_explorer"]
     assert [json.loads(calls[i][1]) for i in calls] == [{"file_path": "a.py"}, {"path": "."}]
     assert results == {"call_0": _RESULT_A, "call_1": _RESULT_DIR}
+
+
+# -- GLM and Qwen: no stream index (step 14, R9b, D6) --------------------------------------------------------------------
+
+_D6 = (
+    "Error: part of this call's arguments could not be attributed to it, so it was not run. "
+    "Send the call again."
+)
+
+
+def _qwen_stream(*message_dicts: dict):
+    """DashScope's incremental output: one response per streamed chunk."""
+    return [
+        SimpleNamespace(
+            status_code=200,
+            message=None,
+            output=SimpleNamespace(choices=[SimpleNamespace(message=message)]),
+        )
+        for message in message_dicts
+    ]
+
+
+def _qwen_call(index: int, *, id: str = "", name: str | None = None, arguments: str = ""):
+    function: dict = {"arguments": arguments}
+    if name is not None:
+        function["name"] = name
+    return {"tool_calls": [{"index": index, "id": id, "type": "function", "function": function}]}
+
+
+@contextlib.contextmanager
+def _qwen_provider(first_stream):
+    """The real Qwen driver, with dashscope's ``Generation.call`` (third-party) faked: the first
+    request streams ``first_stream`` and the next ones answer in text. No key, no live call."""
+    from ayder_cli.providers.impl.qwen import QwenNativeProvider
+
+    dashscope = pytest.importorskip("dashscope")
+    provider = QwenNativeProvider.__new__(QwenNativeProvider)
+    provider.config = None
+    provider.api_key = "test"  # a literal placeholder
+    streams = [first_stream, _qwen_stream({"content": "done"})]
+    with patch.object(dashscope.Generation, "call", side_effect=streams):
+        yield provider
+
+
+def _glm_call(index: int, *, id: str | None = None, name: str | None = None, arguments: str = ""):
+    return SimpleNamespace(
+        index=index, id=id, type="function",
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+def _glm_chunk(*calls, content: str | None = None):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=list(calls) or None))]
+    )
+
+
+def _glm_provider(first_stream):
+    """The real GLM driver over a fake ZhipuAI client: the first request streams ``first_stream``
+    and the next ones answer in text."""
+    from ayder_cli.providers.impl.glm import GLMNativeProvider
+
+    streams = [first_stream, [_glm_chunk(content="done")]]
+    provider = GLMNativeProvider.__new__(GLMNativeProvider)
+    provider.config = None
+    provider.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: streams.pop(0)))
+    )
+    return provider
+
+
+def _sequence_qwen():
+    return _qwen_stream(
+        _qwen_call(0, id="call_a", name="read_file", arguments='{"file_path": '),
+        _qwen_call(0, arguments='"a.py"}'),
+        _qwen_call(1, id="call_b", name="file_explorer", arguments='{"path": '),
+        _qwen_call(1, arguments='"."}'),
+    )
+
+
+def _interleaved_qwen():
+    return _qwen_stream(
+        _qwen_call(0, id="call_a", name="read_file", arguments='{"file_path": '),
+        _qwen_call(1, id="call_b", name="file_explorer", arguments='{"path": '),
+        _qwen_call(0, arguments='"a.py"}'),
+        _qwen_call(1, arguments='"."}'),
+    )
+
+
+def _sequence_glm():
+    return [
+        _glm_chunk(_glm_call(0, id="call_a", name="read_file", arguments='{"file_path": ')),
+        _glm_chunk(_glm_call(0, arguments='"a.py"}')),
+        _glm_chunk(_glm_call(1, id="call_b", name="file_explorer", arguments='{"path": ')),
+        _glm_chunk(_glm_call(1, arguments='"."}')),
+    ]
+
+
+def _interleaved_glm():
+    return [
+        _glm_chunk(_glm_call(0, id="call_a", name="read_file", arguments='{"file_path": ')),
+        _glm_chunk(_glm_call(1, id="call_b", name="file_explorer", arguments='{"path": ')),
+        _glm_chunk(_glm_call(0, arguments='"a.py"}')),
+        _glm_chunk(_glm_call(1, arguments='"."}')),
+    ]
+
+
+def _qwen_history(first_stream):
+    with _qwen_provider(first_stream) as provider:
+        return _history_of(provider)
+
+
+def test_qwen_two_calls_in_sequence_run_with_their_full_arguments():
+    """Baseline regression, B3: the fragments after each call's first delta land in a nameless call
+    and the real calls run with partial arguments today (the driver drops the index)."""
+    _, calls, results = _qwen_history(_sequence_qwen())
+
+    assert calls == {"call_a": ("read_file", _A), "call_b": ("file_explorer", _DIR)}
+    assert results == {"call_a": _RESULT_A, "call_b": _RESULT_DIR}
+
+
+def test_qwen_two_interleaved_calls_do_not_run_and_get_the_unattributed_result():
+    """Baseline regression, D6: interleaved fragments cannot be told apart once the index is
+    dropped. After: neither call runs, and each gets the unattributed result."""
+    loop, _, results = _qwen_history(_interleaved_qwen())
+
+    assert loop.registry.calls == []
+    assert (results["call_a"], results["call_b"]) == (_D6, _D6)
+
+
+def test_glm_two_calls_in_sequence_run_with_their_full_arguments():
+    """Baseline regression, B3: as for Qwen, through GLM's own adapter and fake ZhipuAI stream."""
+    _, calls, results = _history_of(_glm_provider(_sequence_glm()))
+
+    assert calls == {"call_a": ("read_file", _A), "call_b": ("file_explorer", _DIR)}
+    assert results == {"call_a": _RESULT_A, "call_b": _RESULT_DIR}
+
+
+def test_glm_two_interleaved_calls_do_not_run_and_get_the_unattributed_result():
+    """Baseline regression, D6: as for Qwen."""
+    loop, _, results = _history_of(_glm_provider(_interleaved_glm()))
+
+    assert loop.registry.calls == []
+    assert (results["call_a"], results["call_b"]) == (_D6, _D6)

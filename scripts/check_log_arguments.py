@@ -220,7 +220,7 @@ CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 101, "patch": 0}
 FROZEN_TALLY: dict[str, int] = {
     "R-name": 99,
     "R-id": 40,
-    "R-count": 92,
+    "R-count": 94,
     "R-status": 31,
     "R-class": 12,
     "R-path": 25,

@@ -149,6 +149,48 @@ def _turn_integrity(request, monkeypatch):
 
 
 @pytest.fixture
+def probe_tool():
+    """Register temporary tools through the tables the loop and its policy read.
+
+    ``probe_tool(name, parallel_safe=True, max_result_chars=None)`` registers a read-only tool with
+    no required arguments and returns its name; every tool it registered is removed afterwards.
+    """
+    from ayder_cli.tools.definition import (
+        TOOL_DEFINITIONS_BY_NAME,
+        ToolDefinition,
+        register_dynamic_definition,
+    )
+    from ayder_cli.tools.schemas import TOOL_PERMISSIONS
+
+    added: list[str] = []
+
+    def make(name, *, parallel_safe=True, max_result_chars=None):
+        register_dynamic_definition(
+            ToolDefinition(
+                name=name,
+                description="test tool",
+                func_ref="tests.conftest:_unused_tool",
+                parameters={"type": "object", "properties": {}, "required": []},
+                permission="r",
+                parallel_safe=parallel_safe,
+                max_result_chars=max_result_chars,
+            )
+        )
+        TOOL_PERMISSIONS[name] = "r"
+        added.append(name)
+        return name
+
+    yield make
+    for name in added:
+        TOOL_DEFINITIONS_BY_NAME.pop(name, None)
+        TOOL_PERMISSIONS.pop(name, None)
+
+
+def _unused_tool(**kwargs):  # pragma: no cover - func_ref target, never imported
+    return "unused"
+
+
+@pytest.fixture
 def default_sigint_handler():
     """Python's default SIGINT handler, with everything a signal test could leave behind restored.
 

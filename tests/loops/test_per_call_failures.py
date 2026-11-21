@@ -101,36 +101,6 @@ class _OverlapRegistry(RecordingRegistry):
         return super().execute(name, arguments)
 
 
-@pytest.fixture
-def probe_tool():
-    """Register temporary tools through the table ``is_parallel_safe`` reads."""
-    added: list[str] = []
-
-    def make(name, *, parallel_safe=True, max_result_chars=None):
-        definition = ToolDefinition(
-            name=name,
-            description="test tool",
-            func_ref="tests.loops.test_per_call_failures:_unused",
-            parameters={"type": "object", "properties": {}, "required": []},
-            permission="r",
-            parallel_safe=parallel_safe,
-            max_result_chars=max_result_chars,
-        )
-        register_dynamic_definition(definition)
-        TOOL_PERMISSIONS[name] = "r"
-        added.append(name)
-        return name
-
-    yield make
-    for name in added:
-        TOOL_DEFINITIONS_BY_NAME.pop(name, None)
-        TOOL_PERMISSIONS.pop(name, None)
-
-
-def _unused(**kwargs):  # pragma: no cover - func_ref target, never imported
-    return "unused"
-
-
 # -- A confirmed call that fails ---------------------------------------------
 
 
