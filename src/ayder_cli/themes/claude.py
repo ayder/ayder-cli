@@ -351,6 +351,109 @@ EvrenTermsScreen Button {
     margin: 0 2;
 }
 
+/* Config wizard - /config and the first-run setup: the profiles list, the
+   provider picker, the profile form and the delete confirm.
+   Targets the screens in config_wizard.py; each wraps its content in
+   '.config-modal'. */
+ConfigWizardScreen, ProviderTypeScreen, ProfileFormScreen, ConfirmDeleteScreen,
+ModelPickerScreen {
+    align: center middle;
+}
+
+.config-modal {
+    width: 90%;
+    max-width: 110;
+    height: auto;
+    max-height: 90%;
+    background: #12122a;
+    border: solid #5eaff5;
+    padding: 1 2;
+}
+
+ProfileFormScreen > .config-modal {
+    height: 90%;
+}
+
+.config-modal .prompt {
+    text-style: bold;
+    color: #5eaff5;
+    margin-bottom: 1;
+}
+
+.config-modal .description,
+.config-modal .note {
+    color: #666680;
+}
+
+/* The key hints stay readable (not dimmed) on every palette. */
+.config-modal .hint {
+    color: #b8b8c8;
+    margin-top: 1;
+}
+
+.config-modal .field-label {
+    color: #b8b8c8;
+    margin-top: 1;
+}
+
+.config-modal .error {
+    color: #c45050;
+}
+
+.config-modal .warning {
+    color: #d7af5f;
+}
+
+.config-modal OptionList {
+    height: auto;
+    max-height: 16;
+}
+
+.config-modal #profiles {
+    margin-top: 1;
+}
+
+/* The model picker's list; ModelPickerScreen caps its height in cells to
+   fit the terminal. */
+.config-modal #model-options {
+    margin-top: 1;
+}
+
+.config-modal #filter-row {
+    height: auto;
+}
+
+.config-modal #filter-label {
+    color: #b8b8c8;
+    text-style: bold;
+}
+
+.config-modal #model-filter {
+    width: 1fr;
+}
+
+.config-modal #form-scroll {
+    height: 1fr;
+}
+
+.config-modal #model-row {
+    height: auto;
+}
+
+.config-modal #model-row Input {
+    width: 1fr;
+}
+
+.config-modal .buttons {
+    height: auto;
+    align: center middle;
+    margin-top: 1;
+}
+
+.config-modal Button {
+    margin: 0 2;
+}
+
 /* Generic text selection highlight color. */
 .selection {
     background: #264f78;

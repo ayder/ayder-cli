@@ -36,6 +36,7 @@ dependencies = [
     "textual==8.2.8",
     "python-dotenv>=1.0.0",
     "tiktoken>=0.7.0",
+    "tomlkit>=0.13",
 ]
 
 [project.optional-dependencies]

@@ -153,6 +153,7 @@ cli.py:main()
 |--------|---------|----------------------|
 | `core/config.py` | Configuration management | `Config`, `load_config()`, `load_config_for_provider()` |
 | `core/config_migration.py` | TOML config migration helpers | migration routines for schema changes |
+| `core/config_editor.py` | Comment-preserving edits of `[llm.<name>]` profiles (tomlkit) for the config wizard | `load_document()`, `save_document()`, `upsert_profile()`, `delete_profile()`, `set_default()`, `validate()`, `check_buildable()`, `PRESETS` |
 | `core/context.py` | Project sandboxing | `ProjectContext` |
 | `core/result.py` | Tool result types | `ToolSuccess`, `ToolError` |
 | `core/skills.py` | Skill discovery, delivery, built-in sync and the session filter | `SkillInfo`, `SkillScope`, `discover_all()`, `render_skill_block()`, `active_skills()`, `builtin_skills_root()`, `build_scope()`, `format_catalog()` |
@@ -221,7 +222,8 @@ cli.py:main()
 |--------|---------|----------------------|
 | `tui/app.py` | Main TUI application | `AyderApp`, `AppCallbacks` |
 | `tui/adapter.py` | Adapter glue between `AyderApp` and `ChatLoop` | callback wiring helpers |
-| `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()` |
+| `tui/commands.py` | Slash command handlers | `COMMAND_MAP`, `handle_*()`, `open_config_wizard()` |
+| `tui/config_wizard.py` | Config wizard (`/config`, first run) | `ConfigWizardScreen`, `ProviderTypeScreen`, `ProfileFormScreen`, `ConfirmDeleteScreen` |
 | `tui/widgets.py` | Custom widgets | `ChatView` (with `ThinkingItem`, `ToolBox`, `AgentBox`), `ActivityBar`, `CLIInputBar`, `StatusBar`, `AutoCompleteInput` |
 | `tui/screens.py` | Modal screens | `AgentListScreen`, `CLIConfirmScreen`, `CLIHelpScreen`, `CLIMultiSelectScreen`, `CLIPermissionScreen`, `CLISafeModeScreen`, `CLISelectScreen`, `EvrenTermsScreen`, `TaskEditScreen` |
 | `tui/parser.py` | TUI-specific parsing | `content_processor()` |

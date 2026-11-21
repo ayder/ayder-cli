@@ -99,6 +99,7 @@ def run_tui(
     resume_session_id: str | None = None,
     session_name: str | None = None,
     log_settings=None,          # LoggingSettings | None
+    first_run: bool = False,
 ) -> None:
     """
     Run the CLI-style TUI application.
@@ -122,6 +123,8 @@ def run_tui(
         log_settings: Fully-resolved LoggingSettings from the CLI entry point.
             When None, AyderApp resolves its own (e.g. when constructed directly
             in tests).
+        first_run: True when no config.toml existed at startup; the app opens
+            the config wizard once it is mounted.
     """
     from ayder_cli.providers import ProviderUnavailableError
     from ayder_cli.core.session import persist_and_announce
@@ -133,7 +136,7 @@ def run_tui(
             model=model, safe_mode=safe_mode, permissions=permissions,
             agent_mode=agent_mode, system_prompt_override=system_prompt_override,
             provider=provider, initial_messages=initial_messages, resume_session_id=resume_session_id,
-            session_name=session_name, log_settings=log_settings,
+            session_name=session_name, log_settings=log_settings, first_run=first_run,
         )
         built = True
     except ProviderUnavailableError as e:

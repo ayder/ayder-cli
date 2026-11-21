@@ -36,8 +36,8 @@ DEFAULTS: Dict[str, Any] = {
     "anthropic": {
         "driver": "anthropic",
         "api_key": "",
-        "model": "claude-sonnet-4-5-20250929",
-        "num_ctx": 8192,
+        "model": "claude-sonnet-5-5",
+        "num_ctx": 200000,
     },
     "gemini": {
         "driver": "google",

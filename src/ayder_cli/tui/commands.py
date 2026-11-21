@@ -22,6 +22,7 @@ from ayder_cli.application.runtime_factory import _maybe_wrap_with_retry, apply_
 from ayder_cli.core.result import ToolError
 from ayder_cli.core.skills import SkillInfo, active_skills, render_skill_block
 from ayder_cli.tools.builtins.skill import _after_change, discover_skills
+from ayder_cli.tui.config_wizard import ConfigWizardScreen
 from ayder_cli.tui.screens import (
     AgentListScreen,
     CLISelectScreen,
@@ -156,6 +157,24 @@ def _apply_provider_switch(
         )
 
     app.request_turn(prepare=_prepare, run_loop=False)
+
+
+def open_config_wizard(
+    app: "AyderApp", chat_view: ChatView, *, first_run: bool = False
+) -> None:
+    """Push the config wizard; its provider switches go through _apply_provider_switch."""
+    app.push_screen(
+        ConfigWizardScreen(
+            session_provider=lambda: app.config.provider,
+            on_switch=lambda name: _apply_provider_switch(app, name, chat_view),
+            first_run=first_run,
+        )
+    )
+
+
+def handle_config(app: AyderApp, args: str, chat_view: ChatView) -> None:
+    """Add, edit or delete provider profiles and set the default (config wizard)."""
+    open_config_wizard(app, chat_view)
 
 
 async def _list_and_show_models(
@@ -1327,6 +1346,7 @@ def handle_agent(app: "AyderApp", args: str, chat_view: "ChatView") -> None:
 COMMAND_MAP: dict[str, Callable] = {
     "/help": handle_help,
     "/provider": handle_provider,
+    "/config": handle_config,
     "/model": handle_model,
     "/effort": handle_effort,
     "/tasks": handle_tasks,

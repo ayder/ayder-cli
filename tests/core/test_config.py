@@ -26,7 +26,7 @@ class TestDefaultValues:
         assert DEFAULTS["openai"]["api_key"] == "ollama"
         assert DEFAULTS["openai"]["model"] == "qwen3-coder:latest"
         assert DEFAULTS["openai"]["num_ctx"] == 65536
-        assert DEFAULTS["anthropic"]["model"] == "claude-sonnet-4-5-20250929"
+        assert DEFAULTS["anthropic"]["model"] == "claude-sonnet-5-5"
         assert DEFAULTS["gemini"]["model"] == "gemini-3-flash"
         assert DEFAULTS["editor"] == "vim"
         assert DEFAULTS["verbose"] is False
@@ -163,7 +163,7 @@ class TestLoadConfigFirstRun:
         assert 'model = "qwen3-coder:latest"' in content
         assert "num_ctx = 65536" in content
         # Verify anthropic section values
-        assert 'model = "claude-sonnet-4-5-20250929"' in content
+        assert 'model = "claude-sonnet-5-5"' in content
         # Verify gemini section values
         assert 'model = "gemini-3-flash"' in content
         # Verify utility sections

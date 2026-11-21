@@ -85,6 +85,16 @@ class ProviderOrchestrator:
         """Map each canonical driver name -> whether its SDK is importable."""
         return {name: _installed(cap.sdk_module) for name, cap in self._capabilities.items()}
 
+    def missing_extra(self, driver: str) -> str | None:
+        """The pip extra to install when ``driver``'s SDK is missing, else None.
+
+        None also for core drivers and for driver names this registry does not know.
+        """
+        cap = self._capabilities.get(self._canonical(driver))
+        if cap is None or _installed(cap.sdk_module):
+            return None
+        return cap.extra_name
+
     def _import_provider(self, path: str) -> type[AIProvider]:
         module_name, class_name = path.rsplit(".", 1)
         module = importlib.import_module(module_name)
