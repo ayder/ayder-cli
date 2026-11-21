@@ -171,6 +171,7 @@ _REPAIRED_PREFIX = (
 
 _CANCELLED_BEFORE_RUN = "Tool call was cancelled before it ran."
 _NOT_RUN_TURN_FAILED = "Tool call was not run because the turn failed."
+_PARTIAL_REPLY_NOTICE = "The partial reply above was not saved."
 _INTERRUPTED_WHILE_RUNNING = (
     "Tool call was interrupted while running and may have partially applied. "
     "Check the current state before retrying."
@@ -354,19 +355,38 @@ class ChatLoop:
             )
             end.reported = delivered is not _UNREPORTED
 
-    def _end_turn(self, end: "_TurnEnd", thinking_open: bool) -> None:
+    def _end_turn(self, end: "_TurnEnd", thinking_open: bool, partial_reply_lost: bool) -> None:
         """The turn's end, run once from the boundary's ``finally``; it never publishes.
 
         It closes a thinking phase that a failure or a cancellation left open,
         through the guard so the stop cannot replace the primary failure (R7d),
-        gives the appended reply's unrun calls their tool messages, then reports
-        a failed turn. The cancel flags and finishing the items join it in later
-        steps, each call guarded.
+        gives the appended reply's unrun calls their tool messages, announces a
+        partial reply that was shown and not saved (D2), then reports a failed
+        turn. The cancel flags and finishing the items join it in later steps,
+        each call guarded.
         """
         if thinking_open:
             self._guarded("closing thinking stop", self.cb.on_thinking_stop)
         self._settle_unrun_calls(end)
+        if partial_reply_lost:
+            self._announce_lost_partial_reply(end)
         self._report_once(end)
+
+    def _announce_lost_partial_reply(self, end: "_TurnEnd") -> None:
+        """Tell the user the partial reply they saw was not saved (D2), once.
+
+        A failure's message gets the notice as its second line, and the turn's end
+        reports it. A cancellation sends it as its own system message, guarded.
+        """
+        decided = end.decided
+        if decided is None:
+            return
+        if decided.status == "failed":
+            end.decided = TurnOutcome(
+                "failed", decided.stage, f"{decided.message}\n{_PARTIAL_REPLY_NOTICE}"
+            )
+        elif decided.status == "cancelled":
+            self._guarded("partial reply notice", self.cb.on_system_message, _PARTIAL_REPLY_NOTICE)
 
     def _settle_unrun_calls(self, end: "_TurnEnd") -> None:
         """Give each call of the appended reply that never reached the batch its tool message.
@@ -427,6 +447,10 @@ class ChatLoop:
         end = _TurnEnd(cancels_at_entry=_cancel_count())
         stage = "context"  # the collaborator now active (R7c); see _failure_stage
         thinking_open = False  # a thinking phase is open until its one stop (R5a)
+        # This iteration showed content, and its reply was appended (D2): content shown whose
+        # reply was not saved is announced at the turn's end.
+        content_delivered = False
+        reply_saved = False
         try:
             try:
                 # Lazy init: detect real context length for Ollama models
@@ -466,6 +490,8 @@ class ChatLoop:
                     final_content = ""
                     final_reasoning = ""
                     normalized_tool_calls = []
+                    content_delivered = False
+                    reply_saved = False
                     try:
                         # Pre-iteration hook (used for agent summary injection)
                         stage = "hook"
@@ -556,6 +582,7 @@ class ChatLoop:
                                     thinking_open = False
                                     self.cb.on_thinking_stop()
                                 self.cb.on_assistant_content(chunk.content)
+                                content_delivered = True
 
                             if chunk.tool_calls:
                                 if thinking_open:
@@ -709,6 +736,7 @@ class ChatLoop:
                             # Hold its calls until the batch takes them: the turn's end
                             # settles any that are left (R3b).
                             end.unsettled = list(normalized_tool_calls)
+                            reply_saved = True
 
                         if thinking_open:
                             # The stream ended with a phase open: close it. A raising
@@ -861,7 +889,7 @@ class ChatLoop:
                     end.decided = TurnOutcome(
                         "failed", "internal", _NO_OUTCOME_TEXT
                     )
-                self._end_turn(end, thinking_open)
+                self._end_turn(end, thinking_open, content_delivered and not reply_saved)
                 end.finished = True
                 if end.decided.status != "cancelled" and _cancel_count() > end.cancels_at_entry:
                     # A cancellation may have been requested while the turn ended (a

@@ -90,8 +90,8 @@ def test_a_task_cancelled_in_the_stream_publishes_only_the_cancelled_state(varia
     """Preservation, E8: whether ``run()`` returns or re-raises, the turn is ``cancelled`` and quiet.
 
     The outcome has no stage or message and ``reported`` False, ``loop.error`` is None, nothing
-    is reported, the task's cancel count is still 1, and a raising closing stop is one guard
-    warning. Passes before and after.
+    is reported but the partial-reply notice (step 10), the task's cancel count is still 1, and a
+    raising closing stop is one guard warning.
     """
     loop, stall = _stalled_stream_loop(variant)
 
@@ -99,7 +99,9 @@ def test_a_task_cancelled_in_the_stream_publishes_only_the_cancelled_state(varia
 
     assert loop.outcome == _CANCELLED
     assert loop.error is None
-    assert loop.cb.system == []
+    # Step 10 (D2): a cancellation after shown content says the partial reply was not saved,
+    # as its own system message; reasoning alone adds nothing.
+    assert loop.cb.system == (["The partial reply above was not saved."] if variant == "plain" else [])
     assert task.cancelling() == 1
     expected = [] if variant == "plain" else [_STOP_WARNING]
     assert _warnings(loguru_caplog, "") == expected
@@ -139,9 +141,11 @@ def test_a_stray_cancellation_from_the_provider_fails_the_turn_at_the_llm_stage(
     escaped = escape(run_turn, loop)
 
     assert escaped is None
-    assert loop.outcome == TurnOutcome("failed", "llm", "Error: CancelledError", True)
-    assert loop.error == "Error: CancelledError"
-    assert loop.cb.system == ["Error: CancelledError"]
+    # Step 10 (D2): content was shown and its reply was lost, so the message says so.
+    message = "Error: CancelledError\nThe partial reply above was not saved."
+    assert loop.outcome == TurnOutcome("failed", "llm", message, True)
+    assert loop.error == message
+    assert loop.cb.system == [message]
 
 
 def test_a_stray_cancellation_logs_one_error_record_with_a_traceback(loguru_caplog):

@@ -58,7 +58,10 @@ def test_a_stream_that_fails_after_content_stops_thinking_once():
 
     run_turn(loop)
 
-    assert loop.outcome == TurnOutcome("failed", "llm", "Error: boom", True)
+    # Step 10 (D2): content was shown and its reply was lost, so the message says so.
+    assert loop.outcome == TurnOutcome(
+        "failed", "llm", "Error: boom\nThe partial reply above was not saved.", True
+    )
     assert _phases(loop.cb) == ["thinking_start", "thinking_stop", "assistant_content"]
 
 
