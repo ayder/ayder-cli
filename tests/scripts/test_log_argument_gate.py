@@ -183,13 +183,13 @@ def test_live_tree_is_clean_and_fully_reconciled():
     code, out = _run()
     assert code == 0, out
     assert f"scanned {_live_py_count()} file(s)" in out, out
-    assert "235 logging call site(s): 229 level-method + 6 emit_event" in out, out
-    assert "151 call site(s) with >=1 interpolated argument" in out, out
-    assert "298 interpolated argument(s) after static splat expansion" in out, out
-    assert "(285 raw, 5 splat(s) -> 18 key(s))" in out, out
+    assert "236 logging call site(s): 230 level-method + 6 emit_event" in out, out
+    assert "152 call site(s) with >=1 interpolated argument" in out, out
+    assert "299 interpolated argument(s) after static splat expansion" in out, out
+    assert "(286 raw, 5 splat(s) -> 18 key(s))" in out, out
     assert "2 dynamic message row(s)" in out, out
     assert "107 chain input(s): 6 bind + 101 opt + 0 patch, 1 data row(s)" in out, out
-    assert "301 baseline row(s)" in out, out
+    assert "302 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
 
@@ -205,7 +205,7 @@ def test_committed_baseline_is_ordered_and_collision_free():
 
 
 FROZEN_TALLY = {
-    "R-name": 100, "R-id": 40, "R-count": 92, "R-status": 30, "R-class": 11,
+    "R-name": 100, "R-id": 40, "R-count": 92, "R-status": 30, "R-class": 12,
     "R-path": 25, "dynamic-trusted": 1,
     "dynamic-residual:known-shape-masked": 2,
 }
@@ -234,7 +234,7 @@ def test_gate_itself_enforces_the_frozen_tally(tmp_path, explicit):
     # otherwise the mutation below would be proving nothing.
     code, out = _run(*invocation, cwd=tmp_path, gate=gate)
     assert code == 0, out
-    assert "301 baseline row(s)" in out, out
+    assert "302 baseline row(s)" in out, out
     assert "0 findings" in out, out
 
     rows = [json.loads(ln) for ln in baseline.read_text().splitlines()
@@ -305,10 +305,10 @@ def test_committed_baseline_classification_tally():
     assert tally == FROZEN_TALLY, tally
     retained = sum(tally.get(t, 0) for t in
                    ("R-name", "R-id", "R-count", "R-status", "R-class"))
-    assert retained == 273, tally
+    assert retained == 274, tally
     assert "content-deferred:5-04" not in tally, "5-04 content deferral is closed"
     assert "dynamic-deferred:5-04" not in tally, "5-04 dynamic deferral is closed"
-    assert sum(tally.values()) == 301, tally
+    assert sum(tally.values()) == 302, tally
     assert "ident" not in tally, "the forbidden generic tag is in the baseline"
 
 

@@ -16,6 +16,7 @@ import json
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, List, Protocol, runtime_checkable
 
@@ -539,7 +540,7 @@ class ChatLoop:
                         )
 
                         async for chunk in async_stream:
-                            if chunk.usage:
+                            if chunk.usage is not None:
                                 usage_obj = chunk.usage
 
                             if chunk.reasoning:
@@ -737,17 +738,24 @@ class ChatLoop:
                             )
                             return
 
-                        # 3. Process final response metadata and token counting
-                        if usage_obj:
-                            # Use provider-reported token count if available
-                            tokens = usage_obj.get("total_tokens", 0)
-                            self._total_tokens += tokens
-                            stage = "context"
-                            self.context_manager.update_from_response(usage_obj)
-                            stage = "internal"
-                        else:
+                        # 3. Process final response metadata and token counting (D4)
+                        if usage_obj is None:
                             # No usage data from provider — estimate total tokens
-                            self._total_tokens += len(str(final_content)) // 4 + len(str(final_reasoning)) // 4
+                            self._total_tokens += _estimate_tokens(final_content, final_reasoning)
+                        elif not _usage_is_usable(usage_obj):
+                            # Malformed usage counts as missing.
+                            llm_log.warning(
+                                "Provider usage is malformed ({}); using the estimate",
+                                type(usage_obj).__name__,
+                            )
+                            self._total_tokens += _estimate_tokens(final_content, final_reasoning)
+                        else:
+                            # Use the provider-reported count; a mapping without
+                            # total_tokens adds 0. A failing manager is skipped.
+                            self._total_tokens += usage_obj.get("total_tokens", 0)
+                            self._guarded(
+                                "token accounting", self.context_manager.update_from_response, usage_obj
+                            )
                         stage = "ui"
                         self.cb.on_token_usage(self._total_tokens)
                         stage = "internal"
@@ -1369,6 +1377,20 @@ def _truncate_for_tool(tool_name: str, content: str) -> str:
     if override is None:
         return truncate_tool_result(content)
     return truncate_tool_result(content, max_chars=override)
+
+
+def _estimate_tokens(content: str, reasoning: str) -> int:
+    """The loop's own token estimate for a reply the provider reported no usable usage for."""
+    return len(str(content)) // 4 + len(str(reasoning)) // 4
+
+
+def _usage_is_usable(usage: object) -> bool:
+    """Whether provider usage can be counted: a mapping whose ``total_tokens``, when present, is a
+    non-negative ``int`` (a ``bool`` does not count). A mapping without it counts as 0."""
+    if not isinstance(usage, Mapping):
+        return False
+    total = usage.get("total_tokens", 0)
+    return isinstance(total, int) and not isinstance(total, bool) and total >= 0
 
 
 def _cancel_count() -> int:

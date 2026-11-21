@@ -157,9 +157,8 @@ def test_a_closing_stop_that_raises_after_a_clean_stream_leaves_the_reply_in_his
         pytest.param(_the_flag_is_set_during_the_stream, TurnOutcome("cancelled"), id="E10"),
         pytest.param(
             _accounting_raises_after_a_text_reply,
-            TurnOutcome(
-                "failed", "context", "Error: the context manager failed: accounting exploded", True
-            ),
+            # Step 9 (D4): a raising accounting call is a guard warning, not a failure.
+            TurnOutcome("completed"),
             id="E12-accounting",
         ),
         pytest.param(
@@ -179,7 +178,8 @@ def test_a_closing_stop_that_raises_after_a_clean_stream_leaves_the_reply_in_his
 def test_the_turn_keeps_its_outcome_when_the_reply_is_recorded_first(scenario, outcome):
     """Preservation: recording the reply first changes history, not how the turn ends.
 
-    Step 3 already gives each of these its outcome. Passes before and after.
+    Step 3 gave each of these its outcome; step 9 changed the accounting case from
+    ``failed``/``context`` to ``completed`` (the reply is still in history).
     """
     loop = scenario()
 

@@ -160,6 +160,7 @@
 {"class":"R-class","site":{"arg_index":"pos:0","expr":"type(e).__name__","message":"Failed to convert path to relative: {}","method":"debug","path":"tools/builtins/search.py","qualname":"_to_rel"}}
 {"class":"R-class","site":{"arg_index":"pos:0","expr":"type(e).__name__","message":"Security error in replace_string: {}","method":"warning","path":"tools/utils.py","qualname":"prepare_new_content"}}
 {"class":"R-class","site":{"arg_index":"pos:0","expr":"type(exc).__name__","message":"Provider stream failed ({}); retrying in {:.2f}s ({} attempts left)","method":"info","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
+{"class":"R-class","site":{"arg_index":"pos:0","expr":"type(usage_obj).__name__","message":"Provider usage is malformed ({}); using the estimate","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"used","message":"Context: compaction triggered \u2014 {} tokens used, budget={}, threshold={:.0f}%","method":"info","path":"core/ollama_context_manager.py","qualname":"OllamaContextManager.should_compact"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"what","message":"{} raised; continuing without it","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._guarded"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"worktree_path","message":"worktree cleanup failed: {}","method":"exception","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
