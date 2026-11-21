@@ -121,6 +121,15 @@ def classify_error(
         and getattr(exc, "code", None) == 429
     ):
         return RetryVerdict.RETRYABLE
+    # The native Qwen driver raises one error for every non-200 status; 429 and 5xx are
+    # transient, anything else is not. Matched by name and module, like Gemini's 429.
+    if (
+        type(exc).__name__ == "QwenStreamError"
+        and type(exc).__module__ == "ayder_cli.providers.impl.qwen"
+    ):
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int) and (status == 429 or 500 <= status <= 599):
+            return RetryVerdict.RETRYABLE
     return RetryVerdict.FATAL
 
 

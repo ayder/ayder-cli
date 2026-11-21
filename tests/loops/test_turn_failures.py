@@ -20,7 +20,10 @@ with ``catch=False`` and removes it afterwards; ``emit_event`` is not patched.
 
 from __future__ import annotations
 
+import contextlib
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from loguru import logger
@@ -411,3 +414,121 @@ def test_the_reasoning_only_limit_logs_one_error_record_without_a_traceback(logu
     ]
     assert records[0]["exception"] is None
     assert records[0]["extra"]["channel"] == "llm"
+
+
+# -- A native Qwen upstream error (R13, E23) ----------------------------------------------------------
+#
+# The provider is the real RetryingProvider over the real native Qwen driver; only dashscope's
+# ``Generation.call`` (third-party) is faked, one stream per request.
+
+_QWEN_REASON = "InvalidParameter: max_tokens is too large"
+
+
+def _qwen_chunk(content: str = "", tool_calls: list | None = None):
+    message: dict = {"content": content}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    return SimpleNamespace(
+        status_code=200, message=None, output=SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    )
+
+
+def _qwen_error_chunk(status: int = 400):
+    return SimpleNamespace(status_code=status, message=_QWEN_REASON)
+
+
+@contextlib.contextmanager
+def _qwen_streams(*streams):
+    """A loop provider over the Qwen driver: each request gets the next stream in ``streams``."""
+    from ayder_cli.providers.impl.qwen import QwenNativeProvider
+    from ayder_cli.providers.retry import RetryConfig, RetryingProvider
+
+    dashscope = pytest.importorskip("dashscope")
+    driver = QwenNativeProvider.__new__(QwenNativeProvider)
+    driver.config = None
+    driver.api_key = "test"  # a literal placeholder; no call leaves the process
+
+    async def no_wait(delay: float) -> None:
+        return None
+
+    provider = RetryingProvider(
+        driver,
+        RetryConfig(max_attempts=3, initial_delay_seconds=0.0, max_delay_seconds=0.0, jitter=False),
+        sleep=no_wait,
+    )
+    with patch.object(dashscope.Generation, "call", side_effect=list(streams)):
+        yield provider
+
+
+def _qwen_error_after_content():
+    with _qwen_streams([_qwen_chunk("partial text"), _qwen_error_chunk(400)]) as provider:
+        loop = make_loop(provider)
+        run_turn(loop)
+    return loop
+
+
+def _qwen_error_after_a_complete_call():
+    call = {"id": "c1", "function": {"name": "read_file", "arguments": '{"file_path": "a.py"}'}}
+    registry = RecordingRegistry()
+    # The second stream is what a loop that kept going would ask for: a text reply.
+    with _qwen_streams(
+        [_qwen_chunk(tool_calls=[call]), _qwen_error_chunk(400)], [_qwen_chunk("done")]
+    ) as provider:
+        loop = make_loop(provider, registry=registry)
+        run_turn(loop)
+    return loop, registry
+
+
+def test_a_qwen_error_after_content_fails_the_turn_with_the_reason_and_the_notice():
+    """Baseline regression, E23: the partial text is recorded as a completed reply today.
+
+    Driven by one content chunk and then a 400 through the real retry wrapper. After:
+    ``failed``/``llm`` with the status and the upstream reason, and the partial-reply notice on
+    its own line.
+    """
+    loop = _qwen_error_after_content()
+
+    assert loop.outcome == TurnOutcome(
+        "failed",
+        "llm",
+        f"Error: Error code: 400 - {_QWEN_REASON}\nThe partial reply above was not saved.",
+        True,
+    )
+
+
+def test_a_qwen_error_after_content_records_no_reply():
+    """Baseline regression, E23: the cut-off text is in history as the assistant's reply today."""
+    loop = _qwen_error_after_content()
+
+    assert loop.messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "go"},
+    ]
+
+
+def test_a_qwen_error_after_content_puts_the_reason_in_no_log_record(loguru_caplog):
+    """Preservation, R13: the reason reaches the user and no log record or traceback.
+
+    The driver's metadata-only record, the retry layer's debug record and the turn's error
+    record carry only the status. Passes before and after.
+    """
+    _qwen_error_after_content()
+
+    assert _QWEN_REASON not in loguru_caplog.text
+    assert "Qwen streaming error: status=400 message_chars=" in loguru_caplog.text
+
+
+def test_a_qwen_error_after_a_complete_tool_call_does_not_run_it():
+    """Baseline regression, R13: the stream ends cleanly and the call runs once today."""
+    _, registry = _qwen_error_after_a_complete_call()
+
+    assert registry.calls == []
+
+
+def test_a_qwen_error_after_a_complete_tool_call_fails_the_turn_at_the_llm_stage():
+    """Baseline regression, R13: the turn completes today, after running the call."""
+    loop, _ = _qwen_error_after_a_complete_call()
+
+    assert loop.outcome == TurnOutcome(
+        "failed", "llm", f"Error: Error code: 400 - {_QWEN_REASON}", True
+    )

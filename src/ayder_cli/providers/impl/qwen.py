@@ -22,6 +22,19 @@ if TYPE_CHECKING:
 logger = get_logger("llm")
 
 
+class QwenStreamError(Exception):
+    """DashScope answered a streaming request with a non-200 status (R13).
+
+    ``str()`` is only ``Error code: <status>``; the upstream text is on ``body``, so the user
+    sees the reason and no log record or traceback carries it.
+    """
+
+    def __init__(self, status_code: int, body: str) -> None:
+        self.status_code = status_code
+        self.body = body
+        super().__init__(f"Error code: {status_code}")
+
+
 class QwenNativeProvider(AIProvider):
     """
     Provider for Alibaba Qwen models using the official DashScope SDK.
@@ -101,7 +114,11 @@ class QwenNativeProvider(AIProvider):
                     "Qwen streaming error: status={} message_chars={}",
                     response.status_code, message_chars,
                 )
-                break
+                # Raise, never end the stream quietly: a stream cut off by an
+                # upstream error would otherwise look like a finished reply (R13).
+                raise QwenStreamError(
+                    response.status_code, "" if message is None else str(message)
+                )
             yield self._normalize_chunk(response)
 
     def _normalize_response(self, response: Any) -> NormalizedStreamChunk:
