@@ -360,9 +360,11 @@ def test_full_tree_census_is_frozen():
     # providers/evren.py (evren terms acceptance) adds one module. The OpenAI
     # driver's list_models no longer swallows server errors (one fewer), and
     # the evren terms paths catch named errors only.
+    # core/config_editor.py and tui/config_wizard.py (the config wizard) add
+    # two modules and catch named errors only.
     code, out = _run()
     assert "broad=129" in out, out
-    assert "files=120/120" in out, out
+    assert "files=122/122" in out, out
     code, out = _run("--expect-broad", "137")
     assert code == 1
     assert "census: found 129" in out

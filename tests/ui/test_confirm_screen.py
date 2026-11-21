@@ -330,6 +330,7 @@ class TestRunTuiPermissions:
                 resume_session_id=None,
                 session_name=None,
                 log_settings=None,
+                first_run=False,
             )
 
     def test_run_tui_default_permissions(self, tmp_path, monkeypatch):
@@ -354,6 +355,7 @@ class TestRunTuiPermissions:
                 resume_session_id=None,
                 session_name=None,
                 log_settings=None,
+                first_run=False,
             )
 
 

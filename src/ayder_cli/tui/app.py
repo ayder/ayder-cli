@@ -50,7 +50,7 @@ from ayder_cli.tui.widgets import (
     CLIInputBar,
     StatusBar,
 )
-from ayder_cli.tui.commands import COMMAND_MAP, do_clear
+from ayder_cli.tui.commands import COMMAND_MAP, do_clear, open_config_wizard
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig, new_session_id
 from ayder_cli.services.messaging_inbox import MessagingInbox
 from ayder_cli import __version__ as ayder_version
@@ -233,6 +233,7 @@ class AyderApp(App):
         initial_messages: list[dict] | None = None,
         resume_session_id: str | None = None,
         log_settings=None,
+        first_run: bool = False,
         **kwargs,
     ):
         """
@@ -249,6 +250,8 @@ class AyderApp(App):
             log_settings: Fully-resolved LoggingSettings from the CLI entry point.
                 When None, resolved from config via build_logging_settings (e.g.
                 when AyderApp is constructed directly in tests).
+            first_run: When True (no config.toml existed at startup), open the
+                config wizard after mount.
         """
         # Pop before super(): Textual's App.__init__ rejects unknown kwargs.
         session_name = str(kwargs.pop("session_name", "") or "")
@@ -301,6 +304,7 @@ class AyderApp(App):
         self._inbox: MessagingInbox | None = None
         self._session_name: str = session_name
         self._log_settings = log_settings
+        self._first_run = first_run
         self._resuming = bool(
             initial_messages and initial_messages[0].get("role") == "system"
         )
@@ -751,6 +755,9 @@ class AyderApp(App):
 
         # After layout is computed, size the spacer to push the banner near the input
         self.call_after_refresh(self._position_banner)
+
+        if self._first_run:
+            open_config_wizard(self, chat_view, first_run=True)
 
     def _position_banner(self) -> None:
         """Size the top spacer so the banner sits just above the input bar."""
