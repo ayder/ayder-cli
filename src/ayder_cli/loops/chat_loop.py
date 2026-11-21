@@ -26,6 +26,7 @@ from ayder_cli.application.execution_policy import (
     ToolRequest,
 )
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
+from ayder_cli.core.result import ToolResultText, ToolSuccess
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 from ayder_cli.tools.definition import is_parallel_safe
@@ -934,7 +935,7 @@ class ChatLoop:
                     }
                     tool_results_map[tc.id] = rd
                     self._display(self.cb.on_tool_start, tc.id, "parse_error", {})
-                    self._display(self.cb.on_tool_complete, tc.id, rd["result"])
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(rd["result"], "error"))
                     continue
 
                 if not tc.function.name or tc.function.name == "unknown":
@@ -945,7 +946,7 @@ class ChatLoop:
                     }
                     tool_results_map[tc.id] = rd
                     self._display(self.cb.on_tool_start, tc.id, "unknown", {})
-                    self._display(self.cb.on_tool_complete, tc.id, rd["result"])
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(rd["result"], "error"))
                     continue
 
                 # Validate that arguments parsed correctly — some providers
@@ -961,7 +962,7 @@ class ChatLoop:
                     }
                     tool_results_map[tc.id] = rd
                     self._display(self.cb.on_tool_start, tc.id, tc.function.name, args)
-                    self._display(self.cb.on_tool_complete, tc.id, refusal)
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(refusal, "error"))
                     continue
                 if arg_status == "repaired":
                     repaired_ids.add(tc.id)
@@ -981,7 +982,7 @@ class ChatLoop:
                     }
                     tool_results_map[tc.id] = rd
                     self._display(self.cb.on_tool_start, tc.id, tc.function.name, args)
-                    self._display(self.cb.on_tool_complete, tc.id, err_msg)
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(err_msg, "error"))
                     tool_log.warning(
                         "Tool '{}' called with missing args {} ({} chars raw, keys={})",
                         tc.function.name,
@@ -1035,9 +1036,13 @@ class ChatLoop:
                         if isinstance(rd, dict):
                             tid = rd["tool_call_id"]
                             result = str(rd["result"])
-                            self._display(self.cb.on_tool_complete, tid, result)
+                            self._display(
+                                self.cb.on_tool_complete, tid, _completion(result, rd.get("status"))
+                            )
                         else:
-                            self._display(self.cb.on_tool_complete, tc.id, f"Error: {rd}")
+                            self._display(
+                                self.cb.on_tool_complete, tc.id, _completion(f"Error: {rd}", "error")
+                            )
                     continue
 
                 tc = segment[0]
@@ -1055,7 +1060,9 @@ class ChatLoop:
                     tool_results_map[tc.id] = rd
 
                     # Notify UI
-                    self._display(self.cb.on_tool_complete, tc.id, result)
+                    self._display(
+                        self.cb.on_tool_complete, tc.id, _completion(result, rd.get("status"))
+                    )
 
                 elif confirm is not None and getattr(confirm, "action", None) == "instruct":
                     # User provided instructions instead of approval
@@ -1063,7 +1070,7 @@ class ChatLoop:
                     denied_msg = "Tool call skipped by user instruction."
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_complete, tc.id, denied_msg)
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(denied_msg, "denied"))
                     break  # No later call runs once the user redirects the turn
                 else:
                     # User denied tool — still must add a result so the LLM sees
@@ -1071,7 +1078,7 @@ class ChatLoop:
                     denied_msg = "Tool call denied by user."
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_complete, tc.id, denied_msg)
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(denied_msg, "denied"))
 
             # Ensure every tool_call has a result (API requires it)
             for tc in tool_calls:
@@ -1082,7 +1089,7 @@ class ChatLoop:
                         "name": tc.function.name,
                         "result": skipped_msg,
                     }
-                    self._display(self.cb.on_tool_complete, tc.id, skipped_msg)
+                    self._display(self.cb.on_tool_complete, tc.id, _completion(skipped_msg, "skipped"))
 
             # Process results in correct order -> append tool messages
             for tc in tool_calls:
@@ -1173,6 +1180,7 @@ class ChatLoop:
                     "tool_call_id": tc.id,
                     "name": name,
                     "result": _failure_text(name, failure),
+                    "status": "error",
                 }
                 batch.results[tc.id] = recorded
         return recorded
@@ -1206,7 +1214,10 @@ class ChatLoop:
                     if state.cancelled.is_set() or self.cb.is_cancelled() is True:
                         settled = True
                         return {
-                            "tool_call_id": tc.id, "name": name, "result": _CANCELLED_BEFORE_RUN,
+                            "tool_call_id": tc.id,
+                            "name": name,
+                            "result": _CANCELLED_BEFORE_RUN,
+                            "status": "not_run",
                         }
                     state.started.add(tc.id)
                 reached = True
@@ -1230,6 +1241,7 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": name,
                         "result": _failure_text(name, raised),
+                        "status": "error",
                     }
                     with state.lock:
                         state.results[tc.id] = failure
@@ -1237,7 +1249,12 @@ class ChatLoop:
                         failed = ExecutionResult(success=False, error=raised)
                         self._emit_tool_call(name, args, started, failed)
             result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
-            rd = {"tool_call_id": tc.id, "name": name, "result": result}
+            rd = {
+                "tool_call_id": tc.id,
+                "name": name,
+                "result": result,
+                "status": _result_status(exec_result),
+            }
             with state.lock:
                 state.results[tc.id] = rd
             self._emit_tool_call(name, args, started, exec_result)
@@ -1434,6 +1451,25 @@ def _cancel_requested() -> bool:
     or a library, not by a cancellation of the task: it is that call's failure.
     """
     return _cancel_count() > 0
+
+
+def _completion(text: str, status: str | None) -> str:
+    """What ``on_tool_complete`` receives: the text with its status when the loop knows one (R4a).
+
+    History keeps the plain text. A result with no known status stays a plain ``str``, so a
+    receiver's own text rule still applies to it.
+    """
+    return ToolResultText(text, status) if status else text
+
+
+def _result_status(exec_result: Any) -> str | None:
+    """The status of an executed call: ``error`` for a failed execution, ``ok`` for a
+    ``ToolSuccess``, and None for a plain string (the agent tool's handler, some plugins)."""
+    if not hasattr(exec_result, "success"):  # a test double may return a bare string
+        return None
+    if not exec_result.success:
+        return "error"
+    return "ok" if isinstance(exec_result.result, ToolSuccess) else None
 
 
 def _failure_text(tool_name: str, exc: BaseException | None) -> str:
