@@ -946,18 +946,6 @@ class ChatLoop:
             repaired_ids: set[str] = set()
 
             for tc in tool_calls:
-                # Check for parsing errors injected by XML/JSON fallback protocols
-                if getattr(tc, "error", None):
-                    rd = {
-                        "tool_call_id": tc.id,
-                        "name": "parse_error",
-                        "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
-                    }
-                    tool_results_map[tc.id] = rd
-                    self._display(self._item_started, _key(tc.id), "parse_error", {})
-                    self._display(self._item_finished, _key(tc.id), _completion(rd["result"], "error"))
-                    continue
-
                 if not tc.function.name or tc.function.name == "unknown":
                     rd = {
                         "tool_call_id": tc.id,
