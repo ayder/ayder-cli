@@ -668,7 +668,7 @@ class ChatLoop:
                             )
                             self._fail(
                                 end,
-                                "LLM returned an empty response. Check model compatibility "
+                                "Error: LLM returned an empty response. Check model compatibility "
                                 "or try switching chat_protocol in config.",
                                 "llm",
                             )

@@ -330,3 +330,40 @@ async def test_run_flags_echo_only_deliverable_as_error(tmp_path):
 
     assert out.status == "error"
     assert "deliverable" in (out.error or "").lower()
+
+
+@pytest.mark.anyio
+async def test_run_reports_an_empty_provider_response_as_the_agents_error(tmp_path):
+    """Baseline regression, N1: an agent whose provider streams nothing hides the cause.
+
+    The real ``ChatLoop`` runs under the runner, with a provider whose stream is empty. The loop
+    reports the failure through ``on_system_message``, and the agent callbacks capture only a
+    message that starts with ``Error``. Today that message does not, so the run settles ``error``
+    with "Agent produced no deliverable (empty or echo-only response)." After: it settles
+    ``error`` with the loop's own message.
+    """
+    from ayder_cli.core.context import ProjectContext
+    from tests.loops.turn_fakes import FakeContext, RecordingRegistry, ScriptedProvider
+
+    cfg = AgentConfig(name="coder", system_prompt="x")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(),
+        project_ctx=ProjectContext(str(tmp_path)), process_manager=MagicMock(),
+        permissions=set(), timeout=5, run_id=1, generation=0,
+    )
+    provider = ScriptedProvider([])  # one reply: an empty stream
+    rt = _fake_rt()
+    rt.llm_provider = provider
+    rt.tool_registry = RecordingRegistry()
+    rt.context_manager = FakeContext()
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=rt):
+        out = await runner.run("do it")
+
+    assert provider.calls == 1
+    assert out.status == "error"
+    assert out.error == (
+        "Error: LLM returned an empty response. "
+        "Check model compatibility or try switching chat_protocol in config."
+    )
