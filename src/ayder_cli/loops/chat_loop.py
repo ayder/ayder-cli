@@ -105,6 +105,8 @@ class _TurnEnd:
     reported: bool | None = None
     finished: bool = False
     cancels_at_entry: int = 0
+    # The calls of the appended reply that the batch has not taken yet (R3b).
+    unsettled: list = field(default_factory=list)
 
     def final(self) -> TurnOutcome:
         """The frozen outcome to publish. It cannot raise."""
@@ -167,6 +169,7 @@ _REPAIRED_PREFIX = (
 )
 
 _CANCELLED_BEFORE_RUN = "Tool call was cancelled before it ran."
+_NOT_RUN_TURN_FAILED = "Tool call was not run because the turn failed."
 _INTERRUPTED_WHILE_RUNNING = (
     "Tool call was interrupted while running and may have partially applied. "
     "Check the current state before retrying."
@@ -355,12 +358,31 @@ class ChatLoop:
 
         It closes a thinking phase that a failure or a cancellation left open,
         through the guard so the stop cannot replace the primary failure (R7d),
-        then reports a failed turn. Settlement, the cancel flags and finishing
-        the items join it in later steps, each call guarded.
+        gives the appended reply's unrun calls their tool messages, then reports
+        a failed turn. The cancel flags and finishing the items join it in later
+        steps, each call guarded.
         """
         if thinking_open:
             self._guarded("closing thinking stop", self.cb.on_thinking_stop)
+        self._settle_unrun_calls(end)
         self._report_once(end)
+
+    def _settle_unrun_calls(self, end: "_TurnEnd") -> None:
+        """Give each call of the appended reply that never reached the batch its tool message.
+
+        The text is the cancel text on a cancellation and the failure text on a
+        failure (R3b), without the repeat note or the repaired prefix. Every
+        call is a ``_ToolCall`` the loop built, so nothing here can raise.
+        """
+        if not end.unsettled:
+            return
+        cancelled = end.decided is not None and end.decided.status == "cancelled"
+        text = _CANCELLED_BEFORE_RUN if cancelled else _NOT_RUN_TURN_FAILED
+        for tc in end.unsettled:
+            self.messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": text}
+            )
+        end.unsettled = []
 
     def _display(self, fn: Callable[..., None], *args: Any) -> None:
         """Call a display callback inside the tool batch.
@@ -622,12 +644,6 @@ class ChatLoop:
 
                             stage = "llm"  # the next chunk comes from the provider
 
-                        if thinking_open:
-                            # The stream ended with a phase open: close it. A raising
-                            # stop is a UI failure.
-                            thinking_open = False
-                            stage = "ui"
-                            self.cb.on_thinking_stop()
                         stage = "internal"
 
                         # Some models pack multiple parallel tool calls into one entry
@@ -654,7 +670,51 @@ class ChatLoop:
                             )
                             normalized_tool_calls.append(tool_call_obj)
 
+                        if final_content or normalized_tool_calls:
+                            # A complete reply is recorded before anything that can fail
+                            # (R3b): the stop, the cancel check and accounting come after.
+                            # Build and append assistant message dict to conversation history.
+                            # Sanitize tool call arguments: some models emit malformed JSON which
+                            # gets stored in history. On the next API call, providers (e.g. Ollama)
+                            # validate the history and reject requests with invalid arguments.
+                            if raw_tool_calls_for_history:
+                                for tc_entry in raw_tool_calls_for_history:
+                                    raw_args = tc_entry["function"].get("arguments", "")
+                                    if isinstance(raw_args, str):
+                                        try:
+                                            decoded = json.loads(raw_args)
+                                            if not isinstance(decoded, dict):
+                                                # e.g. "null": never send it back to the
+                                                # provider; the call is refused anyway.
+                                                tc_entry["function"]["arguments"] = "{}"
+                                        except (json.JSONDecodeError, ValueError):
+                                            llm_log.warning(
+                                                "Malformed tool arguments for '{}': "
+                                                "{} chars — repairing before storing in history",
+                                                tc_entry["function"].get("name", "?"),
+                                                len(raw_args),
+                                            )
+                                            parsed = _parse_arguments(raw_args)
+                                            tc_entry["function"]["arguments"] = json.dumps(parsed)
 
+                            reasoning_only = 0
+                            msg_dict: dict = {"role": "assistant", "content": final_content}
+                            if raw_tool_calls_for_history:
+                                msg_dict["tool_calls"] = raw_tool_calls_for_history
+                            if final_reasoning:
+                                msg_dict["reasoning_content"] = final_reasoning
+
+                            self.messages.append(msg_dict)
+                            # Hold its calls until the batch takes them: the turn's end
+                            # settles any that are left (R3b).
+                            end.unsettled = list(normalized_tool_calls)
+
+                        if thinking_open:
+                            # The stream ended with a phase open: close it. A raising
+                            # stop is a UI failure.
+                            thinking_open = False
+                            stage = "ui"
+                            self.cb.on_thinking_stop()
                         stage = "ui"
                         if self.cb.is_cancelled():
                             end.decided = TurnOutcome("cancelled")
@@ -724,41 +784,10 @@ class ChatLoop:
                             )
                             continue
 
-                        # Build and append assistant message dict to conversation history.
-                        # Sanitize tool call arguments: some models emit malformed JSON which
-                        # gets stored in history. On the next API call, providers (e.g. Ollama)
-                        # validate the history and reject requests with invalid arguments.
-                        if raw_tool_calls_for_history:
-                            for tc_entry in raw_tool_calls_for_history:
-                                raw_args = tc_entry["function"].get("arguments", "")
-                                if isinstance(raw_args, str):
-                                    try:
-                                        decoded = json.loads(raw_args)
-                                        if not isinstance(decoded, dict):
-                                            # e.g. "null": never send it back to the
-                                            # provider; the call is refused anyway.
-                                            tc_entry["function"]["arguments"] = "{}"
-                                    except (json.JSONDecodeError, ValueError):
-                                        llm_log.warning(
-                                            "Malformed tool arguments for '{}': "
-                                            "{} chars — repairing before storing in history",
-                                            tc_entry["function"].get("name", "?"),
-                                            len(raw_args),
-                                        )
-                                        parsed = _parse_arguments(raw_args)
-                                        tc_entry["function"]["arguments"] = json.dumps(parsed)
-
-                        reasoning_only = 0
-                        msg_dict: dict = {"role": "assistant", "content": final_content}
-                        if raw_tool_calls_for_history:
-                            msg_dict["tool_calls"] = raw_tool_calls_for_history
-                        if final_reasoning:
-                            msg_dict["reasoning_content"] = final_reasoning
-
-                        self.messages.append(msg_dict)
-
                         # 4. Handle tool execution
                         if normalized_tool_calls:
+                            # The batch settles every call it takes, however it ends.
+                            end.unsettled = []
                             # We use the existing unified execution path
                             escalated = await self._execute_tool_calls(normalized_tool_calls)
                             self._batch_stage = None
