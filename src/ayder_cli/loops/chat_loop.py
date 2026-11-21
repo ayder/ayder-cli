@@ -218,6 +218,50 @@ class _ToolItems:
     fresh: bool = False
 
 
+_ATOMIC_TYPES = frozenset({str, int, float, bool, type(None)})
+
+
+def _copy_arguments(value: Any) -> Any:
+    """A deep copy of parsed arguments that needs no recursion, so any nesting the parser accepts
+    can be copied (R10).
+
+    ``copy.deepcopy`` recurses in Python and fails at about 500 levels, a depth ``json.loads``
+    accepts and the loop ran before arguments were copied. Plain dicts and lists, which is
+    everything a JSON parse yields, are copied with an explicit stack. Anything else is handed to
+    ``copy.deepcopy``, so a value that is not a JSON type (a tuple, a set, an object a provider
+    passes in dict arguments) copies as it always did. The copy keeps shared references and cycles,
+    as ``deepcopy`` does.
+    """
+    memo: dict[int, Any] = {}  # the format copy.deepcopy shares, so both see what is copied
+    pending: list[tuple[Any, Any]] = []
+
+    def shell(source: Any) -> Any:
+        if type(source) in _ATOMIC_TYPES:
+            return source
+        known = memo.get(id(source))
+        if known is not None:
+            return known
+        if type(source) is dict:
+            target: Any = {}
+        elif type(source) is list:
+            target = []
+        else:
+            return copy.deepcopy(source, memo)
+        memo[id(source)] = target
+        pending.append((source, target))
+        return target
+
+    root = shell(value)
+    while pending:
+        source, target = pending.pop()
+        if type(source) is dict:
+            for key, item in source.items():
+                target[key if type(key) in _ATOMIC_TYPES else copy.deepcopy(key, memo)] = shell(item)
+        else:
+            target.extend([shell(item) for item in source])
+    return root
+
+
 @dataclass
 class _ParsedCall:
     """One call's arguments, parsed once (seam B, R10).
@@ -229,7 +273,8 @@ class _ParsedCall:
 
     ``args`` stays private: a consumer that may mutate what it is given (the parallel-safe
     predicate, the receivers of the running display and of the confirmation preview, the executor)
-    gets ``arguments()``, its own deep copy, so nothing it does can reach the call that runs.
+    gets ``arguments()``, its own deep copy (at any nesting depth, ``_copy_arguments``), so nothing
+    it does can reach the call that runs.
     """
 
     raw: Any
@@ -247,7 +292,7 @@ class _ParsedCall:
 
     def arguments(self) -> dict:
         """A fresh deep copy of the parsed arguments, for one consumer."""
-        return copy.deepcopy(self.args)
+        return _copy_arguments(self.args)
 
 
 class ChatLoop:

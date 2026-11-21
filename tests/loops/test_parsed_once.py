@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 
+from ayder_cli.loops.chat_loop import _ParsedCall
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 from tests.loops.turn_fakes import (
     RecordingCallbacks,
@@ -26,6 +27,7 @@ from tests.loops.turn_fakes import (
     delta,
     make_loop,
     run_turn,
+    tool_messages,
 )
 
 _PARSE_WARNING_PREFIXES = (
@@ -157,3 +159,112 @@ def test_the_executor_called_directly_parses_its_own_call():
     result = asyncio.run(loop._exec_tool_async(_call('{"file_path": "a.py"}')))
 
     assert (result["result"], loop.registry.calls) == ("ok", [("read_file", {"file_path": "a.py"})])
+
+
+# -- Step 25: isolation covers every depth the parser accepts (Codex #7) --------------------------------------
+
+_NESTING = 520
+_DEEP = '{"a": ' * _NESTING + "1" + "}" * _NESTING
+
+
+def _depth(value) -> int:
+    """How deeply dicts and lists nest in ``value``, counted without recursion."""
+    deepest, stack = 0, [(value, 1)]
+    while stack:
+        node, level = stack.pop()
+        if isinstance(node, dict):
+            deepest = max(deepest, level)
+            stack.extend((child, level + 1) for child in node.values())
+        elif isinstance(node, list):
+            deepest = max(deepest, level)
+            stack.extend((child, level + 1) for child in node)
+    return deepest
+
+
+def _a_call_with_520_nested_objects(probe_tool):
+    """Codex's probe: a registered read-only tool called with an object that holds 520 nested JSON
+    objects. ``json.loads`` accepts that depth, and main ran the call once."""
+    name = probe_tool("probe")
+    loop = _turn_with(delta("c1", name, _DEEP))
+    return name, loop
+
+
+def test_a_call_with_deeply_nested_arguments_runs_once(probe_tool):
+    """Baseline regression, Codex #7: the argument copy raises ``RecursionError`` before dispatch
+    today, so the call never runs (zero executions)."""
+    _, loop = _a_call_with_520_nested_objects(probe_tool)
+
+    assert len(loop.registry.calls) == 1
+
+
+def test_a_call_with_deeply_nested_arguments_runs_with_all_of_them(probe_tool):
+    """Baseline regression, Codex #7: nothing reaches the tool today."""
+    _, loop = _a_call_with_520_nested_objects(probe_tool)
+
+    assert [_depth(arguments) for _, arguments in loop.registry.calls] == [_NESTING]
+
+
+def test_a_call_with_deeply_nested_arguments_gets_its_own_result(probe_tool):
+    """Baseline regression, Codex #7: its tool message is the cancelled text today."""
+    _, loop = _a_call_with_520_nested_objects(probe_tool)
+
+    assert [m["content"] for m in tool_messages(loop)] == ["ok"]
+
+
+def test_a_call_with_deeply_nested_arguments_does_not_fail_the_turn(probe_tool):
+    """Baseline regression, Codex #7: the turn ends ``failed``/``tools`` today. After: the call
+    ran and a final text reply completes the turn, as on main."""
+    _, loop = _a_call_with_520_nested_objects(probe_tool)
+
+    assert (loop.outcome.status, loop.outcome.stage) == ("completed", None)
+
+
+class _Opaque:
+    """A value that is not a JSON type, as a provider that hands over dict arguments might pass."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, _Opaque) and other.label == self.label
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+def test_dict_arguments_with_values_that_are_not_json_copy_as_they_always_did():
+    """Preservation: a tuple, a set and an object of a class of the provider's own still copy.
+
+    Every container is a new object, the opaque object is copied, and the values are equal.
+    """
+    arguments = {"t": (1, [2]), "s": {1, 2}, "o": _Opaque("x"), "d": {"n": [1, {"m": 2}]}}
+    parsed = _ParsedCall.of(arguments)
+
+    copied = parsed.arguments()
+
+    assert copied == arguments
+    assert copied["t"][1] is not arguments["t"][1]
+    assert copied["o"] is not arguments["o"]
+    assert copied["d"]["n"][1] is not arguments["d"]["n"][1]
+
+
+def test_copies_keep_shared_and_circular_references_as_deepcopy_did():
+    """Preservation: a list used twice stays one list in the copy, and a cycle stays a cycle."""
+    shared: list = [1]
+    arguments: dict = {"a": shared, "b": shared}
+    arguments["self"] = arguments
+    parsed = _ParsedCall.of(arguments)
+
+    copied = parsed.arguments()
+
+    assert copied["a"] is copied["b"] and copied["a"] is not shared
+    assert copied["self"] is copied and copied is not arguments
+
+
+def test_a_copy_is_independent_of_the_parse_and_of_the_other_copies():
+    """Preservation: each consumer's copy is its own, at any depth it can mutate."""
+    parsed = _ParsedCall.of('{"items": [{"a": [1, 2]}]}')
+    first, second = parsed.arguments(), parsed.arguments()
+
+    first["items"][0]["a"].append("TAMPERED")
+
+    assert second == {"items": [{"a": [1, 2]}]} and parsed.args == {"items": [{"a": [1, 2]}]}
