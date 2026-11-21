@@ -44,7 +44,9 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"driver.name","message":"{} ({}) failed mid-stream (error_type={}); transparently retrying with {} ({})","method":"info","path":"providers/impl/ollama.py","qualname":"OllamaProvider.stream_with_tools"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"err_name","message":"Appending Tool Error [{}] to history: {} chars","method":"trace","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"existing_tc['function']['name']","message":"Tool call id reused by a different tool ({} then {}); calls would merge","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-status","site":{"arg_index":"pos:0","expr":"failed_stage","message":"Chat turn cancelled (stage={})","method":"info","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-status","site":{"arg_index":"pos:0","expr":"failed_stage","message":"Chat turn raised (stage={})","method":"error","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
+{"class":"R-status","site":{"arg_index":"pos:0","expr":"failed_stage","message":"Chat turn raised a stray cancellation (stage={})","method":"error","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Diff preview generation failed for {}","method":"debug","path":"ui.py","qualname":"generate_diff_preview"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Failed to render file panel for {}","method":"warning","path":"ui.py","qualname":"print_file_content"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"file_path","message":"Failed to render file panel for {}","method":"warning","path":"ui.py","qualname":"print_file_content_rich"}}

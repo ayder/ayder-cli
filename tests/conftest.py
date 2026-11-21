@@ -10,7 +10,9 @@ from __future__ import annotations
 import contextlib
 import functools
 import pathlib
+import signal
 import sys
+import threading
 
 import pytest
 from loguru import logger
@@ -144,6 +146,42 @@ def _turn_integrity(request, monkeypatch):
         problems.append(f"a chat turn ended failed/internal: {internal[0].message}")
     if problems:
         pytest.fail("; ".join(problems), pytrace=False)
+
+
+@pytest.fixture
+def default_sigint_handler():
+    """Python's default SIGINT handler, with everything a signal test could leave behind restored.
+
+    ``asyncio.run`` installs its own handler over the default one, which cancels the main task on
+    the first SIGINT. Restores ``sys.excepthook``, the SIGINT and SIGTERM handlers and the
+    diagnostics flags afterwards.
+    """
+    from ayder_cli import diagnostics
+
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("a signal can only be handled in the main thread")
+    saved_hook = sys.excepthook
+    saved_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    saved_flags = (diagnostics._hooks_installed, diagnostics._signals_installed)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        sys.excepthook = saved_hook
+        for sig, handler in saved_handlers.items():
+            signal.signal(sig, handler)
+        diagnostics._hooks_installed, diagnostics._signals_installed = saved_flags
+
+
+@pytest.fixture
+def diagnostics_sigint_handler(default_sigint_handler):
+    """SIGINT as the CLI runs with it: diagnostics' handler chained over Python's default."""
+    from ayder_cli import diagnostics
+
+    diagnostics._hooks_installed = False
+    diagnostics._signals_installed = False
+    diagnostics.install_exception_hooks()
+    yield
 
 
 @pytest.fixture(autouse=True)

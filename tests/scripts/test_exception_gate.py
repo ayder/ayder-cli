@@ -364,9 +364,10 @@ def test_full_tree_census_is_frozen():
     # two modules and catch named errors only.
     # loops/chat_loop.py (turn integrity, step 2) adds the loop's generic guard
     # (one); the per-call handler only moves from `_safe_exec` to `_run_call`.
+    # Step 6 adds the turn boundary's `except BaseException` (one).
     code, out = _run()
-    assert "broad=130" in out, out
+    assert "broad=131" in out, out
     assert "files=122/122" in out, out
     code, out = _run("--expect-broad", "137")
     assert code == 1
-    assert "census: found 130" in out
+    assert "census: found 131" in out

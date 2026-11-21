@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ayder_cli import diagnostics
 from ayder_cli.cli_runner import _run_loop, run_command
 from ayder_cli.providers.base import NormalizedStreamChunk
 from tests.loops.test_chat_loop_errors import _Raising
@@ -147,24 +146,6 @@ def test_a_failure_the_callbacks_printed_is_printed_once(capsys):
     assert capsys.readouterr().err.count("Error: boom") == 1
 
 
-@pytest.fixture
-def default_sigint_handler():
-    """Python's default SIGINT handler, with everything a signal test could leave behind restored."""
-    if threading.current_thread() is not threading.main_thread():
-        pytest.skip("a signal can only be handled in the main thread")
-    saved_hook = sys.excepthook
-    saved_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
-    saved_flags = (diagnostics._hooks_installed, diagnostics._signals_installed)
-    signal.signal(signal.SIGINT, signal.default_int_handler)
-    try:
-        yield
-    finally:
-        sys.excepthook = saved_hook
-        for sig, handler in saved_handlers.items():
-            signal.signal(sig, handler)
-        diagnostics._hooks_installed, diagnostics._signals_installed = saved_flags
-
-
 class _StallingProvider:
     """Streams one chunk, tells the test it is awaiting, then waits; Ctrl+C lands here."""
 
@@ -179,16 +160,12 @@ class _StallingProvider:
         await asyncio.sleep(5)
 
 
-def test_ctrl_c_with_the_default_handler_exits_130(default_sigint_handler):
-    """Baseline regression, E17: after step 3 the exit code is 0.
+def _ctrl_c_during_the_stream() -> tuple[int | None, bool]:
+    """Run ``_run_loop`` while a helper thread sends SIGINT once the stream is awaiting.
 
-    Driven by a real SIGINT with Python's default handler installed: a helper thread waits until
-    the stream is awaiting, then signals the main thread, where ``_run_loop`` runs under
-    ``asyncio.run``. Its runner cancels the turn's task; the stream swallows the cancellation and
-    ``run()`` returns with the outcome ``cancelled``, which ``loop.error`` does not show. After:
-    exit 130, from the outcome.
+    ``_run_loop`` runs in the test's main thread. Returns its exit code and whether a
+    ``KeyboardInterrupt`` escaped it (a regression then fails the test, not the session).
     """
-    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
     awaiting = threading.Event()
     main_thread = threading.main_thread().ident
     assert main_thread is not None
@@ -208,10 +185,53 @@ def test_ctrl_c_with_the_default_handler_exits_130(default_sigint_handler):
         ):
             code = _run_loop("hello", permissions={"r"})
     except KeyboardInterrupt:
-        interrupted = True  # a regression fails the assertions below, not the session
+        interrupted = True
     finally:
         sender.join(5)
-
     assert awaiting.is_set()
+    return code, interrupted
+
+
+def test_ctrl_c_with_the_default_handler_exits_130(default_sigint_handler):
+    """Baseline regression, E17: after step 3 the exit code is 0.
+
+    Driven by a real SIGINT with Python's default handler installed: a helper thread waits until
+    the stream is awaiting, then signals the main thread, where ``_run_loop`` runs under
+    ``asyncio.run``. Its runner cancels the turn's task; the stream swallows the cancellation and
+    ``run()`` returns with the outcome ``cancelled``, which ``loop.error`` does not show. After:
+    exit 130, from the outcome.
+    """
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+    code, interrupted = _ctrl_c_during_the_stream()
+
     assert not interrupted
     assert code == 130
+
+
+def test_ctrl_c_with_the_default_handler_prints_interrupted(default_sigint_handler, capsys):
+    """Baseline regression, E17 (step 6): the cancellation did not reach ``asyncio.run``.
+
+    Same harness as above. Today the stream swallows the cancellation, so ``asyncio.run`` returns
+    normally and ``_run_loop`` exits 130 from the outcome without its ``Interrupted.`` line.
+    After: the cancellation propagates, ``asyncio.run`` raises ``KeyboardInterrupt``, and
+    ``_run_loop`` prints ``Interrupted.``.
+    """
+    _ctrl_c_during_the_stream()
+
+    assert "Interrupted." in capsys.readouterr().err
+
+
+def test_ctrl_c_with_the_diagnostics_hook_exits_130_and_prints_interrupted(
+    diagnostics_sigint_handler, capsys
+):
+    """Preservation, E17: with the CLI's own SIGINT handler the same Ctrl+C is the same.
+
+    Diagnostics' handler raises ``KeyboardInterrupt`` in the main thread, so ``asyncio.run``
+    raises it and ``_run_loop`` prints ``Interrupted.`` and exits 130, before and after.
+    """
+    code, interrupted = _ctrl_c_during_the_stream()
+
+    assert not interrupted
+    assert code == 130
+    assert "Interrupted." in capsys.readouterr().err

@@ -206,10 +206,10 @@ FROZEN_CHAIN_SITES: dict[tuple[str, str, str, str], tuple[str, int]] = {
 # The 94 `exception=True` inputs are homogeneous, so they are governed as one
 # package-wide shape/count rule rather than 94 site identities - their per-site
 # discipline is C10's.
-FROZEN_EXCEPTION_TRUE = 96
+FROZEN_EXCEPTION_TRUE = 97
 
 # Live chain inputs, counted per method. Printed on every run.
-CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 100, "patch": 0}
+CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 101, "patch": 0}
 
 # The reviewed composition of THE COMMITTED baseline, frozen by the Phase 5
 # census: 252 retained non-path + 22 paths + 2 deferred interpolated rows, plus
@@ -221,7 +221,7 @@ FROZEN_TALLY: dict[str, int] = {
     "R-name": 100,
     "R-id": 40,
     "R-count": 92,
-    "R-status": 28,
+    "R-status": 30,
     "R-class": 11,
     "R-path": 25,
     # Both 5-04 deferrals are closed: the two asyncio rows now interpolate the

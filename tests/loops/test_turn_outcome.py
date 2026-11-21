@@ -16,16 +16,16 @@ hook that waits, and ``asyncio.Task.cancel()`` while the turn is parked.
 from __future__ import annotations
 
 import asyncio
-import threading
-from types import SimpleNamespace
-from typing import Any, Awaitable, Callable
 
-from ayder_cli.loops.chat_loop import ChatLoop, TurnOutcome
+from ayder_cli.loops.chat_loop import TurnOutcome
 from tests.loops.turn_fakes import (
+    HeldRegistry,
     RecordingCallbacks,
     RecordingRegistry,
     ScriptedProvider,
     Stall,
+    WaitingConfirmation,
+    cancel_parked_turn,
     chunk,
     delta,
     make_loop,
@@ -40,61 +40,6 @@ _CANCELLED = TurnOutcome("cancelled")
 
 def _read_call(call_id: str = "call_1"):
     return chunk(calls=[delta(call_id, "read_file", _READ)])
-
-
-class _HeldRegistry(RecordingRegistry):
-    """A registry whose tool blocks its worker thread until ``release`` is set."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.entered = threading.Event()
-        self.release = threading.Event()
-
-    def execute(self, name: str, arguments: dict) -> Any:
-        self.entered.set()
-        self.release.wait(WAIT)
-        return super().execute(name, arguments)
-
-
-class _WaitingConfirmation(RecordingCallbacks):
-    """Callbacks whose confirmation prompt stays open until ``gate`` is set."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.asked = asyncio.Event()
-        self.gate = asyncio.Event()
-
-    async def request_confirmation(self, name: str, arguments: dict) -> object | None:
-        await super().request_confirmation(name, arguments)
-        self.asked.set()
-        await self.gate.wait()
-        return SimpleNamespace(action="approve")
-
-
-def _cancel_parked_turn(
-    loop: ChatLoop,
-    parked: Callable[[], Awaitable[Any]],
-    after_cancel: Callable[[], None] = lambda: None,
-) -> str:
-    """Run a turn as a task, cancel it once ``parked`` returns, and say how it ended.
-
-    Returns ``returned`` when ``run()`` returned normally and ``raised`` when
-    the task ended with ``CancelledError``.
-    """
-
-    async def main() -> str:
-        task = asyncio.create_task(loop.run())
-        await asyncio.wait_for(parked(), WAIT)
-        task.cancel()
-        after_cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            assert task.cancelled()
-            return "raised"
-        return "returned"
-
-    return asyncio.run(main())
 
 
 # -- Exits that return -------------------------------------------------------
@@ -218,20 +163,20 @@ def test_a_task_cancelled_in_the_stream_ends_the_turn_cancelled():
     stall = Stall()
     loop = make_loop(ScriptedProvider([chunk(content="partial"), stall]))
 
-    _cancel_parked_turn(loop, stall.entered.wait)
+    cancel_parked_turn(loop, stall.entered.wait)
 
     assert loop.outcome == _CANCELLED
 
 
 def test_a_task_cancelled_in_the_batch_ends_the_turn_cancelled_and_re_raises():
     """New interface, local-faked, unit: E15. The task is cancelled while a tool runs."""
-    registry = _HeldRegistry()
+    registry = HeldRegistry()
     loop = make_loop(ScriptedProvider([_read_call()]), registry=registry)
 
-    ended = _cancel_parked_turn(
+    ended, _ = cancel_parked_turn(
         loop,
         lambda: asyncio.to_thread(registry.entered.wait, WAIT),
-        after_cancel=registry.release.set,
+        release=registry.release.set,
     )
 
     assert ended == "raised"
@@ -248,7 +193,7 @@ def test_a_task_cancelled_in_the_hook_ends_the_turn_cancelled_and_re_raises():
 
     loop = make_loop(ScriptedProvider([chunk(content="done")]), pre_iteration_hook=hook)
 
-    ended = _cancel_parked_turn(loop, entered.wait)
+    ended, _ = cancel_parked_turn(loop, entered.wait)
 
     assert ended == "raised"
     assert loop.outcome == _CANCELLED
@@ -256,11 +201,11 @@ def test_a_task_cancelled_in_the_hook_ends_the_turn_cancelled_and_re_raises():
 
 def test_a_task_cancelled_at_the_confirmation_prompt_ends_the_turn_cancelled_and_re_raises():
     """New interface, local-faked, unit: E16. The task is cancelled while the confirmation prompt is open."""
-    callbacks = _WaitingConfirmation()
+    callbacks = WaitingConfirmation()
     provider = ScriptedProvider([chunk(calls=[delta("call_1", "file_editor", _WRITE)])])
     loop = make_loop(provider, callbacks=callbacks, permissions={"r"})
 
-    ended = _cancel_parked_turn(loop, callbacks.asked.wait)
+    ended, _ = cancel_parked_turn(loop, callbacks.asked.wait)
 
     assert ended == "raised"
     assert loop.outcome == _CANCELLED

@@ -20,7 +20,7 @@ with ``catch=False`` and removes it afterwards; ``emit_event`` is not patched.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 from loguru import logger
@@ -33,6 +33,7 @@ from tests.loops.turn_fakes import (
     ScriptedProvider,
     chunk,
     delta,
+    escape,
     make_loop,
     run_turn,
     tool_messages,
@@ -42,15 +43,6 @@ _READ = '{"file_path": "a.py"}'
 _WRITE = '{"file_path": "a.py", "operation": "write", "content": "x"}'
 _GUARD_WARNING = "raised; continuing without it"
 _FALLBACK_TEXT = "Error: the turn failed, and its error could not be described."
-
-
-def _escape(fn: Callable[..., Any], *args: Any) -> BaseException | None:
-    """What leaves ``fn(*args)``, or None. Lets a test assert that nothing escaped."""
-    try:
-        fn(*args)
-    except BaseException as exc:  # noqa: BLE001 - the test wants whatever escaped
-        return exc
-    return None
 
 
 def _read_call(call_id: str = "c1"):
@@ -130,7 +122,7 @@ def test_a_collaborator_that_raises_before_the_request_fails_the_turn_at_its_sta
     provider = ScriptedProvider([chunk(content="never asked")])
     loop = make_loop(provider, registry=registry, context=context, **config)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     _assert_failed(loop, stage, f"Error: {prefix}: {detail}")
@@ -150,7 +142,7 @@ def test_a_display_callback_that_raises_mid_stream_is_a_ui_failure(loguru_caplog
     callbacks = RecordingCallbacks(raises={"on_assistant_content": RuntimeError("widget exploded")})
     loop = make_loop(ScriptedProvider([chunk(content="hello")]), callbacks=callbacks)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     _assert_failed(loop, "ui", "Error: the user interface failed: widget exploded")
@@ -181,7 +173,7 @@ def test_a_delta_whose_arguments_are_not_text_is_an_internal_failure(script):
     """
     loop = make_loop(ScriptedProvider(script))
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert loop.outcome is not None
@@ -200,7 +192,7 @@ def test_an_exception_that_cannot_print_gets_the_fixed_text():
     """
     loop = make_loop(ScriptedProvider([_Unprintable()]))
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     _assert_failed(loop, "llm", _FALLBACK_TEXT)
@@ -215,7 +207,7 @@ def test_the_closing_stop_cannot_replace_the_providers_failure(loguru_caplog):
     callbacks = RecordingCallbacks(raises={"on_thinking_stop": RuntimeError("stop exploded")})
     loop = make_loop(ScriptedProvider([RuntimeError("boom")]), callbacks=callbacks)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     _assert_failed(loop, "llm", "Error: boom")
@@ -239,7 +231,7 @@ def test_a_closing_stop_that_raises_after_a_clean_stream_is_a_ui_failure():
     provider = ScriptedProvider([chunk(content="hello"), chunk(reasoning="late")])
     loop = make_loop(provider, callbacks=callbacks)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert stops == [1, 2]
@@ -260,7 +252,7 @@ def test_a_failing_iteration_event_leaves_a_completed_turn_completed(loguru_capl
     sink_id = logger.add(sink, level=0, catch=False, format="{message}")
     try:
         loop = make_loop(ScriptedProvider([chunk(content="hello")]))
-        escaped = _escape(run_turn, loop)
+        escaped = escape(run_turn, loop)
     finally:
         logger.remove(sink_id)
 
@@ -300,7 +292,7 @@ def test_a_tool_result_the_loop_cannot_process_is_an_internal_failure_with_histo
     registry = RecordingRegistry(results={"read_file": nested})
     loop = make_loop(ScriptedProvider([_read_call()]), registry=registry)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert loop.outcome is not None
@@ -323,7 +315,7 @@ def test_a_cancel_poll_that_raises_at_the_loops_check_is_a_ui_failure():
     provider = ScriptedProvider([chunk(content="never asked")])
     loop = make_loop(provider, callbacks=callbacks)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     _assert_failed(loop, "ui", "Error: the user interface failed: poll exploded")
@@ -350,7 +342,7 @@ def test_a_receiver_that_raises_keeps_the_outcome_and_is_called_once(loguru_capl
     callbacks = RecordingCallbacks(raises={"on_system_message": receiver})
     loop = make_loop(ScriptedProvider([_read_call()]), callbacks=callbacks, max_iterations=1)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert len(callbacks.of("on_system_message")) == 1
@@ -381,7 +373,7 @@ def test_a_prompt_that_raises_fails_the_turn_at_the_confirmation_stage():
     )
     loop = make_loop(provider, registry=registry, callbacks=callbacks, permissions={"r"})
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     _assert_failed(loop, "confirmation", "Error: the confirmation prompt failed: dialog exploded")

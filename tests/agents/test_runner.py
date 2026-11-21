@@ -367,3 +367,34 @@ async def test_run_reports_an_empty_provider_response_as_the_agents_error(tmp_pa
         "Error: LLM returned an empty response. "
         "Check model compatibility or try switching chat_protocol in config."
     )
+
+
+@pytest.mark.anyio
+async def test_run_times_out_when_the_stream_stalls_past_the_deadline(tmp_path):
+    """Baseline regression, B2: the stream swallows the deadline's cancellation, so it never fires.
+
+    The real ``ChatLoop`` runs under the runner with a provider whose stream stalls, and a short
+    timeout. Today ``run()`` returns normally after the cancellation, so the run settles
+    ``error`` with "Agent produced no deliverable (empty or echo-only response)." After: the
+    deadline fires, and the runner settles ``timeout`` with its timeout text.
+    """
+    from ayder_cli.core.context import ProjectContext
+    from tests.loops.turn_fakes import FakeContext, RecordingRegistry, ScriptedProvider, Stall
+
+    cfg = AgentConfig(name="coder", system_prompt="x")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(),
+        project_ctx=ProjectContext(str(tmp_path)), process_manager=MagicMock(),
+        permissions=set(), timeout=0.3, run_id=1, generation=0,
+    )
+    rt = _fake_rt()
+    rt.llm_provider = ScriptedProvider([Stall()])  # waits until it is cancelled
+    rt.tool_registry = RecordingRegistry()
+    rt.context_manager = FakeContext()
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=rt):
+        out = await runner.run("do it")
+
+    assert runner.status == "timeout"
+    assert out.error is not None and "exceeded its 0.3s timeout" in out.error

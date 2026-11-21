@@ -37,8 +37,11 @@ from tests.loops.turn_fakes import (
     RecordingCallbacks,
     RecordingRegistry,
     ScriptedProvider,
+    HeldRegistry,
+    cancel_parked_turn,
     chunk,
     delta,
+    escape,
     make_loop,
     run_turn,
     tool_messages,
@@ -49,15 +52,6 @@ _READ = '{"file_path": "a.py"}'
 _WRITE = '{"file_path": "a.py", "operation": "write", "content": "x"}'
 _GUARD_WARNING = "raised; continuing without it"
 _CANCEL_TEXT = "Error: Tool execution cancelled"
-
-
-def _escape(fn: Callable[..., Any], *args: Any) -> BaseException | None:
-    """What leaves ``fn(*args)``, or None. Lets a test assert that nothing escaped."""
-    try:
-        fn(*args)
-    except BaseException as exc:  # noqa: BLE001 - the test wants whatever escaped
-        return exc
-    return None
 
 
 def _call(call_id: str, name: str, arguments: str) -> _ToolCall:
@@ -149,7 +143,7 @@ def test_a_confirmed_call_that_raises_becomes_its_result_and_the_batch_goes_on()
     registry = RecordingRegistry(raises={"file_editor": PermissionError("blocked by middleware")})
     loop = _confirmed_write_loop(registry, extra_calls=[delta("c2", "read_file", _READ)])
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert _results(loop) == {"c1": "Error: blocked by middleware", "c2": "ok"}
@@ -168,7 +162,7 @@ def test_a_stray_cancellation_in_a_confirmed_call_becomes_its_result():
     registry = RecordingRegistry(raises={"file_editor": asyncio.CancelledError()})
     loop = _confirmed_write_loop(registry)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert _results(loop) == {"c1": _CANCEL_TEXT}
@@ -191,7 +185,7 @@ def test_a_cancel_poll_that_raises_in_a_confirmed_worker_becomes_its_result():
     registry = RecordingRegistry()
     loop = _confirmed_write_loop(registry, callbacks)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert _results(loop) == {"c1": "Error: cancel poll exploded"}
@@ -236,7 +230,7 @@ def test_a_parallel_safe_predicate_that_raises_runs_its_call_alone_with_one_warn
     )
     loop = make_loop(provider, registry=registry)
 
-    escaped = _escape(run_turn, loop)
+    escaped = escape(run_turn, loop)
 
     assert escaped is None
     assert registry.overlapped == {"a.py": False, "probe": False}
@@ -354,31 +348,16 @@ def test_a_task_cancelled_while_a_confirmed_call_runs_still_re_raises_with_histo
     Ctrl+X cancels the turn's task while the confirmed call's worker runs. The task ends
     cancelled and the call still has its one tool message. Passes before and after.
     """
-    entered, release = threading.Event(), threading.Event()
+    registry = HeldRegistry()
+    loop = _confirmed_write_loop(registry)
 
-    class HeldRegistry(RecordingRegistry):
-        def execute(self, name: str, arguments: dict) -> Any:
-            entered.set()
-            release.wait(WAIT)
-            return super().execute(name, arguments)
+    ended, _ = cancel_parked_turn(
+        loop,
+        lambda: asyncio.to_thread(registry.entered.wait, WAIT),
+        release=registry.release.set,  # only after the task ended: settlement has already run
+    )
 
-    loop = _confirmed_write_loop(HeldRegistry())
-
-    async def main() -> str:
-        task = asyncio.create_task(loop.run())
-        await asyncio.wait_for(asyncio.to_thread(entered.wait, WAIT), WAIT)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            assert task.cancelled()
-            return "raised"
-        finally:
-            # Only now may the worker finish: settlement has already run.
-            release.set()
-        return "returned"
-
-    assert asyncio.run(main()) == "raised"
+    assert ended == "raised"
     (message,) = tool_messages(loop)
     assert message["tool_call_id"] == "c1"
     assert "interrupted while running" in message["content"]
@@ -405,7 +384,7 @@ def test_the_guard_returns_its_default_reports_the_failure_and_warns_once(exc, l
     def boom():
         raise exc
 
-    escaped = _escape(
+    escaped = escape(
         lambda: returned.append(
             loop._guarded("probe", boom, default="fallback", on_error=seen.append)
         )

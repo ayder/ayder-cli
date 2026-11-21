@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import threading
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from ayder_cli.loops.chat_loop import ChatLoop, ChatLoopConfig
 from ayder_cli.providers.base import NormalizedStreamChunk, ToolCallDef
 
 DEFAULT_PERMISSIONS = frozenset({"r", "w", "x", "http"})
 TURN_TIMEOUT = 5.0
+PARK_TIMEOUT = 5.0  # how long a parked tool, prompt or turn may wait for its test
 
 
 # -- Scripted provider ---------------------------------------------------------
@@ -302,3 +304,78 @@ def tool_messages(loop: ChatLoop) -> list[dict]:
 def assistant_calls(loop: ChatLoop) -> list[dict]:
     """Every tool call recorded on an assistant message, in history order."""
     return [call for m in loop.messages if m["role"] == "assistant" for call in m.get("tool_calls", [])]
+
+
+# -- Parking a turn, and what leaves a call ------------------------------------
+
+
+class HeldRegistry(RecordingRegistry):
+    """A registry whose tool blocks its worker thread until ``release`` is set.
+
+    ``entered`` is set when the tool starts, so a test can act while it runs.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def execute(self, name: str, arguments: dict) -> Any:
+        self.entered.set()
+        self.release.wait(PARK_TIMEOUT)
+        return super().execute(name, arguments)
+
+
+class WaitingConfirmation(RecordingCallbacks):
+    """Callbacks whose confirmation prompt stays open until ``gate`` is set.
+
+    ``asked`` is set when the prompt opens.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def request_confirmation(self, name: str, arguments: dict) -> object | None:
+        await super().request_confirmation(name, arguments)
+        self.asked.set()
+        await self.gate.wait()
+        return SimpleNamespace(action="approve")
+
+
+def cancel_parked_turn(
+    loop: ChatLoop,
+    parked: Callable[[], Awaitable[Any]],
+    release: Callable[[], None] = lambda: None,
+) -> tuple[str, asyncio.Task]:
+    """Run a turn as a task, cancel it once ``parked`` returns, and say how it ended.
+
+    Returns ``returned`` when ``run()`` returned normally or ``raised`` when the task ended with
+    ``CancelledError``, and the task. ``release`` runs once the task has ended, to let a blocked
+    worker finish after settlement.
+    """
+
+    async def main() -> tuple[str, asyncio.Task]:
+        task = asyncio.create_task(loop.run())
+        await asyncio.wait_for(parked(), PARK_TIMEOUT)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            assert task.cancelled()
+            return "raised", task
+        finally:
+            release()
+        return "returned", task
+
+    return asyncio.run(main())
+
+
+def escape(fn: Callable[..., Any], *args: Any) -> BaseException | None:
+    """What leaves ``fn(*args)``, or None. Lets a test assert that nothing escaped."""
+    try:
+        fn(*args)
+    except BaseException as exc:  # noqa: BLE001 - the test wants whatever escaped
+        return exc
+    return None

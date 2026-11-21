@@ -95,13 +95,21 @@ class _TurnEnd:
 
     ``decided`` is set by each exit and by the boundary's clauses; ``reported``
     is None until a report was attempted, then whether the receiver returned.
+    ``finished`` is set once the turn's end has run: when it is False, a
+    ``BaseException`` or a delivered cancellation left the turn's end, and the
+    turn is ``cancelled``. ``cancels_at_entry`` is the task's cancel count when
+    ``run()`` started.
     """
 
     decided: TurnOutcome | None = None
     reported: bool | None = None
+    finished: bool = False
+    cancels_at_entry: int = 0
 
     def final(self) -> TurnOutcome:
         """The frozen outcome to publish. It cannot raise."""
+        if not self.finished:
+            return TurnOutcome("cancelled")
         decided = self.decided
         if decided is None:
             return TurnOutcome("failed", "internal", _NO_OUTCOME_TEXT, reported=bool(self.reported))
@@ -319,7 +327,7 @@ class ChatLoop:
         """The stage a failure belongs to: the batch's marker when set, else ``stage``."""
         return self._batch_stage if self._batch_stage is not None else stage
 
-    def _failed_by(self, stage: str, exc: Exception) -> TurnOutcome:
+    def _failed_by(self, stage: str, exc: BaseException) -> TurnOutcome:
         """The ``failed`` outcome for ``exc`` raised at ``stage`` (R7a).
 
         Building the text is guarded: if it raises, a fixed text is used.
@@ -389,7 +397,7 @@ class ChatLoop:
         self.error = None  # the TUI reuses one loop across turns
         self.outcome = None
         self._batch_stage = None
-        end = _TurnEnd()
+        end = _TurnEnd(cancels_at_entry=_cancel_count())
         stage = "context"  # the collaborator now active (R7c); see _failure_stage
         try:
             try:
@@ -637,10 +645,6 @@ class ChatLoop:
                                 normalized_tool_calls.append(tool_call_obj)
 
                             stream_ended = True
-                        except asyncio.CancelledError:
-                            llm_log.info("LLM stream cancelled")
-                            end.decided = TurnOutcome("cancelled")
-                            return
                         finally:
                             if stream_ended:
                                 # A clean end: a raising stop is a UI failure.
@@ -794,20 +798,44 @@ class ChatLoop:
                                 **self._correlation(),
                             ),
                         )
-            except asyncio.CancelledError:
-                # A cancellation leaving the turn: the turn did not finish.
-                end.decided = TurnOutcome("cancelled")
-                raise
+            except asyncio.CancelledError as exc:
+                failed_stage = self._failure_stage(stage)
+                if _cancel_requested():
+                    # A task cancellation: the turn did not finish, and it propagates.
+                    llm_log.info("Chat turn cancelled (stage={})", failed_stage)
+                    end.decided = TurnOutcome("cancelled")
+                    raise
+                # Nothing cancelled the task: a tool or library raised it, and the
+                # turn fails like any other.
+                llm_log.opt(exception=True).error(
+                    "Chat turn raised a stray cancellation (stage={})", failed_stage
+                )
+                end.decided = self._failed_by(failed_stage, exc)
             except Exception as exc:  # noqa: BLE001 - the turn's boundary: any failure becomes the turn's failed outcome, never an escape
                 failed_stage = self._failure_stage(stage)
                 llm_log.opt(exception=True).error("Chat turn raised (stage={})", failed_stage)
                 end.decided = self._failed_by(failed_stage, exc)
+            except BaseException:
+                # KeyboardInterrupt, SystemExit and GeneratorExit end the turn cancelled
+                # and propagate.
+                end.decided = TurnOutcome("cancelled")
+                raise
             finally:
                 if end.decided is None:
                     end.decided = TurnOutcome(
                         "failed", "internal", _NO_OUTCOME_TEXT
                     )
                 self._end_turn(end)
+                end.finished = True
+                if end.decided.status != "cancelled" and _cancel_count() > end.cancels_at_entry:
+                    # A cancellation may have been requested while the turn ended (a
+                    # receiver that cancels the task, or the first SIGINT under
+                    # asyncio.run). The turn's end awaits nothing, so it is delivered
+                    # here, inside run(): the outer finally then publishes `cancelled`.
+                    # When nothing is pending the await returns and the decision stands.
+                    end.finished = False
+                    await asyncio.sleep(0)
+                    end.finished = True
         finally:
             # Publish once, whatever happened; nothing assigns the outcome earlier.
             self.outcome = end.final()
@@ -1315,14 +1343,19 @@ def _truncate_for_tool(tool_name: str, content: str) -> str:
     return truncate_tool_result(content, max_chars=override)
 
 
+def _cancel_count() -> int:
+    """How many times the current task has been asked to cancel (``Task.cancel()``)."""
+    task = asyncio.current_task()
+    return 0 if task is None else task.cancelling()
+
+
 def _cancel_requested() -> bool:
     """Whether the current task has been asked to cancel (``Task.cancel()``).
 
     A ``CancelledError`` that arrives while this is False was raised by a tool
     or a library, not by a cancellation of the task: it is that call's failure.
     """
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0
+    return _cancel_count() > 0
 
 
 def _failure_text(tool_name: str, exc: BaseException | None) -> str:
