@@ -1983,10 +1983,13 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
     Some models emit all parallel tool calls as a single native tool call with
     arguments like '{...}{...}{...}' instead of separate tool call entries.
     Uses json.JSONDecoder.raw_decode to extract each object without loading the
-    whole string at once.
+    whole string at once. A child's id is ``<parent id>_split_<i>``, and never an id
+    another call of the response already has: every literal provider id is reserved
+    before the first child is named, so a provider's own ``p_split_0`` keeps it.
     """
     result = []
     decoder = json.JSONDecoder()
+    used = {call["id"] for call in raw_tool_calls if call["id"]}
     for raw_tc in raw_tool_calls:
         args_str = raw_tc["function"].get("arguments", "")
         if not isinstance(args_str, str) or raw_tc.get("_unattributed") or raw_tc.get("_refused"):
@@ -2017,8 +2020,14 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
                 len(objects),
             )
             for i, args in enumerate(objects):
+                child_id = f"{raw_tc['id']}_split_{i}"
+                attempt = 1
+                while child_id in used:
+                    attempt += 1
+                    child_id = f"{raw_tc['id']}_split_{i}_{attempt}"
+                used.add(child_id)
                 result.append({
-                    "id": f"{raw_tc['id']}_split_{i}",
+                    "id": child_id,
                     "type": "function",
                     "function": {"name": raw_tc["function"]["name"], "arguments": args},
                     # The parent's item becomes the first child's (R9d); the rest open their own.

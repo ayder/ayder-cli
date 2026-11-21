@@ -571,3 +571,52 @@ def test_two_keyless_fragments_alone_are_logged_once(loguru_caplog):
 
     messages = [m for m in loguru_caplog.only("warning").messages if m.startswith("Refused ")]
     assert messages == ["Refused 2 unattributable tool-call fragment(s) (4 chars)"]
+
+
+# -- Step 22: a split id never takes a provider's own id (Codex #6) -----------------------------------------
+
+
+_C = '{"file_path": "c.py"}'
+
+
+def _the_probe_turn():
+    """Codex's probe: a call ``p`` whose arguments are two concatenated objects (it splits into
+    ``p_split_0`` and ``p_split_1``), followed by a distinct provider call whose literal id is
+    ``p_split_0``."""
+    return _turn(delta("p", "read_file", _A + _B), delta("p_split_0", "read_file", _C))
+
+
+def test_a_provider_call_keeps_an_id_the_split_would_have_generated_in_history():
+    """Baseline regression, Codex #6: the first split child takes ``p_split_0`` today, and the
+    genuine call is recorded as ``p_split_0_2``."""
+    loop = _the_probe_turn()
+
+    assert _calls_by_id(loop).get("p_split_0") == ("read_file", _C)
+
+
+def test_a_provider_calls_tool_message_keeps_its_own_id_when_a_split_would_have_taken_it():
+    """Baseline regression, Codex #6: a reader using the provider's id gets the wrong result today,
+    because the tool message under ``p_split_0`` is the split child's."""
+    loop = _the_probe_turn()
+
+    assert _results_by_id(loop).get("p_split_0") == "read_file:[('file_path', 'c.py')]"
+
+
+def test_the_split_children_get_ids_no_other_call_uses():
+    """Baseline regression, Codex #6: the first child takes the provider's id today."""
+    loop = _the_probe_turn()
+
+    child_ids = [
+        call["id"] for call in assistant_calls(loop) if call["function"]["arguments"] in (
+            '{"file_path": "a.py"}', '{"file_path": "b.py"}',
+        )
+    ]
+    assert len(child_ids) == 2 and "p_split_0" not in child_ids
+
+
+def test_every_id_of_the_probe_turn_is_still_unique():
+    """Preservation: ids are unique within the response, before and after (step 13)."""
+    loop = _the_probe_turn()
+
+    ids = [call["id"] for call in assistant_calls(loop)]
+    assert len(ids) == 3 and len(set(ids)) == 3
