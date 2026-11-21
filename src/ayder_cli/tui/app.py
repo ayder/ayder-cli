@@ -311,6 +311,9 @@ class AyderApp(App):
 
         self._requests: asyncio.Queue[TurnRequest] = asyncio.Queue()
         self._run_task: asyncio.Task | None = None
+        # The prompt a confirmation waits on: its dialog and a resolver that answers the wait with
+        # no result. Set only while the wait lasts (R14).
+        self._pending_confirmation: tuple[CLIConfirmScreen, Callable[[], None]] | None = None
         self._cancel_event: asyncio.Event | None = None
         self._verbose_mode: bool = False
         self._show_thinking: bool = False
@@ -694,20 +697,29 @@ class AyderApp(App):
         diff_content = self._generate_diff(tool_name, arguments)
 
         def on_result(result):
+            if event.is_set():
+                return  # the first answer wins
             result_holder[0] = result
             event.set()
 
-        self.push_screen(
-            CLIConfirmScreen(
-                title=tool_name,
-                description=description,
-                diff_content=diff_content,
-                action_name=description,
-            ),
-            on_result,
+        dialog = CLIConfirmScreen(
+            title=tool_name,
+            description=description,
+            diff_content=diff_content,
+            action_name=description,
         )
-
-        await event.wait()
+        self.push_screen(dialog, on_result)
+        pending = (dialog, lambda: on_result(None))
+        self._pending_confirmation = pending
+        try:
+            await event.wait()
+        finally:
+            if self._pending_confirmation is pending:
+                self._pending_confirmation = None
+            if not event.is_set():
+                # The waiter ended without an answer (its turn was cancelled): retire this
+                # dialog, and no other screen.
+                dialog.retire()
         return result_holder[0]
 
     def compose(self) -> ComposeResult:
@@ -1128,7 +1140,20 @@ class AyderApp(App):
         self._agent_registry.mark_nudged(pending)   # finding A: AFTER enqueue
 
     def action_cancel(self) -> None:
-        """Cancel the active turn only; queued requests survive and proceed."""
+        """Cancel the active turn only; queued requests survive and proceed.
+
+        With no turn task, a prompt that is still open belongs to the request being prepared (a
+        leading-``!`` command): Ctrl+C rejects it, and nothing else happens (R14). A dialog that was
+        answered is already off the screen stack while its answer waits for delivery, so its answer
+        stands.
+        """
+        pending = getattr(self, "_pending_confirmation", None)
+        if self._run_task is None and pending is not None:
+            dialog, resolve = pending
+            if dialog in self.screen_stack:
+                resolve()  # the preparation's wait ends now, with no answer
+                dialog.retire()
+                return
         if self._activity_timer:
             self._activity_timer.stop()
             self._activity_timer = None
