@@ -128,3 +128,48 @@ def test_a_failure_while_a_phase_is_open_closes_it_once_before_the_report():
         "thinking_stop",
         "system_message",
     ]
+
+
+# -- Step 27: the phase is open before its start is called (Codex #9) -----------------------------------------
+
+
+def _a_turn_whose_thinking_start_raises(*, stop_raises: bool = False):
+    """One content reply. The receiver records ``on_thinking_start`` and raises, as the TUI's
+    handler can: it sets the activity bar before two more operations that can fail."""
+    raises: dict = {"on_thinking_start": RuntimeError("start exploded")}
+    if stop_raises:
+        raises["on_thinking_stop"] = RuntimeError("stop exploded")
+    callbacks = RecordingCallbacks(raises=raises)
+    loop = make_loop(ScriptedProvider([chunk(content="hello")]), callbacks=callbacks)
+    run_turn(loop)
+    return loop
+
+
+def test_a_start_that_raises_still_gets_its_one_stop():
+    """Baseline regression, Codex #9: the phase is noted open after its start returns, so a start
+    that raised was never closed today (one start, no stop).
+
+    Driven by a receiver that records ``on_thinking_start`` and raises. After: one start and one
+    stop, the stop before the failure is reported.
+    """
+    loop = _a_turn_whose_thinking_start_raises()
+
+    assert _phases(loop.cb, "on_system_message") == ["thinking_start", "thinking_stop", "system_message"]
+
+
+def test_a_start_that_raises_still_fails_the_turn_as_a_ui_failure_reported_once():
+    """Preservation: the receiver's failure is the turn's outcome. Holds before and after."""
+    loop = _a_turn_whose_thinking_start_raises()
+
+    assert loop.outcome == TurnOutcome("failed", "ui", "Error: the user interface failed: start exploded", True)
+    assert loop.cb.system == ["Error: the user interface failed: start exploded"]
+
+
+def test_a_stop_that_raises_after_a_failed_start_does_not_replace_the_failure():
+    """Preservation (R7d): the closing stop is guarded, so its own failure is not the turn's.
+
+    Holds today because the stop is not sent; after, because the guard catches it.
+    """
+    loop = _a_turn_whose_thinking_start_raises(stop_raises=True)
+
+    assert loop.outcome == TurnOutcome("failed", "ui", "Error: the user interface failed: start exploded", True)

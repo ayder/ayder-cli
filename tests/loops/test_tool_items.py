@@ -454,3 +454,111 @@ def test_the_receiver_that_raised_the_interrupt_is_not_called_again_for_its_item
     loop, _, _ = _the_first_completion_receiver_raises_an_interrupt()
 
     assert len(loop.cb.completes_by_key()["c1"]) == 1
+
+
+# -- A refusal keeps its status through settlement (fix-up 27, Codex #10) --------------------------------------
+#
+# Unknown name, unattributed, argument refusal and missing arguments are refused before the batch
+# runs anything. Each is recorded, then shown running and finished with the status ``error``. When the
+# running display is what raises, the item is already open and the finish never ran, so the turn's end
+# finishes it with what settlement published for the call. The record held no status, so the receiver
+# was given a plain string. The probes below make the receiver raise at the start the batch shows.
+
+
+def _raising_at_start_number(key, number):
+    """A receiver of ``on_tool_start`` that raises on the ``number``-th start of the item ``key``."""
+    starts = []
+
+    def receiver(call_id, name, arguments):
+        if call_id == key:
+            starts.append(arguments)
+            if len(starts) == number:
+                raise RuntimeError("running preview exploded")
+
+    return receiver
+
+
+def _a_refused_call_whose_running_preview_raises(delta_of_the_call, *, start_number, key="c1"):
+    """One reply with the call; the receiver raises at the batch's start of its item.
+
+    A call with a name is announced while the reply streams (its first start), so the batch's start is
+    the second one; a call without a name is not announced, so the batch's start is the first.
+    """
+    receiver = _raising_at_start_number(key, start_number)
+    callbacks = RecordingCallbacks(raises={"on_tool_start": receiver})
+    loop = make_loop(ScriptedProvider([chunk(calls=[delta_of_the_call])]), callbacks=callbacks)
+    run_turn(loop)
+    return loop
+
+
+def test_a_call_with_missing_arguments_is_finished_with_the_status_error_when_its_preview_raises():
+    """Baseline regression, Codex #10: ``read_file({})``. The item is finished with a plain string
+    today, so the receiver never learns the call was an error (R4a, R4c)."""
+    loop = _a_refused_call_whose_running_preview_raises(delta("c1", "read_file", "{}"), start_number=2)
+
+    assert _status_of(loop, "c1") == "error"
+
+
+def test_a_call_with_a_missing_name_is_finished_with_the_status_error_when_its_preview_raises():
+    """Baseline regression, Codex #10: a call with no name, refused as unknown."""
+    loop = _a_refused_call_whose_running_preview_raises(delta("c1", "", "{}"), start_number=1)
+
+    assert _status_of(loop, "c1") == "error"
+
+
+def test_a_call_with_arguments_that_are_not_an_object_is_finished_with_the_status_error_when_its_preview_raises():
+    """Baseline regression, Codex #10: arguments that decode to a list are refused (F11)."""
+    loop = _a_refused_call_whose_running_preview_raises(delta("c1", "read_file", "[1, 2]"), start_number=2)
+
+    assert _status_of(loop, "c1") == "error"
+
+
+def test_an_unattributed_call_is_finished_with_the_status_error_when_its_preview_raises(probe_tool):
+    """Baseline regression, Codex #10: two calls started and a fragment that belongs to neither, so
+    both are refused (R9b). The receiver raises at the first call's batch start."""
+    probe_tool("opt_a")
+    probe_tool("opt_b")
+    receiver = _raising_at_start_number("a1", 2)
+    callbacks = RecordingCallbacks(raises={"on_tool_start": receiver})
+    provider = ScriptedProvider(
+        [chunk(calls=[delta("a1", "opt_a", ""), delta("b1", "opt_b", ""), delta("", "", '{"x": 1}')])]
+    )
+    loop = make_loop(provider, callbacks=callbacks)
+    run_turn(loop)
+
+    assert _status_of(loop, "a1") == "error"
+
+
+def test_the_text_a_refused_item_is_finished_with_is_the_refusal_the_history_holds():
+    """Preservation: the status is added; the text is what it was, and it is the text in history."""
+    loop = _a_refused_call_whose_running_preview_raises(delta("c1", "read_file", "{}"), start_number=2)
+
+    history = [m["content"] for m in loop.messages if m["role"] == "tool"]
+    assert history == [_text_of(loop, "c1")]
+    assert history[0].startswith("Error: tool call 'read_file' has missing required arguments")
+
+
+def test_every_refusal_stays_a_plain_tool_message_in_history(probe_tool):
+    """Preservation (R12): the status is for the receiver. History keeps four keys and a plain ``str``,
+    for each kind of refusal and for a denied call."""
+    probe_tool("opt_a")
+    callbacks = RecordingCallbacks(confirm="deny")
+    provider = ScriptedProvider(
+        [
+            chunk(
+                calls=[
+                    delta("c1", "", "{}"),
+                    delta("c2", "read_file", "[1, 2]"),
+                    delta("c3", "read_file", "{}"),
+                    delta("c4", "file_editor", '{"file_path": "a.py", "operation": "write", "content": "x"}'),
+                ]
+            )
+        ],
+        [chunk(content="done")],
+    )
+    loop = make_loop(provider, callbacks=callbacks, permissions={"r"})
+    run_turn(loop)
+
+    tool_messages = [m for m in loop.messages if m["role"] == "tool"]
+    assert [sorted(m) for m in tool_messages] == [["content", "name", "role", "tool_call_id"]] * 4
+    assert [type(m["content"]) for m in tool_messages] == [str] * 4

@@ -30,6 +30,7 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from ayder_cli.core.config import Config
+from ayder_cli.loops.chat_loop import TurnOutcome
 from ayder_cli.themes import get_theme
 from ayder_cli.tui.app import AyderApp
 from ayder_cli.tui.screens import CLIConfirmScreen
@@ -506,3 +507,7 @@ async def test_quitting_with_a_dialog_open_still_lets_the_turn_and_the_consumer_
         task.cancel()
     _, pending = await asyncio.wait({turn, consumer}, timeout=5)
     assert not pending
+    # Done is not enough: a task that ended by an error, or that swallowed the cancellation and
+    # returned, is done too. Each ended by the cancellation, and the turn says it was cancelled.
+    assert {"turn": turn.cancelled(), "consumer": consumer.cancelled()} == {"turn": True, "consumer": True}
+    assert app.chat_loop.outcome == TurnOutcome("cancelled")

@@ -701,8 +701,8 @@ class ChatLoop:
 
                         # 2. Call LLM (Streaming)
                         stage = "ui"
+                        thinking_open = True  # noted first: a start that raises still gets its one stop
                         self.cb.on_thinking_start()
-                        thinking_open = True
                         stage = "internal"
 
                         usage_obj = None
@@ -1065,6 +1065,7 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": "unknown",
                         "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
                     self._display(self._item_started, _key(tc.id), "unknown", {})
@@ -1076,6 +1077,7 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": _UNATTRIBUTED_CALL,
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
                     self._display(self._item_started, _key(tc.id), tc.function.name, {})
@@ -1093,6 +1095,7 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": refusal,
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
                     self._display(
@@ -1115,6 +1118,7 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": err_msg,
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
                     self._display(
@@ -1212,7 +1216,7 @@ class ChatLoop:
                     # User provided instructions instead of approval
                     custom_instructions = getattr(confirm, "instructions", None)
                     denied_msg = "Tool call skipped by user instruction."
-                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg, "status": "denied"}
                     tool_results_map[tc.id] = rd
                     self._display(self._item_finished, _key(tc.id), _completion(denied_msg, "denied"))
                     break  # No later call runs once the user redirects the turn
@@ -1220,7 +1224,7 @@ class ChatLoop:
                     # User denied tool — still must add a result so the LLM sees
                     # a valid tool_call → tool_result sequence (required by API)
                     denied_msg = "Tool call denied by user."
-                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg, "status": "denied"}
                     tool_results_map[tc.id] = rd
                     self._display(self._item_finished, _key(tc.id), _completion(denied_msg, "denied"))
 
@@ -1232,6 +1236,7 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": skipped_msg,
+                        "status": "skipped",
                     }
                     self._display(self._item_finished, _key(tc.id), _completion(skipped_msg, "skipped"))
 

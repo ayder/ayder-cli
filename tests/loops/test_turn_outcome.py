@@ -234,4 +234,3 @@ def test_a_second_turn_replaces_the_first_outcome_and_none_shows_while_it_runs()
     assert seen_while_running == [None, None]
     assert loop.outcome == TurnOutcome("completed")
     assert loop.error is None
-
