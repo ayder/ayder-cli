@@ -254,6 +254,9 @@ class ChatLoop:
         self._last_call_sig: tuple[str, str] | None = None
         self._repeat_count = 0
 
+        # The UI keys every tool item of this chat has used (R9c).
+        self._ui_keys = _UiKeys()
+
     def _reap_task(self, task: asyncio.Task) -> None:
         """Done-callback for a retained worker task.
 
@@ -553,7 +556,7 @@ class ChatLoop:
                         # bound above the outer try — one assignment point each.
                         # (Raw is kept for appending to history exactly as it arrived)
                         raw_tool_calls_for_history: list[dict] = []
-                        assembler = _ToolCallAssembler()
+                        assembler = _ToolCallAssembler(self._ui_keys)
 
                         options: dict[str, Any] = {}
                         if getattr(self.config, "num_ctx", None):
@@ -618,6 +621,7 @@ class ChatLoop:
                         # recorded or run (R9a).
                         assembler.settle_ids(raw_tool_calls_for_history)
                         unattributed = assembler.refusals(raw_tool_calls_for_history)
+                        ui_keys = assembler.ui_keys(raw_tool_calls_for_history)
 
                         # Now that streaming is done, build the normalized objects for execution
                         for raw_tc in raw_tool_calls_for_history:
@@ -764,7 +768,7 @@ class ChatLoop:
                             end.unsettled = []
                             # We use the existing unified execution path
                             escalated = await self._execute_tool_calls(
-                                normalized_tool_calls, unattributed
+                                normalized_tool_calls, unattributed, ui_keys
                             )
                             self._batch_stage = None
                             if escalated:
@@ -848,12 +852,16 @@ class ChatLoop:
     # -- Tool execution ------------------------------------------------------
 
     async def _execute_tool_calls(
-        self, tool_calls: List[_ToolCall], unattributed: frozenset[str] | set[str] = frozenset()
+        self,
+        tool_calls: List[_ToolCall],
+        unattributed: frozenset[str] | set[str] = frozenset(),
+        ui_keys: dict[str, str] | None = None,
     ) -> bool:
         """Run a batch in emission order; parallelize safe auto-approved runs.
 
         A call in ``unattributed`` lost part of its arguments to fragments the stream could not
-        attribute (R9b): it is refused, not run.
+        attribute (R9b): it is refused, not run. ``ui_keys`` maps each call's id to the key its
+        item is shown under (R9c); called without it, the batch uses the call ids.
 
         Every call gets exactly one tool message, however the batch ends. The
         ``finally`` settles any call the normal path did not append (Ctrl+C
@@ -862,6 +870,11 @@ class ChatLoop:
         """
         batch = _ToolBatch()
         tool_results_map: dict[str, Any] = {}
+
+        def _key(call_id: str) -> str:
+            """The key a call's item is shown under (R9c)."""
+            return ui_keys.get(call_id, call_id) if ui_keys else call_id
+
         self._batch_stage = "tools"  # preparing the calls
         try:
             runnable: list[_ToolCall] = []
@@ -878,8 +891,8 @@ class ChatLoop:
                         "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, tc.id, "parse_error", {})
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(rd["result"], "error"))
+                    self._display(self.cb.on_tool_start, _key(tc.id), "parse_error", {})
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(rd["result"], "error"))
                     continue
 
                 if not tc.function.name or tc.function.name == "unknown":
@@ -889,8 +902,8 @@ class ChatLoop:
                         "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, tc.id, "unknown", {})
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(rd["result"], "error"))
+                    self._display(self.cb.on_tool_start, _key(tc.id), "unknown", {})
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(rd["result"], "error"))
                     continue
 
                 if tc.id in unattributed:
@@ -900,8 +913,8 @@ class ChatLoop:
                         "result": _UNATTRIBUTED_CALL,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, tc.id, tc.function.name, {})
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(_UNATTRIBUTED_CALL, "error"))
+                    self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, {})
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(_UNATTRIBUTED_CALL, "error"))
                     continue
 
                 # Validate that arguments parsed correctly — some providers
@@ -916,8 +929,8 @@ class ChatLoop:
                         "result": refusal,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, tc.id, tc.function.name, args)
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(refusal, "error"))
+                    self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, args)
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(refusal, "error"))
                     continue
                 if arg_status == "repaired":
                     repaired_ids.add(tc.id)
@@ -936,8 +949,8 @@ class ChatLoop:
                         "result": err_msg,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, tc.id, tc.function.name, args)
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(err_msg, "error"))
+                    self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, args)
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(err_msg, "error"))
                     tool_log.warning(
                         "Tool '{}' called with missing args {} ({} chars raw, keys={})",
                         tc.function.name,
@@ -961,7 +974,7 @@ class ChatLoop:
                 if tc.id in tool_results_map:
                     continue
                 args = _parse_arguments(tc.function.arguments)
-                self._display(self.cb.on_tool_start, tc.id, tc.function.name, args)
+                self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, args)
 
             self._batch_stage = "internal"
             escalated = False
@@ -992,11 +1005,11 @@ class ChatLoop:
                             tid = rd["tool_call_id"]
                             result = str(rd["result"])
                             self._display(
-                                self.cb.on_tool_complete, tid, _completion(result, rd.get("status"))
+                                self.cb.on_tool_complete, _key(tid), _completion(result, rd.get("status"))
                             )
                         else:
                             self._display(
-                                self.cb.on_tool_complete, tc.id, _completion(f"Error: {rd}", "error")
+                                self.cb.on_tool_complete, _key(tc.id), _completion(f"Error: {rd}", "error")
                             )
                     continue
 
@@ -1016,7 +1029,7 @@ class ChatLoop:
 
                     # Notify UI
                     self._display(
-                        self.cb.on_tool_complete, tc.id, _completion(result, rd.get("status"))
+                        self.cb.on_tool_complete, _key(tc.id), _completion(result, rd.get("status"))
                     )
 
                 elif confirm is not None and getattr(confirm, "action", None) == "instruct":
@@ -1025,7 +1038,7 @@ class ChatLoop:
                     denied_msg = "Tool call skipped by user instruction."
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(denied_msg, "denied"))
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(denied_msg, "denied"))
                     break  # No later call runs once the user redirects the turn
                 else:
                     # User denied tool — still must add a result so the LLM sees
@@ -1033,7 +1046,7 @@ class ChatLoop:
                     denied_msg = "Tool call denied by user."
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(denied_msg, "denied"))
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(denied_msg, "denied"))
 
             # Ensure every tool_call has a result (API requires it)
             for tc in tool_calls:
@@ -1044,7 +1057,7 @@ class ChatLoop:
                         "name": tc.function.name,
                         "result": skipped_msg,
                     }
-                    self._display(self.cb.on_tool_complete, tc.id, _completion(skipped_msg, "skipped"))
+                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(skipped_msg, "skipped"))
 
             # Process results in correct order -> append tool messages
             for tc in tool_calls:
@@ -1590,6 +1603,36 @@ def _describe_llm_error(exc: BaseException) -> str:
     return f"{text} - {detail}"
 
 
+class _UiKeys:
+    """The keys a chat's tool items are shown under, unique in the session (R9c).
+
+    The chat view keeps one item per key for the whole chat, so a provider id that a later
+    response repeats (native Ollama restarts its ids on every request), or a placeholder
+    (``idx_N``, ``dummy_N``), must not become a key twice. A provider id that is non-empty, not a
+    placeholder and not used before is its own key; any other call gets ``<id or "call">#<n>``,
+    where ``n`` counts up on this object and skips every key already used, literal or generated.
+    """
+
+    _PLACEHOLDERS = ("idx_", "dummy_")
+
+    def __init__(self) -> None:
+        self._used: set[str] = set()
+        self._counter = 0
+
+    def take(self, provider_id: str) -> str:
+        """The key for a call that arrives with ``provider_id``; it is never handed out again."""
+        key = provider_id
+        if not key or key.startswith(self._PLACEHOLDERS) or key in self._used:
+            base = provider_id or "call"
+            while True:
+                self._counter += 1
+                key = f"{base}#{self._counter}"
+                if key not in self._used:
+                    break
+        self._used.add(key)
+        return key
+
+
 class _ToolCallAssembler:
     """Builds one response's tool calls from the provider's streamed deltas (seam A, R9).
 
@@ -1606,10 +1649,15 @@ class _ToolCallAssembler:
     argument stream is never decoded per fragment. Any other fragment is refused (R9b, D6): it joins
     one shared nameless call, which is refused for its missing name, and every call that is not
     sealed at that point is marked, so that it does not run.
+
+    Each call also gets its UI key when it opens (R9c), from the chat's ``_UiKeys``. The key stays
+    with the call when a real id replaces a placeholder one; a split call's first child inherits its
+    parent's key (R9d), and the other children take keys of their own.
     """
 
-    def __init__(self) -> None:
-        # Each slot: {"id", "name", "parts", "signature", "filled", "sealed", "unattributed"}.
+    def __init__(self, keys: _UiKeys) -> None:
+        self._keys = keys
+        # Each slot: {"id", "name", "parts", "signature", "filled", "sealed", "unattributed", "key"}.
         self._slots: list[dict] = []
         self._latest: dict | None = None  # the call opened last
         self._earlier_unsealed = False  # a call was judged unsealed when the next one opened
@@ -1618,7 +1666,7 @@ class _ToolCallAssembler:
         self._refused_chars = 0
 
     def add(self, tc: Any) -> tuple[str, str] | None:
-        """Apply one delta. Returns ``(id, name)`` when the call is now announced by name."""
+        """Apply one delta. Returns ``(key, name)`` when the call is now announced by name."""
         slots = self._slots
         index = getattr(tc, "_stream_index", None)
         if index is None and not tc.id and not tc.name:
@@ -1647,6 +1695,7 @@ class _ToolCallAssembler:
                 "filled": True,
                 "sealed": None,
                 "unattributed": False,
+                "key": self._keys.take(tc.id),
             }
             self._supersede_latest()
             if call is not None:  # a padded slot that this delta fills
@@ -1655,11 +1704,12 @@ class _ToolCallAssembler:
                 call = fields
                 while index is not None and len(slots) < index:
                     slots.append(
-                        {"id": None, "name": "", "parts": [], "signature": None, "filled": False}
+                        {"id": None, "name": "", "parts": [], "signature": None, "filled": False,
+                         "key": None}
                     )
                 slots.append(call)
             self._latest = call
-            return (tc.id, tc.name) if tc.name else None
+            return (call["key"], tc.name) if tc.name else None
 
         # A placeholder id gives way to the real one.
         if tc.id and not tc.id.startswith("idx_") and call["id"].startswith("idx_"):
@@ -1668,7 +1718,7 @@ class _ToolCallAssembler:
         # Some providers send the name only on a later delta.
         if tc.name and not call["name"]:
             call["name"] = tc.name
-            started = (call["id"], tc.name)
+            started = (call["key"], tc.name)
         if tc.arguments:
             call["parts"].append(tc.arguments)
         return started
@@ -1698,7 +1748,7 @@ class _ToolCallAssembler:
         if self._refused is None:
             self._refused = {
                 "id": "", "name": "", "parts": [], "signature": None, "filled": True,
-                "sealed": False, "unattributed": False,
+                "sealed": False, "unattributed": False, "key": self._keys.take(""),
             }
             self._slots.append(self._refused)
         self._refused_count += 1
@@ -1714,7 +1764,8 @@ class _ToolCallAssembler:
     def calls(self) -> list[dict]:
         """The assembled calls in the history's own shape; unfilled slots are absent.
 
-        A call that must not run carries ``_unattributed``; ``refusals`` takes the mark off.
+        Each call carries its UI key as ``_key``, and a call that must not run carries
+        ``_unattributed``; ``ui_keys`` and ``refusals`` take those marks off.
         """
         calls = []
         for slot in self._slots:
@@ -1730,8 +1781,20 @@ class _ToolCallAssembler:
                 call["thought_signature"] = slot["signature"]
             if slot["unattributed"]:
                 call["_unattributed"] = True
+            call["_key"] = slot["key"]
             calls.append(call)
         return calls
+
+    def ui_keys(self, calls: list[dict]) -> dict[str, str]:
+        """Take the keys off the settled calls; returns ``{call id: UI key}``.
+
+        A call the split produced after the first child has no key yet and takes one now.
+        """
+        keys = {}
+        for call in calls:
+            key = call.pop("_key", None)
+            keys[call["id"]] = key if key is not None else self._keys.take(call["id"])
+        return keys
 
     def refusals(self, calls: list[dict]) -> set[str]:
         """Take the marks off the settled calls; returns the ids of those that must not run.
@@ -1820,6 +1883,8 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
                     "id": f"{raw_tc['id']}_split_{i}",
                     "type": "function",
                     "function": {"name": raw_tc["function"]["name"], "arguments": args},
+                    # The parent's item becomes the first child's (R9d); the rest open their own.
+                    "_key": raw_tc.get("_key") if i == 0 else None,
                 })
         else:
             result.append(raw_tc)

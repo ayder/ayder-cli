@@ -15,6 +15,11 @@ recent call only when every earlier call is sealed (its arguments are non-empty 
 a JSON object), and are refused otherwise. A refused fragment goes to one shared nameless call, which
 is refused as before, and the calls that were not sealed at that point do not run.
 
+Step 15 (R9c, R9d) gives each call one UI key, unique in the chat session, that every start and
+completion of its item uses: the provider's id when it is non-empty, not a placeholder (``idx_``,
+``dummy_``) and not used before in the session, otherwise ``<id or "call">#<n>``. A split call's
+first child keeps the item opened for its parent. History keeps the provider's id.
+
 Kind: baseline regression unless a docstring says preservation. Environment: local-faked (no
 network; the provider and registry are the fakes in ``turn_fakes``). Layer: unit.
 
@@ -349,3 +354,144 @@ def test_a_truncated_last_call_keeps_the_repaired_arguments_rule():
     assert _ran(loop) == [("read_file", {"file_path": "a.py"})]
     (message,) = tool_messages(loop)
     assert message["content"].startswith("[harness] arguments were truncated and repaired")
+
+
+# -- Step 15: UI keys (R9c, R9d; B5) -------------------------------------------------------------------------------------
+
+
+def _turns(*responses):
+    """One turn whose replies are ``responses`` (each a list of deltas), then a text reply."""
+    scripts = [[chunk(calls=list(deltas))] for deltas in responses] + [[chunk(content="done")]]
+    loop = make_loop(ScriptedProvider(*scripts), registry=_EchoRegistry())
+    run_turn(loop)
+    return loop
+
+
+def _opened(loop) -> list[str]:
+    """The item keys, in the order their items opened."""
+    return list(loop.cb.starts_by_key())
+
+
+def _finished(loop) -> list[str]:
+    return list(loop.cb.completes_by_key())
+
+
+def test_a_placeholder_id_that_a_real_id_replaces_opens_one_item():
+    """Baseline regression, P3 B5b: ``on_tool_start`` fires for ``idx_0`` and again for ``call_x``.
+
+    Driven by the OpenAI shape: the name arrives with the placeholder id, the real id on the next
+    delta of the same index. After: one key.
+    """
+    loop = _turns(
+        [delta("idx_0", "read_file", "", index=0), delta("call_x", "", _A, index=0)],
+    )
+
+    assert len(_opened(loop)) == 1
+
+
+def test_the_item_of_a_placeholder_id_that_a_real_id_replaces_is_finished():
+    """Baseline regression, P3 B5b: only ``call_x`` completes today, so ``idx_0``'s item never ends."""
+    loop = _turns(
+        [delta("idx_0", "read_file", "", index=0), delta("call_x", "", _A, index=0)],
+    )
+
+    assert _finished(loop) == _opened(loop)
+
+
+def test_history_keeps_the_real_id_that_replaced_the_placeholder():
+    """Preservation: the assistant entry and its result carry ``call_x``, not the UI key."""
+    loop = _turns(
+        [delta("idx_0", "read_file", "", index=0), delta("call_x", "", _A, index=0)],
+    )
+
+    assert list(_calls_by_id(loop)) == ["call_x"]
+    assert list(_results_by_id(loop)) == ["call_x"]
+
+
+def test_the_first_child_of_a_split_call_finishes_the_item_opened_for_its_parent():
+    """Baseline regression, P7: ``p`` is started while streaming and never completed today.
+
+    Driven by one call whose arguments hold two concatenated objects, which the loop splits into
+    ``p_split_0`` and ``p_split_1``.
+    """
+    loop = _turns([delta("p", "read_file", _A + _B)])
+
+    assert "p" in _finished(loop)
+
+
+def test_the_first_child_of_a_split_call_opens_no_item_of_its_own():
+    """Baseline regression, R9d: the parent's item is the first child's, so ``p_split_0`` has none."""
+    loop = _turns([delta("p", "read_file", _A + _B)])
+
+    assert "p_split_0" not in _opened(loop)
+
+
+def test_the_other_child_of_a_split_call_opens_and_finishes_its_own_item():
+    """Preservation: ``p_split_1`` is started once and completed once, today and after."""
+    loop = _turns([delta("p", "read_file", _A + _B)])
+
+    assert loop.cb.starts_by_key()["p_split_1"][-1] == ("read_file", {"file_path": "b.py"})
+    assert len(loop.cb.completes_by_key()["p_split_1"]) == 1
+
+
+def test_a_call_with_an_empty_id_gets_a_generated_key():
+    """Baseline regression, R9c: the item is opened under the empty id today.
+
+    After: ``call#<n>``, one key for the start and the completion, while history keeps ``call_0``.
+    """
+    loop = _turns([delta("", "read_file", _A)])
+
+    assert _opened(loop) == ["call#1"]
+    assert _finished(loop) == ["call#1"]
+
+
+def test_a_provider_id_with_a_placeholder_prefix_gets_a_generated_key():
+    """Baseline regression, R9c: ``dummy_0`` is the item's key today. After: ``dummy_0#1``."""
+    loop = _turns([delta("dummy_0", "read_file", _A)])
+
+    assert _opened(loop) == ["dummy_0#1"]
+
+
+def test_a_provider_id_used_earlier_in_the_session_gets_a_generated_key_that_skips_used_ones():
+    """Baseline regression, R9c: the second ``r`` reuses the first ``r``'s key today.
+
+    Iteration 1 sends the literal ``r#1`` and ``r``; iteration 2 sends ``r`` again. The generated
+    ``r#1`` would collide with the literal one, so the counter skips it: ``r#2``.
+    """
+    loop = _turns(
+        [delta("r#1", "read_file", _A), delta("r", "read_file", _B)],
+        [delta("r", "read_file", _A)],
+    )
+
+    assert _opened(loop) == ["r#1", "r", "r#2"]
+    assert _finished(loop) == ["r#1", "r", "r#2"]
+
+
+def test_history_keeps_the_provider_id_when_the_ui_key_is_generated():
+    """Preservation: the repeated ``r`` stays ``r`` in history; only the UI key differs."""
+    loop = _turns([delta("r", "read_file", _A)], [delta("r", "read_file", _B)])
+
+    assert [c["id"] for c in assistant_calls(loop)] == ["r", "r"]
+
+
+def test_a_provider_id_that_is_unique_in_the_session_is_its_own_key():
+    """Preservation: ``tests/ui/test_tui_chat_loop.py`` expects ``c1`` for a call ``c1``."""
+    loop = _turns([delta("c1", "read_file", _A)], [delta("c2", "read_file", _B)])
+
+    assert _opened(loop) == ["c1", "c2"]
+    assert _finished(loop) == ["c1", "c2"]
+
+
+def test_the_batch_called_directly_falls_back_to_the_call_id():
+    """Preservation: a caller that passes no key map gets the call's own id for its item."""
+    import asyncio
+
+    from ayder_cli.providers.base import _FunctionCall, _ToolCall
+
+    loop = make_loop(ScriptedProvider([chunk(content="unused")]), registry=_EchoRegistry())
+    call = _ToolCall(id="c9", function=_FunctionCall(name="read_file", arguments=_A))
+
+    asyncio.run(loop._execute_tool_calls([call]))
+
+    assert _opened(loop) == ["c9"]
+    assert _finished(loop) == ["c9"]
