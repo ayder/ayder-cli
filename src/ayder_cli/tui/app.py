@@ -822,6 +822,19 @@ class AyderApp(App):
             except Exception as e:  # noqa: BLE001 - turn-execution boundary: a failed turn is reported and the consumer stays alive for the next one
                 logger.opt(exception=True).error("Turn execution failed")
                 self._report_turn_error(e)
+            else:
+                # The task returned normally, so run() reset and published this
+                # turn's outcome. After a cancellation the loop may still hold the
+                # previous turn's (R1), so it is not read there.
+                outcome = getattr(self.chat_loop, "outcome", None)
+                if (
+                    outcome is not None
+                    and outcome.status == "failed"
+                    and not outcome.reported
+                    and outcome.message
+                ):
+                    # The callbacks could not show the failure: show it once.
+                    self._report_turn_message(outcome.message)
             finally:
                 self._run_task = None
                 self._after_turn_finished()
@@ -848,8 +861,12 @@ class AyderApp(App):
 
     def _report_turn_error(self, exc: Exception) -> None:
         """Surface a turn/prepare error in the chat view (best effort)."""
+        self._report_turn_message(f"Error: {exc}")
+
+    def _report_turn_message(self, text: str) -> None:
+        """Show ``text`` as a system message in the chat view (best effort)."""
         try:
-            self.query_one("#chat-view", ChatView).add_system_message(f"Error: {exc}")
+            self.query_one("#chat-view", ChatView).add_system_message(text)
         except Exception:  # noqa: BLE001 - error-reporting guard: failing to surface an error must not raise a second one
             # The turn error itself is already logged with its stack by the
             # consumer; this only records that it could not be surfaced.
