@@ -397,7 +397,7 @@ class AgentBox(_Expandable):
         self.status = status
         self.result = result or ""
         self.remove_class("running")
-        if status not in ("done", "completed"):
+        if status not in ("done", "completed", "cancelled"):
             self.add_class("-error")
         self.refresh_item()
 
@@ -409,6 +409,8 @@ class AgentBox(_Expandable):
             state = (f"running {secs}", "$warning")
         elif self.status in ("done", "completed"):
             state = (f"✓ done {secs}", "$success")
+        elif self.status == "cancelled":
+            state = (f"○ cancelled {secs}", "$warning")
         else:
             state = (f"✗ failed {secs}", "$error")
         label = f"— {self.assignment}" if self.assignment else ""

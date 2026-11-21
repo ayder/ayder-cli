@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
+from ayder_cli.loops.chat_loop import TurnOutcome
 
 # Longer than the 200-character slice the pre-redaction call logged, so a
 # regression that reinstates `[:200]` still leaks the head and fails.
@@ -208,9 +209,9 @@ async def test_run_reports_error_when_stream_fails_after_text(loguru_caplog):
         async def _run(*a, **k):
             msgs.append({"role": "assistant", "content": "intermediate text"})
             cb.last_content = "intermediate text"          # cumulative, non-empty
-            # Sentinel-bearing: the captured system error is arbitrary upstream
+            # Sentinel-bearing: the turn's failure message is arbitrary upstream
             # text (model/provider prose), so it must never reach a log message.
-            cb.last_system_error = SYSTEM_ERROR_SENTINEL  # late failure
+            m.outcome = TurnOutcome("failed", "llm", SYSTEM_ERROR_SENTINEL)  # late failure
         m.run = _run
         return m
 
@@ -227,8 +228,8 @@ async def test_run_reports_error_when_stream_fails_after_text(loguru_caplog):
     assert SYSTEM_ERROR_SENTINEL not in loguru_caplog.text
     assert "hunter2" not in loguru_caplog.text
     hits = [r for r in loguru_caplog.records
-            if r["message"].startswith("run failed (captured via on_system_message):")]
-    assert hits, "captured-error record never emitted"
+            if r["message"].startswith("run failed (turn outcome):")]
+    assert hits, "turn-outcome record never emitted"
     assert hits[0]["level"].name == "ERROR"
     # The UN-truncated length, not the 200-char slice the old call logged.
     assert len(SYSTEM_ERROR_SENTINEL) > 200

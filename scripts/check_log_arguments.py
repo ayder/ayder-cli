@@ -218,8 +218,8 @@ CHAIN_TALLY: dict[str, int] = {"bind": 6, "opt": 101, "patch": 0}
 # unchanged - so the composition is gated too. Caller-supplied baselines (the
 # gate's own synthetic fixtures) are exempt: this is a fact about one file.
 FROZEN_TALLY: dict[str, int] = {
-    "R-name": 99,
-    "R-id": 40,
+    "R-name": 100,
+    "R-id": 41,
     "R-count": 94,
     "R-status": 31,
     "R-class": 12,

@@ -408,12 +408,14 @@ class AgentRegistry:
                         # A branch-carrying run whose branch tip did not move made
                         # no commit; its worktree is reaped, so the work is lost.
                         # Settle 'error' so the orchestrator re-dispatches instead
-                        # of accepting an empty branch as success (F1b).
+                        # of accepting an empty branch as success (F1b). Only a run that
+                        # settled 'done' is accepted as success, so only it is checked: a
+                        # cancelled run was not asked to commit.
                         if (
                             worktree_path is not None
                             and run.branch_name
                             and outcome is not None
-                            and outcome.status != "error"
+                            and outcome.status == "done"
                         ):
                             head_after = await asyncio.to_thread(
                                 branch_head, str(self._project_ctx.root), run.branch_name
