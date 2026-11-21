@@ -60,6 +60,21 @@ class ChatLoopConfig:
     run_id: int | None = None  # set only for agent loops; None for parent loops
 
 
+@dataclass(frozen=True)
+class TurnOutcome:
+    """How one ``ChatLoop.run()`` turn ended (R1).
+
+    ``status`` is ``completed``, ``escalated``, ``failed`` or ``cancelled``.
+    ``stage`` and ``message`` are set for ``failed`` only; ``reported`` says
+    whether ``on_system_message`` delivered the message without raising.
+    """
+
+    status: str
+    stage: str | None = None
+    message: str | None = None
+    reported: bool = False
+
+
 def new_session_id() -> str:
     """Short unique id used to correlate events from one session."""
     import uuid
@@ -150,6 +165,8 @@ class ChatLoop:
         # Set when run() stops with an error (stream failure, empty response,
         # reasoning-only limit, max_iterations). The CLI exits 1 on it.
         self.error: str | None = None
+        # How the last turn ended; None until a turn ends, and while one runs.
+        self.outcome: TurnOutcome | None = None
         if context_manager is not None:
             self.context_manager = context_manager
         else:
@@ -242,354 +259,373 @@ class ChatLoop:
             **self._correlation(),
         )
 
-    def _fail(self, text: str) -> None:
-        """Report a stop that ends the turn with an error; the CLI exits 1."""
+    def _fail(self, text: str, stage: str) -> None:
+        """Report a stop that ends the turn with an error; the CLI exits 1.
+
+        Sets the turn's outcome once the message has been delivered. A receiver
+        that raises leaves it unset, as the exception leaves ``run()``.
+        """
         self.error = text
         self.cb.on_system_message(text)
+        self.outcome = TurnOutcome("failed", stage, text, reported=True)
 
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
         self.error = None  # the TUI reuses one loop across turns
-        # Lazy init: detect real context length for Ollama models
-        if hasattr(self.context_manager, "detect_context_length"):
-            await self.context_manager.detect_context_length()
+        self.outcome = None
+        try:
+            # Lazy init: detect real context length for Ollama models
+            if hasattr(self.context_manager, "detect_context_length"):
+                await self.context_manager.detect_context_length()
 
-        iteration_n = 0
-        reasoning_only = 0
-        self._last_call_sig, self._repeat_count = None, 0
-        while True:
-            if self.cb.is_cancelled():
-                return
-            cap = self.config.max_iterations
-            if cap and iteration_n >= cap:
-                if self.config.run_id is None:
-                    remedy = (
-                        "Send a message to continue, or raise [app] max_iterations "
-                        "(0 = unlimited)."
-                    )
-                else:
-                    remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
-                self._fail(
-                    f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}"
-                )
-                return
-
-            # Every field the event reads is bound BEFORE the try, so the
-            # finally can still describe an iteration that returned early.
-            iteration_n += 1
-            iter_started = time.perf_counter()
-            final_content = ""
-            final_reasoning = ""
-            normalized_tool_calls = []
-            try:
-                # Pre-iteration hook (used for agent summary injection)
-                if self.config.pre_iteration_hook is not None:
-                    await self.config.pre_iteration_hook(self.messages)
-
-                # 1. Prepare schemas and messages
-                tool_schemas = (
-                    []
-                    if no_tools
-                    else self.registry.get_schemas(tags=self.config.tool_tags)
-                )
-
-                # Use ContextManager to trim history based on token budget
-                llm_messages = self.context_manager.prepare_messages(
-                    self.messages,
-                    max_history=self.config.max_history,
-                )
-
-                # Log history preview
-                history_summary = []
-                for m in llm_messages:
-                    role = m.get("role")
-                    content = m.get("content", "") or ""
-                    if isinstance(content, list):  # handle native tool results if any
-                        content_str = str(content)
+            iteration_n = 0
+            reasoning_only = 0
+            self._last_call_sig, self._repeat_count = None, 0
+            while True:
+                if self.cb.is_cancelled():
+                    self.outcome = TurnOutcome("cancelled")
+                    return
+                cap = self.config.max_iterations
+                if cap and iteration_n >= cap:
+                    if self.config.run_id is None:
+                        remedy = (
+                            "Send a message to continue, or raise [app] max_iterations "
+                            "(0 = unlimited)."
+                        )
                     else:
-                        content_str = content
-                    history_summary.append(f"{role}({len(content_str)})")
-                llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
-                if self.config.verbose:
-                    for i, m in enumerate(llm_messages):
-                        content = m.get("content")
-                        llm_log.trace(
-                            "  Message {} [{}] content_type={} content_len={}",
-                            i,
-                            m.get("role"),
-                            type(content).__name__,
-                            len(content) if hasattr(content, "__len__") else 0,
+                        remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
+                    self._fail(
+                        f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}",
+                        "limit",
+                    )
+                    return
+
+                # Every field the event reads is bound BEFORE the try, so the
+                # finally can still describe an iteration that returned early.
+                iteration_n += 1
+                iter_started = time.perf_counter()
+                final_content = ""
+                final_reasoning = ""
+                normalized_tool_calls = []
+                try:
+                    # Pre-iteration hook (used for agent summary injection)
+                    if self.config.pre_iteration_hook is not None:
+                        await self.config.pre_iteration_hook(self.messages)
+
+                    # 1. Prepare schemas and messages
+                    tool_schemas = (
+                        []
+                        if no_tools
+                        else self.registry.get_schemas(tags=self.config.tool_tags)
+                    )
+
+                    # Use ContextManager to trim history based on token budget
+                    llm_messages = self.context_manager.prepare_messages(
+                        self.messages,
+                        max_history=self.config.max_history,
+                    )
+
+                    # Log history preview
+                    history_summary = []
+                    for m in llm_messages:
+                        role = m.get("role")
+                        content = m.get("content", "") or ""
+                        if isinstance(content, list):  # handle native tool results if any
+                            content_str = str(content)
+                        else:
+                            content_str = content
+                        history_summary.append(f"{role}({len(content_str)})")
+                    llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
+                    if self.config.verbose:
+                        for i, m in enumerate(llm_messages):
+                            content = m.get("content")
+                            llm_log.trace(
+                                "  Message {} [{}] content_type={} content_len={}",
+                                i,
+                                m.get("role"),
+                                type(content).__name__,
+                                len(content) if hasattr(content, "__len__") else 0,
+                            )
+
+                    # 2. Call LLM (Streaming)
+                    self.cb.on_thinking_start()
+
+                    usage_obj = None
+                    # final_content / final_reasoning / normalized_tool_calls are
+                    # bound above the outer try — one assignment point each.
+                    # (Raw is kept for appending to history exactly as it arrived)
+                    raw_tool_calls_for_history: list[dict] = []
+                    thinking_stopped = False
+
+                    try:
+                        options: dict[str, Any] = {}
+                        if getattr(self.config, "num_ctx", None):
+                            options["num_ctx"] = self.config.num_ctx
+                        if getattr(self.config, "max_output_tokens", None):
+                            options["max_output_tokens"] = self.config.max_output_tokens
+                        if getattr(self.config, "stop_sequences", None):
+                            options["stop_sequences"] = self.config.stop_sequences
+
+                        async_stream = self.llm.stream_with_tools(
+                            llm_messages,
+                            self.config.model,
+                            tools=tool_schemas,
+                            options=options,
+                            verbose=self.config.verbose,
                         )
 
-                # 2. Call LLM (Streaming)
-                self.cb.on_thinking_start()
+                        async for chunk in async_stream:
+                            if chunk.usage:
+                                usage_obj = chunk.usage
 
-                usage_obj = None
-                # final_content / final_reasoning / normalized_tool_calls are
-                # bound above the outer try — one assignment point each.
-                # (Raw is kept for appending to history exactly as it arrived)
-                raw_tool_calls_for_history: list[dict] = []
-                thinking_stopped = False
+                            if chunk.reasoning:
+                                final_reasoning += chunk.reasoning
+                                self.cb.on_thinking_content(chunk.reasoning)
 
-                try:
-                    options: dict[str, Any] = {}
-                    if getattr(self.config, "num_ctx", None):
-                        options["num_ctx"] = self.config.num_ctx
-                    if getattr(self.config, "max_output_tokens", None):
-                        options["max_output_tokens"] = self.config.max_output_tokens
-                    if getattr(self.config, "stop_sequences", None):
-                        options["stop_sequences"] = self.config.stop_sequences
+                            if chunk.content:
+                                final_content += chunk.content
+                                if not thinking_stopped:
+                                    thinking_stopped = True
+                                    self.cb.on_thinking_stop()
+                                self.cb.on_assistant_content(chunk.content)
 
-                    async_stream = self.llm.stream_with_tools(
-                        llm_messages,
-                        self.config.model,
-                        tools=tool_schemas,
-                        options=options,
-                        verbose=self.config.verbose,
-                    )
+                            if chunk.tool_calls:
+                                if not thinking_stopped:
+                                    thinking_stopped = True
+                                    self.cb.on_thinking_stop()
+                                for tc in chunk.tool_calls:
+                                    # We use `_stream_index` if available, otherwise fallback to `len()` positioning
+                                    stream_idx = getattr(tc, "_stream_index", None)
 
-                    async for chunk in async_stream:
-                        if chunk.usage:
-                            usage_obj = chunk.usage
+                                    # Find if we are already building this tool call
+                                    existing_tc = None
 
-                        if chunk.reasoning:
-                            final_reasoning += chunk.reasoning
-                            self.cb.on_thinking_content(chunk.reasoning)
-
-                        if chunk.content:
-                            final_content += chunk.content
-                            if not thinking_stopped:
-                                thinking_stopped = True
-                                self.cb.on_thinking_stop()
-                            self.cb.on_assistant_content(chunk.content)
-
-                        if chunk.tool_calls:
-                            if not thinking_stopped:
-                                thinking_stopped = True
-                                self.cb.on_thinking_stop()
-                            for tc in chunk.tool_calls:
-                                # We use `_stream_index` if available, otherwise fallback to `len()` positioning
-                                stream_idx = getattr(tc, "_stream_index", None)
-
-                                # Find if we are already building this tool call
-                                existing_tc = None
-
-                                if stream_idx is not None:
-                                    # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
-                                    if stream_idx < len(raw_tool_calls_for_history):
-                                        existing_tc = raw_tool_calls_for_history[stream_idx]
-                                else:
-                                    # Fallback: try matching by ID
-                                    existing_tc = next(
-                                        (x for x in raw_tool_calls_for_history if x["id"] == tc.id),
-                                        None
-                                    )
-
-                                if existing_tc is None:
-                                    # New tool call start
-                                    new_tc = {
-                                        "id": tc.id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": tc.name,
-                                            "arguments": tc.arguments
-                                        },
-                                    }
-                                    # Gemini needs its thought_signature replayed with
-                                    # the call. getattr: tests and plugins feed
-                                    # SimpleNamespace tool calls.
-                                    signature = getattr(tc, "thought_signature", None)
-                                    if signature:
-                                        new_tc["thought_signature"] = signature
-
-                                    # If we have a stream_index, ensure our array grows to that size
                                     if stream_idx is not None:
-                                        while len(raw_tool_calls_for_history) < stream_idx:
-                                            raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
-                                        raw_tool_calls_for_history.append(new_tc)
+                                        # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
+                                        if stream_idx < len(raw_tool_calls_for_history):
+                                            existing_tc = raw_tool_calls_for_history[stream_idx]
                                     else:
-                                        raw_tool_calls_for_history.append(new_tc)
-
-                                    # Only trigger UI start if we have a name
-                                    if tc.name:
-                                        self.cb.on_tool_start(tc.id, tc.name, {})
-                                else:
-                                    # Update ID if the existing one was a dummy or fallback ID, and the new one is real
-                                    if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
-                                        existing_tc["id"] = tc.id
-
-                                    # Append arguments to existing tool call
-                                    # An id reused by a different tool means two
-                                    # distinct calls are about to merge into one
-                                    # entry, concatenating their arguments and
-                                    # dropping the later name. Never silent again.
-                                    if (
-                                        tc.name
-                                        and existing_tc["function"]["name"]
-                                        and tc.name != existing_tc["function"]["name"]
-                                    ):
-                                        tool_log.warning(
-                                            "Tool call id reused by a different tool "
-                                            "({} then {}); calls would merge",
-                                            existing_tc["function"]["name"],
-                                            tc.name,
+                                        # Fallback: try matching by ID
+                                        existing_tc = next(
+                                            (x for x in raw_tool_calls_for_history if x["id"] == tc.id),
+                                            None
                                         )
 
-                                    # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
-                                    if tc.name and not existing_tc["function"]["name"]:
-                                        existing_tc["function"]["name"] = tc.name
-                                        self.cb.on_tool_start(existing_tc["id"], tc.name, {})
+                                    if existing_tc is None:
+                                        # New tool call start
+                                        new_tc = {
+                                            "id": tc.id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": tc.name,
+                                                "arguments": tc.arguments
+                                            },
+                                        }
+                                        # Gemini needs its thought_signature replayed with
+                                        # the call. getattr: tests and plugins feed
+                                        # SimpleNamespace tool calls.
+                                        signature = getattr(tc, "thought_signature", None)
+                                        if signature:
+                                            new_tc["thought_signature"] = signature
 
-                                    if tc.arguments:
-                                        existing_tc["function"]["arguments"] += tc.arguments
+                                        # If we have a stream_index, ensure our array grows to that size
+                                        if stream_idx is not None:
+                                            while len(raw_tool_calls_for_history) < stream_idx:
+                                                raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
+                                            raw_tool_calls_for_history.append(new_tc)
+                                        else:
+                                            raw_tool_calls_for_history.append(new_tc)
 
-                    # Some models pack multiple parallel tool calls into one entry
-                    # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
-                    # these into individual tool calls before normalizing.
-                    raw_tool_calls_for_history = _expand_concatenated_tool_calls(
-                        raw_tool_calls_for_history
-                    )
+                                        # Only trigger UI start if we have a name
+                                        if tc.name:
+                                            self.cb.on_tool_start(tc.id, tc.name, {})
+                                    else:
+                                        # Update ID if the existing one was a dummy or fallback ID, and the new one is real
+                                        if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
+                                            existing_tc["id"] = tc.id
 
-                    # Now that streaming is done, build the normalized objects for execution
-                    for raw_tc in raw_tool_calls_for_history:
-                        self._emit_tool_call_received(
-                            raw_tc["function"]["name"],
-                            raw_tc["id"],
-                            len(raw_tc["function"]["arguments"]),
+                                        # Append arguments to existing tool call
+                                        # An id reused by a different tool means two
+                                        # distinct calls are about to merge into one
+                                        # entry, concatenating their arguments and
+                                        # dropping the later name. Never silent again.
+                                        if (
+                                            tc.name
+                                            and existing_tc["function"]["name"]
+                                            and tc.name != existing_tc["function"]["name"]
+                                        ):
+                                            tool_log.warning(
+                                                "Tool call id reused by a different tool "
+                                                "({} then {}); calls would merge",
+                                                existing_tc["function"]["name"],
+                                                tc.name,
+                                            )
+
+                                        # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
+                                        if tc.name and not existing_tc["function"]["name"]:
+                                            existing_tc["function"]["name"] = tc.name
+                                            self.cb.on_tool_start(existing_tc["id"], tc.name, {})
+
+                                        if tc.arguments:
+                                            existing_tc["function"]["arguments"] += tc.arguments
+
+                        # Some models pack multiple parallel tool calls into one entry
+                        # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
+                        # these into individual tool calls before normalizing.
+                        raw_tool_calls_for_history = _expand_concatenated_tool_calls(
+                            raw_tool_calls_for_history
                         )
-                        tool_call_obj = _ToolCall(
-                            id=raw_tc["id"],
-                            type="function",
-                            function=_FunctionCall(
-                                name=raw_tc["function"]["name"],
-                                arguments=raw_tc["function"]["arguments"]
-                            ),
-                        )
-                        normalized_tool_calls.append(tool_call_obj)
 
-                except asyncio.CancelledError:
-                    llm_log.info("LLM stream cancelled")
-                    return
-                except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
-                    llm_log.exception("LLM stream failed")
-                    self._fail(f"Error: {_describe_llm_error(e)}")
+                        # Now that streaming is done, build the normalized objects for execution
+                        for raw_tc in raw_tool_calls_for_history:
+                            self._emit_tool_call_received(
+                                raw_tc["function"]["name"],
+                                raw_tc["id"],
+                                len(raw_tc["function"]["arguments"]),
+                            )
+                            tool_call_obj = _ToolCall(
+                                id=raw_tc["id"],
+                                type="function",
+                                function=_FunctionCall(
+                                    name=raw_tc["function"]["name"],
+                                    arguments=raw_tc["function"]["arguments"]
+                                ),
+                            )
+                            normalized_tool_calls.append(tool_call_obj)
+
+                    except asyncio.CancelledError:
+                        llm_log.info("LLM stream cancelled")
+                        self.outcome = TurnOutcome("cancelled")
+                        return
+                    except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
+                        llm_log.exception("LLM stream failed")
+                        self._fail(f"Error: {_describe_llm_error(e)}", "llm")
+                        return
+                    finally:
+                        self.cb.on_thinking_stop()
+
+                    if self.cb.is_cancelled():
+                        self.outcome = TurnOutcome("cancelled")
+                        return
+
+                    # Detect empty/dropped responses (server closed cleanly but sent nothing)
+                    if not final_content and not normalized_tool_calls and not final_reasoning:
+                        llm_log.error(
+                            "LLM returned empty response (possible connection drop). "
+                            "model={}, provider={}",
+                            self.config.model,
+                            self.config.provider,
+                        )
+                        self._fail(
+                            "LLM returned an empty response. Check model compatibility "
+                            "or try switching chat_protocol in config.",
+                            "llm",
+                        )
+                        return
+
+                    # 3. Process final response metadata and token counting
+                    if usage_obj:
+                        # Use provider-reported token count if available
+                        tokens = usage_obj.get("total_tokens", 0)
+                        self._total_tokens += tokens
+                        self.context_manager.update_from_response(usage_obj)
+                    else:
+                        # No usage data from provider — estimate total tokens
+                        self._total_tokens += len(str(final_content)) // 4 + len(str(final_reasoning)) // 4
+                    self.cb.on_token_usage(self._total_tokens)
+
+                    # Content / reasoning / tool-call counts are now the `iteration`
+                    # event's content_len, reasoning_len and tool_calls fields.
+
+                    # If model thought but forgot to output content/tools, prompt it
+                    if not final_content and not normalized_tool_calls and final_reasoning:
+                        llm_log.debug(
+                            "Model thought but provided no content or tools. Prompting for final response."
+                        )
+                        self.messages.append(
+                            {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
+                        )
+                        reasoning_only += 1
+                        if reasoning_only > _MAX_REASONING_RETRIES:
+                            self._fail(
+                                f"Error: the model returned only reasoning {reasoning_only} "
+                                "times in a row; stopped.",
+                                "llm",
+                            )
+                            return
+                        self.messages.append(
+                            {
+                                "role": "user",
+                                "content": "Please provide your final response or tool call based on your reasoning above.",
+                            }
+                        )
+                        continue
+
+                    # Build and append assistant message dict to conversation history.
+                    # Sanitize tool call arguments: some models emit malformed JSON which
+                    # gets stored in history. On the next API call, providers (e.g. Ollama)
+                    # validate the history and reject requests with invalid arguments.
+                    if raw_tool_calls_for_history:
+                        for tc_entry in raw_tool_calls_for_history:
+                            raw_args = tc_entry["function"].get("arguments", "")
+                            if isinstance(raw_args, str):
+                                try:
+                                    decoded = json.loads(raw_args)
+                                    if not isinstance(decoded, dict):
+                                        # e.g. "null": never send it back to the
+                                        # provider; the call is refused anyway.
+                                        tc_entry["function"]["arguments"] = "{}"
+                                except (json.JSONDecodeError, ValueError):
+                                    llm_log.warning(
+                                        "Malformed tool arguments for '{}': "
+                                        "{} chars — repairing before storing in history",
+                                        tc_entry["function"].get("name", "?"),
+                                        len(raw_args),
+                                    )
+                                    parsed = _parse_arguments(raw_args)
+                                    tc_entry["function"]["arguments"] = json.dumps(parsed)
+
+                    reasoning_only = 0
+                    msg_dict: dict = {"role": "assistant", "content": final_content}
+                    if raw_tool_calls_for_history:
+                        msg_dict["tool_calls"] = raw_tool_calls_for_history
+                    if final_reasoning:
+                        msg_dict["reasoning_content"] = final_reasoning
+
+                    self.messages.append(msg_dict)
+
+                    # 4. Handle tool execution
+                    if normalized_tool_calls:
+                        # We use the existing unified execution path
+                        escalated = await self._execute_tool_calls(normalized_tool_calls)
+                        if escalated:
+                            self.cb.on_system_message(
+                                "⚠ Escalation requested. Activity stopped; waiting for user prompt."
+                            )
+                            self.outcome = TurnOutcome("escalated")
+                            return
+                        no_tools = False
+                        continue
+
+                    # Text-only response — loop finished
+                    self.outcome = TurnOutcome("completed")
                     return
                 finally:
-                    self.cb.on_thinking_stop()
-
-                if self.cb.is_cancelled():
-                    return
-
-                # Detect empty/dropped responses (server closed cleanly but sent nothing)
-                if not final_content and not normalized_tool_calls and not final_reasoning:
-                    llm_log.error(
-                        "LLM returned empty response (possible connection drop). "
-                        "model={}, provider={}",
-                        self.config.model,
-                        self.config.provider,
+                    emit_event(
+                        "llm", "iteration",
+                        n=iteration_n,
+                        model=self.config.model,
+                        content_len=len(final_content),
+                        reasoning_len=len(final_reasoning),
+                        tool_calls=len(normalized_tool_calls),
+                        hist_tokens=self._total_tokens,
+                        ms=int((time.perf_counter() - iter_started) * 1000),
+                        **self._correlation(),
                     )
-                    self._fail(
-                        "LLM returned an empty response. Check model compatibility "
-                        "or try switching chat_protocol in config."
-                    )
-                    return
-
-                # 3. Process final response metadata and token counting
-                if usage_obj:
-                    # Use provider-reported token count if available
-                    tokens = usage_obj.get("total_tokens", 0)
-                    self._total_tokens += tokens
-                    self.context_manager.update_from_response(usage_obj)
-                else:
-                    # No usage data from provider — estimate total tokens
-                    self._total_tokens += len(str(final_content)) // 4 + len(str(final_reasoning)) // 4
-                self.cb.on_token_usage(self._total_tokens)
-
-                # Content / reasoning / tool-call counts are now the `iteration`
-                # event's content_len, reasoning_len and tool_calls fields.
-
-                # If model thought but forgot to output content/tools, prompt it
-                if not final_content and not normalized_tool_calls and final_reasoning:
-                    llm_log.debug(
-                        "Model thought but provided no content or tools. Prompting for final response."
-                    )
-                    self.messages.append(
-                        {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
-                    )
-                    reasoning_only += 1
-                    if reasoning_only > _MAX_REASONING_RETRIES:
-                        self._fail(
-                            f"Error: the model returned only reasoning {reasoning_only} "
-                            "times in a row; stopped."
-                        )
-                        return
-                    self.messages.append(
-                        {
-                            "role": "user",
-                            "content": "Please provide your final response or tool call based on your reasoning above.",
-                        }
-                    )
-                    continue
-
-                # Build and append assistant message dict to conversation history.
-                # Sanitize tool call arguments: some models emit malformed JSON which
-                # gets stored in history. On the next API call, providers (e.g. Ollama)
-                # validate the history and reject requests with invalid arguments.
-                if raw_tool_calls_for_history:
-                    for tc_entry in raw_tool_calls_for_history:
-                        raw_args = tc_entry["function"].get("arguments", "")
-                        if isinstance(raw_args, str):
-                            try:
-                                decoded = json.loads(raw_args)
-                                if not isinstance(decoded, dict):
-                                    # e.g. "null": never send it back to the
-                                    # provider; the call is refused anyway.
-                                    tc_entry["function"]["arguments"] = "{}"
-                            except (json.JSONDecodeError, ValueError):
-                                llm_log.warning(
-                                    "Malformed tool arguments for '{}': "
-                                    "{} chars — repairing before storing in history",
-                                    tc_entry["function"].get("name", "?"),
-                                    len(raw_args),
-                                )
-                                parsed = _parse_arguments(raw_args)
-                                tc_entry["function"]["arguments"] = json.dumps(parsed)
-
-                reasoning_only = 0
-                msg_dict: dict = {"role": "assistant", "content": final_content}
-                if raw_tool_calls_for_history:
-                    msg_dict["tool_calls"] = raw_tool_calls_for_history
-                if final_reasoning:
-                    msg_dict["reasoning_content"] = final_reasoning
-
-                self.messages.append(msg_dict)
-
-                # 4. Handle tool execution
-                if normalized_tool_calls:
-                    # We use the existing unified execution path
-                    escalated = await self._execute_tool_calls(normalized_tool_calls)
-                    if escalated:
-                        self.cb.on_system_message(
-                            "⚠ Escalation requested. Activity stopped; waiting for user prompt."
-                        )
-                        return
-                    no_tools = False
-                    continue
-
-                # Text-only response — loop finished
-                return
-            finally:
-                emit_event(
-                    "llm", "iteration",
-                    n=iteration_n,
-                    model=self.config.model,
-                    content_len=len(final_content),
-                    reasoning_len=len(final_reasoning),
-                    tool_calls=len(normalized_tool_calls),
-                    hist_tokens=self._total_tokens,
-                    ms=int((time.perf_counter() - iter_started) * 1000),
-                    **self._correlation(),
-                )
+        except asyncio.CancelledError:
+            # A cancellation leaving the turn: the turn did not finish.
+            self.outcome = TurnOutcome("cancelled")
+            raise
 
     # -- Tool execution ------------------------------------------------------
 
