@@ -407,7 +407,10 @@ def test_agent_prompt_uses_final_message_contract_not_summary_block():
     from ayder_cli.agents.config import AgentConfig
     from ayder_cli.application import runtime_factory
     agent_cfg = AgentConfig(name="reporter", system_prompt="Produce a document.")
-    parent = MagicMock(provider="ollama", tool_tags=None, retry=MagicMock(enabled=False))
+    parent = MagicMock(
+        provider="ollama", tool_tags=None, retry=MagicMock(enabled=False),
+        request_timeout_seconds=0,  # a MagicMock value would be truthy and wrap the provider
+    )
     fake_reg = MagicMock()
     fake_reg.get_system_prompts.return_value = "\n[tools]\n"
     fake_reg.get_schemas.return_value = []
@@ -420,3 +423,40 @@ def test_agent_prompt_uses_final_message_contract_not_summary_block():
     assert "Produce a document." in rt.system_prompt
     assert "<agent-summary>" not in rt.system_prompt
     assert "final message" in rt.system_prompt.lower()
+
+
+class TestMaybeWrapWithRetryTimeout:
+    """``request_timeout_seconds`` reaches the retry layer."""
+
+    def _wrap(self, **config):
+        from ayder_cli.application.runtime_factory import _maybe_wrap_with_retry
+        from ayder_cli.core.config import RetryConfigSection
+
+        retry = RetryConfigSection(enabled=config.pop("retry_enabled", True))
+        provider = MagicMock()
+        return provider, _maybe_wrap_with_retry(provider, Config(retry=retry, **config), None)
+
+    def test_the_profiles_timeout_is_passed_to_the_wrapper(self):
+        from ayder_cli.providers.retry import RetryingProvider
+
+        provider, wrapped = self._wrap(request_timeout_seconds=5)
+
+        assert isinstance(wrapped, RetryingProvider)
+        assert wrapped._inner is provider
+        assert wrapped._request_timeout == 5
+
+    def test_a_timeout_wraps_even_with_retry_disabled(self):
+        """The timeout guards the stream; retry itself stays off (one attempt)."""
+        from ayder_cli.providers.retry import RetryingProvider
+
+        provider, wrapped = self._wrap(retry_enabled=False, request_timeout_seconds=5)
+
+        assert isinstance(wrapped, RetryingProvider)
+        assert wrapped._inner is provider
+        assert wrapped._retry.enabled is False
+        assert wrapped._request_timeout == 5
+
+    def test_retry_off_and_no_timeout_leaves_the_provider_unwrapped(self):
+        provider, wrapped = self._wrap(retry_enabled=False, request_timeout_seconds=0)
+
+        assert wrapped is provider

@@ -25,6 +25,7 @@ This document provides coding standards, tool configurations, and workflows for 
 | **textual** | Terminal User Interface (TUI) framework | ==8.2.8 |
 | **python-dotenv** | Environment variable management | >=1.0.0 |
 | **tiktoken** | Token counting for context management | >=0.7.0 |
+| **tomlkit** | Comment-preserving `config.toml` edits (config wizard) | >=0.13 |
 
 Optional extras: `anthropic`, `google` (google-genai), `qwen` (dashscope), `glm` (zhipuai>=2, with pydantic<2.14 because zhipuai holds mcp at 1.19.0), `all` (the four provider extras), `libcst` (for plugins that do CST code transforms); `mcp` is an empty compatibility extra.
 
@@ -73,6 +74,7 @@ ayder-cli/
 │   ├── core/                   # Core infrastructure
 │   │   ├── config.py           # Pydantic config with validation
 │   │   ├── config_migration.py # Config schema v2.0 migration
+│   │   ├── config_editor.py    # Comment-preserving [llm.*] profile edits (config wizard)
 │   │   ├── context.py          # ProjectContext (path sandboxing, scratch dir)
 │   │   ├── result.py           # ToolSuccess/ToolError types
 │   │   ├── session.py          # Save/restore TUI sessions (.ayder/sessions/)
@@ -105,7 +107,7 @@ ayder-cli/
 │   ├── providers/              # LLM provider implementations
 │   │   ├── base.py             # AIProvider protocol, NormalizedStreamChunk
 │   │   ├── orchestrator.py     # Factory: create(config) → provider
-│   │   ├── retry.py            # Retry wrapper (backoff + mid-stream recovery)
+│   │   ├── retry.py            # Retry wrapper (backoff, mid-stream recovery, stall timeout)
 │   │   ├── evren.py            # evren gateway terms-of-use acceptance (/model)
 │   │   └── impl/               # Individual provider drivers
 │   │       ├── openai.py       # OpenAIProvider (base for most drivers)
@@ -155,6 +157,7 @@ ayder-cli/
 │   │   ├── __init__.py         # run_tui() entry point
 │   │   ├── app.py              # AyderApp main application
 │   │   ├── commands.py         # Slash command handlers
+│   │   ├── config_wizard.py    # Config wizard screens (/config, first run)
 │   │   ├── keybindings.py      # Keybinding registry
 │   │   ├── helpers.py          # TUI helper functions
 │   │   ├── adapter.py          # TUIInteractionSink (verbose debug)

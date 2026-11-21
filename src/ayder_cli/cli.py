@@ -283,6 +283,12 @@ def main():
             sys.exit(1)
         set_config_path(config_file)
 
+    # First run: no config file before load_config writes the template. The TUI
+    # then opens the config wizard. With -c the file must already exist.
+    from ayder_cli.core import config as config_module
+
+    first_run = not config_module.CONFIG_PATH.exists()
+
     from ayder_cli.core.config import load_config
 
     cfg = load_config(notify_migration=True, output=print)
@@ -448,6 +454,7 @@ def main():
             initial_messages=sess.messages,
             resume_session_id=sess.session_id,
             session_name=getattr(args, "name", None),
+            first_run=first_run,
             log_settings=log_settings,
         )
         return
@@ -542,6 +549,7 @@ def main():
             system_prompt_override=system_prompt_override,
             session_name=getattr(args, "name", None),
             log_settings=log_settings,
+            first_run=first_run,
         )
         return
 

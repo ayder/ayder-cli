@@ -146,12 +146,15 @@ def create_runtime(
 def _maybe_wrap_with_retry(
     provider: AIProvider, cfg: Config, context_mgr: Any
 ) -> AIProvider:
-    """Wrap provider with RetryingProvider when cfg.retry.enabled.
+    """Wrap provider with RetryingProvider when cfg.retry.enabled, or when a stall
+    timeout (cfg.request_timeout_seconds > 0) is set.
 
-    Wires CacheMonitor.reset() as the on_reconnect hook for drivers whose
-    context manager exposes ``_cache_monitor`` (currently OllamaContextManager).
+    With retry off, a timeout still wraps: the stream is guarded and a stall
+    surfaces after one attempt. Wires CacheMonitor.reset() as the on_reconnect
+    hook for drivers whose context manager exposes ``_cache_monitor`` (currently
+    OllamaContextManager).
     """
-    if not cfg.retry.enabled:
+    if not cfg.retry.enabled and not cfg.request_timeout_seconds:
         return provider
     retry_cfg = RetryConfig(
         enabled=cfg.retry.enabled,
@@ -166,7 +169,12 @@ def _maybe_wrap_with_retry(
     monitor = getattr(context_mgr, "_cache_monitor", None)
     if monitor is not None and hasattr(monitor, "reset"):
         on_reconnect = monitor.reset
-    return RetryingProvider(provider, retry_cfg, on_reconnect=on_reconnect)
+    return RetryingProvider(
+        provider,
+        retry_cfg,
+        on_reconnect=on_reconnect,
+        request_timeout_seconds=cfg.request_timeout_seconds,
+    )
 
 
 def create_agent_runtime(

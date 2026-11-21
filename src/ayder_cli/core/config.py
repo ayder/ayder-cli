@@ -36,8 +36,8 @@ DEFAULTS: Dict[str, Any] = {
     "anthropic": {
         "driver": "anthropic",
         "api_key": "",
-        "model": "claude-sonnet-4-5-20250929",
-        "num_ctx": 8192,
+        "model": "claude-sonnet-5-5",
+        "num_ctx": 200000,
     },
     "gemini": {
         "driver": "google",
@@ -299,6 +299,11 @@ class Config(BaseModel):
     max_history_messages: int = Field(default=0)
     # LLM calls per user turn before the loop stops; 0 = unlimited (default).
     max_iterations: int = Field(default=0)
+    # Seconds the LLM stream may stay silent (before its first chunk or between
+    # chunks) before the attempt fails and is retried. 0 = no timeout (default):
+    # the cap is the user's choice. Set per [llm.<provider>] profile, or in [app]
+    # as a default for every profile.
+    request_timeout_seconds: float = Field(default=0.0)
     prompt: str = Field(default="STANDARD")
     chat_protocol: str = Field(default="ollama")
     # Ollama thinking mode. Defaults on because most local models in the
@@ -474,6 +479,13 @@ class Config(BaseModel):
     def validate_max_iterations(cls, v: int) -> int:
         if v < 0:
             raise ValueError("max_iterations must be non-negative (0 = unlimited)")
+        return v
+
+    @field_validator("request_timeout_seconds")
+    @classmethod
+    def validate_request_timeout_seconds(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("request_timeout_seconds must be >= 0 (0 = no timeout)")
         return v
 
     @model_validator(mode="after")

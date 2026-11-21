@@ -97,8 +97,8 @@ export OLLAMA_MAX_LOADED_MODELS=1
 
 ### Cloud providers
 
-Add an API key to a profile in `~/.ayder/config.toml` (see Configuration
-below) and switch provider in the TUI:
+Add an API key to a profile with `/config` (or edit `~/.ayder/config.toml`,
+see Configuration below) and switch provider in the TUI:
 
 ```bash
 /provider anthropic   # or: openai, google, deepseek, qwen, glm
@@ -110,9 +110,20 @@ in the core install.
 
 ### Configuration: Profiles and Drivers
 
-ayder-cli uses a flexible profile-based configuration system. On the first run, it creates a config file at `~/.ayder/config.toml`.
+ayder-cli uses a flexible profile-based configuration system. On the first run, it creates a config file at `~/.ayder/config.toml`. When that first run opens the TUI, the config wizard opens over it so you can set up a provider right away; a first run without the TUI (`ayder "..."`, piped input, task commands) only writes the file.
 
-The generated file includes an `[llm.evren]` profile for the evren gateway (`https://evren-llmapi.ssyz.org.tr/v1`) with an empty `api_key`. Fill in your key and switch to it with `/provider evren`.
+The generated file includes an `[llm.evren]` profile for the evren gateway (`https://evren-llmapi.ssyz.org.tr/v1`) with an empty `api_key`. Fill in your key with `/config` and make it the default, or switch to it with `/provider evren`.
+
+### The Config Wizard (`/config`)
+
+`/config` opens the config wizard at any time; it is the same screen the first run shows. It lists the `[llm.<name>]` profiles (★ marks the default, "(in use)" the session's profile) and edits them in place:
+
+- **`a` add:** pick Claude, Gemini, Evren, Ollama, or any OpenAI-compatible endpoint; each comes with its default settings. A provider whose SDK extra is not installed is greyed out with the command to install it (e.g. `pip install ayder-cli[anthropic]`). Picking a preset whose seeded profile still has an empty API key (`anthropic`, `gemini`, `evren`) edits that profile instead of adding a copy.
+- **`e` / Enter edit:** the form shows only the keys the profile's driver reads: base URL as Host, Port and Path (with a preview), a masked API key, the model, and an Advanced section (`num_ctx`, `max_output_tokens`, `reasoning_effort`, `think`, `stop_sequences`, depending on the driver). Empty advanced fields are not written. For OpenAI-compatible and Ollama profiles, **Fetch models** lists the endpoint's models in a picker: type to filter, ↑↓ to move, Enter to fill the Model field, Esc to keep it (the evren terms are shown first when the gateway asks for them).
+- **`s` set default:** writes `provider` under `[app]` and switches the session to it. A profile becomes the default only if its provider can be built, so a missing SDK or a bad URL can never stop the next start.
+- **`d` delete:** asks first; the default profile, the session's profile, a profile an agent uses, and the last profile cannot be deleted.
+
+Saving the session's profile applies the change to the running session. The wizard rewrites only the edited `[llm.<name>]` table and the `provider` line: comments, ordering and every other section of `config.toml` stay as they are.
 
 **Key Concepts:**
 - **Profile Name:** A custom named section (e.g., `[llm.my_ollama]`). You can define as many profiles as you want.
@@ -208,7 +219,7 @@ num_ctx = 128000
 [llm.anthropic]
 driver = "anthropic"
 api_key = "sk-ant-..."
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-5-5"
 num_ctx = 200000
 
 [llm.gemini]
@@ -216,6 +227,7 @@ driver = "google"
 api_key = "AIza..."
 model = "gemini-3-pro"
 num_ctx = 1000000
+request_timeout_seconds = 0   # seconds the stream may stay silent before the attempt is retried; 0 = no timeout (default)
 ```
 
 Please adjust `num_ctx` context size window according to your local computer RAM. If Ollama crashes, decrease the value.
@@ -310,6 +322,14 @@ ayder --stdin < prompt.txt
 ayder --system-prompt prompt-file.md "refactor this code"
 ```
 
+Exit codes, for scripts:
+
+| Code | Meaning |
+| ---- | ------- |
+| `0` | The turn finished. |
+| `1` | The turn ended in an error: the provider call failed (the API error body is shown), the model returned an empty response or only reasoning, or `max_iterations` was reached. |
+| `130` | Interrupted with Ctrl+C. |
+
 ### Task Commands (CLI Mode)
 
 Execute task-related commands directly without entering the TUI:
@@ -395,6 +415,7 @@ You can also manually manage context with the `context` tool and its slash-comma
 | ------- | ----------- |
 | `/help` | Show available commands and keyboard shortcuts |
 | `/provider` | Switch LLM provider (interactive selector or direct name) |
+| `/config` | Config wizard: add, edit or delete provider profiles and set the default |
 | `/model` | List available models or switch model (e.g., `/model qwen3-coder`) |
 | `/effort` | Pick reasoning effort or set it directly (e.g., `/effort high`) |
 | `/plugin` | Toggle tool plugins by tag (e.g., venv, http, background, python, dbs) |
@@ -665,7 +686,7 @@ num_ctx = 65536
 [llm.anthropic]
 driver = "anthropic"
 api_key = "sk-ant-..."
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-5-5"
 num_ctx = 200000
 
 # --- Agents ---
@@ -674,7 +695,7 @@ num_ctx = 200000
 system_prompt = """You are a senior code reviewer. Review the code for bugs,
 security issues, and style violations. Be concise and actionable."""
 provider = "anthropic"         # Optional: use a different provider than main
-model = "claude-sonnet-4-5-20250929"  # Optional: use a different model
+model = "claude-sonnet-5-5"  # Optional: use a different model
 
 [agents.test-writer]
 system_prompt = """You are a test engineer. Write comprehensive pytest tests

@@ -47,7 +47,8 @@ def _run_loop(
             instead of the built-in prompts.py prompt (ayder --system-prompt FILE).
 
     Returns:
-        Exit code (0 for success, 1 for error).
+        Exit code: 0 when the turn finished, 1 when it ended in an error (stream
+        failure, empty response, reasoning-only limit, max_iterations), 130 on Ctrl+C.
     """
     rt = create_runtime(
         prompt_tier="AGENTIC" if agent_mode else None,
@@ -120,9 +121,14 @@ def _run_loop(
             agent_registry.set_loop(asyncio.get_running_loop())
         await loop.run()
 
-    asyncio.run(_drive())
+    try:
+        asyncio.run(_drive())
+    except KeyboardInterrupt:
+        print(file=sys.stderr)  # end the "^C" line
+        print("Interrupted.", file=sys.stderr)
+        return 130
     print()  # Ensure terminal prompt starts on a new line after streaming output
-    return 0
+    return 1 if loop.error else 0
 
 
 class CommandRunner:
