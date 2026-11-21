@@ -722,12 +722,16 @@ class ChatLoop:
                         # Now that streaming is done, build the normalized objects for execution
                         # Each call's arguments are parsed once, here (R10).
                         parsed_calls: dict[str, _ParsedCall] = {}
+                        # What each call's event records, taken before history sanitization
+                        # rewrites the arguments; the events themselves come after the reply
+                        # is recorded.
+                        received: list[tuple[str, str, int]] = []
                         for raw_tc in raw_tool_calls_for_history:
-                            self._emit_tool_call_received(
+                            received.append((
                                 raw_tc["function"]["name"],
                                 raw_tc["id"],
                                 len(raw_tc["function"]["arguments"]),
-                            )
+                            ))
                             tool_call_obj = _ToolCall(
                                 id=raw_tc["id"],
                                 type="function",
@@ -776,6 +780,12 @@ class ChatLoop:
                             # settles any that are left (R3b).
                             end.unsettled = list(normalized_tool_calls)
                             reply_saved = True
+
+                        # The loop's own telemetry is fallible (a sink can raise), so it comes after
+                        # the complete reply is in history and its calls are held for settlement
+                        # (R3b): a failing event then fails the turn, not the reply.
+                        for name, call_id, arg_chars in received:
+                            self._emit_tool_call_received(name, call_id, arg_chars)
 
                         if thinking_open:
                             # The stream ended with a phase open: close it. A raising
