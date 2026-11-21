@@ -216,6 +216,7 @@ driver = "google"
 api_key = "AIza..."
 model = "gemini-3-pro"
 num_ctx = 1000000
+request_timeout_seconds = 0   # seconds the stream may stay silent before the attempt is retried; 0 = no timeout (default)
 ```
 
 Please adjust `num_ctx` context size window according to your local computer RAM. If Ollama crashes, decrease the value.
@@ -309,6 +310,14 @@ ayder --stdin < prompt.txt
 #  and the tool instructions, are still appended)
 ayder --system-prompt prompt-file.md "refactor this code"
 ```
+
+Exit codes, for scripts:
+
+| Code | Meaning |
+| ---- | ------- |
+| `0` | The turn finished. |
+| `1` | The turn ended in an error: the provider call failed (the API error body is shown), the model returned an empty response or only reasoning, or `max_iterations` was reached. |
+| `130` | Interrupted with Ctrl+C. |
 
 ### Task Commands (CLI Mode)
 

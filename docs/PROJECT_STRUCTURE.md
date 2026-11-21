@@ -245,6 +245,7 @@ All LLM provider implementations live here. Previously some sat under `services/
 | `providers/__init__.py` | Re-exports | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `provider_orchestrator` |
 | `providers/base.py` | Provider protocol + shared DTOs | `AIProvider`, `NormalizedStreamChunk`, `ToolCallDef`, `_ToolCall`, `_FunctionCall` |
 | `providers/orchestrator.py` | Driver-keyed provider factory | `ProviderOrchestrator`, `provider_orchestrator` |
+| `providers/retry.py` | Retry wrapper: backoff with jitter, mid-stream recovery, and the stall timeout (`request_timeout_seconds`) | `RetryingProvider`, `RetryConfig`, `ProviderStallTimeout`, `classify_error` |
 | `providers/evren.py` | evren gateway terms-of-use acceptance (used by `/model`) | `EVREN_HOST`, `EvrenTerms`, `is_evren_terms_error`, `fetch_terms`, `accept_terms` |
 | `providers/impl/ollama.py` | Native Ollama provider (ollama SDK) | `OllamaProvider` |
 | `providers/impl/ollama_inspector.py` | Ollama model introspection | `OllamaInspector`, `ModelInfo`, `RuntimeState` |

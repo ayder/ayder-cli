@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import signal
 import sys
+import threading
 from types import TracebackType
 
 from ayder_cli.log import flush, get_logger, level_no
@@ -17,6 +18,12 @@ from ayder_cli.logging_config import (
 _log = get_logger("core")
 _hooks_installed = False
 _signals_installed = False
+
+# How long a signal handler waits for the thread that logs the signal. The
+# handler itself never calls the logger: a signal can land while this thread
+# is inside a log call, and Loguru's handlers are not re-entrant (RuntimeError
+# "Could not acquire internal lock", or a deadlock in logger.complete()).
+_SIGNAL_LOG_WAIT_SECONDS = 1.0
 
 # B2-prime (§F5-R7). An asyncio `context["message"]` is framework text, but the
 # framework interpolates callback reprs and transport state into some of them -
@@ -146,20 +153,38 @@ def install_exception_hooks() -> None:
             try:
                 previous_handler = signal.getsignal(sig)
 
-                def _chained_signal(signum, frame, _prev=previous_handler):
+                def _chained_signal(signum):
+                    # Runs on a helper thread, never inside the signal handler.
                     # A signal is a termination request, not an exception:
                     # WARNING, and no traceback to attach.
                     _log.warning(
                         "Received signal {}; flushing logs", signal.Signals(signum).name
                     )
                     flush()
+
+                def _chained_signal_handler(signum, frame, _prev=previous_handler):
+                    reporter = threading.Thread(
+                        target=_chained_signal,
+                        args=(signum,),
+                        name="ayder-signal-log",
+                        daemon=True,
+                    )
+                    try:
+                        reporter.start()
+                    except RuntimeError:
+                        pass  # interpreter shutting down: no new threads; still chain
+                    else:
+                        # If this thread was inside a log call, the reporter waits
+                        # on the lock this thread holds; stop waiting and let the
+                        # record land once the lock is released.
+                        reporter.join(_SIGNAL_LOG_WAIT_SECONDS)
                     if callable(_prev):
                         _prev(signum, frame)  # Textual's terminal cleanup
                     elif _prev == signal.SIG_DFL:
                         signal.signal(signum, signal.SIG_DFL)
                         signal.raise_signal(signum)
 
-                signal.signal(sig, _chained_signal)
+                signal.signal(sig, _chained_signal_handler)
             except (ValueError, OSError):
                 pass  # not the main thread
         _signals_installed = True

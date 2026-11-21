@@ -105,7 +105,7 @@ ayder-cli/
 │   ├── providers/              # LLM provider implementations
 │   │   ├── base.py             # AIProvider protocol, NormalizedStreamChunk
 │   │   ├── orchestrator.py     # Factory: create(config) → provider
-│   │   ├── retry.py            # Retry wrapper (backoff + mid-stream recovery)
+│   │   ├── retry.py            # Retry wrapper (backoff, mid-stream recovery, stall timeout)
 │   │   ├── evren.py            # evren gateway terms-of-use acceptance (/model)
 │   │   └── impl/               # Individual provider drivers
 │   │       ├── openai.py       # OpenAIProvider (base for most drivers)

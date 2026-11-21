@@ -18,7 +18,7 @@ from ayder_cli.logging_config import setup_logging
 import openai
 
 from ayder_cli.providers import evren, provider_orchestrator, ProviderUnavailableError
-from ayder_cli.application.runtime_factory import apply_skill_setting
+from ayder_cli.application.runtime_factory import _maybe_wrap_with_retry, apply_skill_setting
 from ayder_cli.core.result import ToolError
 from ayder_cli.core.skills import SkillInfo, active_skills, render_skill_block
 from ayder_cli.tools.builtins.skill import _after_change, discover_skills
@@ -113,7 +113,13 @@ def _apply_provider_switch(
 
     # Create FIRST - only mutate app state after a successful build.
     try:
-        new_llm = provider_orchestrator.create(new_config)
+        # Wrap like the startup path, so the new provider keeps retry and the
+        # stall timeout.
+        new_llm = _maybe_wrap_with_retry(
+            provider_orchestrator.create(new_config),
+            new_config,
+            getattr(app, "context_manager", None),
+        )
     except ProviderUnavailableError as e:
         chat_view.add_system_message(str(e))   # already actionable; keep current provider
         return

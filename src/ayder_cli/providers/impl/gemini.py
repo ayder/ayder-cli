@@ -2,6 +2,7 @@
 Gemini Provider implementation using google-genai.
 """
 
+import base64
 import json
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -15,6 +16,18 @@ from ayder_cli.providers.base import (
 )
 
 logger = get_logger("llm")
+
+# Keywords a Gemini function declaration's ``parameters`` Schema accepts, in the
+# JSON-Schema spelling ayder's tool definitions use. This is google-genai 3.3.0's
+# ``types.Schema`` field set minus ``additional_properties`` (the Gemini API rejects
+# it: 400 "Unknown name 'additional_properties'") and ``defs``/``ref`` (the SDK cannot
+# take them from ``$defs``/``$ref``). Anything else is dropped.
+_GEMINI_SCHEMA_KEYS = frozenset({
+    "type", "format", "title", "description", "nullable", "enum", "default",
+    "example", "items", "properties", "required", "propertyOrdering", "anyOf",
+    "minItems", "maxItems", "minLength", "maxLength", "minProperties",
+    "maxProperties", "minimum", "maximum", "pattern",
+})
 
 
 class GeminiProvider(AIProvider):
@@ -66,7 +79,7 @@ class GeminiProvider(AIProvider):
             if part.text:
                 content += part.text
             elif part.function_call:
-                tool_calls.append(self._function_call_def(part.function_call))
+                tool_calls.append(self._function_call_def(part.function_call, part.thought_signature))
 
 
         usage = {"total_tokens": getattr(response.usage_metadata, "total_token_count", 0)}
@@ -138,7 +151,7 @@ class GeminiProvider(AIProvider):
                 content += part.text
             elif part.function_call:
                 # Gemini emits complete function calls, not deltas
-                tool_calls.append(self._function_call_def(part.function_call))
+                tool_calls.append(self._function_call_def(part.function_call, part.thought_signature))
 
         # Usage info is often attached to the final chunk
         if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
@@ -154,19 +167,29 @@ class GeminiProvider(AIProvider):
         )
 
     @staticmethod
-    def _function_call_def(fc: Any) -> ToolCallDef:
+    def _function_call_def(fc: Any, thought_signature: Optional[bytes] = None) -> ToolCallDef:
         """Normalize one SDK ``FunctionCall``.
 
         ``args`` is a plain dict in google-genai. The id is the SDK's own call id
         when present, else a generated one: the tool name alone would merge two
         calls to the same tool in the chat loop's id match. Results map back by
         tool name in ``_convert_messages``, so a generated id is safe.
+
+        ``thought_signature`` is ``Part.thought_signature`` (bytes): it lives on the
+        Part, not on the FunctionCall. It is stored base64-encoded so the history
+        stays JSON; the SDK decodes the text back to the same bytes when the Part is
+        rebuilt for the next request.
         """
         call_id = getattr(fc, "id", None) or f"{fc.name}_{uuid.uuid4().hex[:8]}"
         return ToolCallDef(
             id=call_id,
             name=fc.name,
             arguments=json.dumps(dict(fc.args or {})),
+            thought_signature=(
+                base64.b64encode(thought_signature).decode("ascii")
+                if thought_signature
+                else None
+            ),
         )
 
     @staticmethod
@@ -200,12 +223,15 @@ class GeminiProvider(AIProvider):
                             args = json.loads(args)
                         except json.JSONDecodeError:
                             args = {}
-                    parts.append({
+                    part: Dict[str, Any] = {
                         "function_call": {
                             "name": tc["function"]["name"],
                             "args": args
                         }
-                    })
+                    }
+                    if tc.get("thought_signature"):
+                        part["thought_signature"] = tc["thought_signature"]
+                    parts.append(part)
             elif role == "tool":
                 # Tool result returned by user
                 tool_name = msg.get("name", "unknown")
@@ -223,6 +249,41 @@ class GeminiProvider(AIProvider):
         return system_prompt.strip(), gemini_messages
 
     @staticmethod
+    def _gemini_schema(schema: Any) -> Any:
+        """Keep only the JSON-Schema keywords Gemini function declarations accept.
+
+        Recurses into ``properties`` (a name -> schema map: every property NAME is
+        kept), ``items`` and ``anyOf``. ``oneOf`` is sent as ``anyOf`` (Gemini has no
+        oneOf). A JSON-Schema type list such as ["string", "null"] becomes type
+        "string" with nullable true.
+        """
+        if not isinstance(schema, dict):
+            return schema
+        out: Dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "oneOf" and "anyOf" not in schema:
+                key = "anyOf"
+            if key not in _GEMINI_SCHEMA_KEYS:
+                continue
+            if key == "properties" and isinstance(value, dict):
+                out[key] = {
+                    name: GeminiProvider._gemini_schema(sub) for name, sub in value.items()
+                }
+            elif key == "items":
+                out[key] = GeminiProvider._gemini_schema(value)
+            elif key == "anyOf" and isinstance(value, list):
+                out[key] = [GeminiProvider._gemini_schema(sub) for sub in value]
+            elif key == "type" and isinstance(value, list):
+                concrete = [t for t in value if t != "null"]
+                if concrete:
+                    out["type"] = concrete[0]
+                if "null" in value:
+                    out["nullable"] = True
+            else:
+                out[key] = value
+        return out
+
+    @staticmethod
     def _convert_tools(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert OpenAI schema to Gemini schema."""
         gemini_tools = []
@@ -232,7 +293,9 @@ class GeminiProvider(AIProvider):
                 "function_declarations": [{
                     "name": func.get("name"),
                     "description": func.get("description", ""),
-                    "parameters": func.get("parameters", {"type": "object", "properties": {}})
+                    "parameters": GeminiProvider._gemini_schema(
+                        func.get("parameters", {"type": "object", "properties": {}})
+                    )
                 }]
             })
         return gemini_tools

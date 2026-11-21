@@ -28,6 +28,10 @@ class ToolCallDef:
     id: str
     name: str
     arguments: str  # Always a JSON string representing the arguments
+    # Gemini attaches a thought_signature to the Part carrying a function call and
+    # rejects replayed history without it. Base64 text, so history stays JSON
+    # (session files, token estimates). None for every other provider.
+    thought_signature: Optional[str] = None
 
 
 @dataclass

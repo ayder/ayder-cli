@@ -147,6 +147,9 @@ class ChatLoop:
         self.config = config
         self.cb = callbacks
         self._total_tokens = 0
+        # Set when run() stops with an error (stream failure, empty response,
+        # reasoning-only limit, max_iterations). The CLI exits 1 on it.
+        self.error: str | None = None
         if context_manager is not None:
             self.context_manager = context_manager
         else:
@@ -239,8 +242,14 @@ class ChatLoop:
             **self._correlation(),
         )
 
+    def _fail(self, text: str) -> None:
+        """Report a stop that ends the turn with an error; the CLI exits 1."""
+        self.error = text
+        self.cb.on_system_message(text)
+
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
+        self.error = None  # the TUI reuses one loop across turns
         # Lazy init: detect real context length for Ollama models
         if hasattr(self.context_manager, "detect_context_length"):
             await self.context_manager.detect_context_length()
@@ -260,7 +269,7 @@ class ChatLoop:
                     )
                 else:
                     remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
-                self.cb.on_system_message(
+                self._fail(
                     f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}"
                 )
                 return
@@ -386,6 +395,12 @@ class ChatLoop:
                                             "arguments": tc.arguments
                                         },
                                     }
+                                    # Gemini needs its thought_signature replayed with
+                                    # the call. getattr: tests and plugins feed
+                                    # SimpleNamespace tool calls.
+                                    signature = getattr(tc, "thought_signature", None)
+                                    if signature:
+                                        new_tc["thought_signature"] = signature
 
                                     # If we have a stream_index, ensure our array grows to that size
                                     if stream_idx is not None:
@@ -457,7 +472,7 @@ class ChatLoop:
                     return
                 except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
                     llm_log.exception("LLM stream failed")
-                    self.cb.on_system_message(f"Error: {e}")
+                    self._fail(f"Error: {_describe_llm_error(e)}")
                     return
                 finally:
                     self.cb.on_thinking_stop()
@@ -473,7 +488,7 @@ class ChatLoop:
                         self.config.model,
                         self.config.provider,
                     )
-                    self.cb.on_system_message(
+                    self._fail(
                         "LLM returned an empty response. Check model compatibility "
                         "or try switching chat_protocol in config."
                     )
@@ -503,7 +518,7 @@ class ChatLoop:
                     )
                     reasoning_only += 1
                     if reasoning_only > _MAX_REASONING_RETRIES:
-                        self.cb.on_system_message(
+                        self._fail(
                             f"Error: the model returned only reasoning {reasoning_only} "
                             "times in a row; stopped."
                         )
@@ -1162,6 +1177,27 @@ def _unwrap_exec_result(exec_result) -> str:
     if hasattr(exec_result, "success"):
         return exec_result.result if exec_result.success else str(exec_result.error)
     return str(exec_result)
+
+
+_ERROR_BODY_CHARS = 2000
+
+
+def _describe_llm_error(exc: BaseException) -> str:
+    """str(exc), plus the API error body when the SDK's message is only the status.
+
+    openai 3.x builds "Error code: <status>" and appends only a body's
+    error.message; a body of another shape (Gemini's OpenAI-compat endpoint
+    sends a JSON list) is kept on exc.body and never shown.
+    """
+    text = str(exc)
+    status = getattr(exc, "status_code", None)
+    body = getattr(exc, "body", None)
+    if status is None or body is None or body == "" or text.strip() != f"Error code: {status}":
+        return text
+    detail = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, default=str)
+    if len(detail) > _ERROR_BODY_CHARS:
+        detail = f"{detail[:_ERROR_BODY_CHARS]}... ({len(detail) - _ERROR_BODY_CHARS} more chars)"
+    return f"{text} - {detail}"
 
 
 def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:

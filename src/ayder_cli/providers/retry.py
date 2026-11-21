@@ -18,6 +18,18 @@ class RetryVerdict(enum.Enum):
     FATAL = "fatal"
 
 
+class ProviderStallTimeout(TimeoutError):
+    """The provider sent no chunk for request_timeout_seconds."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        super().__init__(
+            f"the provider sent nothing for {seconds:g} s. Raise "
+            "request_timeout_seconds in the [llm.<provider>] profile, or set it "
+            "to 0 to remove the timeout."
+        )
+
+
 @dataclass(frozen=True)
 class RetryConfig:
     """Config for RetryingProvider. Kept separate from the pydantic
@@ -65,6 +77,9 @@ _RETRYABLE_NAMES: frozenset[tuple[str, str]] = frozenset({
     ("anthropic", "APITimeoutError"),
     ("anthropic", "RateLimitError"),
     ("anthropic", "InternalServerError"),
+    # google-genai — 5xx (503 "high demand"); a 429 ClientError is matched in
+    # classify_error. The SDK itself does not retry (retry_options=None).
+    ("google", "ServerError"),
     # ollama — covers bare "EOF (status code: -1)" mid-stream (transport
     # drop, server crash, OOM kill) and other transient server failures.
     # The committed=False gate above ensures we never retry after content
@@ -94,7 +109,17 @@ def classify_error(
     retry_on_names: Iterable[str] = (),
 ) -> RetryVerdict:
     """Return RETRYABLE if `exc` matches a known transient failure."""
+    if isinstance(exc, ProviderStallTimeout):
+        return RetryVerdict.RETRYABLE
     if _match_name(exc, retry_on_names):
+        return RetryVerdict.RETRYABLE
+    # google-genai raises one ClientError class for every 4xx; only 429 is transient.
+    # By name and module, so retry.py does not import google-genai.
+    if (
+        type(exc).__name__ == "ClientError"
+        and type(exc).__module__.startswith("google.genai")
+        and getattr(exc, "code", None) == 429
+    ):
         return RetryVerdict.RETRYABLE
     return RetryVerdict.FATAL
 
@@ -120,6 +145,35 @@ def _is_meaningful(chunk: NormalizedStreamChunk) -> bool:
     return bool(chunk.content) or bool(chunk.reasoning) or bool(chunk.tool_calls)
 
 
+async def _stall_guarded(
+    stream: AsyncGenerator[NormalizedStreamChunk, None], seconds: float
+) -> AsyncGenerator[NormalizedStreamChunk, None]:
+    """Yield from `stream`; raise ProviderStallTimeout when no chunk arrives
+    within `seconds` (time to the first chunk, then between chunks). 0 = off."""
+    if seconds <= 0:
+        async for chunk in stream:
+            yield chunk
+        return
+    iterator = stream.__aiter__()
+    try:
+        while True:
+            guard = asyncio.timeout(seconds)
+            try:
+                async with guard:
+                    chunk = await anext(iterator)
+            except StopAsyncIteration:
+                return
+            except TimeoutError:
+                if guard.expired():
+                    raise ProviderStallTimeout(seconds) from None
+                raise  # the provider's own TimeoutError: not ours to relabel
+            yield chunk
+    finally:
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
+
 class RetryingProvider(AIProvider):
     """Decorator that wraps an inner AIProvider with retry + empty-response
     recovery. Transparent w.r.t. chat / list_models.
@@ -136,9 +190,11 @@ class RetryingProvider(AIProvider):
         *,
         on_reconnect: Optional[Callable[[], None]] = None,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        request_timeout_seconds: float = 0.0,
     ) -> None:
         # Deliberately bypass AIProvider.__init__ — we delegate to `inner`.
         self._inner = inner
+        self._request_timeout = request_timeout_seconds
         self._retry = retry_config
         self._on_reconnect = on_reconnect
         self._sleep = sleep
@@ -158,8 +214,11 @@ class RetryingProvider(AIProvider):
         verbose: bool = False,
     ) -> AsyncGenerator[NormalizedStreamChunk, None]:
         if not self._retry.enabled:
-            async for chunk in self._inner.stream_with_tools(
-                messages, model, tools=tools, options=options, verbose=verbose
+            async for chunk in _stall_guarded(
+                self._inner.stream_with_tools(
+                    messages, model, tools=tools, options=options, verbose=verbose
+                ),
+                self._request_timeout,
             ):
                 yield chunk
             return
@@ -169,8 +228,11 @@ class RetryingProvider(AIProvider):
             committed = False
             usage_only_this_attempt: List[NormalizedStreamChunk] = []
             try:
-                async for chunk in self._inner.stream_with_tools(
-                    messages, model, tools=tools, options=options, verbose=verbose
+                async for chunk in _stall_guarded(
+                    self._inner.stream_with_tools(
+                        messages, model, tools=tools, options=options, verbose=verbose
+                    ),
+                    self._request_timeout,
                 ):
                     if _is_meaningful(chunk):
                         committed = True
