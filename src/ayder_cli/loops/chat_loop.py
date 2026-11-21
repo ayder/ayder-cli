@@ -201,6 +201,22 @@ class _ToolBatch:
     appended: set[str] = field(default_factory=set)
 
 
+@dataclass
+class _ToolItems:
+    """The tool items one turn opened, and what became of them (R4b).
+
+    ``opened`` holds the keys in opening order; ``attempted`` the keys whose finish was tried (it is
+    recorded before the receiver is called, so a receiver that raised is never called again for
+    that item); ``published`` the text and status settlement gave the calls it handled; ``fresh``
+    is True while an item has opened since the last cleanup attempt.
+    """
+
+    opened: dict[str, None] = field(default_factory=dict)
+    attempted: set[str] = field(default_factory=set)
+    published: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    fresh: bool = False
+
+
 class ChatLoop:
     """Async chat loop that drives LLM agent interactions.
 
@@ -256,6 +272,8 @@ class ChatLoop:
 
         # The UI keys every tool item of this chat has used (R9c).
         self._ui_keys = _UiKeys()
+        # The tool items of the current turn; run() starts it afresh.
+        self._items = _ToolItems()
 
     def _reap_task(self, task: asyncio.Task) -> None:
         """Done-callback for a retained worker task.
@@ -369,14 +387,15 @@ class ChatLoop:
 
         It closes a thinking phase that a failure or a cancellation left open,
         through the guard so the stop cannot replace the primary failure (R7d),
-        gives the appended reply's unrun calls their tool messages, announces a
-        partial reply that was shown and not saved (D2), then reports a failed
-        turn. The cancel flags and finishing the items join it in later steps,
-        each call guarded.
+        gives the appended reply's unrun calls their tool messages, finishes the
+        tool items that are still open and attempts the cleanup once (R4b), announces
+        a partial reply that was shown and not saved (D2), then reports a failed
+        turn. Each receiver call is guarded.
         """
         if thinking_open:
             self._guarded("closing thinking stop", self.cb.on_thinking_stop)
         self._settle_unrun_calls(end)
+        self._finish_open_items(end)
         if partial_reply_lost:
             self._announce_lost_partial_reply(end)
         self._report_once(end)
@@ -413,6 +432,49 @@ class ChatLoop:
                 {"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": text}
             )
         end.unsettled = []
+
+    def _item_started(self, key: str, name: str, arguments: dict) -> None:
+        """Open (or update) the item ``key`` for the receiver, noting it first (R4b).
+
+        Opening a key clears its finished mark; an item opened since the last cleanup makes the
+        turn's end attempt one.
+        """
+        items = self._items
+        items.opened[key] = None
+        items.attempted.discard(key)
+        items.fresh = True
+        self.cb.on_tool_start(key, name, arguments)
+
+    def _item_finished(self, key: str, result: str) -> None:
+        """Finish the item ``key`` for the receiver. The attempt is noted before the call, so a
+        receiver that raises is not called again for the item."""
+        self._items.attempted.add(key)
+        self.cb.on_tool_complete(key, result)
+
+    def _cleanup(self) -> None:
+        """The activity bar's cleanup. The attempt counts whatever the receiver does."""
+        self._items.fresh = False
+        self.cb.on_tools_cleanup()
+
+    def _finish_open_items(self, end: "_TurnEnd") -> None:
+        """Finish every item the normal path left open, then attempt the cleanup (R4b, R5b).
+
+        Each item gets what settlement published for its call: its recorded result with that
+        result's status, ``interrupted``, or ``not_run`` with the cancel text. A call that never
+        reached a batch gets ``not_run`` with the text of its tool message (the cancel text on a
+        cancellation, the failure text otherwise). Nothing here awaits, and each receiver call is
+        guarded, so the primary outcome stays the turn's.
+        """
+        items = self._items
+        cancelled = end.decided is not None and end.decided.status == "cancelled"
+        unrun = (_CANCELLED_BEFORE_RUN if cancelled else _NOT_RUN_TURN_FAILED, "not_run")
+        for key in list(items.opened):
+            if key in items.attempted:
+                continue
+            text, status = items.published.get(key, unrun)
+            self._guarded("tool item finish", self._item_finished, key, _completion(text, status))
+        if items.fresh:
+            self._guarded("tools cleanup", self._cleanup)
 
     def _display(self, fn: Callable[..., None], *args: Any) -> None:
         """Call a display callback inside the tool batch.
@@ -453,6 +515,7 @@ class ChatLoop:
         self.error = None  # the TUI reuses one loop across turns
         self.outcome = None
         self._batch_stage = None
+        self._items = _ToolItems()
         end = _TurnEnd(cancels_at_entry=_cancel_count())
         stage = "context"  # the collaborator now active (R7c); see _failure_stage
         thinking_open = False  # a thinking phase is open until its one stop (R5a)
@@ -604,7 +667,7 @@ class ChatLoop:
                                     started = assembler.add(tc)
                                     if started is not None:
                                         stage = "ui"
-                                        self.cb.on_tool_start(started[0], started[1], {})
+                                        self._item_started(started[0], started[1], {})
                                         stage = "internal"
 
                             stage = "llm"  # the next chunk comes from the provider
@@ -891,8 +954,8 @@ class ChatLoop:
                         "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, _key(tc.id), "parse_error", {})
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(rd["result"], "error"))
+                    self._display(self._item_started, _key(tc.id), "parse_error", {})
+                    self._display(self._item_finished, _key(tc.id), _completion(rd["result"], "error"))
                     continue
 
                 if not tc.function.name or tc.function.name == "unknown":
@@ -902,8 +965,8 @@ class ChatLoop:
                         "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, _key(tc.id), "unknown", {})
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(rd["result"], "error"))
+                    self._display(self._item_started, _key(tc.id), "unknown", {})
+                    self._display(self._item_finished, _key(tc.id), _completion(rd["result"], "error"))
                     continue
 
                 if tc.id in unattributed:
@@ -913,8 +976,8 @@ class ChatLoop:
                         "result": _UNATTRIBUTED_CALL,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, {})
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(_UNATTRIBUTED_CALL, "error"))
+                    self._display(self._item_started, _key(tc.id), tc.function.name, {})
+                    self._display(self._item_finished, _key(tc.id), _completion(_UNATTRIBUTED_CALL, "error"))
                     continue
 
                 # Validate that arguments parsed correctly — some providers
@@ -929,8 +992,8 @@ class ChatLoop:
                         "result": refusal,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, args)
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(refusal, "error"))
+                    self._display(self._item_started, _key(tc.id), tc.function.name, args)
+                    self._display(self._item_finished, _key(tc.id), _completion(refusal, "error"))
                     continue
                 if arg_status == "repaired":
                     repaired_ids.add(tc.id)
@@ -949,8 +1012,8 @@ class ChatLoop:
                         "result": err_msg,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, args)
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(err_msg, "error"))
+                    self._display(self._item_started, _key(tc.id), tc.function.name, args)
+                    self._display(self._item_finished, _key(tc.id), _completion(err_msg, "error"))
                     tool_log.warning(
                         "Tool '{}' called with missing args {} ({} chars raw, keys={})",
                         tc.function.name,
@@ -974,7 +1037,7 @@ class ChatLoop:
                 if tc.id in tool_results_map:
                     continue
                 args = _parse_arguments(tc.function.arguments)
-                self._display(self.cb.on_tool_start, _key(tc.id), tc.function.name, args)
+                self._display(self._item_started, _key(tc.id), tc.function.name, args)
 
             self._batch_stage = "internal"
             escalated = False
@@ -1005,11 +1068,11 @@ class ChatLoop:
                             tid = rd["tool_call_id"]
                             result = str(rd["result"])
                             self._display(
-                                self.cb.on_tool_complete, _key(tid), _completion(result, rd.get("status"))
+                                self._item_finished, _key(tid), _completion(result, rd.get("status"))
                             )
                         else:
                             self._display(
-                                self.cb.on_tool_complete, _key(tc.id), _completion(f"Error: {rd}", "error")
+                                self._item_finished, _key(tc.id), _completion(f"Error: {rd}", "error")
                             )
                     continue
 
@@ -1029,7 +1092,7 @@ class ChatLoop:
 
                     # Notify UI
                     self._display(
-                        self.cb.on_tool_complete, _key(tc.id), _completion(result, rd.get("status"))
+                        self._item_finished, _key(tc.id), _completion(result, rd.get("status"))
                     )
 
                 elif confirm is not None and getattr(confirm, "action", None) == "instruct":
@@ -1038,7 +1101,7 @@ class ChatLoop:
                     denied_msg = "Tool call skipped by user instruction."
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(denied_msg, "denied"))
+                    self._display(self._item_finished, _key(tc.id), _completion(denied_msg, "denied"))
                     break  # No later call runs once the user redirects the turn
                 else:
                     # User denied tool — still must add a result so the LLM sees
@@ -1046,7 +1109,7 @@ class ChatLoop:
                     denied_msg = "Tool call denied by user."
                     rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
                     tool_results_map[tc.id] = rd
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(denied_msg, "denied"))
+                    self._display(self._item_finished, _key(tc.id), _completion(denied_msg, "denied"))
 
             # Ensure every tool_call has a result (API requires it)
             for tc in tool_calls:
@@ -1057,7 +1120,7 @@ class ChatLoop:
                         "name": tc.function.name,
                         "result": skipped_msg,
                     }
-                    self._display(self.cb.on_tool_complete, _key(tc.id), _completion(skipped_msg, "skipped"))
+                    self._display(self._item_finished, _key(tc.id), _completion(skipped_msg, "skipped"))
 
             # Process results in correct order -> append tool messages
             for tc in tool_calls:
@@ -1110,10 +1173,10 @@ class ChatLoop:
             if custom_instructions:
                 self.messages.append({"role": "user", "content": custom_instructions})
 
-            self._display(self.cb.on_tools_cleanup)
+            self._display(self._cleanup)
             return escalated
         finally:
-            self._settle_tool_batch(tool_calls, batch, tool_results_map)
+            self._settle_tool_batch(tool_calls, batch, tool_results_map, _key)
 
     async def _run_call(self, tc, batch: "_ToolBatch", *, own_task: bool) -> dict:
         """Run one call and return its result dict, however it ends.
@@ -1235,6 +1298,7 @@ class ChatLoop:
         tool_calls: List[_ToolCall],
         batch: "_ToolBatch",
         tool_results_map: dict[str, Any],
+        key_of: Callable[[str], str] = lambda call_id: call_id,
     ) -> None:
         """Append one tool message for every call the batch did not append.
 
@@ -1243,8 +1307,10 @@ class ChatLoop:
         its snapshot of started calls and recorded results under the lock.
         Each unsettled call then gets, in call order: its collected or
         recorded result; the interrupted notice if a worker had started it;
-        or the cancelled notice. No UI callback runs here. On a normal batch
-        every call is already appended and this appends nothing.
+        or the cancelled notice. No UI callback runs here: each call's text and
+        status are published to the turn's item tracker, and the turn's end finishes
+        the items (R4b). On a normal batch every call is already appended and this
+        appends nothing.
         """
         with batch.lock:
             batch.cancelled.set()
@@ -1254,18 +1320,20 @@ class ChatLoop:
             if tc.id in batch.appended:
                 continue
             rd = tool_results_map.get(tc.id, recorded.get(tc.id))
+            status: str | None
             if isinstance(rd, dict):
-                name, content = rd["name"], str(rd["result"])
+                name, content, status = rd["name"], str(rd["result"]), rd.get("status")
             elif rd is not None:
-                name, content = tc.function.name, f"Error: {rd}"
+                name, content, status = tc.function.name, f"Error: {rd}", "error"
             elif tc.id in started:
-                name, content = tc.function.name, _INTERRUPTED_WHILE_RUNNING
+                name, content, status = tc.function.name, _INTERRUPTED_WHILE_RUNNING, "interrupted"
             else:
-                name, content = tc.function.name, _CANCELLED_BEFORE_RUN
+                name, content, status = tc.function.name, _CANCELLED_BEFORE_RUN, "not_run"
             self.messages.append(
                 {"role": "tool", "tool_call_id": tc.id, "name": name, "content": content}
             )
             batch.appended.add(tc.id)
+            self._items.published[key_of(tc.id)] = (content, status)
 
     # -- Helpers -------------------------------------------------------------
 

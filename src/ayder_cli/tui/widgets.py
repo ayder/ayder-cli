@@ -326,7 +326,10 @@ class ToolBox(_Expandable):
 
     def finish(self, result: str, status: str | None = None) -> None:
         """Show the result. A ``status`` the loop reported decides the label; with none, the
-        text rule applies (a result that begins with "Error" is an error)."""
+        text rule applies (a result that begins with "Error" is an error). The first terminal
+        state is kept: a later finish for the same box changes nothing (R4b)."""
+        if self.result is not None:
+            return
         self.result = result
         self.status = status
         self.remove_class("running")
