@@ -12,6 +12,7 @@ reuse by agents and other consumers beyond the TUI.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import sys
 import threading
@@ -215,6 +216,38 @@ class _ToolItems:
     attempted: set[str] = field(default_factory=set)
     published: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     fresh: bool = False
+
+
+@dataclass
+class _ParsedCall:
+    """One call's arguments, parsed once (seam B, R10).
+
+    ``raw`` is the argument text as the provider streamed it, which execution keeps, never the
+    repaired JSON that history stores. ``args`` is the parse and ``status`` says how far to trust it
+    (``ok``, ``repaired`` or ``invalid``, see ``_parse_tool_arguments``). ``strict`` is True when
+    ``raw`` was JSON text that decodes to an object as it stands.
+
+    ``args`` stays private: a consumer that may mutate what it is given (the parallel-safe
+    predicate, the receivers of the running display and of the confirmation preview, the executor)
+    gets ``arguments()``, its own deep copy, so nothing it does can reach the call that runs.
+    """
+
+    raw: Any
+    args: dict
+    status: str
+    strict: bool
+
+    @classmethod
+    def of(cls, raw: Any) -> "_ParsedCall":
+        """Parse ``raw`` once. Any recovery warnings are logged here, once per call."""
+        status: list[str] = []
+        strict: list[bool] = []
+        args = _parse_arguments(raw, status, strict)
+        return cls(raw, args, status[0], bool(strict))
+
+    def arguments(self) -> dict:
+        """A fresh deep copy of the parsed arguments, for one consumer."""
+        return copy.deepcopy(self.args)
 
 
 class ChatLoop:
@@ -687,6 +720,8 @@ class ChatLoop:
                         ui_keys = assembler.ui_keys(raw_tool_calls_for_history)
 
                         # Now that streaming is done, build the normalized objects for execution
+                        # Each call's arguments are parsed once, here (R10).
+                        parsed_calls: dict[str, _ParsedCall] = {}
                         for raw_tc in raw_tool_calls_for_history:
                             self._emit_tool_call_received(
                                 raw_tc["function"]["name"],
@@ -702,6 +737,7 @@ class ChatLoop:
                                 ),
                             )
                             normalized_tool_calls.append(tool_call_obj)
+                            parsed_calls[raw_tc["id"]] = _ParsedCall.of(raw_tc["function"]["arguments"])
 
                         if final_content or normalized_tool_calls:
                             # A complete reply is recorded before anything that can fail
@@ -714,21 +750,19 @@ class ChatLoop:
                                 for tc_entry in raw_tool_calls_for_history:
                                     raw_args = tc_entry["function"].get("arguments", "")
                                     if isinstance(raw_args, str):
-                                        try:
-                                            decoded = json.loads(raw_args)
-                                            if not isinstance(decoded, dict):
-                                                # e.g. "null": never send it back to the
-                                                # provider; the call is refused anyway.
-                                                tc_entry["function"]["arguments"] = "{}"
-                                        except (json.JSONDecodeError, ValueError):
+                                        parsed_call = parsed_calls[tc_entry["id"]]
+                                        if parsed_call.status == "invalid":
+                                            # e.g. "null": never send it back to the
+                                            # provider; the call is refused anyway.
+                                            tc_entry["function"]["arguments"] = "{}"
+                                        elif not parsed_call.strict:
                                             llm_log.warning(
                                                 "Malformed tool arguments for '{}': "
                                                 "{} chars — repairing before storing in history",
                                                 tc_entry["function"].get("name", "?"),
                                                 len(raw_args),
                                             )
-                                            parsed = _parse_arguments(raw_args)
-                                            tc_entry["function"]["arguments"] = json.dumps(parsed)
+                                            tc_entry["function"]["arguments"] = json.dumps(parsed_call.args)
 
                             reasoning_only = 0
                             msg_dict: dict = {"role": "assistant", "content": final_content}
@@ -831,7 +865,7 @@ class ChatLoop:
                             end.unsettled = []
                             # We use the existing unified execution path
                             escalated = await self._execute_tool_calls(
-                                normalized_tool_calls, unattributed, ui_keys
+                                normalized_tool_calls, unattributed, ui_keys, parsed_calls
                             )
                             self._batch_stage = None
                             if escalated:
@@ -919,12 +953,15 @@ class ChatLoop:
         tool_calls: List[_ToolCall],
         unattributed: frozenset[str] | set[str] = frozenset(),
         ui_keys: dict[str, str] | None = None,
+        parsed: dict[str, _ParsedCall] | None = None,
     ) -> bool:
         """Run a batch in emission order; parallelize safe auto-approved runs.
 
         A call in ``unattributed`` lost part of its arguments to fragments the stream could not
         attribute (R9b): it is refused, not run. ``ui_keys`` maps each call's id to the key its
-        item is shown under (R9c); called without it, the batch uses the call ids.
+        item is shown under (R9c); called without it, the batch uses the call ids. ``parsed`` maps
+        each call's id to its arguments, parsed once (R10); called without it, the batch parses
+        each call itself.
 
         Every call gets exactly one tool message, however the batch ends. The
         ``finally`` settles any call the normal path did not append (Ctrl+C
@@ -944,6 +981,11 @@ class ChatLoop:
             confirm_ids: set[str] = set()
             safe_ids: set[str] = set()
             repaired_ids: set[str] = set()
+            # Keyed by the call object, so calls that share an id (a direct caller's) keep their own.
+            parsed_by_call: dict[int, _ParsedCall] = {}
+            for tc in tool_calls:
+                known = parsed.get(tc.id) if parsed else None
+                parsed_by_call[id(tc)] = known if known is not None else _ParsedCall.of(tc.function.arguments)
 
             for tc in tool_calls:
                 if not tc.function.name or tc.function.name == "unknown":
@@ -971,7 +1013,8 @@ class ChatLoop:
                 # Validate that arguments parsed correctly — some providers
                 # (e.g. DeepSeek) send empty/malformed arguments in the native
                 # tool call while putting the real content in reasoning.
-                args, arg_status = _parse_tool_arguments(tc.function.arguments)
+                parsed_call = parsed_by_call[id(tc)]
+                args, arg_status = parsed_call.args, parsed_call.status
                 refusal = _argument_refusal(tc.function.name, arg_status)
                 if refusal is not None:
                     rd = {
@@ -980,7 +1023,9 @@ class ChatLoop:
                         "result": refusal,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self._item_started, _key(tc.id), tc.function.name, args)
+                    self._display(
+                        self._item_started, _key(tc.id), tc.function.name, parsed_call.arguments()
+                    )
                     self._display(self._item_finished, _key(tc.id), _completion(refusal, "error"))
                     continue
                 if arg_status == "repaired":
@@ -1000,7 +1045,9 @@ class ChatLoop:
                         "result": err_msg,
                     }
                     tool_results_map[tc.id] = rd
-                    self._display(self._item_started, _key(tc.id), tc.function.name, args)
+                    self._display(
+                        self._item_started, _key(tc.id), tc.function.name, parsed_call.arguments()
+                    )
                     self._display(self._item_finished, _key(tc.id), _completion(err_msg, "error"))
                     tool_log.warning(
                         "Tool '{}' called with missing args {} ({} chars raw, keys={})",
@@ -1015,8 +1062,8 @@ class ChatLoop:
                 if self._tool_needs_confirmation(tc.function.name):
                     confirm_ids.add(tc.id)
                 if self._guarded(
-                    "parallel_safe predicate", is_parallel_safe, tc.function.name, args,
-                    default=False,
+                    "parallel_safe predicate", is_parallel_safe, tc.function.name,
+                    parsed_call.arguments(), default=False,
                 ):
                     safe_ids.add(tc.id)
 
@@ -1024,14 +1071,18 @@ class ChatLoop:
             for tc in tool_calls:
                 if tc.id in tool_results_map:
                     continue
-                args = _parse_arguments(tc.function.arguments)
-                self._display(self._item_started, _key(tc.id), tc.function.name, args)
+                self._display(
+                    self._item_started, _key(tc.id), tc.function.name,
+                    parsed_by_call[id(tc)].arguments(),
+                )
 
             self._batch_stage = "internal"
             escalated = False
 
             async def _worker(tc_obj):
-                return tc_obj, await self._run_call(tc_obj, batch, own_task=True)
+                return tc_obj, await self._run_call(
+                    tc_obj, batch, own_task=True, parsed=parsed_by_call[id(tc_obj)]
+                )
 
             # Calls take effect in emission order: a run of parallel-safe,
             # auto-approved calls runs concurrently; every other call runs
@@ -1066,7 +1117,7 @@ class ChatLoop:
 
                 tc = segment[0]
                 name = tc.function.name
-                args = _parse_arguments(tc.function.arguments)
+                args = parsed_by_call[id(tc)].arguments()
 
                 self._batch_stage = "confirmation"
                 confirm = await self.cb.request_confirmation(name, args)
@@ -1074,7 +1125,9 @@ class ChatLoop:
 
                 if confirm is not None and getattr(confirm, "action", None) == "approve":
                     # The same cancel-gated worker as the parallel path.
-                    rd = await self._run_call(tc, batch, own_task=False)
+                    rd = await self._run_call(
+                        tc, batch, own_task=False, parsed=parsed_by_call[id(tc)]
+                    )
                     result = str(rd["result"])
                     tool_results_map[tc.id] = rd
 
@@ -1135,14 +1188,14 @@ class ChatLoop:
                             "role": "tool",
                             "tool_call_id": tid,
                             "name": name,
-                            "content": result + self._repeat_note(tc),
+                            "content": result + self._repeat_note(tc, parsed_by_call[id(tc)]),
                         }
                     )
                     batch.appended.add(tc.id)
                 else:
                     # rd_result is BaseException (includes Exception)
                     err_id, err_name = tc.id, tc.function.name
-                    error_msg = f"Error: {rd_result}" + self._repeat_note(tc)
+                    error_msg = f"Error: {rd_result}" + self._repeat_note(tc, parsed_by_call[id(tc)])
                     if tc.id in repaired_ids:
                         error_msg = _REPAIRED_PREFIX + error_msg
                     tool_log.trace(
@@ -1166,7 +1219,9 @@ class ChatLoop:
         finally:
             self._settle_tool_batch(tool_calls, batch, tool_results_map, _key)
 
-    async def _run_call(self, tc, batch: "_ToolBatch", *, own_task: bool) -> dict:
+    async def _run_call(
+        self, tc, batch: "_ToolBatch", *, own_task: bool, parsed: _ParsedCall | None = None
+    ) -> dict:
         """Run one call and return its result dict, however it ends.
 
         A call that raises becomes its result. The worker records its own
@@ -1180,7 +1235,7 @@ class ChatLoop:
         """
         failure: BaseException
         try:
-            return await self._exec_tool_async(tc, batch)
+            return await self._exec_tool_async(tc, batch, parsed)
         except asyncio.CancelledError as cancelled:
             if not own_task and _cancel_requested():
                 raise
@@ -1204,7 +1259,9 @@ class ChatLoop:
                 batch.results[tc.id] = recorded
         return recorded
 
-    async def _exec_tool_async(self, tc, batch: "_ToolBatch | None" = None) -> dict:
+    async def _exec_tool_async(
+        self, tc, batch: "_ToolBatch | None" = None, parsed: _ParsedCall | None = None
+    ) -> dict:
         """Execute a single tool call through the shared execution policy path.
 
         The worker thread owns the call's lifecycle, so it survives the
@@ -1220,7 +1277,8 @@ class ChatLoop:
            history or reaches the UI; the batch's settlement reads the record.
         """
         name = tc.function.name
-        args = _parse_arguments(tc.function.arguments)
+        # The executor's own deep copy of the validated arguments; called directly, it parses them.
+        args = (parsed if parsed is not None else _ParsedCall.of(tc.function.arguments)).arguments()
         policy = ExecutionPolicy(self.config.permissions)
         state = batch if batch is not None else _ToolBatch()
 
@@ -1325,14 +1383,15 @@ class ChatLoop:
 
     # -- Helpers -------------------------------------------------------------
 
-    def _repeat_note(self, tc: _ToolCall) -> str:
+    def _repeat_note(self, tc: _ToolCall, parsed: _ParsedCall | None = None) -> str:
         """Count ``tc`` in the run's call sequence; the note from its 3rd repeat on.
 
         Polling a status legitimately repeats a call, so the note never blocks
         it and only asks the model to check whether the result changed.
         """
         name = tc.function.name
-        canonical = canonicalize_arguments(name, _parse_arguments(tc.function.arguments))
+        args = parsed.args if parsed is not None else _parse_arguments(tc.function.arguments)
+        canonical = canonicalize_arguments(name, args)
         sig = (name, json.dumps(canonical, sort_keys=True, default=str))
         if sig == self._last_call_sig:
             self._repeat_count += 1
@@ -1528,7 +1587,9 @@ def _parse_tool_arguments(arguments) -> tuple[dict, str]:
     return args, status[0]
 
 
-def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
+def _parse_arguments(
+    arguments, status: list[str] | None = None, strict: list[bool] | None = None
+) -> dict:
     """Safely parse tool call arguments (str or dict) to a dict.
 
     When the LLM hits its output token limit, the streamed JSON may be
@@ -1537,7 +1598,8 @@ def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
     truncated JSON by closing open strings/braces before giving up.
 
     When ``status`` is given, the parse status (see ``_parse_tool_arguments``)
-    is appended to it. Non-object values yield ``{}``.
+    is appended to it. When ``strict`` is given, True is appended if the text was
+    JSON that decodes to an object as it stands. Non-object values yield ``{}``.
     """
     def _done(args: dict, outcome: str) -> dict:
         if status is not None:
@@ -1570,6 +1632,8 @@ def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
         tool_log.warning("Could not recover tool arguments — using empty dict")
         return _done({}, "ok")
     if isinstance(decoded, dict):
+        if strict is not None:
+            strict.append(True)
         return _done(decoded, "ok")
     return _done({}, "invalid")
 
