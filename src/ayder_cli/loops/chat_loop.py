@@ -350,12 +350,16 @@ class ChatLoop:
             )
             end.reported = delivered is not _UNREPORTED
 
-    def _end_turn(self, end: "_TurnEnd") -> None:
+    def _end_turn(self, end: "_TurnEnd", thinking_open: bool) -> None:
         """The turn's end, run once from the boundary's ``finally``; it never publishes.
 
-        It reports a failed turn. Settlement, the cancel flags and finishing the
-        items join it in later steps, each call guarded.
+        It closes a thinking phase that a failure or a cancellation left open,
+        through the guard so the stop cannot replace the primary failure (R7d),
+        then reports a failed turn. Settlement, the cancel flags and finishing
+        the items join it in later steps, each call guarded.
         """
+        if thinking_open:
+            self._guarded("closing thinking stop", self.cb.on_thinking_stop)
         self._report_once(end)
 
     def _display(self, fn: Callable[..., None], *args: Any) -> None:
@@ -399,6 +403,7 @@ class ChatLoop:
         self._batch_stage = None
         end = _TurnEnd(cancels_at_entry=_cancel_count())
         stage = "context"  # the collaborator now active (R7c); see _failure_stage
+        thinking_open = False  # a thinking phase is open until its one stop (R5a)
         try:
             try:
                 # Lazy init: detect real context length for Ollama models
@@ -485,6 +490,7 @@ class ChatLoop:
                         # 2. Call LLM (Streaming)
                         stage = "ui"
                         self.cb.on_thinking_start()
+                        thinking_open = True
                         stage = "internal"
 
                         usage_obj = None
@@ -492,169 +498,162 @@ class ChatLoop:
                         # bound above the outer try — one assignment point each.
                         # (Raw is kept for appending to history exactly as it arrived)
                         raw_tool_calls_for_history: list[dict] = []
-                        thinking_stopped = False
-                        stream_ended = False  # set at the end of the try body below
 
-                        try:
-                            options: dict[str, Any] = {}
-                            if getattr(self.config, "num_ctx", None):
-                                options["num_ctx"] = self.config.num_ctx
-                            if getattr(self.config, "max_output_tokens", None):
-                                options["max_output_tokens"] = self.config.max_output_tokens
-                            if getattr(self.config, "stop_sequences", None):
-                                options["stop_sequences"] = self.config.stop_sequences
+                        options: dict[str, Any] = {}
+                        if getattr(self.config, "num_ctx", None):
+                            options["num_ctx"] = self.config.num_ctx
+                        if getattr(self.config, "max_output_tokens", None):
+                            options["max_output_tokens"] = self.config.max_output_tokens
+                        if getattr(self.config, "stop_sequences", None):
+                            options["stop_sequences"] = self.config.stop_sequences
 
-                            stage = "llm"
-                            async_stream = self.llm.stream_with_tools(
-                                llm_messages,
-                                self.config.model,
-                                tools=tool_schemas,
-                                options=options,
-                                verbose=self.config.verbose,
-                            )
+                        stage = "llm"
+                        async_stream = self.llm.stream_with_tools(
+                            llm_messages,
+                            self.config.model,
+                            tools=tool_schemas,
+                            options=options,
+                            verbose=self.config.verbose,
+                        )
 
-                            async for chunk in async_stream:
-                                if chunk.usage:
-                                    usage_obj = chunk.usage
+                        async for chunk in async_stream:
+                            if chunk.usage:
+                                usage_obj = chunk.usage
 
-                                if chunk.reasoning:
-                                    final_reasoning += chunk.reasoning
+                            if chunk.reasoning:
+                                final_reasoning += chunk.reasoning
+                                thinking_open = True  # opens a phase after a stop
+                                stage = "ui"
+                                self.cb.on_thinking_content(chunk.reasoning)
+
+                            if chunk.content:
+                                final_content += chunk.content
+                                stage = "ui"
+                                if thinking_open:
+                                    thinking_open = False
+                                    self.cb.on_thinking_stop()
+                                self.cb.on_assistant_content(chunk.content)
+
+                            if chunk.tool_calls:
+                                if thinking_open:
+                                    thinking_open = False
                                     stage = "ui"
-                                    self.cb.on_thinking_content(chunk.reasoning)
+                                    self.cb.on_thinking_stop()
+                                stage = "internal"
+                                for tc in chunk.tool_calls:
+                                    # We use `_stream_index` if available, otherwise fallback to `len()` positioning
+                                    stream_idx = getattr(tc, "_stream_index", None)
 
-                                if chunk.content:
-                                    final_content += chunk.content
-                                    stage = "ui"
-                                    if not thinking_stopped:
-                                        thinking_stopped = True
-                                        self.cb.on_thinking_stop()
-                                    self.cb.on_assistant_content(chunk.content)
+                                    # Find if we are already building this tool call
+                                    existing_tc = None
 
-                                if chunk.tool_calls:
-                                    if not thinking_stopped:
-                                        thinking_stopped = True
-                                        stage = "ui"
-                                        self.cb.on_thinking_stop()
-                                    stage = "internal"
-                                    for tc in chunk.tool_calls:
-                                        # We use `_stream_index` if available, otherwise fallback to `len()` positioning
-                                        stream_idx = getattr(tc, "_stream_index", None)
+                                    if stream_idx is not None:
+                                        # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
+                                        if stream_idx < len(raw_tool_calls_for_history):
+                                            existing_tc = raw_tool_calls_for_history[stream_idx]
+                                    else:
+                                        # Fallback: try matching by ID
+                                        existing_tc = next(
+                                            (x for x in raw_tool_calls_for_history if x["id"] == tc.id),
+                                            None
+                                        )
 
-                                        # Find if we are already building this tool call
-                                        existing_tc = None
+                                    if existing_tc is None:
+                                        # New tool call start
+                                        new_tc = {
+                                            "id": tc.id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": tc.name,
+                                                "arguments": tc.arguments
+                                            },
+                                        }
+                                        # Gemini needs its thought_signature replayed with
+                                        # the call. getattr: tests and plugins feed
+                                        # SimpleNamespace tool calls.
+                                        signature = getattr(tc, "thought_signature", None)
+                                        if signature:
+                                            new_tc["thought_signature"] = signature
 
+                                        # If we have a stream_index, ensure our array grows to that size
                                         if stream_idx is not None:
-                                            # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
-                                            if stream_idx < len(raw_tool_calls_for_history):
-                                                existing_tc = raw_tool_calls_for_history[stream_idx]
+                                            while len(raw_tool_calls_for_history) < stream_idx:
+                                                raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
+                                            raw_tool_calls_for_history.append(new_tc)
                                         else:
-                                            # Fallback: try matching by ID
-                                            existing_tc = next(
-                                                (x for x in raw_tool_calls_for_history if x["id"] == tc.id),
-                                                None
+                                            raw_tool_calls_for_history.append(new_tc)
+
+                                        # Only trigger UI start if we have a name
+                                        if tc.name:
+                                            stage = "ui"
+                                            self.cb.on_tool_start(tc.id, tc.name, {})
+                                            stage = "internal"
+                                    else:
+                                        # Update ID if the existing one was a dummy or fallback ID, and the new one is real
+                                        if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
+                                            existing_tc["id"] = tc.id
+
+                                        # Append arguments to existing tool call
+                                        # An id reused by a different tool means two
+                                        # distinct calls are about to merge into one
+                                        # entry, concatenating their arguments and
+                                        # dropping the later name. Never silent again.
+                                        if (
+                                            tc.name
+                                            and existing_tc["function"]["name"]
+                                            and tc.name != existing_tc["function"]["name"]
+                                        ):
+                                            tool_log.warning(
+                                                "Tool call id reused by a different tool "
+                                                "({} then {}); calls would merge",
+                                                existing_tc["function"]["name"],
+                                                tc.name,
                                             )
 
-                                        if existing_tc is None:
-                                            # New tool call start
-                                            new_tc = {
-                                                "id": tc.id,
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tc.name,
-                                                    "arguments": tc.arguments
-                                                },
-                                            }
-                                            # Gemini needs its thought_signature replayed with
-                                            # the call. getattr: tests and plugins feed
-                                            # SimpleNamespace tool calls.
-                                            signature = getattr(tc, "thought_signature", None)
-                                            if signature:
-                                                new_tc["thought_signature"] = signature
+                                        # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
+                                        if tc.name and not existing_tc["function"]["name"]:
+                                            existing_tc["function"]["name"] = tc.name
+                                            stage = "ui"
+                                            self.cb.on_tool_start(existing_tc["id"], tc.name, {})
+                                            stage = "internal"
 
-                                            # If we have a stream_index, ensure our array grows to that size
-                                            if stream_idx is not None:
-                                                while len(raw_tool_calls_for_history) < stream_idx:
-                                                    raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
-                                                raw_tool_calls_for_history.append(new_tc)
-                                            else:
-                                                raw_tool_calls_for_history.append(new_tc)
+                                        if tc.arguments:
+                                            existing_tc["function"]["arguments"] += tc.arguments
 
-                                            # Only trigger UI start if we have a name
-                                            if tc.name:
-                                                stage = "ui"
-                                                self.cb.on_tool_start(tc.id, tc.name, {})
-                                                stage = "internal"
-                                        else:
-                                            # Update ID if the existing one was a dummy or fallback ID, and the new one is real
-                                            if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
-                                                existing_tc["id"] = tc.id
+                            stage = "llm"  # the next chunk comes from the provider
 
-                                            # Append arguments to existing tool call
-                                            # An id reused by a different tool means two
-                                            # distinct calls are about to merge into one
-                                            # entry, concatenating their arguments and
-                                            # dropping the later name. Never silent again.
-                                            if (
-                                                tc.name
-                                                and existing_tc["function"]["name"]
-                                                and tc.name != existing_tc["function"]["name"]
-                                            ):
-                                                tool_log.warning(
-                                                    "Tool call id reused by a different tool "
-                                                    "({} then {}); calls would merge",
-                                                    existing_tc["function"]["name"],
-                                                    tc.name,
-                                                )
+                        if thinking_open:
+                            # The stream ended with a phase open: close it. A raising
+                            # stop is a UI failure.
+                            thinking_open = False
+                            stage = "ui"
+                            self.cb.on_thinking_stop()
+                        stage = "internal"
 
-                                            # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
-                                            if tc.name and not existing_tc["function"]["name"]:
-                                                existing_tc["function"]["name"] = tc.name
-                                                stage = "ui"
-                                                self.cb.on_tool_start(existing_tc["id"], tc.name, {})
-                                                stage = "internal"
+                        # Some models pack multiple parallel tool calls into one entry
+                        # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
+                        # these into individual tool calls before normalizing.
+                        raw_tool_calls_for_history = _expand_concatenated_tool_calls(
+                            raw_tool_calls_for_history
+                        )
 
-                                            if tc.arguments:
-                                                existing_tc["function"]["arguments"] += tc.arguments
-
-                                stage = "llm"  # the next chunk comes from the provider
-
-                            stage = "internal"
-
-                            # Some models pack multiple parallel tool calls into one entry
-                            # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
-                            # these into individual tool calls before normalizing.
-                            raw_tool_calls_for_history = _expand_concatenated_tool_calls(
-                                raw_tool_calls_for_history
+                        # Now that streaming is done, build the normalized objects for execution
+                        for raw_tc in raw_tool_calls_for_history:
+                            self._emit_tool_call_received(
+                                raw_tc["function"]["name"],
+                                raw_tc["id"],
+                                len(raw_tc["function"]["arguments"]),
                             )
+                            tool_call_obj = _ToolCall(
+                                id=raw_tc["id"],
+                                type="function",
+                                function=_FunctionCall(
+                                    name=raw_tc["function"]["name"],
+                                    arguments=raw_tc["function"]["arguments"]
+                                ),
+                            )
+                            normalized_tool_calls.append(tool_call_obj)
 
-                            # Now that streaming is done, build the normalized objects for execution
-                            for raw_tc in raw_tool_calls_for_history:
-                                self._emit_tool_call_received(
-                                    raw_tc["function"]["name"],
-                                    raw_tc["id"],
-                                    len(raw_tc["function"]["arguments"]),
-                                )
-                                tool_call_obj = _ToolCall(
-                                    id=raw_tc["id"],
-                                    type="function",
-                                    function=_FunctionCall(
-                                        name=raw_tc["function"]["name"],
-                                        arguments=raw_tc["function"]["arguments"]
-                                    ),
-                                )
-                                normalized_tool_calls.append(tool_call_obj)
-
-                            stream_ended = True
-                        finally:
-                            if stream_ended:
-                                # A clean end: a raising stop is a UI failure.
-                                stage = "ui"
-                                self.cb.on_thinking_stop()
-                                stage = "internal"
-                            else:
-                                # An exception or a cancellation is unwinding: the
-                                # closing stop must not replace it (R7d).
-                                self._guarded("closing thinking stop", self.cb.on_thinking_stop)
 
                         stage = "ui"
                         if self.cb.is_cancelled():
@@ -825,7 +824,7 @@ class ChatLoop:
                     end.decided = TurnOutcome(
                         "failed", "internal", _NO_OUTCOME_TEXT
                     )
-                self._end_turn(end)
+                self._end_turn(end, thinking_open)
                 end.finished = True
                 if end.decided.status != "cancelled" and _cancel_count() > end.cancels_at_entry:
                     # A cancellation may have been requested while the turn ended (a
