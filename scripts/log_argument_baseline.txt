@@ -142,9 +142,9 @@
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"source.repo","message":"Downloading '{}' at {}","method":"info","path":"tools/plugin_github.py","qualname":"download_plugin"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"target","message":"Built-in skills were not synced to {} ({}); reading the packaged copy","method":"warning","path":"core/skills.py","qualname":"_sync_builtin_skills"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tc.function.name","message":"Tool '{}' called with missing args {} ({} chars raw, keys={})","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"tc.function.name","message":"Tool execution cancelled: {}","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._run_call"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"tc.function.name","message":"Tool execution failed for '{}'","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._run_call"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tc_entry['function'].get('name', '?')","message":"Malformed tool arguments for '{}': {} chars \u2014 repairing before storing in history","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop.run"}}
-{"class":"R-name","site":{"arg_index":"pos:0","expr":"tc_obj.function.name","message":"Tool execution cancelled: {}","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls._safe_exec"}}
-{"class":"R-name","site":{"arg_index":"pos:0","expr":"tc_obj.function.name","message":"Tool execution failed for '{}'","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._execute_tool_calls._safe_exec"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tool_name","message":"Diff preview generation failed for tool {}","method":"debug","path":"tui/app.py","qualname":"AyderApp._generate_diff"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tool_name","message":"Middleware failed for {}","method":"warning","path":"tools/hooks.py","qualname":"HookManager.run_middlewares"}}
 {"class":"R-name","site":{"arg_index":"pos:0","expr":"tool_name","message":"Pre-execute callback failed for {}","method":"warning","path":"tools/hooks.py","qualname":"HookManager.run_pre_callbacks"}}
@@ -156,6 +156,7 @@
 {"class":"R-class","site":{"arg_index":"pos:0","expr":"type(e).__name__","message":"Security error in replace_string: {}","method":"warning","path":"tools/utils.py","qualname":"prepare_new_content"}}
 {"class":"R-class","site":{"arg_index":"pos:0","expr":"type(exc).__name__","message":"Provider stream failed ({}); retrying in {:.2f}s ({} attempts left)","method":"info","path":"providers/retry.py","qualname":"RetryingProvider.stream_with_tools"}}
 {"class":"R-count","site":{"arg_index":"pos:0","expr":"used","message":"Context: compaction triggered \u2014 {} tokens used, budget={}, threshold={:.0f}%","method":"info","path":"core/ollama_context_manager.py","qualname":"OllamaContextManager.should_compact"}}
+{"class":"R-name","site":{"arg_index":"pos:0","expr":"what","message":"{} raised; continuing without it","method":"warning","path":"loops/chat_loop.py","qualname":"ChatLoop._guarded"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"worktree_path","message":"worktree cleanup failed: {}","method":"exception","path":"agents/registry.py","qualname":"AgentRegistry._run_and_queue"}}
 {"class":"R-path","site":{"arg_index":"pos:0","expr":"worktree_path","message":"worktree remove/prune failed for {}","method":"warning","path":"agents/worktree.py","qualname":"remove_worktree"}}
 {"class":"R-name","site":{"arg_index":"pos:1","expr":"', '.join(rt.config.agents.keys())","message":"Registered {} agent(s): {}","method":"info","path":"cli_runner.py","qualname":"_run_loop"}}

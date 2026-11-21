@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, List, Protocol, runtime_checkable
 
 from ayder_cli.application.execution_policy import (
     ExecutionPolicy,
@@ -268,6 +268,29 @@ class ChatLoop:
         self.error = text
         self.cb.on_system_message(text)
         self.outcome = TurnOutcome("failed", stage, text, reported=True)
+
+    def _guarded(
+        self,
+        what: str,
+        fn: Callable[..., Any],
+        *args: Any,
+        default: Any = None,
+        on_error: Callable[[BaseException], None] | None = None,
+    ) -> Any:
+        """Return ``fn(*args)``; if it raises, log one warning and return ``default``.
+
+        The loop's one generic guard for a collaborator whose failure the turn
+        can survive. It catches ``Exception`` and a stray ``CancelledError``:
+        ``fn`` is synchronous, so a task cancellation can never arrive inside
+        it. ``on_error`` receives the exception, for a caller that must keep it.
+        """
+        try:
+            return fn(*args)
+        except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 - the guard: a failing collaborator is logged and replaced by its default
+            llm_log.opt(exception=True).warning("{} raised; continuing without it", what)
+            if on_error is not None:
+                on_error(exc)
+            return default
 
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
@@ -715,7 +738,10 @@ class ChatLoop:
                 runnable.append(tc)
                 if self._tool_needs_confirmation(tc.function.name):
                     confirm_ids.add(tc.id)
-                if is_parallel_safe(tc.function.name, args):
+                if self._guarded(
+                    "parallel_safe predicate", is_parallel_safe, tc.function.name, args,
+                    default=False,
+                ):
                     safe_ids.add(tc.id)
 
             # Show non-empty tools as running
@@ -727,17 +753,8 @@ class ChatLoop:
 
             escalated = False
 
-            async def _safe_exec(tc_obj):
-                try:
-                    return tc_obj, await self._exec_tool_async(tc_obj, batch)
-                except asyncio.CancelledError:
-                    tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
-                    return tc_obj, RuntimeError("Tool execution cancelled")
-                except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
-                    tool_log.opt(exception=True).warning(
-                        "Tool execution failed for '{}'", tc_obj.function.name
-                    )
-                    return tc_obj, e
+            async def _worker(tc_obj):
+                return tc_obj, await self._run_call(tc_obj, batch, own_task=True)
 
             # Calls take effect in emission order: a run of parallel-safe,
             # auto-approved calls runs concurrently; every other call runs
@@ -745,7 +762,7 @@ class ChatLoop:
             custom_instructions = None
             for kind, segment in _plan_tool_segments(runnable, confirm_ids, safe_ids):
                 if kind == "parallel":
-                    tasks = [asyncio.create_task(_safe_exec(tc)) for tc in segment]
+                    tasks = [asyncio.create_task(_worker(tc)) for tc in segment]
                     for worker_task in tasks:
                         self._inflight_tasks.add(worker_task)
                         worker_task.add_done_callback(self._reap_task)
@@ -774,7 +791,7 @@ class ChatLoop:
 
                 if confirm is not None and getattr(confirm, "action", None) == "approve":
                     # The same cancel-gated worker as the parallel path.
-                    rd = await self._exec_tool_async(tc, batch)
+                    rd = await self._run_call(tc, batch, own_task=False)
                     result = str(rd["result"])
                     tool_results_map[tc.id] = rd
 
@@ -864,6 +881,43 @@ class ChatLoop:
         finally:
             self._settle_tool_batch(tool_calls, batch, tool_results_map)
 
+    async def _run_call(self, tc, batch: "_ToolBatch", *, own_task: bool) -> dict:
+        """Run one call and return its result dict, however it ends.
+
+        A call that raises becomes its result. The worker records its own
+        failure, bounded, under the batch lock; this publishes one only when
+        the worker did not, so the collector, the confirmed path and
+        settlement all read the same dict. ``own_task`` is True for a worker
+        task of a parallel segment: it converts every ``CancelledError``. On
+        the confirmed path the caller's own task runs this, so a task
+        cancellation re-raises and only a stray ``CancelledError`` (a tool or
+        library raised it) is converted.
+        """
+        failure: BaseException
+        try:
+            return await self._exec_tool_async(tc, batch)
+        except asyncio.CancelledError as cancelled:
+            if not own_task and _cancel_requested():
+                raise
+            tool_log.warning("Tool execution cancelled: {}", tc.function.name)
+            failure = cancelled
+        except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the batch still completes
+            tool_log.opt(exception=True).warning(
+                "Tool execution failed for '{}'", tc.function.name
+            )
+            failure = e
+        name = tc.function.name
+        with batch.lock:
+            recorded = batch.results.get(tc.id)
+            if recorded is None:
+                recorded = {
+                    "tool_call_id": tc.id,
+                    "name": name,
+                    "result": _failure_text(name, failure),
+                }
+                batch.results[tc.id] = recorded
+        return recorded
+
     async def _exec_tool_async(self, tc, batch: "_ToolBatch | None" = None) -> dict:
         """Execute a single tool call through the shared execution policy path.
 
@@ -885,34 +939,44 @@ class ChatLoop:
         state = batch if batch is not None else _ToolBatch()
 
         def run() -> dict:
-            with state.lock:
-                if state.cancelled.is_set() or self.cb.is_cancelled() is True:
-                    return {"tool_call_id": tc.id, "name": name, "result": _CANCELLED_BEFORE_RUN}
-                state.started.add(tc.id)
-            started = time.perf_counter()
-            returned = False
+            settled = False  # True once no exception can leave the worker any more
+            reached = False  # True once the call is handed to the policy
+            started = 0.0
             try:
+                with state.lock:
+                    if state.cancelled.is_set() or self.cb.is_cancelled() is True:
+                        settled = True
+                        return {
+                            "tool_call_id": tc.id, "name": name, "result": _CANCELLED_BEFORE_RUN,
+                        }
+                    state.started.add(tc.id)
+                reached = True
+                started = time.perf_counter()
                 exec_result = policy.execute_with_registry(
                     ToolRequest(name, args),
                     self.registry,
                     pre_approved=True,
                 )
-                returned = True
+                settled = True
             finally:
-                if not returned:
-                    # The policy call raised (e.g. a middleware's
-                    # PermissionError). Record the terminal outcome and emit
-                    # its completion event here, in the worker, so neither is
-                    # lost if the waiter is cancelled; the exception still
-                    # propagates unchanged to the waiter.
+                if not settled:
+                    # The start check or the policy call raised (e.g. a
+                    # middleware's PermissionError). Record the terminal
+                    # outcome here, in the worker, so it is not lost if the
+                    # waiter is cancelled; the exception still propagates
+                    # unchanged to the waiter. Only a call that reached the
+                    # policy emits its completion event.
                     raised = sys.exc_info()[1]
-                    failed = ExecutionResult(success=False, error=raised)
-                    failure = _truncate_for_tool(name, f"Error: {raised}")
+                    failure = {
+                        "tool_call_id": tc.id,
+                        "name": name,
+                        "result": _failure_text(name, raised),
+                    }
                     with state.lock:
-                        state.results[tc.id] = {
-                            "tool_call_id": tc.id, "name": name, "result": failure,
-                        }
-                    self._emit_tool_call(name, args, started, failed)
+                        state.results[tc.id] = failure
+                    if reached:
+                        failed = ExecutionResult(success=False, error=raised)
+                        self._emit_tool_call(name, args, started, failed)
             result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
             rd = {"tool_call_id": tc.id, "name": name, "result": result}
             with state.lock:
@@ -1082,6 +1146,27 @@ def _truncate_for_tool(tool_name: str, content: str) -> str:
     if override is None:
         return truncate_tool_result(content)
     return truncate_tool_result(content, max_chars=override)
+
+
+def _cancel_requested() -> bool:
+    """Whether the current task has been asked to cancel (``Task.cancel()``).
+
+    A ``CancelledError`` that arrives while this is False was raised by a tool
+    or a library, not by a cancellation of the task: it is that call's failure.
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+def _failure_text(tool_name: str, exc: BaseException | None) -> str:
+    """The bounded result text of a call that raised instead of returning.
+
+    A ``CancelledError`` reads ``Error: Tool execution cancelled`` (its own
+    text is empty); any other exception reads ``Error: <exception>``.
+    """
+    if isinstance(exc, asyncio.CancelledError):
+        return _truncate_for_tool(tool_name, "Error: Tool execution cancelled")
+    return _truncate_for_tool(tool_name, f"Error: {exc}")
 
 
 def _parse_tool_arguments(arguments) -> tuple[dict, str]:
