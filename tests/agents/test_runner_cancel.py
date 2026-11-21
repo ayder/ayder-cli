@@ -307,6 +307,125 @@ async def test_a_run_cancelled_before_the_deadline_reports_the_cancelled_content
     assert (outcome.content, outcome.error) == (_CANCELLED_CONTENT, _CANCELLED_ERROR)
 
 
+# -- A stale cancel count on the task that runs the turn (Codex #4) ---------------------------------------
+
+
+class _RecoversATaskGroupFailureThenStalls:
+    """A provider whose stream recovers a real ``TaskGroup`` child failure, yields control, then
+    stalls.
+
+    On Python 3.12.9 that recovery leaves the cancel count of the task running the stream at 1 with
+    nothing pending. The stream is collaborator code at its interface; the ``TaskGroup`` is real.
+    """
+
+    def __init__(self) -> None:
+        self.stall = Stall()
+
+    async def stream_with_tools(self, messages, model=None, tools=None, options=None, verbose=False):
+        async def child():
+            await asyncio.sleep(0.01)
+            raise ValueError("child failed")
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                group.create_task(child())
+        except* ValueError:
+            pass
+        await asyncio.sleep(0)
+        self.stall.entered.set()
+        await self.stall.release.wait()  # never released
+        yield chunk(content="never reached")
+
+
+async def _result_of(task):
+    """The outcome ``task`` returned, or ``"CancelledError"`` when it ended cancelled."""
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), 5)
+    except asyncio.CancelledError:
+        if task.cancelled():
+            return "CancelledError"
+        raise
+
+
+@pytest.mark.anyio
+async def test_an_agents_own_cancel_settles_the_run_cancelled_despite_a_stale_cancel_count(tmp_path):
+    """Baseline regression, Codex #4: the runner mistakes the stale count for the parent's request.
+
+    The provider recovers a ``TaskGroup`` failure (leaving a count of 1), yields, then stalls. The
+    test calls only ``AgentRunner.cancel()``. Today the runner takes back its own request, finds
+    the count still above 0, and lets ``CancelledError`` out with no outcome. After: ``cancelled``.
+    """
+    provider = _RecoversATaskGroupFailureThenStalls()
+    runner = _runner(tmp_path)
+    task = await _a_run_stalls(runner, provider.stall, _runtime(provider))
+
+    runner.cancel()
+    outcome = await _result_of(task)
+
+    assert getattr(outcome, "status", outcome) == "cancelled"
+
+
+@pytest.mark.anyio
+async def test_the_registry_shows_a_run_cancelled_not_working_after_a_stale_cancel_count(
+    tmp_path, monkeypatch
+):
+    """Baseline regression, Codex #4: the registry writes a terminal status only when it gets an
+    outcome, so the run stays ``working`` today.
+
+    The run goes through the registry's real dispatch (``create_run`` and ``cancel``), with the
+    agent runtime replaced by one that uses the stalling provider.
+    """
+    provider = _RecoversATaskGroupFailureThenStalls()
+    monkeypatch.setattr(
+        runner_module, "create_agent_runtime", lambda **kwargs: _runtime(provider)
+    )
+    registry = AgentRegistry(
+        agents={"coder": AgentConfig(name="coder", system_prompt="x")},
+        parent_config=MagicMock(),
+        project_ctx=ProjectContext(str(tmp_path)),
+        process_manager=MagicMock(),
+        permissions={"r"},
+        agent_timeout=30,
+        max_concurrent_agents=1,
+    )
+    registry.set_loop(asyncio.get_running_loop())
+    run_id = registry.create_run("coder", "do it")
+    await asyncio.wait_for(provider.stall.entered.wait(), 5)
+
+    registry.cancel("coder")
+    await asyncio.wait_for(registry._runs[run_id].done_event.wait(), 5)
+
+    assert registry._runs[run_id].status == "cancelled"
+
+
+@pytest.mark.anyio
+async def test_a_cancellation_of_the_parent_task_still_propagates_despite_a_stale_cancel_count(tmp_path):
+    """Preservation: the registry task's own cancellation is not turned into an outcome."""
+    provider = _RecoversATaskGroupFailureThenStalls()
+    runner = _runner(tmp_path)
+    task = await _a_run_stalls(runner, provider.stall, _runtime(provider))
+
+    task.cancel()
+
+    assert await _result_of(task) == "CancelledError"
+
+
+@pytest.mark.anyio
+async def test_the_parents_cancellation_at_the_same_moment_as_cancel_still_propagates_despite_a_stale_count(
+    tmp_path,
+):
+    """Preservation: both requests land in one loop turn, the stale count is there too, and the
+    parent's cancellation wins."""
+    provider = _RecoversATaskGroupFailureThenStalls()
+    runner = _runner(tmp_path)
+    task = await _a_run_stalls(runner, provider.stall, _runtime(provider))
+
+    task.cancel()
+    runner.cancel()
+
+    assert await _result_of(task) == "CancelledError"
+
+
 # -- A branch run cancelled while its call runs -----------------------------------------------------------
 
 

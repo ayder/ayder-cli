@@ -70,8 +70,8 @@ class AgentRunner:
         self._cancel_event = asyncio.Event()
         self.status: str = "idle"
         self._cancelled = False  # cancel() was called
-        # The task running the turn (the registry's run task: wait_for awaits the loop in the
-        # calling task). Set only while the turn's awaits can receive the cancellation.
+        # The task running the turn: a child of the task that awaits it (the registry's run task),
+        # so waking the turn never cancels the awaiting task. Set only while the turn runs.
         self._turn_task: asyncio.Task | None = None
         self._wake_requested = False  # task.cancel() was called for this run, at most once
 
@@ -84,8 +84,10 @@ class AgentRunner:
 
         Besides setting the flag the loop polls between steps, this wakes the turn: it cancels the
         task running it, so a stream or a tool that is awaiting stops now instead of when it yields
-        or the deadline fires. The request is made once per run, so a repeated ``cancel()`` adds no
-        second one (R8).
+        or the deadline fires. That task is the turn's own, never the one awaiting it, so a cancel
+        count the turn left behind (a recovered ``TaskGroup`` failure) cannot be mistaken for the
+        awaiting task's own cancellation. The request is made once per run, so a repeated
+        ``cancel()`` adds no second one (R8).
         """
         logger.debug("cancel requested: agent='{}' run_id={}", self.agent_name, self.run_id)
         self._cancelled = True
@@ -188,12 +190,15 @@ class AgentRunner:
             )
 
             woken = False  # the turn was cancelled by cancel(), or cancel() beat the deadline
-            self._turn_task = asyncio.current_task()
+            # The turn runs in a task of its own. cancel() wakes that task, not this one, and a
+            # cancel count the turn leaves behind lives on it. This task's own cancellation, the
+            # parent's, is then the only thing that raises its count above what it was at entry.
+            awaiting = asyncio.current_task()
+            cancels_at_entry = awaiting.cancelling() if awaiting is not None else 0
+            turn = asyncio.ensure_future(chat_loop.run())
+            self._turn_task = turn
             try:
-                await asyncio.wait_for(
-                    chat_loop.run(),
-                    timeout=self._timeout,
-                )
+                await asyncio.wait_for(turn, timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._cancelled:
                     self._cancel_event.set()
@@ -213,12 +218,10 @@ class AgentRunner:
                     return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
                 woken = True  # cancel() was called first: the run is cancelled, not timed out
             except asyncio.CancelledError:
-                current = asyncio.current_task()
-                if not self._wake_requested or current is None:
-                    raise  # not this runner's request: the parent's cancellation propagates
-                current.uncancel()  # take back our own request, once
-                if current.cancelling() > 0:
-                    raise  # another request is pending: the parent's
+                if awaiting is not None and awaiting.cancelling() > cancels_at_entry:
+                    raise  # this task was asked to cancel: the parent's request propagates
+                if not self._wake_requested:
+                    raise  # the turn ended cancelled, and not at this runner's request
                 woken = True
             finally:
                 self._turn_task = None
