@@ -1781,7 +1781,11 @@ class _ToolCallAssembler:
         self._slots: list[dict] = []
         self._latest: dict | None = None  # the call opened last
         self._earlier_unsealed = False  # a call was judged unsealed when the next one opened
-        self._refused: dict | None = None  # the nameless call that collects refused fragments
+        # The nameless call that collects refused fragments. It is not a slot: the provider's indices
+        # address ``_slots`` only, so an indexed delta can neither name nor extend it. It sits in
+        # the call order after the first ``_refused_at`` slots.
+        self._refused: dict | None = None
+        self._refused_at = 0
         self._refused_count = 0
         self._refused_chars = 0
 
@@ -1798,7 +1802,7 @@ class _ToolCallAssembler:
                 call = slots[index]
         else:
             for candidate in reversed(slots):
-                if candidate["filled"] and candidate["id"] == tc.id and candidate is not self._refused:
+                if candidate["filled"] and candidate["id"] == tc.id:
                     call = candidate
                     break
             # An id reused by a different tool is a new call, not a continuation.
@@ -1870,7 +1874,7 @@ class _ToolCallAssembler:
                 "id": "", "name": "", "parts": [], "signature": None, "filled": True,
                 "sealed": False, "unattributed": False, "key": self._keys.take(""),
             }
-            self._slots.append(self._refused)
+            self._refused_at = len(self._slots)
         self._refused_count += 1
         self._refused_chars += len(tc.arguments)
         if tc.arguments:
@@ -1878,32 +1882,41 @@ class _ToolCallAssembler:
         # The calls that are not sealed at this point do not run. Each call is judged once, and
         # one that was sealed here stays sealed.
         for slot in self._slots:
-            if slot is not self._refused and slot["filled"] and not self._judge(slot):
+            if slot["filled"] and not self._judge(slot):
                 slot["unattributed"] = True
 
     def calls(self) -> list[dict]:
         """The assembled calls in the history's own shape; unfilled slots are absent.
 
         Each call carries its UI key as ``_key``, and a call that must not run carries
-        ``_unattributed``; ``ui_keys`` and ``refusals`` take those marks off.
+        ``_unattributed``; ``ui_keys`` and ``refusals`` take those marks off. The one call that
+        collects refused fragments carries ``_refused`` and is never split (R9b).
         """
         calls = []
-        for slot in self._slots:
-            if not slot["filled"]:
-                continue
-            call = {
-                "id": slot["id"],
-                "type": "function",
-                "function": {"name": slot["name"], "arguments": "".join(slot["parts"])},
-            }
-            # Gemini needs its thought_signature replayed with the call.
-            if slot["signature"]:
-                call["thought_signature"] = slot["signature"]
-            if slot["unattributed"]:
-                call["_unattributed"] = True
-            call["_key"] = slot["key"]
-            calls.append(call)
+        for position, slot in enumerate(self._slots):
+            if self._refused is not None and position == self._refused_at:
+                calls.append(self._as_call(self._refused))
+            if slot["filled"]:
+                calls.append(self._as_call(slot))
+        if self._refused is not None and self._refused_at >= len(self._slots):
+            calls.append(self._as_call(self._refused))
         return calls
+
+    def _as_call(self, slot: dict) -> dict:
+        call = {
+            "id": slot["id"],
+            "type": "function",
+            "function": {"name": slot["name"], "arguments": "".join(slot["parts"])},
+        }
+        # Gemini needs its thought_signature replayed with the call.
+        if slot["signature"]:
+            call["thought_signature"] = slot["signature"]
+        if slot["unattributed"]:
+            call["_unattributed"] = True
+        if slot is self._refused:
+            call["_refused"] = True
+        call["_key"] = slot["key"]
+        return call
 
     def ui_keys(self, calls: list[dict]) -> dict[str, str]:
         """Take the keys off the settled calls; returns ``{call id: UI key}``.
@@ -1927,7 +1940,12 @@ class _ToolCallAssembler:
                 self._refused_count,
                 self._refused_chars,
             )
-        return {call["id"] for call in calls if call.pop("_unattributed", False)}
+        ids = set()
+        for call in calls:
+            call.pop("_refused", None)
+            if call.pop("_unattributed", False):
+                ids.add(call["id"])
+        return ids
 
     @staticmethod
     def settle_ids(calls: list[dict]) -> None:
@@ -1971,8 +1989,8 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
     decoder = json.JSONDecoder()
     for raw_tc in raw_tool_calls:
         args_str = raw_tc["function"].get("arguments", "")
-        if not isinstance(args_str, str) or raw_tc.get("_unattributed"):
-            result.append(raw_tc)  # a call that must not run is never split
+        if not isinstance(args_str, str) or raw_tc.get("_unattributed") or raw_tc.get("_refused"):
+            result.append(raw_tc)  # a call that must not run, and the refusal, are never split
             continue
         objects: list[str] = []
         pos = 0

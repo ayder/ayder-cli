@@ -495,3 +495,79 @@ def test_the_batch_called_directly_falls_back_to_the_call_id():
 
     assert _opened(loop) == ["c9"]
     assert _finished(loop) == ["c9"]
+
+
+# -- Step 21: the refusal call lives outside the provider's index space (Codex #1) ----------------------
+
+_NAMELESS = "Error: tool name is empty or unknown. You must specify a valid function name."
+
+
+def _refusals(loop) -> int:
+    """How many tool messages refuse a call for its missing name."""
+    return sum(1 for m in tool_messages(loop) if m["content"] == _NAMELESS)
+
+
+def test_an_indexed_call_after_a_refused_fragment_runs_once_with_its_own_arguments():
+    """Baseline regression, Codex #1: both reads execute today.
+
+    Codex's first probe: one keyless object fragment (``orphan``), then an indexed ``read_file`` with
+    id ``real`` (``intended``). The refusal sits in the list the provider's indices address, so the
+    indexed delta extends it and the loop splits the two objects. After: only ``intended`` runs.
+    """
+    loop = _turn(
+        delta("", "", '{"file_path": "orphan"}'),
+        delta("real", "read_file", '{"file_path": "intended"}', index=0),
+    )
+
+    assert loop.registry.calls == [("read_file", {"file_path": "intended"})]
+
+
+def test_an_indexed_call_after_a_refused_fragment_keeps_its_id_and_arguments_in_history():
+    """Baseline regression, Codex #1: ``real`` is lost from history today (two split calls)."""
+    loop = _turn(
+        delta("", "", '{"file_path": "orphan"}'),
+        delta("real", "read_file", '{"file_path": "intended"}', index=0),
+    )
+
+    assert _calls_by_id(loop).get("real") == ("read_file", '{"file_path": "intended"}')
+
+
+def test_the_orphan_fragment_before_an_indexed_call_is_refused_as_one_nameless_call():
+    """Baseline regression, Codex #1: the orphan is never refused today; it runs.
+
+    After: exactly one nameless call carries it, and its tool message is the refusal.
+    """
+    loop = _turn(
+        delta("", "", '{"file_path": "orphan"}'),
+        delta("real", "read_file", '{"file_path": "intended"}', index=0),
+    )
+
+    nameless = [c for c in assistant_calls(loop) if c["function"]["name"] == ""]
+    assert [c["function"]["arguments"] for c in nameless] == ['{"file_path": "orphan"}']
+    assert _refusals(loop) == 1
+
+
+def test_two_keyless_fragments_alone_give_one_refused_call():
+    """Baseline regression, Codex #1 (second probe): two nameless calls today.
+
+    The refused fragments ``{}`` and ``{}`` join into ``{}{}``, which the loop splits. R9b says all
+    refused fragments of a response share one refused call, which is never split.
+    """
+    loop = _turn(delta("", "", "{}"), delta("", "", "{}"))
+
+    assert len(assistant_calls(loop)) == 1
+
+
+def test_two_keyless_fragments_alone_are_refused_once():
+    """Baseline regression, Codex #1: two refusals today."""
+    loop = _turn(delta("", "", "{}"), delta("", "", "{}"))
+
+    assert _refusals(loop) == 1
+
+
+def test_two_keyless_fragments_alone_are_logged_once(loguru_caplog):
+    """Preservation: one record for the response, with the fragments' count and size."""
+    _turn(delta("", "", "{}"), delta("", "", "{}"))
+
+    messages = [m for m in loguru_caplog.only("warning").messages if m.startswith("Refused ")]
+    assert messages == ["Refused 2 unattributable tool-call fragment(s) (4 chars)"]
