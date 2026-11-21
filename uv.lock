@@ -301,7 +301,7 @@ wheels = [
 
 [[package]]
 name = "ayder-cli"
-version = "2.5.5"
+version = "2.5.6"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
