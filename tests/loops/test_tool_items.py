@@ -37,6 +37,7 @@ from tests.loops.turn_fakes import (
     ScriptedProvider,
     chunk,
     delta,
+    escape,
     make_loop,
     run_turn,
 )
@@ -397,3 +398,59 @@ def test_the_item_of_a_recorded_policy_failure_shows_the_recorded_text(tmp_path)
 
     text = _text_of(loop, "A") or ""
     assert text.startswith("Error") and "blocked by policy middleware" in text
+
+
+# -- An interrupt while one item is finished (fix-up 26, Codex #8) ----------------------------------------
+
+
+def _the_first_completion_receiver_raises_an_interrupt():
+    """Codex's probe: two items are open (the first chunk names two calls), the provider then fails
+    mid-stream, and the receiver of the first item's completion raises ``KeyboardInterrupt``."""
+    interrupt = KeyboardInterrupt("first")
+
+    def raise_for_c1(call_id, result):
+        if call_id == "c1":
+            raise interrupt
+
+    callbacks = RecordingCallbacks(raises={"on_tool_complete": raise_for_c1})
+    provider = ScriptedProvider(
+        [chunk(calls=[delta("c1", "read_file", ""), delta("c2", "read_file", "")]),
+         RuntimeError("provider exploded")]
+    )
+    loop = make_loop(provider, callbacks=callbacks)
+    return loop, interrupt, escape(run_turn, loop)
+
+
+def test_an_interrupt_from_one_items_completion_does_not_strand_the_other_items():
+    """Baseline regression, Codex #8: the interrupt skips the second item's attempt today (R4b)."""
+    loop, _, _ = _the_first_completion_receiver_raises_an_interrupt()
+
+    assert "c2" in loop.cb.completes_by_key()
+
+
+def test_an_interrupt_from_one_items_completion_still_gets_the_one_cleanup_attempt():
+    """Baseline regression, Codex #8: the cleanup is never attempted today (R5b)."""
+    loop, _, _ = _the_first_completion_receiver_raises_an_interrupt()
+
+    assert _cleanups(loop) == 1
+
+
+def test_the_first_interrupt_leaves_run_unchanged():
+    """Preservation: the interrupt that the receiver raised is the one that leaves ``run()``."""
+    _, interrupt, escaped = _the_first_completion_receiver_raises_an_interrupt()
+
+    assert escaped is interrupt
+
+
+def test_a_turn_that_ended_with_an_interrupt_is_cancelled():
+    """Preservation: the outcome is ``cancelled`` (R2)."""
+    loop, _, _ = _the_first_completion_receiver_raises_an_interrupt()
+
+    assert loop.outcome.status == "cancelled"
+
+
+def test_the_receiver_that_raised_the_interrupt_is_not_called_again_for_its_item():
+    """Preservation: one attempt per item."""
+    loop, _, _ = _the_first_completion_receiver_raises_an_interrupt()
+
+    assert len(loop.cb.completes_by_key()["c1"]) == 1

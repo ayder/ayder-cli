@@ -390,3 +390,89 @@ def test_a_task_cancelled_elsewhere_still_re_raises_with_history_settled(
     results = {m["tool_call_id"]: m["content"] for m in tool_messages(loop)}
     assert {k: v[: len(expected[k])] for k, v in results.items()} == expected
     assert _warnings(loguru_caplog, "") == [_EVENT_WARNING]
+
+
+# -- A pending cancellation at a cooperative end (fix-up 26, Codex #5) --------------------------------------
+
+
+def _a_receiver_sets_the_flag_and_cancels_its_own_task():
+    """A synchronous receiver that sets the cooperative cancel flag and cancels the running task.
+
+    It runs while the reply streams, so the turn ends by its own cancel check (a cooperative
+    return), with the task's cancellation still pending.
+    """
+    callbacks = RecordingCallbacks()
+
+    def flag_and_cancel(text):
+        callbacks.cancelled = True
+        asyncio.current_task().cancel()
+
+    callbacks.raises["on_assistant_content"] = flag_and_cancel
+    return make_loop(ScriptedProvider([chunk(content="hello")]), callbacks=callbacks)
+
+
+async def _await_run_then_another_operation(loop) -> list[str]:
+    """What a caller sees when it awaits ``run()`` and then a second operation in the same task."""
+    seen = []
+    try:
+        await loop.run()
+        seen.append("run returned")
+    except asyncio.CancelledError:
+        seen.append("run raised CancelledError")
+    try:
+        await asyncio.sleep(0)
+        seen.append("next await completed")
+    except asyncio.CancelledError:
+        seen.append("next await cancelled")
+    return seen
+
+
+def test_a_pending_cancellation_is_delivered_inside_a_turn_that_ends_cooperatively():
+    """Baseline regression, Codex #5: ``run()`` returns normally today, as ``cancelled``.
+
+    Codex's probe: a receiver sets the flag and calls ``current_task().cancel()``. The turn's final
+    checkpoint skips a decision already marked ``cancelled``, so the request stays pending. After:
+    the request is delivered inside ``run()``, which raises ``CancelledError``.
+    """
+    loop = _a_receiver_sets_the_flag_and_cancels_its_own_task()
+
+    seen = asyncio.run(_await_run_then_another_operation(loop))
+
+    assert seen[0] == "run raised CancelledError"
+
+
+def test_the_callers_next_await_is_not_cancelled_once_the_turn_delivered_the_request():
+    """Baseline regression, Codex #5: today the request escapes into the caller's next operation."""
+    loop = _a_receiver_sets_the_flag_and_cancels_its_own_task()
+
+    seen = asyncio.run(_await_run_then_another_operation(loop))
+
+    assert seen[1] == "next await completed"
+
+
+def test_the_outcome_of_a_turn_that_delivered_a_pending_cancellation_is_cancelled():
+    """Preservation: the outcome is ``cancelled`` with no stage, before and after."""
+    loop = _a_receiver_sets_the_flag_and_cancels_its_own_task()
+
+    asyncio.run(_await_run_then_another_operation(loop))
+
+    assert loop.outcome == _CANCELLED
+
+
+def test_a_stale_cancel_count_with_nothing_pending_does_not_stop_a_cooperative_return():
+    """Preservation: a count above entry with no request behind it is not a cancellation.
+
+    The iteration hook recovers a ``TaskGroup`` failure (count 1 on Python 3.12.9, nothing pending),
+    then a receiver sets only the cooperative flag. ``run()`` returns normally as ``cancelled``.
+    """
+    callbacks = RecordingCallbacks()
+    callbacks.raises["on_assistant_content"] = lambda text: setattr(callbacks, "cancelled", True)
+    loop = make_loop(
+        ScriptedProvider([chunk(content="hello")]),
+        callbacks=callbacks,
+        pre_iteration_hook=_recovering_hook,
+    )
+
+    escaped = escape(run_turn, loop)
+
+    assert escaped is None and loop.outcome == _CANCELLED

@@ -12,6 +12,7 @@ reuse by agents and other consumers beyond the TUI.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import sys
@@ -542,17 +543,28 @@ class ChatLoop:
         reached a batch gets ``not_run`` with the text of its tool message (the cancel text on a
         cancellation, the failure text otherwise). Nothing here awaits, and each receiver call is
         guarded, so the primary outcome stays the turn's.
+
+        The guard does not catch an interrupt (``KeyboardInterrupt``, ``SystemExit``). One that a
+        receiver raises must not strand the other items or the cleanup (R2, R4b, R5b), so the
+        attempts are run through an ``ExitStack``: it runs every one, in order, and then raises the
+        interrupt that left the first one (Codex #8).
         """
         items = self._items
         cancelled = end.decided is not None and end.decided.status == "cancelled"
         unrun = (_CANCELLED_BEFORE_RUN if cancelled else _NOT_RUN_TURN_FAILED, "not_run")
-        for key in list(items.opened):
-            if key in items.attempted:
-                continue
-            text, status = items.published.get(key, unrun)
-            self._guarded("tool item finish", self._item_finished, key, _completion(text, status))
-        if items.fresh:
-            self._guarded("tools cleanup", self._cleanup)
+        with contextlib.ExitStack() as attempts:
+            # An ExitStack runs its callbacks last in, first out: the cleanup is registered first
+            # so it runs last, and the items in reverse so they run in opening order.
+            if items.fresh:
+                attempts.callback(self._guarded, "tools cleanup", self._cleanup)
+            for key in reversed(list(items.opened)):
+                if key in items.attempted:
+                    continue
+                text, status = items.published.get(key, unrun)
+                attempts.callback(
+                    self._guarded, "tool item finish", self._item_finished, key,
+                    _completion(text, status),
+                )
 
     def _display(self, fn: Callable[..., None], *args: Any) -> None:
         """Call a display callback inside the tool batch.
@@ -597,6 +609,7 @@ class ChatLoop:
         end = _TurnEnd(cancels_at_entry=_cancel_count())
         stage = "context"  # the collaborator now active (R7c); see _failure_stage
         thinking_open = False  # a thinking phase is open until its one stop (R5a)
+        propagating = False  # an exception is leaving the boundary: nothing more to deliver
         # This iteration showed content, and its reply was appended (D2): content shown whose
         # reply was not saved is announced at the turn's end.
         content_delivered = False
@@ -964,6 +977,7 @@ class ChatLoop:
                     # A task cancellation: the turn did not finish, and it propagates.
                     llm_log.info("Chat turn cancelled (stage={})", failed_stage)
                     end.decided = TurnOutcome("cancelled")
+                    propagating = True
                     raise
                 # Nothing cancelled the task: a tool or library raised it, and the
                 # turn fails like any other.
@@ -979,6 +993,7 @@ class ChatLoop:
                 # KeyboardInterrupt, SystemExit and GeneratorExit end the turn cancelled
                 # and propagate.
                 end.decided = TurnOutcome("cancelled")
+                propagating = True
                 raise
             finally:
                 if end.decided is None:
@@ -987,12 +1002,14 @@ class ChatLoop:
                     )
                 self._end_turn(end, thinking_open, content_delivered and not reply_saved)
                 end.finished = True
-                if end.decided.status != "cancelled" and _cancel_count() > end.cancels_at_entry:
+                if not propagating and _cancel_count() > end.cancels_at_entry:
                     # A cancellation may have been requested while the turn ended (a
                     # receiver that cancels the task, or the first SIGINT under
-                    # asyncio.run). The turn's end awaits nothing, so it is delivered
-                    # here, inside run(): the outer finally then publishes `cancelled`.
-                    # When nothing is pending the await returns and the decision stands.
+                    # asyncio.run), including one that came with the cooperative flag and
+                    # decided `cancelled` (Codex #5). The turn's end awaits nothing, so it
+                    # is delivered here, inside run(): the outer finally then publishes
+                    # `cancelled`. When nothing is pending the await returns and the
+                    # decision stands. An exception already propagating needs none.
                     end.finished = False
                     await asyncio.sleep(0)
                     end.finished = True
