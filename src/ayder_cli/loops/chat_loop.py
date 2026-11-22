@@ -470,14 +470,24 @@ class ChatLoop:
         tool items that are still open and attempts the cleanup once (R4b), announces
         a partial reply that was shown and not saved (D2), then reports a failed
         turn. Each receiver call is guarded.
+
+        The guard does not catch an interrupt (``KeyboardInterrupt``, ``SystemExit``), and one that
+        a receiver raises must not skip the steps after it (R2, R3b, R4b, R5b, D2). The steps are
+        run through an ``ExitStack``: it runs every one, in order, and then raises the interrupt
+        of the latest step that raised one, so with several interrupts the later one propagates
+        (Codex #8, round 2). The notice runs before the report because it rewrites a failed
+        decision's message, which the report delivers.
         """
-        if thinking_open:
-            self._guarded("closing thinking stop", self.cb.on_thinking_stop)
-        self._settle_unrun_calls(end)
-        self._finish_open_items(end)
-        if partial_reply_lost:
-            self._announce_lost_partial_reply(end)
-        self._report_once(end)
+        with contextlib.ExitStack() as steps:
+            # An ExitStack runs its callbacks last in, first out, so they are registered in
+            # reverse: the closing stop runs first and the report last.
+            steps.callback(self._report_once, end)
+            if partial_reply_lost:
+                steps.callback(self._announce_lost_partial_reply, end)
+            steps.callback(self._finish_open_items, end)
+            steps.callback(self._settle_unrun_calls, end)
+            if thinking_open:
+                steps.callback(self._guarded, "closing thinking stop", self.cb.on_thinking_stop)
 
     def _announce_lost_partial_reply(self, end: "_TurnEnd") -> None:
         """Tell the user the partial reply they saw was not saved (D2), once.
@@ -547,7 +557,9 @@ class ChatLoop:
         The guard does not catch an interrupt (``KeyboardInterrupt``, ``SystemExit``). One that a
         receiver raises must not strand the other items or the cleanup (R2, R4b, R5b), so the
         attempts are run through an ``ExitStack``: it runs every one, in order, and then raises the
-        interrupt that left the first one (Codex #8).
+        interrupt of the latest attempt that raised one. With several interrupts the later one
+        propagates, with the earlier as its context; the turn ends ``cancelled`` either way
+        (Codex #8, round 2).
         """
         items = self._items
         cancelled = end.decided is not None and end.decided.status == "cancelled"
