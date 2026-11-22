@@ -152,3 +152,33 @@ def test_a_429_from_another_sdk_named_client_error_is_not_matched():
         code = 429
 
     assert classify_error(ClientError("quota")) == RetryVerdict.FATAL
+
+
+# --- native Qwen: 429 and 5xx retry, every other status is fatal ------------------------------------
+
+
+def _qwen_error(status: int):
+    from ayder_cli.providers.impl.qwen import QwenStreamError
+
+    return QwenStreamError(status, "upstream text")
+
+
+@pytest.mark.parametrize("status", [429, 500, 503, 599])
+def test_classify_qwen_rate_limit_and_server_errors_are_retryable(status):
+    """Baseline regression, R13: a ``QwenStreamError`` is not matched today, so it is fatal."""
+    assert classify_error(_qwen_error(status)) == RetryVerdict.RETRYABLE
+
+
+@pytest.mark.parametrize("status", [400, 401, 404, 499])
+def test_classify_other_qwen_statuses_stay_fatal(status):
+    """Preservation: a bad request, a credential or a missing model is not transient."""
+    assert classify_error(_qwen_error(status)) == RetryVerdict.FATAL
+
+
+def test_a_429_from_another_class_named_qwen_stream_error_is_not_matched():
+    """The rule is tied to the driver's module, not to any class called ``QwenStreamError``."""
+
+    class QwenStreamError(Exception):
+        status_code = 429
+
+    assert classify_error(QwenStreamError("quota")) == RetryVerdict.FATAL

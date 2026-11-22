@@ -118,8 +118,15 @@ def test_non_200_response_logs_status_and_chars_only(
                 )
             ]
 
-    chunks = asyncio.run(_run())
-    assert chunks == []          # the loop still breaks on a non-200 status
+    # R13: a non-200 status raises (it used to end the stream quietly), with the status and the
+    # upstream text on the exception, and nothing but its size in the log.
+    from ayder_cli.providers.impl.qwen import QwenStreamError
+
+    with pytest.raises(QwenStreamError) as raised:
+        asyncio.run(_run())
+    assert raised.value.status_code == 401
+    assert raised.value.body == ("" if message is None else str(message))
+    assert str(raised.value) == "Error code: 401"
 
     hits = [r for r in loguru_caplog.records
             if r["message"].startswith("Qwen streaming error:")]

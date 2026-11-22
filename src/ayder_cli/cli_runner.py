@@ -128,7 +128,15 @@ def _run_loop(
         print("Interrupted.", file=sys.stderr)
         return 130
     print()  # Ensure terminal prompt starts on a new line after streaming output
-    return 1 if loop.error else 0
+    outcome = loop.outcome
+    if outcome is not None and outcome.status == "failed":
+        if not outcome.reported:
+            # The callbacks could not print it: say it here, once.
+            print(outcome.message, file=sys.stderr)
+        return 1
+    if outcome is not None and outcome.status == "cancelled":
+        return 130
+    return 0
 
 
 class CommandRunner:

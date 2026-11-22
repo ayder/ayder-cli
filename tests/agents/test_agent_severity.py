@@ -94,7 +94,7 @@ EXPECTED = {
     "agents/callbacks.py :: AgentCallbacks.on_tool_start :: agent tool_start:": "debug",
     "agents/runner.py :: AgentRunner.run :: run started: agent=": "info",
     "agents/runner.py :: AgentRunner.run :: run completed: agent=": "info",
-    "agents/runner.py :: AgentRunner.run :: run failed (captured via on_system_message):": "error",
+    "agents/runner.py :: AgentRunner.run :: run failed (turn outcome):": "error",
     "agents/runner.py :: AgentRunner.run :: run vacuous: agent=": "error",
     "agents/registry.py :: AgentRegistry.create_run :: agent dispatch: run #": "debug",
     "tui/app.py :: AyderApp._maybe_nudge :: agent nudge:": "debug",

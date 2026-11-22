@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from ayder_cli.agents.config import AgentConfig
 from ayder_cli.agents.runner import AgentRunner, AgentRunOutcome
+from ayder_cli.loops.chat_loop import TurnOutcome
 
 # Longer than the 200-character slice the pre-redaction call logged, so a
 # regression that reinstates `[:200]` still leaks the head and fails.
@@ -208,9 +209,9 @@ async def test_run_reports_error_when_stream_fails_after_text(loguru_caplog):
         async def _run(*a, **k):
             msgs.append({"role": "assistant", "content": "intermediate text"})
             cb.last_content = "intermediate text"          # cumulative, non-empty
-            # Sentinel-bearing: the captured system error is arbitrary upstream
+            # Sentinel-bearing: the turn's failure message is arbitrary upstream
             # text (model/provider prose), so it must never reach a log message.
-            cb.last_system_error = SYSTEM_ERROR_SENTINEL  # late failure
+            m.outcome = TurnOutcome("failed", "llm", SYSTEM_ERROR_SENTINEL)  # late failure
         m.run = _run
         return m
 
@@ -227,8 +228,8 @@ async def test_run_reports_error_when_stream_fails_after_text(loguru_caplog):
     assert SYSTEM_ERROR_SENTINEL not in loguru_caplog.text
     assert "hunter2" not in loguru_caplog.text
     hits = [r for r in loguru_caplog.records
-            if r["message"].startswith("run failed (captured via on_system_message):")]
-    assert hits, "captured-error record never emitted"
+            if r["message"].startswith("run failed (turn outcome):")]
+    assert hits, "turn-outcome record never emitted"
     assert hits[0]["level"].name == "ERROR"
     # The UN-truncated length, not the 200-char slice the old call logged.
     assert len(SYSTEM_ERROR_SENTINEL) > 200
@@ -330,3 +331,71 @@ async def test_run_flags_echo_only_deliverable_as_error(tmp_path):
 
     assert out.status == "error"
     assert "deliverable" in (out.error or "").lower()
+
+
+@pytest.mark.anyio
+async def test_run_reports_an_empty_provider_response_as_the_agents_error(tmp_path):
+    """Baseline regression, N1: an agent whose provider streams nothing hides the cause.
+
+    The real ``ChatLoop`` runs under the runner, with a provider whose stream is empty. The loop
+    reports the failure through ``on_system_message``, and the agent callbacks capture only a
+    message that starts with ``Error``. Today that message does not, so the run settles ``error``
+    with "Agent produced no deliverable (empty or echo-only response)." After: it settles
+    ``error`` with the loop's own message.
+    """
+    from ayder_cli.core.context import ProjectContext
+    from tests.loops.turn_fakes import FakeContext, RecordingRegistry, ScriptedProvider
+
+    cfg = AgentConfig(name="coder", system_prompt="x")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(),
+        project_ctx=ProjectContext(str(tmp_path)), process_manager=MagicMock(),
+        permissions=set(), timeout=5, run_id=1, generation=0,
+    )
+    provider = ScriptedProvider([])  # one reply: an empty stream
+    rt = _fake_rt()
+    rt.llm_provider = provider
+    rt.tool_registry = RecordingRegistry()
+    rt.context_manager = FakeContext()
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=rt):
+        out = await runner.run("do it")
+
+    assert provider.calls == 1
+    assert out.status == "error"
+    assert out.error == (
+        "Error: LLM returned an empty response. "
+        "Check model compatibility or try switching chat_protocol in config."
+    )
+
+
+@pytest.mark.anyio
+async def test_run_times_out_when_the_stream_stalls_past_the_deadline(tmp_path):
+    """Baseline regression, B2: the stream swallows the deadline's cancellation, so it never fires.
+
+    The real ``ChatLoop`` runs under the runner with a provider whose stream stalls, and a short
+    timeout. Today ``run()`` returns normally after the cancellation, so the run settles
+    ``error`` with "Agent produced no deliverable (empty or echo-only response)." After: the
+    deadline fires, and the runner settles ``timeout`` with its timeout text.
+    """
+    from ayder_cli.core.context import ProjectContext
+    from tests.loops.turn_fakes import FakeContext, RecordingRegistry, ScriptedProvider, Stall
+
+    cfg = AgentConfig(name="coder", system_prompt="x")
+    runner = AgentRunner(
+        agent_config=cfg, parent_config=MagicMock(),
+        project_ctx=ProjectContext(str(tmp_path)), process_manager=MagicMock(),
+        permissions=set(), timeout=0.3, run_id=1, generation=0,
+    )
+    rt = _fake_rt()
+    rt.llm_provider = ScriptedProvider([Stall()])  # waits until it is cancelled
+    rt.tool_registry = RecordingRegistry()
+    rt.context_manager = FakeContext()
+
+    import ayder_cli.agents.runner as rm
+    with patch.object(rm, "create_agent_runtime", return_value=rt):
+        out = await runner.run("do it")
+
+    assert runner.status == "timeout"
+    assert out.error is not None and "exceeded its 0.3s timeout" in out.error

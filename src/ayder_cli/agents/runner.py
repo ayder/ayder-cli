@@ -31,7 +31,7 @@ _VERDICT_LINE = re.compile(r"^\s*VERDICT\s*:", re.IGNORECASE)
 @dataclass
 class AgentRunOutcome:
     """What an AgentRunner produces; the registry applies it to its AgentRun."""
-    status: str          # "done" | "error"
+    status: str          # "done" | "error" | "cancelled"
     content: str
     error: str | None
     note_path: str | None
@@ -69,16 +69,34 @@ class AgentRunner:
         self._on_progress = on_progress
         self._cancel_event = asyncio.Event()
         self.status: str = "idle"
+        self._cancelled = False  # cancel() was called
+        # The task running the turn: a child of the task that awaits it (the registry's run task),
+        # so waking the turn never cancels the awaiting task. Set only while the turn runs.
+        self._turn_task: asyncio.Task | None = None
+        self._wake_requested = False  # task.cancel() was called for this run, at most once
 
     @property
     def agent_name(self) -> str:
         return self._agent_config.name
 
     def cancel(self) -> bool:
-        """Cancel the running agent."""
+        """Cancel the running agent.
+
+        Besides setting the flag the loop polls between steps, this wakes the turn: it cancels the
+        task running it, so a stream or a tool that is awaiting stops now instead of when it yields
+        or the deadline fires. That task is the turn's own, never the one awaiting it, so a cancel
+        count the turn left behind (a recovered ``TaskGroup`` failure) cannot be mistaken for the
+        awaiting task's own cancellation. The request is made once per run, so a repeated
+        ``cancel()`` adds no second one (R8).
+        """
         logger.debug("cancel requested: agent='{}' run_id={}", self.agent_name, self.run_id)
+        self._cancelled = True
         self._cancel_event.set()
         self.status = "cancelled"
+        task = self._turn_task
+        if task is not None and not self._wake_requested:
+            self._wake_requested = True
+            task.cancel()
         return True
 
     @staticmethod
@@ -171,40 +189,68 @@ class AgentRunner:
                 context_manager=rt.context_manager,
             )
 
+            woken = False  # the turn was cancelled by cancel(), or cancel() beat the deadline
+            # The turn runs in a task of its own. cancel() wakes that task, not this one, and a
+            # cancel count the turn leaves behind lives on it. This task's own cancellation, the
+            # parent's, is then the only thing that raises its count above what it was at entry.
+            awaiting = asyncio.current_task()
+            cancels_at_entry = awaiting.cancelling() if awaiting is not None else 0
+            turn = asyncio.ensure_future(chat_loop.run())
+            self._turn_task = turn
             try:
-                await asyncio.wait_for(
-                    chat_loop.run(),
-                    timeout=self._timeout,
-                )
+                await asyncio.wait_for(turn, timeout=self._timeout)
             except asyncio.TimeoutError:
-                self._cancel_event.set()
-                self.status = "timeout"
-                content = self._final_message(messages) or "Agent timed out before producing output."
-                err = (
-                    f"Agent FAILED because it exceeded its {self._timeout}s timeout before "
-                    f"finishing (not an error in the work, and any partial output above is "
-                    f"incomplete). The task needs MORE TIME, not a smaller scope — re-dispatch "
-                    f"the same agent with a larger timeout, e.g. "
-                    f'agent(action="call", name=..., timeout_s={self._timeout * 2}).'
-                )
-                logger.debug(
-                    "run timeout: agent='{}' run_id={} after {}s",
-                    self.agent_name, self.run_id, self._timeout,
-                )
-                return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
+                if not self._cancelled:
+                    self._cancel_event.set()
+                    self.status = "timeout"
+                    content = self._final_message(messages) or "Agent timed out before producing output."
+                    err = (
+                        f"Agent FAILED because it exceeded its {self._timeout}s timeout before "
+                        f"finishing (not an error in the work, and any partial output above is "
+                        f"incomplete). The task needs MORE TIME, not a smaller scope — re-dispatch "
+                        f"the same agent with a larger timeout, e.g. "
+                        f'agent(action="call", name=..., timeout_s={self._timeout * 2}).'
+                    )
+                    logger.debug(
+                        "run timeout: agent='{}' run_id={} after {}s",
+                        self.agent_name, self.run_id, self._timeout,
+                    )
+                    return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
+                woken = True  # cancel() was called first: the run is cancelled, not timed out
+            except asyncio.CancelledError:
+                if awaiting is not None and awaiting.cancelling() > cancels_at_entry:
+                    raise  # this task was asked to cancel: the parent's request propagates
+                if not self._wake_requested:
+                    raise  # the turn ended cancelled, and not at this runner's request
+                woken = True
+            finally:
+                self._turn_task = None
 
-            # ChatLoop swallows stream/tool failures via on_system_message
-            # and returns normally. Promote any captured error into a real
-            # error AgentRunOutcome so callers see the cause.
-            if callbacks.last_system_error:
+            outcome: Any = getattr(chat_loop, "outcome", None)
+            turn_status = getattr(outcome, "status", None)
+
+            # The loop reports how its turn ended; read it rather than the text of a message.
+            if turn_status == "failed":
                 self.status = "error"
+                err = outcome.message or ""
                 logger.error(
-                    "run failed (captured via on_system_message): agent='{}' run_id={} error_chars={}",
-                    self.agent_name, self.run_id, len(callbacks.last_system_error),
+                    "run failed (turn outcome): agent='{}' run_id={} error_chars={}",
+                    self.agent_name, self.run_id, len(err),
                 )
                 content = self._final_message(messages)
-                err = callbacks.last_system_error
                 return AgentRunOutcome("error", content, err, self._persist_note(task, "error", content, err))
+
+            # Cancelled by cancel(): not an error, and not nudged (R8).
+            if self._cancelled and (woken or turn_status == "cancelled"):
+                self.status = "cancelled"
+                logger.info(
+                    "run cancelled: agent='{}' run_id={}", self.agent_name, self.run_id,
+                )
+                content = self._final_message(messages) or "Agent cancelled before finishing."
+                err = "Agent cancelled by request."
+                return AgentRunOutcome(
+                    "cancelled", content, err, self._persist_note(task, "cancelled", content, err)
+                )
 
             # Loop returned. A vacuous deliverable (empty / echo-only / verdict-
             # only) means the agent did no real work — settle 'error' so the

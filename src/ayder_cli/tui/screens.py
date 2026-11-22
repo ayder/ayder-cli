@@ -1,6 +1,7 @@
 """Modal screens for the TUI: confirm, permission, safe mode, select, task edit, help, evren terms."""
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, Markdown, Static, TextArea
@@ -27,6 +28,14 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
         ("instruct", "Provide custom instructions"),
     ]
 
+    # Ctrl+C follows the chat's rule: selected text is copied, otherwise the app's cancel action
+    # runs. Both bindings are declared because a lone ctrl+c binding replaces the inherited copy
+    # one; each copy action skips when nothing is selected, so the key falls through to the cancel.
+    BINDINGS = [
+        Binding("ctrl+c", "screen.copy_text", "Copy selected text", show=False),
+        Binding("ctrl+c", "app.cancel", "Cancel turn", show=False),
+    ]
+
     def __init__(
         self,
         title: str,
@@ -40,6 +49,24 @@ class CLIConfirmScreen(ModalScreen[ConfirmResult | None]):
         self.diff_content = diff_content
         self.action_name = action_name
         self.selected_index = 0
+        self._retired = False
+
+    def retire(self) -> None:
+        """Close the dialog without an answer, for a waiter that ended (R14).
+
+        When the dialog is the active screen it is dismissed now. When another screen is above
+        it, that screen stays, and the dialog dismisses itself once it is active again. A waiter
+        cancelled by the app's own shutdown finds no screens left; ``is_active`` is then False,
+        and nothing here may raise in place of the cancellation.
+        """
+        if self.is_active:
+            self.dismiss(None)
+        else:
+            self._retired = True
+
+    def on_screen_resume(self) -> None:
+        if self._retired:
+            self.dismiss(None)
 
     def compose(self) -> ComposeResult:
         """Compose the modal."""

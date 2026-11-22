@@ -1,0 +1,494 @@
+"""Each driver's tool-call shape reaches the loop as the right calls (plan step 13, D5).
+
+The call assembler (``_ToolCallAssembler``) takes over the loop's delta handling. These rows pin
+what every driver's adapter feeds the real ``ChatLoop`` and what history and results come out, so
+that the extraction and the identity rules (R9a, R9e) cannot change a shape a driver depends on:
+
+- OpenAI: index deltas, with two interleaved calls (``_stream_index`` on every delta);
+- DeepSeek: the name arrives in a later delta than the id;
+- Claude: argument deltas carry the ``tool_use`` block's id;
+- Gemini: the thought signature travels with its call;
+- Ollama: complete calls, one per chunk;
+- complete calls in content: the XML driver's parsed calls;
+- GLM and Qwen (step 14): the drivers drop the stream index, so a call's argument fragments carry
+  no key. In sequence they continue the latest call; interleaved they cannot be attributed (D6).
+
+Kind: preservation (the first six rows pass before and after step 13; the GLM and Qwen rows are
+baseline regressions of step 14). Environment: local-faked. Layer: unit.
+No request leaves the process: the OpenAI and DeepSeek rows build their SDK stream with
+``httpx2.MockTransport`` passed to the SDK client, and the others use the fake SDK stream their
+provider's own tests use.
+"""
+
+from __future__ import annotations
+
+import base64
+import contextlib
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+import httpx2
+from google.genai import types
+from openai import AsyncOpenAI
+
+from ayder_cli.core.config import Config
+from ayder_cli.core.result import ToolSuccess
+from ayder_cli.providers.base import NormalizedStreamChunk
+from ayder_cli.providers.impl.claude import ClaudeProvider
+from ayder_cli.providers.impl.deepseek import DeepSeekProvider
+from ayder_cli.providers.impl.gemini import GeminiProvider
+from ayder_cli.providers.impl.ollama import OllamaProvider
+from ayder_cli.providers.impl.ollama_drivers.generic_xml import GenericXMLDriver
+from ayder_cli.providers.impl.openai import OpenAIProvider
+from tests.loops.turn_fakes import (
+    RecordingRegistry,
+    assistant_calls,
+    make_loop,
+    run_turn,
+    tool_messages,
+)
+from tests.providers.test_claude_stream_tool_calls import (
+    _FakeMessages,
+    _json_delta,
+    _text_delta,
+    _text_start,
+    _tool_start,
+)
+
+_A = '{"file_path": "a.py"}'
+_DIR = '{"path": "."}'
+_RESULT_A = "read_file:[('file_path', 'a.py')]"
+_RESULT_DIR = "file_explorer:[('path', '.')]"
+
+
+class _EchoRegistry(RecordingRegistry):
+    """Each tool answers with its own name and arguments, so a result says whose it is."""
+
+    def execute(self, name, arguments):
+        self.calls.append((name, dict(arguments)))
+        return ToolSuccess(f"{name}:{sorted(arguments.items())}")
+
+
+def _history_of(provider):
+    """Run one turn over ``provider`` and return the calls and results history ended with."""
+    loop = make_loop(provider, registry=_EchoRegistry())
+    run_turn(loop)
+    calls = {
+        c["id"]: (c["function"]["name"], c["function"]["arguments"]) for c in assistant_calls(loop)
+    }
+    results = {m["tool_call_id"]: m["content"] for m in tool_messages(loop)}
+    return loop, calls, results
+
+
+class _SecondRequestIsText:
+    """Presents one adapter stream as a provider; the loop's second request is answered in text."""
+
+    def __init__(self, first_stream):
+        self._first_stream = first_stream
+        self.requests = 0
+
+    async def stream_with_tools(self, messages, model, tools=None, options=None, verbose=False):
+        self.requests += 1
+        if self.requests == 1:
+            async for chunk in self._first_stream(messages, model, tools, options):
+                yield chunk
+        else:
+            yield NormalizedStreamChunk(content="done")
+
+
+# -- OpenAI and DeepSeek: SSE through httpx2.MockTransport ---------------------------------------------
+
+
+def _sse(*deltas: dict, finish: str | None = None) -> bytes:
+    lines = []
+    for i, delta in enumerate(deltas):
+        last = i == len(deltas) - 1 and finish
+        payload = {
+            "id": "chatcmpl-1",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "m",
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish if last else None}],
+        }
+        lines.append(f"data: {json.dumps(payload)}\n\n")
+    lines.append("data: [DONE]\n\n")
+    return "".join(lines).encode()
+
+
+def _call_delta(index: int, *, id: str | None = None, name: str | None = None, arguments: str = ""):
+    function: dict = {"arguments": arguments}
+    if name is not None:
+        function["name"] = name
+    call: dict = {"index": index, "function": function}
+    if id is not None:
+        call.update(id=id, type="function")
+    return {"tool_calls": [call]}
+
+
+def _openai_client(first_reply: bytes) -> AsyncOpenAI:
+    """An SDK client whose first request streams ``first_reply`` and whose next ones say "done"."""
+    requests = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests["n"] += 1
+        body = first_reply if requests["n"] == 1 else _sse({"content": "done"}, finish="stop")
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+    return AsyncOpenAI(
+        base_url="http://mock/v1",
+        api_key="x",
+        max_retries=0,
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+    )
+
+
+def _config() -> Config:
+    return Config(
+        provider="openai",
+        driver="openai",
+        base_url="http://localhost:11434/v1",
+        api_key="test",
+        model="m",
+        num_ctx=8192,
+    )
+
+
+def test_openai_index_deltas_with_two_interleaved_calls():
+    """OpenAI: every delta carries its call's index, so two interleaved calls stay apart."""
+    provider = OpenAIProvider(_config())
+    provider.client = _openai_client(
+        _sse(
+            _call_delta(0, id="call_a", name="read_file", arguments='{"file_path": '),
+            _call_delta(1, id="call_b", name="file_explorer", arguments='{"path": '),
+            _call_delta(0, arguments='"a.py"}'),
+            _call_delta(1, arguments='"."}'),
+            {},
+            finish="tool_calls",
+        )
+    )
+
+    _, calls, results = _history_of(provider)
+
+    assert calls == {"call_a": ("read_file", _A), "call_b": ("file_explorer", _DIR)}
+    assert results == {"call_a": _RESULT_A, "call_b": _RESULT_DIR}
+
+
+def test_deepseek_name_arriving_after_the_id():
+    """DeepSeek: the id and part of the arguments come first, the name in a later delta."""
+    provider = DeepSeekProvider(_config())
+    provider.base_provider.client = _openai_client(
+        _sse(
+            _call_delta(0, id="call_a", arguments='{"file_path": '),
+            _call_delta(0, name="read_file", arguments='"a.py"}'),
+            {},
+            finish="tool_calls",
+        )
+    )
+
+    _, calls, results = _history_of(provider)
+
+    assert calls == {"call_a": ("read_file", _A)}
+    assert results == {"call_a": _RESULT_A}
+
+
+# -- Claude -----------------------------------------------------------------------------------------------------
+
+
+def test_claude_argument_deltas_keyed_by_their_tool_use_block():
+    """Claude: ``input_json_delta`` events carry only the block index; the provider maps each back
+    to its ``tool_use`` id, so two sequential blocks become two calls."""
+    provider = ClaudeProvider.__new__(ClaudeProvider)
+    provider.config = SimpleNamespace(max_output_tokens=1024)
+    provider.interaction_sink = None
+    provider.client = SimpleNamespace(
+        messages=_FakeMessages(
+            [
+                [
+                    _tool_start(0, "toolu_A", "read_file"),
+                    _json_delta(0, '{"file_path": '),
+                    _json_delta(0, '"a.py"}'),
+                    _tool_start(1, "toolu_B", "file_explorer"),
+                    _json_delta(1, '{"path": '),
+                    _json_delta(1, '"."}'),
+                ],
+                [_text_start(0), _text_delta(0, "done")],
+            ]
+        )
+    )
+
+    _, calls, results = _history_of(provider)
+
+    assert calls == {"toolu_A": ("read_file", _A), "toolu_B": ("file_explorer", _DIR)}
+    assert results == {"toolu_A": _RESULT_A, "toolu_B": _RESULT_DIR}
+
+
+# -- Gemini -----------------------------------------------------------------------------------------------------
+
+_SIGNATURE = bytes(range(256)) + b"\x00\xff"
+
+
+def test_gemini_thought_signature_travels_with_its_call():
+    """Gemini: the signature the provider puts on the call is kept on the stored call."""
+
+    def response(*parts: types.Part) -> types.GenerateContentResponse:
+        return types.GenerateContentResponse(
+            candidates=[types.Candidate(content=types.Content(role="model", parts=list(parts)))]
+        )
+
+    scripts = [
+        [
+            response(
+                types.Part(
+                    function_call=types.FunctionCall(
+                        name="read_file", args={"file_path": "a.py"}, id="g1"
+                    ),
+                    thought_signature=_SIGNATURE,
+                )
+            )
+        ],
+        [response(types.Part(text="done"))],
+    ]
+    provider = GeminiProvider.__new__(GeminiProvider)
+    provider.config = SimpleNamespace(max_output_tokens=1024)
+    provider.interaction_sink = None
+
+    async def generate_content_stream(**kwargs):
+        async def gen():
+            for item in scripts.pop(0):
+                yield item
+
+        return gen()
+
+    provider.client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content_stream=generate_content_stream))
+    )
+
+    loop, calls, results = _history_of(provider)
+
+    assert calls == {"g1": ("read_file", _A)}
+    assert results == {"g1": _RESULT_A}
+    (stored,) = assistant_calls(loop)
+    assert stored["thought_signature"] == base64.b64encode(_SIGNATURE).decode("ascii")
+
+
+# -- Ollama: complete calls, one per chunk ------------------------------------------------------------------------
+
+
+def _ollama_chunk(content: str = "", tool_calls=None, done: bool = False):
+    return SimpleNamespace(
+        message=SimpleNamespace(content=content, thinking="", tool_calls=tool_calls),
+        done=done,
+        prompt_eval_count=0, eval_count=0, prompt_eval_duration=0,
+        eval_duration=0, load_duration=0,
+    )
+
+
+def _ollama_call(name: str, arguments: str):
+    return SimpleNamespace(function=SimpleNamespace(name=name, arguments=arguments))
+
+
+class _OllamaClient:
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    async def chat(self, **kwargs):
+        chunks = self._chunks
+
+        async def gen():
+            for c in chunks:
+                yield c
+
+        return gen()
+
+
+def test_ollama_complete_calls_one_per_chunk():
+    """Ollama: each call arrives complete, with ids the driver numbers across the whole stream."""
+    provider = OllamaProvider.__new__(OllamaProvider)
+    provider._client = _OllamaClient(
+        [
+            _ollama_chunk(tool_calls=[_ollama_call("read_file", _A)]),
+            _ollama_chunk(tool_calls=[_ollama_call("file_explorer", _DIR)], done=True),
+        ]
+    )
+
+    async def first(messages, model, tools, options):
+        async for chunk in provider._stream_native_once(messages, model, tools, options, False):
+            yield chunk
+
+    _, calls, results = _history_of(_SecondRequestIsText(first))
+
+    assert calls == {"call_0": ("read_file", _A), "call_1": ("file_explorer", _DIR)}
+    assert results == {"call_0": _RESULT_A, "call_1": _RESULT_DIR}
+
+
+# -- Complete calls in content ---------------------------------------------------------------------------------------
+
+
+def test_complete_calls_parsed_out_of_content():
+    """In-content protocols: the driver's parser returns complete calls with its own ids."""
+    provider = OllamaProvider.__new__(OllamaProvider)
+    content = (
+        "<tool_call><function=read_file><parameter=file_path>a.py</parameter></function></tool_call>"
+        "<tool_call><function=file_explorer><parameter=path>.</parameter></function></tool_call>"
+    )
+    provider._client = _OllamaClient([_ollama_chunk(content=content, done=True)])
+
+    async def first(messages, model, tools, options):
+        async for chunk in provider._stream_in_content_once(
+            GenericXMLDriver(), messages, model, tools, options, False
+        ):
+            yield chunk
+
+    _, calls, results = _history_of(_SecondRequestIsText(first))
+
+    assert list(calls) == ["call_0", "call_1"]
+    assert [calls[i][0] for i in calls] == ["read_file", "file_explorer"]
+    assert [json.loads(calls[i][1]) for i in calls] == [{"file_path": "a.py"}, {"path": "."}]
+    assert results == {"call_0": _RESULT_A, "call_1": _RESULT_DIR}
+
+
+# -- GLM and Qwen: no stream index (step 14, R9b, D6) --------------------------------------------------------------------
+
+_D6 = (
+    "Error: part of this call's arguments could not be attributed to it, so it was not run. "
+    "Send the call again."
+)
+
+
+def _qwen_stream(*message_dicts: dict):
+    """DashScope's incremental output: one response per streamed chunk."""
+    return [
+        SimpleNamespace(
+            status_code=200,
+            message=None,
+            output=SimpleNamespace(choices=[SimpleNamespace(message=message)]),
+        )
+        for message in message_dicts
+    ]
+
+
+def _qwen_call(index: int, *, id: str = "", name: str | None = None, arguments: str = ""):
+    function: dict = {"arguments": arguments}
+    if name is not None:
+        function["name"] = name
+    return {"tool_calls": [{"index": index, "id": id, "type": "function", "function": function}]}
+
+
+@contextlib.contextmanager
+def _qwen_provider(first_stream):
+    """The real Qwen driver, with dashscope's ``Generation.call`` (third-party) faked: the first
+    request streams ``first_stream`` and the next ones answer in text. No key, no live call."""
+    from ayder_cli.providers.impl.qwen import QwenNativeProvider
+
+    dashscope = pytest.importorskip("dashscope")
+    provider = QwenNativeProvider.__new__(QwenNativeProvider)
+    provider.config = None
+    provider.api_key = "test"  # a literal placeholder
+    streams = [first_stream, _qwen_stream({"content": "done"})]
+    with patch.object(dashscope.Generation, "call", side_effect=streams):
+        yield provider
+
+
+def _glm_call(index: int, *, id: str | None = None, name: str | None = None, arguments: str = ""):
+    return SimpleNamespace(
+        index=index, id=id, type="function",
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+def _glm_chunk(*calls, content: str | None = None):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=list(calls) or None))]
+    )
+
+
+def _glm_provider(first_stream):
+    """The real GLM driver over a fake ZhipuAI client: the first request streams ``first_stream``
+    and the next ones answer in text."""
+    from ayder_cli.providers.impl.glm import GLMNativeProvider
+
+    streams = [first_stream, [_glm_chunk(content="done")]]
+    provider = GLMNativeProvider.__new__(GLMNativeProvider)
+    provider.config = None
+    provider.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: streams.pop(0)))
+    )
+    return provider
+
+
+def _sequence_qwen():
+    return _qwen_stream(
+        _qwen_call(0, id="call_a", name="read_file", arguments='{"file_path": '),
+        _qwen_call(0, arguments='"a.py"}'),
+        _qwen_call(1, id="call_b", name="file_explorer", arguments='{"path": '),
+        _qwen_call(1, arguments='"."}'),
+    )
+
+
+def _interleaved_qwen():
+    return _qwen_stream(
+        _qwen_call(0, id="call_a", name="read_file", arguments='{"file_path": '),
+        _qwen_call(1, id="call_b", name="file_explorer", arguments='{"path": '),
+        _qwen_call(0, arguments='"a.py"}'),
+        _qwen_call(1, arguments='"."}'),
+    )
+
+
+def _sequence_glm():
+    return [
+        _glm_chunk(_glm_call(0, id="call_a", name="read_file", arguments='{"file_path": ')),
+        _glm_chunk(_glm_call(0, arguments='"a.py"}')),
+        _glm_chunk(_glm_call(1, id="call_b", name="file_explorer", arguments='{"path": ')),
+        _glm_chunk(_glm_call(1, arguments='"."}')),
+    ]
+
+
+def _interleaved_glm():
+    return [
+        _glm_chunk(_glm_call(0, id="call_a", name="read_file", arguments='{"file_path": ')),
+        _glm_chunk(_glm_call(1, id="call_b", name="file_explorer", arguments='{"path": ')),
+        _glm_chunk(_glm_call(0, arguments='"a.py"}')),
+        _glm_chunk(_glm_call(1, arguments='"."}')),
+    ]
+
+
+def _qwen_history(first_stream):
+    with _qwen_provider(first_stream) as provider:
+        return _history_of(provider)
+
+
+def test_qwen_two_calls_in_sequence_run_with_their_full_arguments():
+    """Baseline regression, B3: the fragments after each call's first delta land in a nameless call
+    and the real calls run with partial arguments today (the driver drops the index)."""
+    _, calls, results = _qwen_history(_sequence_qwen())
+
+    assert calls == {"call_a": ("read_file", _A), "call_b": ("file_explorer", _DIR)}
+    assert results == {"call_a": _RESULT_A, "call_b": _RESULT_DIR}
+
+
+def test_qwen_two_interleaved_calls_do_not_run_and_get_the_unattributed_result():
+    """Baseline regression, D6: interleaved fragments cannot be told apart once the index is
+    dropped. After: neither call runs, and each gets the unattributed result."""
+    loop, _, results = _qwen_history(_interleaved_qwen())
+
+    assert loop.registry.calls == []
+    assert (results["call_a"], results["call_b"]) == (_D6, _D6)
+
+
+def test_glm_two_calls_in_sequence_run_with_their_full_arguments():
+    """Baseline regression, B3: as for Qwen, through GLM's own adapter and fake ZhipuAI stream."""
+    _, calls, results = _history_of(_glm_provider(_sequence_glm()))
+
+    assert calls == {"call_a": ("read_file", _A), "call_b": ("file_explorer", _DIR)}
+    assert results == {"call_a": _RESULT_A, "call_b": _RESULT_DIR}
+
+
+def test_glm_two_interleaved_calls_do_not_run_and_get_the_unattributed_result():
+    """Baseline regression, D6: as for Qwen."""
+    loop, _, results = _history_of(_glm_provider(_interleaved_glm()))
+
+    assert loop.registry.calls == []
+    assert (results["call_a"], results["call_b"]) == (_D6, _D6)

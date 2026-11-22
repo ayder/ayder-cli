@@ -12,12 +12,15 @@ reuse by agents and other consumers beyond the TUI.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import copy
 import json
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, List, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, List, Protocol, runtime_checkable
 
 from ayder_cli.application.execution_policy import (
     ExecutionPolicy,
@@ -25,6 +28,7 @@ from ayder_cli.application.execution_policy import (
     ToolRequest,
 )
 from ayder_cli.core.context_manager import ContextManager, truncate_tool_result
+from ayder_cli.core.result import ToolResultText, ToolSuccess
 from ayder_cli.log import emit_event, get_logger
 from ayder_cli.providers.base import _FunctionCall, _ToolCall
 from ayder_cli.tools.definition import is_parallel_safe
@@ -60,6 +64,76 @@ class ChatLoopConfig:
     run_id: int | None = None  # set only for agent loops; None for parent loops
 
 
+@dataclass(frozen=True)
+class TurnOutcome:
+    """How one ``ChatLoop.run()`` turn ended (R1).
+
+    ``status`` is ``completed``, ``escalated``, ``failed`` or ``cancelled``.
+    ``stage`` and ``message`` are set for ``failed`` only; ``reported`` says
+    whether ``on_system_message`` delivered the message without raising.
+    """
+
+    status: str
+    stage: str | None = None
+    message: str | None = None
+    reported: bool = False
+
+
+_UNREPORTED = object()  # the report's default: the receiver did not return
+_UNDESCRIBABLE_TEXT = "Error: the turn failed, and its error could not be described."
+_NO_OUTCOME_TEXT = "Error: internal error in the chat loop: the turn ended without an outcome."
+_STAGE_PREFIX = {
+    "llm": "Error: ",
+    "context": "Error: the context manager failed: ",
+    "hook": "Error: the pre-iteration hook failed: ",
+    "tools": "Error: preparing the tool calls failed: ",
+    "confirmation": "Error: the confirmation prompt failed: ",
+    "ui": "Error: the user interface failed: ",
+    "internal": "Error: internal error in the chat loop: ",
+}
+
+
+@dataclass
+class _TurnEnd:
+    """How one ``run()`` ends, kept local until the outer ``finally`` publishes it.
+
+    ``decided`` is set by each exit and by the boundary's clauses; ``reported``
+    is None until a report was attempted, then whether the receiver returned.
+    ``finished`` is set once the turn's end has run: when it is False, a
+    ``BaseException`` or a delivered cancellation left the turn's end, and the
+    turn is ``cancelled``. ``cancels_at_entry`` is the task's cancel count when
+    ``run()`` started.
+    """
+
+    decided: TurnOutcome | None = None
+    reported: bool | None = None
+    finished: bool = False
+    cancels_at_entry: int = 0
+    # The calls of the appended reply that the batch has not taken yet (R3b).
+    unsettled: list = field(default_factory=list)
+
+    def final(self) -> TurnOutcome:
+        """The frozen outcome to publish. It cannot raise."""
+        if not self.finished:
+            return TurnOutcome("cancelled")
+        decided = self.decided
+        if decided is None:
+            return TurnOutcome("failed", "internal", _NO_OUTCOME_TEXT, reported=bool(self.reported))
+        if decided.status == "failed":
+            return TurnOutcome("failed", decided.stage, decided.message, reported=bool(self.reported))
+        return decided
+
+
+def _failure_message(stage: str, exc: BaseException) -> str:
+    """The text a failed turn shows for ``exc`` raised at ``stage`` (R7a).
+
+    An empty description reads as the exception's class name, so a bare
+    ``CancelledError`` is not shown as ``Error: ``.
+    """
+    description = _describe_llm_error(exc) if stage == "llm" else str(exc)
+    return _STAGE_PREFIX[stage] + (description or type(exc).__name__)
+
+
 def new_session_id() -> str:
     """Short unique id used to correlate events from one session."""
     import uuid
@@ -89,6 +163,11 @@ class ChatCallbacks(Protocol):
 
 # Consecutive reasoning-only replies the loop prompts again before stopping.
 _MAX_REASONING_RETRIES = 2
+# The result of a call that lost part of its arguments to fragments the stream could not attribute.
+_UNATTRIBUTED_CALL = (
+    "Error: part of this call's arguments could not be attributed to it, so it was not run. "
+    "Send the call again."
+)
 # The repeat count of an identical tool call from which its result gets a note.
 _REPEAT_NOTE_AT = 3
 # How much of a refused call's raw arguments the missing-argument error echoes.
@@ -99,6 +178,8 @@ _REPAIRED_PREFIX = (
 )
 
 _CANCELLED_BEFORE_RUN = "Tool call was cancelled before it ran."
+_NOT_RUN_TURN_FAILED = "Tool call was not run because the turn failed."
+_PARTIAL_REPLY_NOTICE = "The partial reply above was not saved."
 _INTERRUPTED_WHILE_RUNNING = (
     "Tool call was interrupted while running and may have partially applied. "
     "Check the current state before retrying."
@@ -120,6 +201,99 @@ class _ToolBatch:
     started: set[str] = field(default_factory=set)
     results: dict[str, dict] = field(default_factory=dict)
     appended: set[str] = field(default_factory=set)
+
+
+@dataclass
+class _ToolItems:
+    """The tool items one turn opened, and what became of them (R4b).
+
+    ``opened`` holds the keys in opening order; ``attempted`` the keys whose finish was tried (it is
+    recorded before the receiver is called, so a receiver that raised is never called again for
+    that item); ``published`` the text and status settlement gave the calls it handled; ``fresh``
+    is True while an item has opened since the last cleanup attempt.
+    """
+
+    opened: dict[str, None] = field(default_factory=dict)
+    attempted: set[str] = field(default_factory=set)
+    published: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    fresh: bool = False
+
+
+_ATOMIC_TYPES = frozenset({str, int, float, bool, type(None)})
+
+
+def _copy_arguments(value: Any) -> Any:
+    """A deep copy of parsed arguments that needs no recursion, so any nesting the parser accepts
+    can be copied (R10).
+
+    ``copy.deepcopy`` recurses in Python and fails at about 500 levels, a depth ``json.loads``
+    accepts and the loop ran before arguments were copied. Plain dicts and lists, which is
+    everything a JSON parse yields, are copied with an explicit stack. Anything else is handed to
+    ``copy.deepcopy``, so a value that is not a JSON type (a tuple, a set, an object a provider
+    passes in dict arguments) copies as it always did. The copy keeps shared references and cycles,
+    as ``deepcopy`` does.
+    """
+    memo: dict[int, Any] = {}  # the format copy.deepcopy shares, so both see what is copied
+    pending: list[tuple[Any, Any]] = []
+
+    def shell(source: Any) -> Any:
+        if type(source) in _ATOMIC_TYPES:
+            return source
+        known = memo.get(id(source))
+        if known is not None:
+            return known
+        if type(source) is dict:
+            target: Any = {}
+        elif type(source) is list:
+            target = []
+        else:
+            return copy.deepcopy(source, memo)
+        memo[id(source)] = target
+        pending.append((source, target))
+        return target
+
+    root = shell(value)
+    while pending:
+        source, target = pending.pop()
+        if type(source) is dict:
+            for key, item in source.items():
+                target[key if type(key) in _ATOMIC_TYPES else copy.deepcopy(key, memo)] = shell(item)
+        else:
+            target.extend([shell(item) for item in source])
+    return root
+
+
+@dataclass
+class _ParsedCall:
+    """One call's arguments, parsed once (seam B, R10).
+
+    ``raw`` is the argument text as the provider streamed it, which execution keeps, never the
+    repaired JSON that history stores. ``args`` is the parse and ``status`` says how far to trust it
+    (``ok``, ``repaired`` or ``invalid``, see ``_parse_tool_arguments``). ``strict`` is True when
+    ``raw`` was JSON text that decodes to an object as it stands.
+
+    ``args`` stays private: a consumer that may mutate what it is given (the parallel-safe
+    predicate, the receivers of the running display and of the confirmation preview, the executor)
+    gets ``arguments()``, its own deep copy (at any nesting depth, ``_copy_arguments``), so nothing
+    it does can reach the call that runs.
+    """
+
+    raw: Any
+    args: dict
+    status: str
+    strict: bool
+
+    @classmethod
+    def of(cls, raw: Any) -> "_ParsedCall":
+        """Parse ``raw`` once. Any recovery warnings are logged here, once per call."""
+        status: list[str] = []
+        strict: list[bool] = []
+        args = _parse_arguments(raw, status, strict)
+        return cls(raw, args, status[0], bool(strict))
+
+    def arguments(self) -> dict:
+        """A fresh deep copy of the parsed arguments, for one consumer."""
+        return _copy_arguments(self.args)
 
 
 class ChatLoop:
@@ -150,6 +324,11 @@ class ChatLoop:
         # Set when run() stops with an error (stream failure, empty response,
         # reasoning-only limit, max_iterations). The CLI exits 1 on it.
         self.error: str | None = None
+        # How the last turn ended; None until a turn ends, and while one runs.
+        self.outcome: TurnOutcome | None = None
+        # The stage the tool batch is in (R7c), read by the turn's boundary when a
+        # failure crosses the batch; run() clears it on entry and after a batch.
+        self._batch_stage: str | None = None
         if context_manager is not None:
             self.context_manager = context_manager
         else:
@@ -169,6 +348,11 @@ class ChatLoop:
         # in a row it has occurred in this run(), in history order.
         self._last_call_sig: tuple[str, str] | None = None
         self._repeat_count = 0
+
+        # The UI keys every tool item of this chat has used (R9c).
+        self._ui_keys = _UiKeys()
+        # The tool items of the current turn; run() starts it afresh.
+        self._items = _ToolItems()
 
     def _reap_task(self, task: asyncio.Task) -> None:
         """Done-callback for a retained worker task.
@@ -242,359 +426,626 @@ class ChatLoop:
             **self._correlation(),
         )
 
-    def _fail(self, text: str) -> None:
-        """Report a stop that ends the turn with an error; the CLI exits 1."""
-        self.error = text
-        self.cb.on_system_message(text)
+    def _fail(self, end: "_TurnEnd", text: str, stage: str) -> None:
+        """Decide that the turn failed with ``text``; the CLI exits 1.
+
+        Only the decision is stored. The turn's end reports it once, and the
+        outer ``finally`` publishes it (R1).
+        """
+        end.decided = TurnOutcome("failed", stage, text)
+
+    def _failure_stage(self, stage: str) -> str:
+        """The stage a failure belongs to: the batch's marker when set, else ``stage``."""
+        return self._batch_stage if self._batch_stage is not None else stage
+
+    def _failed_by(self, stage: str, exc: BaseException) -> TurnOutcome:
+        """The ``failed`` outcome for ``exc`` raised at ``stage`` (R7a).
+
+        Building the text is guarded: if it raises, a fixed text is used.
+        """
+        message = self._guarded(
+            "failure message", _failure_message, stage, exc, default=_UNDESCRIBABLE_TEXT
+        )
+        return TurnOutcome("failed", stage, message)
+
+    def _report_once(self, end: "_TurnEnd") -> None:
+        """Report a failed turn through ``on_system_message``, once.
+
+        Guarded with a sentinel default, because a receiver that returns gives
+        None too: ``end.reported`` is True only when the call returned.
+        """
+        decided = end.decided
+        if decided is not None and decided.status == "failed" and end.reported is None:
+            delivered = self._guarded(
+                "failure report", self.cb.on_system_message, decided.message, default=_UNREPORTED
+            )
+            end.reported = delivered is not _UNREPORTED
+
+    def _end_turn(self, end: "_TurnEnd", thinking_open: bool, partial_reply_lost: bool) -> None:
+        """The turn's end, run once from the boundary's ``finally``; it never publishes.
+
+        It closes a thinking phase that a failure or a cancellation left open,
+        through the guard so the stop cannot replace the primary failure (R7d),
+        gives the appended reply's unrun calls their tool messages, finishes the
+        tool items that are still open and attempts the cleanup once (R4b), announces
+        a partial reply that was shown and not saved (D2), then reports a failed
+        turn. Each receiver call is guarded.
+
+        The guard does not catch an interrupt (``KeyboardInterrupt``, ``SystemExit``), and one that
+        a receiver raises must not skip the steps after it (R2, R3b, R4b, R5b, D2). The steps are
+        run through an ``ExitStack``: it runs every one, in order, and then raises the interrupt
+        of the latest step that raised one, so with several interrupts the later one propagates
+        (Codex #8, round 2). The notice runs before the report because it rewrites a failed
+        decision's message, which the report delivers.
+        """
+        with contextlib.ExitStack() as steps:
+            # An ExitStack runs its callbacks last in, first out, so they are registered in
+            # reverse: the closing stop runs first and the report last.
+            steps.callback(self._report_once, end)
+            if partial_reply_lost:
+                steps.callback(self._announce_lost_partial_reply, end)
+            steps.callback(self._finish_open_items, end)
+            steps.callback(self._settle_unrun_calls, end)
+            if thinking_open:
+                steps.callback(self._guarded, "closing thinking stop", self.cb.on_thinking_stop)
+
+    def _announce_lost_partial_reply(self, end: "_TurnEnd") -> None:
+        """Tell the user the partial reply they saw was not saved (D2), once.
+
+        A failure's message gets the notice as its second line, and the turn's end
+        reports it. A cancellation sends it as its own system message, guarded.
+        """
+        decided = end.decided
+        if decided is None:
+            return
+        if decided.status == "failed":
+            end.decided = TurnOutcome(
+                "failed", decided.stage, f"{decided.message}\n{_PARTIAL_REPLY_NOTICE}"
+            )
+        elif decided.status == "cancelled":
+            self._guarded("partial reply notice", self.cb.on_system_message, _PARTIAL_REPLY_NOTICE)
+
+    def _settle_unrun_calls(self, end: "_TurnEnd") -> None:
+        """Give each call of the appended reply that never reached the batch its tool message.
+
+        The text is the cancel text on a cancellation and the failure text on a
+        failure (R3b), without the repeat note or the repaired prefix. Every
+        call is a ``_ToolCall`` the loop built, so nothing here can raise.
+        """
+        if not end.unsettled:
+            return
+        cancelled = end.decided is not None and end.decided.status == "cancelled"
+        text = _CANCELLED_BEFORE_RUN if cancelled else _NOT_RUN_TURN_FAILED
+        for tc in end.unsettled:
+            self.messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": text}
+            )
+        end.unsettled = []
+
+    def _item_started(self, key: str, name: str, arguments: dict) -> None:
+        """Open (or update) the item ``key`` for the receiver, noting it first (R4b).
+
+        Opening a key clears its finished mark; an item opened since the last cleanup makes the
+        turn's end attempt one.
+        """
+        items = self._items
+        items.opened[key] = None
+        items.attempted.discard(key)
+        items.fresh = True
+        self.cb.on_tool_start(key, name, arguments)
+
+    def _item_finished(self, key: str, result: str) -> None:
+        """Finish the item ``key`` for the receiver. The attempt is noted before the call, so a
+        receiver that raises is not called again for the item."""
+        self._items.attempted.add(key)
+        self.cb.on_tool_complete(key, result)
+
+    def _cleanup(self) -> None:
+        """The activity bar's cleanup. The attempt counts whatever the receiver does."""
+        self._items.fresh = False
+        self.cb.on_tools_cleanup()
+
+    def _finish_open_items(self, end: "_TurnEnd") -> None:
+        """Finish every item the normal path left open, then attempt the cleanup (R4b, R5b).
+
+        Each item gets what settlement published for its call: its recorded result with that
+        result's status, ``interrupted``, or ``not_run`` with the cancel text. A call that never
+        reached a batch gets ``not_run`` with the text of its tool message (the cancel text on a
+        cancellation, the failure text otherwise). Nothing here awaits, and each receiver call is
+        guarded, so the primary outcome stays the turn's.
+
+        The guard does not catch an interrupt (``KeyboardInterrupt``, ``SystemExit``). One that a
+        receiver raises must not strand the other items or the cleanup (R2, R4b, R5b), so the
+        attempts are run through an ``ExitStack``: it runs every one, in order, and then raises the
+        interrupt of the latest attempt that raised one. With several interrupts the later one
+        propagates, with the earlier as its context; the turn ends ``cancelled`` either way
+        (Codex #8, round 2).
+        """
+        items = self._items
+        cancelled = end.decided is not None and end.decided.status == "cancelled"
+        unrun = (_CANCELLED_BEFORE_RUN if cancelled else _NOT_RUN_TURN_FAILED, "not_run")
+        with contextlib.ExitStack() as attempts:
+            # An ExitStack runs its callbacks last in, first out: the cleanup is registered first
+            # so it runs last, and the items in reverse so they run in opening order.
+            if items.fresh:
+                attempts.callback(self._guarded, "tools cleanup", self._cleanup)
+            for key in reversed(list(items.opened)):
+                if key in items.attempted:
+                    continue
+                text, status = items.published.get(key, unrun)
+                attempts.callback(
+                    self._guarded, "tool item finish", self._item_finished, key,
+                    _completion(text, status),
+                )
+
+    def _display(self, fn: Callable[..., None], *args: Any) -> None:
+        """Call a display callback inside the tool batch.
+
+        The marker says ``ui`` while it runs, so a raise reaches the boundary
+        attributed to the UI (R7c); the marker is not restored on a raise.
+        """
+        resting = self._batch_stage
+        self._batch_stage = "ui"
+        fn(*args)
+        self._batch_stage = resting
+
+    def _guarded(
+        self,
+        what: str,
+        fn: Callable[..., Any],
+        *args: Any,
+        default: Any = None,
+        on_error: Callable[[BaseException], None] | None = None,
+    ) -> Any:
+        """Return ``fn(*args)``; if it raises, log one warning and return ``default``.
+
+        The loop's one generic guard for a collaborator whose failure the turn
+        can survive. It catches ``Exception`` and a stray ``CancelledError``:
+        ``fn`` is synchronous, so a task cancellation can never arrive inside
+        it. ``on_error`` receives the exception, for a caller that must keep it.
+        """
+        try:
+            return fn(*args)
+        except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 - the guard: a failing collaborator is logged and replaced by its default
+            llm_log.opt(exception=True).warning("{} raised; continuing without it", what)
+            if on_error is not None:
+                on_error(exc)
+            return default
 
     async def run(self, *, no_tools: bool = False) -> None:
         """Main loop: call LLM, handle tools, repeat until text-only or cancel."""
         self.error = None  # the TUI reuses one loop across turns
-        # Lazy init: detect real context length for Ollama models
-        if hasattr(self.context_manager, "detect_context_length"):
-            await self.context_manager.detect_context_length()
-
-        iteration_n = 0
-        reasoning_only = 0
-        self._last_call_sig, self._repeat_count = None, 0
-        while True:
-            if self.cb.is_cancelled():
-                return
-            cap = self.config.max_iterations
-            if cap and iteration_n >= cap:
-                if self.config.run_id is None:
-                    remedy = (
-                        "Send a message to continue, or raise [app] max_iterations "
-                        "(0 = unlimited)."
-                    )
-                else:
-                    remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
-                self._fail(
-                    f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}"
-                )
-                return
-
-            # Every field the event reads is bound BEFORE the try, so the
-            # finally can still describe an iteration that returned early.
-            iteration_n += 1
-            iter_started = time.perf_counter()
-            final_content = ""
-            final_reasoning = ""
-            normalized_tool_calls = []
+        self.outcome = None
+        self._batch_stage = None
+        self._items = _ToolItems()
+        end = _TurnEnd(cancels_at_entry=_cancel_count())
+        stage = "context"  # the collaborator now active (R7c); see _failure_stage
+        thinking_open = False  # a thinking phase is open until its one stop (R5a)
+        propagating = False  # an exception is leaving the boundary: nothing more to deliver
+        # This iteration showed content, and its reply was appended (D2): content shown whose
+        # reply was not saved is announced at the turn's end.
+        content_delivered = False
+        reply_saved = False
+        try:
             try:
-                # Pre-iteration hook (used for agent summary injection)
-                if self.config.pre_iteration_hook is not None:
-                    await self.config.pre_iteration_hook(self.messages)
+                # Lazy init: detect real context length for Ollama models
+                if hasattr(self.context_manager, "detect_context_length"):
+                    await self.context_manager.detect_context_length()
 
-                # 1. Prepare schemas and messages
-                tool_schemas = (
-                    []
-                    if no_tools
-                    else self.registry.get_schemas(tags=self.config.tool_tags)
-                )
+                iteration_n = 0
+                reasoning_only = 0
+                self._last_call_sig, self._repeat_count = None, 0
+                while True:
+                    stage = "ui"
+                    if self.cb.is_cancelled():
+                        end.decided = TurnOutcome("cancelled")
+                        return
+                    stage = "internal"
+                    cap = self.config.max_iterations
+                    if cap and iteration_n >= cap:
+                        if self.config.run_id is None:
+                            remedy = (
+                                "Send a message to continue, or raise [app] max_iterations "
+                                "(0 = unlimited)."
+                            )
+                        else:
+                            remedy = "Raise [agents.<name>] max_iterations (0 = unlimited) to allow more."
+                        llm_log.error("Turn stopped after {} LLM calls (max_iterations)", cap)
+                        self._fail(
+                            end,
+                            f"Error: stopped after {cap} LLM calls (max_iterations = {cap}). {remedy}",
+                            "limit",
+                        )
+                        return
 
-                # Use ContextManager to trim history based on token budget
-                llm_messages = self.context_manager.prepare_messages(
-                    self.messages,
-                    max_history=self.config.max_history,
-                )
+                    # Every field the event reads is bound BEFORE the try, so the
+                    # finally can still describe an iteration that returned early.
+                    iteration_n += 1
+                    iter_started = time.perf_counter()
+                    final_content = ""
+                    final_reasoning = ""
+                    normalized_tool_calls = []
+                    content_delivered = False
+                    reply_saved = False
+                    try:
+                        # Pre-iteration hook (used for agent summary injection)
+                        stage = "hook"
+                        if self.config.pre_iteration_hook is not None:
+                            await self.config.pre_iteration_hook(self.messages)
 
-                # Log history preview
-                history_summary = []
-                for m in llm_messages:
-                    role = m.get("role")
-                    content = m.get("content", "") or ""
-                    if isinstance(content, list):  # handle native tool results if any
-                        content_str = str(content)
-                    else:
-                        content_str = content
-                    history_summary.append(f"{role}({len(content_str)})")
-                llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
-                if self.config.verbose:
-                    for i, m in enumerate(llm_messages):
-                        content = m.get("content")
-                        llm_log.trace(
-                            "  Message {} [{}] content_type={} content_len={}",
-                            i,
-                            m.get("role"),
-                            type(content).__name__,
-                            len(content) if hasattr(content, "__len__") else 0,
+                        # 1. Prepare schemas and messages
+                        stage = "tools"
+                        tool_schemas = (
+                            []
+                            if no_tools
+                            else self.registry.get_schemas(tags=self.config.tool_tags)
                         )
 
-                # 2. Call LLM (Streaming)
-                self.cb.on_thinking_start()
-
-                usage_obj = None
-                # final_content / final_reasoning / normalized_tool_calls are
-                # bound above the outer try — one assignment point each.
-                # (Raw is kept for appending to history exactly as it arrived)
-                raw_tool_calls_for_history: list[dict] = []
-                thinking_stopped = False
-
-                try:
-                    options: dict[str, Any] = {}
-                    if getattr(self.config, "num_ctx", None):
-                        options["num_ctx"] = self.config.num_ctx
-                    if getattr(self.config, "max_output_tokens", None):
-                        options["max_output_tokens"] = self.config.max_output_tokens
-                    if getattr(self.config, "stop_sequences", None):
-                        options["stop_sequences"] = self.config.stop_sequences
-
-                    async_stream = self.llm.stream_with_tools(
-                        llm_messages,
-                        self.config.model,
-                        tools=tool_schemas,
-                        options=options,
-                        verbose=self.config.verbose,
-                    )
-
-                    async for chunk in async_stream:
-                        if chunk.usage:
-                            usage_obj = chunk.usage
-
-                        if chunk.reasoning:
-                            final_reasoning += chunk.reasoning
-                            self.cb.on_thinking_content(chunk.reasoning)
-
-                        if chunk.content:
-                            final_content += chunk.content
-                            if not thinking_stopped:
-                                thinking_stopped = True
-                                self.cb.on_thinking_stop()
-                            self.cb.on_assistant_content(chunk.content)
-
-                        if chunk.tool_calls:
-                            if not thinking_stopped:
-                                thinking_stopped = True
-                                self.cb.on_thinking_stop()
-                            for tc in chunk.tool_calls:
-                                # We use `_stream_index` if available, otherwise fallback to `len()` positioning
-                                stream_idx = getattr(tc, "_stream_index", None)
-
-                                # Find if we are already building this tool call
-                                existing_tc = None
-
-                                if stream_idx is not None:
-                                    # We have a strict index to match against (OpenAI/Deepseek/Ollama streams)
-                                    if stream_idx < len(raw_tool_calls_for_history):
-                                        existing_tc = raw_tool_calls_for_history[stream_idx]
-                                else:
-                                    # Fallback: try matching by ID
-                                    existing_tc = next(
-                                        (x for x in raw_tool_calls_for_history if x["id"] == tc.id),
-                                        None
-                                    )
-
-                                if existing_tc is None:
-                                    # New tool call start
-                                    new_tc = {
-                                        "id": tc.id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": tc.name,
-                                            "arguments": tc.arguments
-                                        },
-                                    }
-                                    # Gemini needs its thought_signature replayed with
-                                    # the call. getattr: tests and plugins feed
-                                    # SimpleNamespace tool calls.
-                                    signature = getattr(tc, "thought_signature", None)
-                                    if signature:
-                                        new_tc["thought_signature"] = signature
-
-                                    # If we have a stream_index, ensure our array grows to that size
-                                    if stream_idx is not None:
-                                        while len(raw_tool_calls_for_history) < stream_idx:
-                                            raw_tool_calls_for_history.append({"id": f"dummy_{len(raw_tool_calls_for_history)}", "type": "function", "function": {"name": "", "arguments": ""}})
-                                        raw_tool_calls_for_history.append(new_tc)
-                                    else:
-                                        raw_tool_calls_for_history.append(new_tc)
-
-                                    # Only trigger UI start if we have a name
-                                    if tc.name:
-                                        self.cb.on_tool_start(tc.id, tc.name, {})
-                                else:
-                                    # Update ID if the existing one was a dummy or fallback ID, and the new one is real
-                                    if tc.id and not tc.id.startswith("idx_") and existing_tc["id"].startswith("idx_"):
-                                        existing_tc["id"] = tc.id
-
-                                    # Append arguments to existing tool call
-                                    # An id reused by a different tool means two
-                                    # distinct calls are about to merge into one
-                                    # entry, concatenating their arguments and
-                                    # dropping the later name. Never silent again.
-                                    if (
-                                        tc.name
-                                        and existing_tc["function"]["name"]
-                                        and tc.name != existing_tc["function"]["name"]
-                                    ):
-                                        tool_log.warning(
-                                            "Tool call id reused by a different tool "
-                                            "({} then {}); calls would merge",
-                                            existing_tc["function"]["name"],
-                                            tc.name,
-                                        )
-
-                                    # Deepseek sends name ONLY on the first chunk, so we must catch it whenever it arrives
-                                    if tc.name and not existing_tc["function"]["name"]:
-                                        existing_tc["function"]["name"] = tc.name
-                                        self.cb.on_tool_start(existing_tc["id"], tc.name, {})
-
-                                    if tc.arguments:
-                                        existing_tc["function"]["arguments"] += tc.arguments
-
-                    # Some models pack multiple parallel tool calls into one entry
-                    # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
-                    # these into individual tool calls before normalizing.
-                    raw_tool_calls_for_history = _expand_concatenated_tool_calls(
-                        raw_tool_calls_for_history
-                    )
-
-                    # Now that streaming is done, build the normalized objects for execution
-                    for raw_tc in raw_tool_calls_for_history:
-                        self._emit_tool_call_received(
-                            raw_tc["function"]["name"],
-                            raw_tc["id"],
-                            len(raw_tc["function"]["arguments"]),
+                        # Use ContextManager to trim history based on token budget
+                        stage = "context"
+                        llm_messages = self.context_manager.prepare_messages(
+                            self.messages,
+                            max_history=self.config.max_history,
                         )
-                        tool_call_obj = _ToolCall(
-                            id=raw_tc["id"],
-                            type="function",
-                            function=_FunctionCall(
-                                name=raw_tc["function"]["name"],
-                                arguments=raw_tc["function"]["arguments"]
+                        stage = "internal"
+
+                        # Log history preview
+                        history_summary = []
+                        for m in llm_messages:
+                            role = m.get("role")
+                            content = m.get("content", "") or ""
+                            if isinstance(content, list):  # handle native tool results if any
+                                content_str = str(content)
+                            else:
+                                content_str = content
+                            history_summary.append(f"{role}({len(content_str)})")
+                        llm_log.debug("Calling LLM with history: {}", " -> ".join(history_summary))
+                        if self.config.verbose:
+                            for i, m in enumerate(llm_messages):
+                                content = m.get("content")
+                                llm_log.trace(
+                                    "  Message {} [{}] content_type={} content_len={}",
+                                    i,
+                                    m.get("role"),
+                                    type(content).__name__,
+                                    len(content) if hasattr(content, "__len__") else 0,
+                                )
+
+                        # 2. Call LLM (Streaming)
+                        stage = "ui"
+                        thinking_open = True  # noted first: a start that raises still gets its one stop
+                        self.cb.on_thinking_start()
+                        stage = "internal"
+
+                        usage_obj = None
+                        # final_content / final_reasoning / normalized_tool_calls are
+                        # bound above the outer try — one assignment point each.
+                        # (Raw is kept for appending to history exactly as it arrived)
+                        raw_tool_calls_for_history: list[dict] = []
+                        assembler = _ToolCallAssembler(self._ui_keys)
+
+                        options: dict[str, Any] = {}
+                        if getattr(self.config, "num_ctx", None):
+                            options["num_ctx"] = self.config.num_ctx
+                        if getattr(self.config, "max_output_tokens", None):
+                            options["max_output_tokens"] = self.config.max_output_tokens
+                        if getattr(self.config, "stop_sequences", None):
+                            options["stop_sequences"] = self.config.stop_sequences
+
+                        stage = "llm"
+                        async_stream = self.llm.stream_with_tools(
+                            llm_messages,
+                            self.config.model,
+                            tools=tool_schemas,
+                            options=options,
+                            verbose=self.config.verbose,
+                        )
+
+                        async for chunk in async_stream:
+                            if chunk.usage is not None:
+                                usage_obj = chunk.usage
+
+                            if chunk.reasoning:
+                                final_reasoning += chunk.reasoning
+                                thinking_open = True  # opens a phase after a stop
+                                stage = "ui"
+                                self.cb.on_thinking_content(chunk.reasoning)
+
+                            if chunk.content:
+                                final_content += chunk.content
+                                stage = "ui"
+                                if thinking_open:
+                                    thinking_open = False
+                                    self.cb.on_thinking_stop()
+                                self.cb.on_assistant_content(chunk.content)
+                                content_delivered = True
+
+                            if chunk.tool_calls:
+                                if thinking_open:
+                                    thinking_open = False
+                                    stage = "ui"
+                                    self.cb.on_thinking_stop()
+                                stage = "internal"
+                                for tc in chunk.tool_calls:
+                                    started = assembler.add(tc)
+                                    if started is not None:
+                                        stage = "ui"
+                                        self._item_started(started[0], started[1], {})
+                                        stage = "internal"
+
+                            stage = "llm"  # the next chunk comes from the provider
+
+                        stage = "internal"
+
+                        # Some models pack multiple parallel tool calls into one entry
+                        # with concatenated JSON args (e.g. '{...}{...}{...}'). Expand
+                        # these into individual tool calls before normalizing.
+                        raw_tool_calls_for_history = _expand_concatenated_tool_calls(
+                            assembler.calls()
+                        )
+                        # Identity is settled after the split and before anything is
+                        # recorded or run (R9a).
+                        assembler.settle_ids(raw_tool_calls_for_history)
+                        unattributed = assembler.refusals(raw_tool_calls_for_history)
+                        ui_keys = assembler.ui_keys(raw_tool_calls_for_history)
+
+                        # Now that streaming is done, build the normalized objects for execution
+                        # Each call's arguments are parsed once, here (R10).
+                        parsed_calls: dict[str, _ParsedCall] = {}
+                        # What each call's event records, taken before history sanitization
+                        # rewrites the arguments; the events themselves come after the reply
+                        # is recorded.
+                        received: list[tuple[str, str, int]] = []
+                        for raw_tc in raw_tool_calls_for_history:
+                            received.append((
+                                raw_tc["function"]["name"],
+                                raw_tc["id"],
+                                len(raw_tc["function"]["arguments"]),
+                            ))
+                            tool_call_obj = _ToolCall(
+                                id=raw_tc["id"],
+                                type="function",
+                                function=_FunctionCall(
+                                    name=raw_tc["function"]["name"],
+                                    arguments=raw_tc["function"]["arguments"]
+                                ),
+                            )
+                            normalized_tool_calls.append(tool_call_obj)
+                            parsed_calls[raw_tc["id"]] = _ParsedCall.of(raw_tc["function"]["arguments"])
+
+                        if final_content or normalized_tool_calls:
+                            # A complete reply is recorded before anything that can fail
+                            # (R3b): the stop, the cancel check and accounting come after.
+                            # Build and append assistant message dict to conversation history.
+                            # Sanitize tool call arguments: some models emit malformed JSON which
+                            # gets stored in history. On the next API call, providers (e.g. Ollama)
+                            # validate the history and reject requests with invalid arguments.
+                            if raw_tool_calls_for_history:
+                                for tc_entry in raw_tool_calls_for_history:
+                                    raw_args = tc_entry["function"].get("arguments", "")
+                                    if isinstance(raw_args, str):
+                                        parsed_call = parsed_calls[tc_entry["id"]]
+                                        if parsed_call.status == "invalid":
+                                            # e.g. "null": never send it back to the
+                                            # provider; the call is refused anyway.
+                                            tc_entry["function"]["arguments"] = "{}"
+                                        elif not parsed_call.strict:
+                                            llm_log.warning(
+                                                "Malformed tool arguments for '{}': "
+                                                "{} chars — repairing before storing in history",
+                                                tc_entry["function"].get("name", "?"),
+                                                len(raw_args),
+                                            )
+                                            tc_entry["function"]["arguments"] = json.dumps(parsed_call.args)
+
+                            reasoning_only = 0
+                            msg_dict: dict = {"role": "assistant", "content": final_content}
+                            if raw_tool_calls_for_history:
+                                msg_dict["tool_calls"] = raw_tool_calls_for_history
+                            if final_reasoning:
+                                msg_dict["reasoning_content"] = final_reasoning
+
+                            self.messages.append(msg_dict)
+                            # Hold its calls until the batch takes them: the turn's end
+                            # settles any that are left (R3b).
+                            end.unsettled = list(normalized_tool_calls)
+                            reply_saved = True
+
+                        # The loop's own telemetry is fallible (a sink can raise), so it comes after
+                        # the complete reply is in history and its calls are held for settlement
+                        # (R3b): a failing event then fails the turn, not the reply.
+                        for name, call_id, arg_chars in received:
+                            self._emit_tool_call_received(name, call_id, arg_chars)
+
+                        if thinking_open:
+                            # The stream ended with a phase open: close it. A raising
+                            # stop is a UI failure.
+                            thinking_open = False
+                            stage = "ui"
+                            self.cb.on_thinking_stop()
+                        stage = "ui"
+                        if self.cb.is_cancelled():
+                            end.decided = TurnOutcome("cancelled")
+                            return
+                        stage = "internal"
+
+                        # Detect empty/dropped responses (server closed cleanly but sent nothing)
+                        if not final_content and not normalized_tool_calls and not final_reasoning:
+                            llm_log.error(
+                                "LLM returned empty response (possible connection drop). "
+                                "model={}, provider={}",
+                                self.config.model,
+                                self.config.provider,
+                            )
+                            self._fail(
+                                end,
+                                "Error: LLM returned an empty response. Check model compatibility "
+                                "or try switching chat_protocol in config.",
+                                "llm",
+                            )
+                            return
+
+                        # 3. Process final response metadata and token counting (D4)
+                        if usage_obj is None:
+                            # No usage data from provider — estimate total tokens
+                            self._total_tokens += _estimate_tokens(final_content, final_reasoning)
+                        elif not _usage_is_usable(usage_obj):
+                            # Malformed usage counts as missing.
+                            llm_log.warning(
+                                "Provider usage is malformed ({}); using the estimate",
+                                type(usage_obj).__name__,
+                            )
+                            self._total_tokens += _estimate_tokens(final_content, final_reasoning)
+                        else:
+                            # Use the provider-reported count; a mapping without
+                            # total_tokens adds 0. A failing manager is skipped.
+                            self._total_tokens += usage_obj.get("total_tokens", 0)
+                            self._guarded(
+                                "token accounting", self.context_manager.update_from_response, usage_obj
+                            )
+                        stage = "ui"
+                        self.cb.on_token_usage(self._total_tokens)
+                        stage = "internal"
+
+                        # Content / reasoning / tool-call counts are now the `iteration`
+                        # event's content_len, reasoning_len and tool_calls fields.
+
+                        # If model thought but forgot to output content/tools, prompt it
+                        if not final_content and not normalized_tool_calls and final_reasoning:
+                            llm_log.debug(
+                                "Model thought but provided no content or tools. Prompting for final response."
+                            )
+                            self.messages.append(
+                                {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
+                            )
+                            reasoning_only += 1
+                            if reasoning_only > _MAX_REASONING_RETRIES:
+                                llm_log.error(
+                                    "Turn stopped: the model returned only reasoning {} times in a row",
+                                    reasoning_only,
+                                )
+                                self._fail(
+                                    end,
+                                    f"Error: the model returned only reasoning {reasoning_only} "
+                                    "times in a row; stopped.",
+                                    "llm",
+                                )
+                                return
+                            self.messages.append(
+                                {
+                                    "role": "user",
+                                    "content": "Please provide your final response or tool call based on your reasoning above.",
+                                }
+                            )
+                            continue
+
+                        # 4. Handle tool execution
+                        if normalized_tool_calls:
+                            # The batch settles every call it takes, however it ends.
+                            end.unsettled = []
+                            # We use the existing unified execution path
+                            escalated = await self._execute_tool_calls(
+                                normalized_tool_calls, unattributed, ui_keys, parsed_calls
+                            )
+                            self._batch_stage = None
+                            if escalated:
+                                stage = "ui"
+                                self.cb.on_system_message(
+                                    "⚠ Escalation requested. Activity stopped; waiting for user prompt."
+                                )
+                                end.decided = TurnOutcome("escalated")
+                                return
+                            no_tools = False
+                            continue
+
+                        # Text-only response — loop finished
+                        end.decided = TurnOutcome("completed")
+                        return
+                    finally:
+                        # The lambda closes over fresh names, never over final_content:
+                        # a closure cell would defeat CPython's in-place `+=` on the
+                        # stream's hot path and make a long reply quadratic.
+                        content_len, reasoning_len = len(final_content), len(final_reasoning)
+                        tool_call_count = len(normalized_tool_calls)
+                        elapsed_ms = int((time.perf_counter() - iter_started) * 1000)
+                        # Guarded: a failing event must not replace the turn's outcome.
+                        self._guarded(
+                            "iteration event",
+                            lambda: emit_event(
+                                "llm", "iteration",
+                                n=iteration_n,
+                                model=self.config.model,
+                                content_len=content_len,
+                                reasoning_len=reasoning_len,
+                                tool_calls=tool_call_count,
+                                hist_tokens=self._total_tokens,
+                                ms=elapsed_ms,
+                                **self._correlation(),
                             ),
                         )
-                        normalized_tool_calls.append(tool_call_obj)
-
-                except asyncio.CancelledError:
-                    llm_log.info("LLM stream cancelled")
-                    return
-                except Exception as e:  # noqa: BLE001 - LLM stream boundary: any provider, driver or transport failure must surface to the user, not end the session
-                    llm_log.exception("LLM stream failed")
-                    self._fail(f"Error: {_describe_llm_error(e)}")
-                    return
-                finally:
-                    self.cb.on_thinking_stop()
-
-                if self.cb.is_cancelled():
-                    return
-
-                # Detect empty/dropped responses (server closed cleanly but sent nothing)
-                if not final_content and not normalized_tool_calls and not final_reasoning:
-                    llm_log.error(
-                        "LLM returned empty response (possible connection drop). "
-                        "model={}, provider={}",
-                        self.config.model,
-                        self.config.provider,
-                    )
-                    self._fail(
-                        "LLM returned an empty response. Check model compatibility "
-                        "or try switching chat_protocol in config."
-                    )
-                    return
-
-                # 3. Process final response metadata and token counting
-                if usage_obj:
-                    # Use provider-reported token count if available
-                    tokens = usage_obj.get("total_tokens", 0)
-                    self._total_tokens += tokens
-                    self.context_manager.update_from_response(usage_obj)
-                else:
-                    # No usage data from provider — estimate total tokens
-                    self._total_tokens += len(str(final_content)) // 4 + len(str(final_reasoning)) // 4
-                self.cb.on_token_usage(self._total_tokens)
-
-                # Content / reasoning / tool-call counts are now the `iteration`
-                # event's content_len, reasoning_len and tool_calls fields.
-
-                # If model thought but forgot to output content/tools, prompt it
-                if not final_content and not normalized_tool_calls and final_reasoning:
-                    llm_log.debug(
-                        "Model thought but provided no content or tools. Prompting for final response."
-                    )
-                    self.messages.append(
-                        {"role": "assistant", "content": f"<think>\n{final_reasoning}\n</think>"}
-                    )
-                    reasoning_only += 1
-                    if reasoning_only > _MAX_REASONING_RETRIES:
-                        self._fail(
-                            f"Error: the model returned only reasoning {reasoning_only} "
-                            "times in a row; stopped."
-                        )
-                        return
-                    self.messages.append(
-                        {
-                            "role": "user",
-                            "content": "Please provide your final response or tool call based on your reasoning above.",
-                        }
-                    )
-                    continue
-
-                # Build and append assistant message dict to conversation history.
-                # Sanitize tool call arguments: some models emit malformed JSON which
-                # gets stored in history. On the next API call, providers (e.g. Ollama)
-                # validate the history and reject requests with invalid arguments.
-                if raw_tool_calls_for_history:
-                    for tc_entry in raw_tool_calls_for_history:
-                        raw_args = tc_entry["function"].get("arguments", "")
-                        if isinstance(raw_args, str):
-                            try:
-                                decoded = json.loads(raw_args)
-                                if not isinstance(decoded, dict):
-                                    # e.g. "null": never send it back to the
-                                    # provider; the call is refused anyway.
-                                    tc_entry["function"]["arguments"] = "{}"
-                            except (json.JSONDecodeError, ValueError):
-                                llm_log.warning(
-                                    "Malformed tool arguments for '{}': "
-                                    "{} chars — repairing before storing in history",
-                                    tc_entry["function"].get("name", "?"),
-                                    len(raw_args),
-                                )
-                                parsed = _parse_arguments(raw_args)
-                                tc_entry["function"]["arguments"] = json.dumps(parsed)
-
-                reasoning_only = 0
-                msg_dict: dict = {"role": "assistant", "content": final_content}
-                if raw_tool_calls_for_history:
-                    msg_dict["tool_calls"] = raw_tool_calls_for_history
-                if final_reasoning:
-                    msg_dict["reasoning_content"] = final_reasoning
-
-                self.messages.append(msg_dict)
-
-                # 4. Handle tool execution
-                if normalized_tool_calls:
-                    # We use the existing unified execution path
-                    escalated = await self._execute_tool_calls(normalized_tool_calls)
-                    if escalated:
-                        self.cb.on_system_message(
-                            "⚠ Escalation requested. Activity stopped; waiting for user prompt."
-                        )
-                        return
-                    no_tools = False
-                    continue
-
-                # Text-only response — loop finished
-                return
-            finally:
-                emit_event(
-                    "llm", "iteration",
-                    n=iteration_n,
-                    model=self.config.model,
-                    content_len=len(final_content),
-                    reasoning_len=len(final_reasoning),
-                    tool_calls=len(normalized_tool_calls),
-                    hist_tokens=self._total_tokens,
-                    ms=int((time.perf_counter() - iter_started) * 1000),
-                    **self._correlation(),
+            except asyncio.CancelledError as exc:
+                failed_stage = self._failure_stage(stage)
+                if _cancel_requested():
+                    # A task cancellation: the turn did not finish, and it propagates.
+                    llm_log.info("Chat turn cancelled (stage={})", failed_stage)
+                    end.decided = TurnOutcome("cancelled")
+                    propagating = True
+                    raise
+                # Nothing cancelled the task: a tool or library raised it, and the
+                # turn fails like any other.
+                llm_log.opt(exception=True).error(
+                    "Chat turn raised a stray cancellation (stage={})", failed_stage
                 )
+                end.decided = self._failed_by(failed_stage, exc)
+            except Exception as exc:  # noqa: BLE001 - the turn's boundary: any failure becomes the turn's failed outcome, never an escape
+                failed_stage = self._failure_stage(stage)
+                llm_log.opt(exception=True).error("Chat turn raised (stage={})", failed_stage)
+                end.decided = self._failed_by(failed_stage, exc)
+            except BaseException:
+                # KeyboardInterrupt, SystemExit and GeneratorExit end the turn cancelled
+                # and propagate.
+                end.decided = TurnOutcome("cancelled")
+                propagating = True
+                raise
+            finally:
+                if end.decided is None:
+                    end.decided = TurnOutcome(
+                        "failed", "internal", _NO_OUTCOME_TEXT
+                    )
+                self._end_turn(end, thinking_open, content_delivered and not reply_saved)
+                end.finished = True
+                if not propagating and _cancel_count() > end.cancels_at_entry:
+                    # A cancellation may have been requested while the turn ended (a
+                    # receiver that cancels the task, or the first SIGINT under
+                    # asyncio.run), including one that came with the cooperative flag and
+                    # decided `cancelled` (Codex #5). The turn's end awaits nothing, so it
+                    # is delivered here, inside run(): the outer finally then publishes
+                    # `cancelled`. When nothing is pending the await returns and the
+                    # decision stands. An exception already propagating needs none.
+                    end.finished = False
+                    await asyncio.sleep(0)
+                    end.finished = True
+        finally:
+            # Publish once, whatever happened; nothing assigns the outcome earlier.
+            self.outcome = end.final()
+            self.error = self.outcome.message
 
     # -- Tool execution ------------------------------------------------------
 
-    async def _execute_tool_calls(self, tool_calls: List[_ToolCall]) -> bool:
+    async def _execute_tool_calls(
+        self,
+        tool_calls: List[_ToolCall],
+        unattributed: frozenset[str] | set[str] = frozenset(),
+        ui_keys: dict[str, str] | None = None,
+        parsed: dict[str, _ParsedCall] | None = None,
+    ) -> bool:
         """Run a batch in emission order; parallelize safe auto-approved runs.
+
+        A call in ``unattributed`` lost part of its arguments to fragments the stream could not
+        attribute (R9b): it is refused, not run. ``ui_keys`` maps each call's id to the key its
+        item is shown under (R9c); called without it, the batch uses the call ids. ``parsed`` maps
+        each call's id to its arguments, parsed once (R10); called without it, the batch parses
+        each call itself.
 
         Every call gets exactly one tool message, however the batch ends. The
         ``finally`` settles any call the normal path did not append (Ctrl+C
@@ -603,50 +1054,66 @@ class ChatLoop:
         """
         batch = _ToolBatch()
         tool_results_map: dict[str, Any] = {}
+
+        def _key(call_id: str) -> str:
+            """The key a call's item is shown under (R9c)."""
+            return ui_keys.get(call_id, call_id) if ui_keys else call_id
+
+        self._batch_stage = "tools"  # preparing the calls
         try:
             runnable: list[_ToolCall] = []
             confirm_ids: set[str] = set()
             safe_ids: set[str] = set()
             repaired_ids: set[str] = set()
+            # Keyed by the call object, so calls that share an id (a direct caller's) keep their own.
+            parsed_by_call: dict[int, _ParsedCall] = {}
+            for tc in tool_calls:
+                known = parsed.get(tc.id) if parsed else None
+                parsed_by_call[id(tc)] = known if known is not None else _ParsedCall.of(tc.function.arguments)
 
             for tc in tool_calls:
-                # Check for parsing errors injected by XML/JSON fallback protocols
-                if getattr(tc, "error", None):
-                    rd = {
-                        "tool_call_id": tc.id,
-                        "name": "parse_error",
-                        "result": f"Error: {tc.error}",  # type: ignore[attr-defined]
-                    }
-                    tool_results_map[tc.id] = rd
-                    self.cb.on_tool_start(tc.id, "parse_error", {})
-                    self.cb.on_tool_complete(tc.id, rd["result"])
-                    continue
-
                 if not tc.function.name or tc.function.name == "unknown":
                     rd = {
                         "tool_call_id": tc.id,
                         "name": "unknown",
                         "result": "Error: tool name is empty or unknown. You must specify a valid function name.",
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
-                    self.cb.on_tool_start(tc.id, "unknown", {})
-                    self.cb.on_tool_complete(tc.id, rd["result"])
+                    self._display(self._item_started, _key(tc.id), "unknown", {})
+                    self._display(self._item_finished, _key(tc.id), _completion(rd["result"], "error"))
+                    continue
+
+                if tc.id in unattributed:
+                    rd = {
+                        "tool_call_id": tc.id,
+                        "name": tc.function.name,
+                        "result": _UNATTRIBUTED_CALL,
+                        "status": "error",
+                    }
+                    tool_results_map[tc.id] = rd
+                    self._display(self._item_started, _key(tc.id), tc.function.name, {})
+                    self._display(self._item_finished, _key(tc.id), _completion(_UNATTRIBUTED_CALL, "error"))
                     continue
 
                 # Validate that arguments parsed correctly — some providers
                 # (e.g. DeepSeek) send empty/malformed arguments in the native
                 # tool call while putting the real content in reasoning.
-                args, arg_status = _parse_tool_arguments(tc.function.arguments)
+                parsed_call = parsed_by_call[id(tc)]
+                args, arg_status = parsed_call.args, parsed_call.status
                 refusal = _argument_refusal(tc.function.name, arg_status)
                 if refusal is not None:
                     rd = {
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": refusal,
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
-                    self.cb.on_tool_start(tc.id, tc.function.name, args)
-                    self.cb.on_tool_complete(tc.id, refusal)
+                    self._display(
+                        self._item_started, _key(tc.id), tc.function.name, parsed_call.arguments()
+                    )
+                    self._display(self._item_finished, _key(tc.id), _completion(refusal, "error"))
                     continue
                 if arg_status == "repaired":
                     repaired_ids.add(tc.id)
@@ -663,10 +1130,13 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": err_msg,
+                        "status": "error",
                     }
                     tool_results_map[tc.id] = rd
-                    self.cb.on_tool_start(tc.id, tc.function.name, args)
-                    self.cb.on_tool_complete(tc.id, err_msg)
+                    self._display(
+                        self._item_started, _key(tc.id), tc.function.name, parsed_call.arguments()
+                    )
+                    self._display(self._item_finished, _key(tc.id), _completion(err_msg, "error"))
                     tool_log.warning(
                         "Tool '{}' called with missing args {} ({} chars raw, keys={})",
                         tc.function.name,
@@ -679,29 +1149,28 @@ class ChatLoop:
                 runnable.append(tc)
                 if self._tool_needs_confirmation(tc.function.name):
                     confirm_ids.add(tc.id)
-                if is_parallel_safe(tc.function.name, args):
+                if self._guarded(
+                    "parallel_safe predicate", is_parallel_safe, tc.function.name,
+                    parsed_call.arguments(), default=False,
+                ):
                     safe_ids.add(tc.id)
 
             # Show non-empty tools as running
             for tc in tool_calls:
                 if tc.id in tool_results_map:
                     continue
-                args = _parse_arguments(tc.function.arguments)
-                self.cb.on_tool_start(tc.id, tc.function.name, args)
+                self._display(
+                    self._item_started, _key(tc.id), tc.function.name,
+                    parsed_by_call[id(tc)].arguments(),
+                )
 
+            self._batch_stage = "internal"
             escalated = False
 
-            async def _safe_exec(tc_obj):
-                try:
-                    return tc_obj, await self._exec_tool_async(tc_obj, batch)
-                except asyncio.CancelledError:
-                    tool_log.warning("Tool execution cancelled: {}", tc_obj.function.name)
-                    return tc_obj, RuntimeError("Tool execution cancelled")
-                except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the parallel batch still completes
-                    tool_log.opt(exception=True).warning(
-                        "Tool execution failed for '{}'", tc_obj.function.name
-                    )
-                    return tc_obj, e
+            async def _worker(tc_obj):
+                return tc_obj, await self._run_call(
+                    tc_obj, batch, own_task=True, parsed=parsed_by_call[id(tc_obj)]
+                )
 
             # Calls take effect in emission order: a run of parallel-safe,
             # auto-approved calls runs concurrently; every other call runs
@@ -709,7 +1178,7 @@ class ChatLoop:
             custom_instructions = None
             for kind, segment in _plan_tool_segments(runnable, confirm_ids, safe_ids):
                 if kind == "parallel":
-                    tasks = [asyncio.create_task(_safe_exec(tc)) for tc in segment]
+                    tasks = [asyncio.create_task(_worker(tc)) for tc in segment]
                     for worker_task in tasks:
                         self._inflight_tasks.add(worker_task)
                         worker_task.add_done_callback(self._reap_task)
@@ -725,41 +1194,51 @@ class ChatLoop:
                         if isinstance(rd, dict):
                             tid = rd["tool_call_id"]
                             result = str(rd["result"])
-                            self.cb.on_tool_complete(tid, result)
+                            self._display(
+                                self._item_finished, _key(tid), _completion(result, rd.get("status"))
+                            )
                         else:
-                            self.cb.on_tool_complete(tc.id, f"Error: {rd}")
+                            self._display(
+                                self._item_finished, _key(tc.id), _completion(f"Error: {rd}", "error")
+                            )
                     continue
 
                 tc = segment[0]
                 name = tc.function.name
-                args = _parse_arguments(tc.function.arguments)
+                args = parsed_by_call[id(tc)].arguments()
 
+                self._batch_stage = "confirmation"
                 confirm = await self.cb.request_confirmation(name, args)
+                self._batch_stage = "internal"
 
                 if confirm is not None and getattr(confirm, "action", None) == "approve":
                     # The same cancel-gated worker as the parallel path.
-                    rd = await self._exec_tool_async(tc, batch)
+                    rd = await self._run_call(
+                        tc, batch, own_task=False, parsed=parsed_by_call[id(tc)]
+                    )
                     result = str(rd["result"])
                     tool_results_map[tc.id] = rd
 
                     # Notify UI
-                    self.cb.on_tool_complete(tc.id, result)
+                    self._display(
+                        self._item_finished, _key(tc.id), _completion(result, rd.get("status"))
+                    )
 
                 elif confirm is not None and getattr(confirm, "action", None) == "instruct":
                     # User provided instructions instead of approval
                     custom_instructions = getattr(confirm, "instructions", None)
                     denied_msg = "Tool call skipped by user instruction."
-                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg, "status": "denied"}
                     tool_results_map[tc.id] = rd
-                    self.cb.on_tool_complete(tc.id, denied_msg)
+                    self._display(self._item_finished, _key(tc.id), _completion(denied_msg, "denied"))
                     break  # No later call runs once the user redirects the turn
                 else:
                     # User denied tool — still must add a result so the LLM sees
                     # a valid tool_call → tool_result sequence (required by API)
                     denied_msg = "Tool call denied by user."
-                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg}
+                    rd = {"tool_call_id": tc.id, "name": name, "result": denied_msg, "status": "denied"}
                     tool_results_map[tc.id] = rd
-                    self.cb.on_tool_complete(tc.id, denied_msg)
+                    self._display(self._item_finished, _key(tc.id), _completion(denied_msg, "denied"))
 
             # Ensure every tool_call has a result (API requires it)
             for tc in tool_calls:
@@ -769,8 +1248,9 @@ class ChatLoop:
                         "tool_call_id": tc.id,
                         "name": tc.function.name,
                         "result": skipped_msg,
+                        "status": "skipped",
                     }
-                    self.cb.on_tool_complete(tc.id, skipped_msg)
+                    self._display(self._item_finished, _key(tc.id), _completion(skipped_msg, "skipped"))
 
             # Process results in correct order -> append tool messages
             for tc in tool_calls:
@@ -797,14 +1277,14 @@ class ChatLoop:
                             "role": "tool",
                             "tool_call_id": tid,
                             "name": name,
-                            "content": result + self._repeat_note(tc),
+                            "content": result + self._repeat_note(tc, parsed_by_call[id(tc)]),
                         }
                     )
                     batch.appended.add(tc.id)
                 else:
                     # rd_result is BaseException (includes Exception)
                     err_id, err_name = tc.id, tc.function.name
-                    error_msg = f"Error: {rd_result}" + self._repeat_note(tc)
+                    error_msg = f"Error: {rd_result}" + self._repeat_note(tc, parsed_by_call[id(tc)])
                     if tc.id in repaired_ids:
                         error_msg = _REPAIRED_PREFIX + error_msg
                     tool_log.trace(
@@ -823,12 +1303,54 @@ class ChatLoop:
             if custom_instructions:
                 self.messages.append({"role": "user", "content": custom_instructions})
 
-            self.cb.on_tools_cleanup()
+            self._display(self._cleanup)
             return escalated
         finally:
-            self._settle_tool_batch(tool_calls, batch, tool_results_map)
+            self._settle_tool_batch(tool_calls, batch, tool_results_map, _key)
 
-    async def _exec_tool_async(self, tc, batch: "_ToolBatch | None" = None) -> dict:
+    async def _run_call(
+        self, tc, batch: "_ToolBatch", *, own_task: bool, parsed: _ParsedCall | None = None
+    ) -> dict:
+        """Run one call and return its result dict, however it ends.
+
+        A call that raises becomes its result. The worker records its own
+        failure, bounded, under the batch lock; this publishes one only when
+        the worker did not, so the collector, the confirmed path and
+        settlement all read the same dict. ``own_task`` is True for a worker
+        task of a parallel segment: it converts every ``CancelledError``. On
+        the confirmed path the caller's own task runs this, so a task
+        cancellation re-raises and only a stray ``CancelledError`` (a tool or
+        library raised it) is converted.
+        """
+        failure: BaseException
+        try:
+            return await self._exec_tool_async(tc, batch, parsed)
+        except asyncio.CancelledError as cancelled:
+            if not own_task and _cancel_requested():
+                raise
+            tool_log.warning("Tool execution cancelled: {}", tc.function.name)
+            failure = cancelled
+        except Exception as e:  # noqa: BLE001 - tool boundary: a raising tool becomes that call's result so the batch still completes
+            tool_log.opt(exception=True).warning(
+                "Tool execution failed for '{}'", tc.function.name
+            )
+            failure = e
+        name = tc.function.name
+        with batch.lock:
+            recorded = batch.results.get(tc.id)
+            if recorded is None:
+                recorded = {
+                    "tool_call_id": tc.id,
+                    "name": name,
+                    "result": _failure_text(name, failure),
+                    "status": "error",
+                }
+                batch.results[tc.id] = recorded
+        return recorded
+
+    async def _exec_tool_async(
+        self, tc, batch: "_ToolBatch | None" = None, parsed: _ParsedCall | None = None
+    ) -> dict:
         """Execute a single tool call through the shared execution policy path.
 
         The worker thread owns the call's lifecycle, so it survives the
@@ -844,41 +1366,61 @@ class ChatLoop:
            history or reaches the UI; the batch's settlement reads the record.
         """
         name = tc.function.name
-        args = _parse_arguments(tc.function.arguments)
+        # The executor's own deep copy of the validated arguments; called directly, it parses them.
+        args = (parsed if parsed is not None else _ParsedCall.of(tc.function.arguments)).arguments()
         policy = ExecutionPolicy(self.config.permissions)
         state = batch if batch is not None else _ToolBatch()
 
         def run() -> dict:
-            with state.lock:
-                if state.cancelled.is_set() or self.cb.is_cancelled() is True:
-                    return {"tool_call_id": tc.id, "name": name, "result": _CANCELLED_BEFORE_RUN}
-                state.started.add(tc.id)
-            started = time.perf_counter()
-            returned = False
+            settled = False  # True once no exception can leave the worker any more
+            reached = False  # True once the call is handed to the policy
+            started = 0.0
             try:
+                with state.lock:
+                    if state.cancelled.is_set() or self.cb.is_cancelled() is True:
+                        settled = True
+                        return {
+                            "tool_call_id": tc.id,
+                            "name": name,
+                            "result": _CANCELLED_BEFORE_RUN,
+                            "status": "not_run",
+                        }
+                    state.started.add(tc.id)
+                reached = True
+                started = time.perf_counter()
                 exec_result = policy.execute_with_registry(
                     ToolRequest(name, args),
                     self.registry,
                     pre_approved=True,
                 )
-                returned = True
+                settled = True
             finally:
-                if not returned:
-                    # The policy call raised (e.g. a middleware's
-                    # PermissionError). Record the terminal outcome and emit
-                    # its completion event here, in the worker, so neither is
-                    # lost if the waiter is cancelled; the exception still
-                    # propagates unchanged to the waiter.
+                if not settled:
+                    # The start check or the policy call raised (e.g. a
+                    # middleware's PermissionError). Record the terminal
+                    # outcome here, in the worker, so it is not lost if the
+                    # waiter is cancelled; the exception still propagates
+                    # unchanged to the waiter. Only a call that reached the
+                    # policy emits its completion event.
                     raised = sys.exc_info()[1]
-                    failed = ExecutionResult(success=False, error=raised)
-                    failure = _truncate_for_tool(name, f"Error: {raised}")
+                    failure = {
+                        "tool_call_id": tc.id,
+                        "name": name,
+                        "result": _failure_text(name, raised),
+                        "status": "error",
+                    }
                     with state.lock:
-                        state.results[tc.id] = {
-                            "tool_call_id": tc.id, "name": name, "result": failure,
-                        }
-                    self._emit_tool_call(name, args, started, failed)
+                        state.results[tc.id] = failure
+                    if reached:
+                        failed = ExecutionResult(success=False, error=raised)
+                        self._emit_tool_call(name, args, started, failed)
             result = _truncate_for_tool(name, _unwrap_exec_result(exec_result))
-            rd = {"tool_call_id": tc.id, "name": name, "result": result}
+            rd = {
+                "tool_call_id": tc.id,
+                "name": name,
+                "result": result,
+                "status": _result_status(exec_result),
+            }
             with state.lock:
                 state.results[tc.id] = rd
             self._emit_tool_call(name, args, started, exec_result)
@@ -891,6 +1433,7 @@ class ChatLoop:
         tool_calls: List[_ToolCall],
         batch: "_ToolBatch",
         tool_results_map: dict[str, Any],
+        key_of: Callable[[str], str] = lambda call_id: call_id,
     ) -> None:
         """Append one tool message for every call the batch did not append.
 
@@ -899,8 +1442,10 @@ class ChatLoop:
         its snapshot of started calls and recorded results under the lock.
         Each unsettled call then gets, in call order: its collected or
         recorded result; the interrupted notice if a worker had started it;
-        or the cancelled notice. No UI callback runs here. On a normal batch
-        every call is already appended and this appends nothing.
+        or the cancelled notice. No UI callback runs here: each call's text and
+        status are published to the turn's item tracker, and the turn's end finishes
+        the items (R4b). On a normal batch every call is already appended and this
+        appends nothing.
         """
         with batch.lock:
             batch.cancelled.set()
@@ -910,29 +1455,32 @@ class ChatLoop:
             if tc.id in batch.appended:
                 continue
             rd = tool_results_map.get(tc.id, recorded.get(tc.id))
+            status: str | None
             if isinstance(rd, dict):
-                name, content = rd["name"], str(rd["result"])
+                name, content, status = rd["name"], str(rd["result"]), rd.get("status")
             elif rd is not None:
-                name, content = tc.function.name, f"Error: {rd}"
+                name, content, status = tc.function.name, f"Error: {rd}", "error"
             elif tc.id in started:
-                name, content = tc.function.name, _INTERRUPTED_WHILE_RUNNING
+                name, content, status = tc.function.name, _INTERRUPTED_WHILE_RUNNING, "interrupted"
             else:
-                name, content = tc.function.name, _CANCELLED_BEFORE_RUN
+                name, content, status = tc.function.name, _CANCELLED_BEFORE_RUN, "not_run"
             self.messages.append(
                 {"role": "tool", "tool_call_id": tc.id, "name": name, "content": content}
             )
             batch.appended.add(tc.id)
+            self._items.published[key_of(tc.id)] = (content, status)
 
     # -- Helpers -------------------------------------------------------------
 
-    def _repeat_note(self, tc: _ToolCall) -> str:
+    def _repeat_note(self, tc: _ToolCall, parsed: _ParsedCall | None = None) -> str:
         """Count ``tc`` in the run's call sequence; the note from its 3rd repeat on.
 
         Polling a status legitimately repeats a call, so the note never blocks
         it and only asks the model to check whether the result changed.
         """
         name = tc.function.name
-        canonical = canonicalize_arguments(name, _parse_arguments(tc.function.arguments))
+        args = parsed.args if parsed is not None else _parse_arguments(tc.function.arguments)
+        canonical = canonicalize_arguments(name, args)
         sig = (name, json.dumps(canonical, sort_keys=True, default=str))
         if sig == self._last_call_sig:
             self._repeat_count += 1
@@ -1048,6 +1596,65 @@ def _truncate_for_tool(tool_name: str, content: str) -> str:
     return truncate_tool_result(content, max_chars=override)
 
 
+def _estimate_tokens(content: str, reasoning: str) -> int:
+    """The loop's own token estimate for a reply the provider reported no usable usage for."""
+    return len(str(content)) // 4 + len(str(reasoning)) // 4
+
+
+def _usage_is_usable(usage: object) -> bool:
+    """Whether provider usage can be counted: a mapping whose ``total_tokens``, when present, is a
+    non-negative ``int`` (a ``bool`` does not count). A mapping without it counts as 0."""
+    if not isinstance(usage, Mapping):
+        return False
+    total = usage.get("total_tokens", 0)
+    return isinstance(total, int) and not isinstance(total, bool) and total >= 0
+
+
+def _cancel_count() -> int:
+    """How many times the current task has been asked to cancel (``Task.cancel()``)."""
+    task = asyncio.current_task()
+    return 0 if task is None else task.cancelling()
+
+
+def _cancel_requested() -> bool:
+    """Whether the current task has been asked to cancel (``Task.cancel()``).
+
+    A ``CancelledError`` that arrives while this is False was raised by a tool
+    or a library, not by a cancellation of the task: it is that call's failure.
+    """
+    return _cancel_count() > 0
+
+
+def _completion(text: str, status: str | None) -> str:
+    """What ``on_tool_complete`` receives: the text with its status when the loop knows one (R4a).
+
+    History keeps the plain text. A result with no known status stays a plain ``str``, so a
+    receiver's own text rule still applies to it.
+    """
+    return ToolResultText(text, status) if status else text
+
+
+def _result_status(exec_result: Any) -> str | None:
+    """The status of an executed call: ``error`` for a failed execution, ``ok`` for a
+    ``ToolSuccess``, and None for a plain string (the agent tool's handler, some plugins)."""
+    if not hasattr(exec_result, "success"):  # a test double may return a bare string
+        return None
+    if not exec_result.success:
+        return "error"
+    return "ok" if isinstance(exec_result.result, ToolSuccess) else None
+
+
+def _failure_text(tool_name: str, exc: BaseException | None) -> str:
+    """The bounded result text of a call that raised instead of returning.
+
+    A ``CancelledError`` reads ``Error: Tool execution cancelled`` (its own
+    text is empty); any other exception reads ``Error: <exception>``.
+    """
+    if isinstance(exc, asyncio.CancelledError):
+        return _truncate_for_tool(tool_name, "Error: Tool execution cancelled")
+    return _truncate_for_tool(tool_name, f"Error: {exc}")
+
+
 def _parse_tool_arguments(arguments) -> tuple[dict, str]:
     """Parse tool call arguments and say how trustworthy the result is.
 
@@ -1069,7 +1676,9 @@ def _parse_tool_arguments(arguments) -> tuple[dict, str]:
     return args, status[0]
 
 
-def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
+def _parse_arguments(
+    arguments, status: list[str] | None = None, strict: list[bool] | None = None
+) -> dict:
     """Safely parse tool call arguments (str or dict) to a dict.
 
     When the LLM hits its output token limit, the streamed JSON may be
@@ -1078,7 +1687,8 @@ def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
     truncated JSON by closing open strings/braces before giving up.
 
     When ``status`` is given, the parse status (see ``_parse_tool_arguments``)
-    is appended to it. Non-object values yield ``{}``.
+    is appended to it. When ``strict`` is given, True is appended if the text was
+    JSON that decodes to an object as it stands. Non-object values yield ``{}``.
     """
     def _done(args: dict, outcome: str) -> dict:
         if status is not None:
@@ -1111,6 +1721,8 @@ def _parse_arguments(arguments, status: list[str] | None = None) -> dict:
         tool_log.warning("Could not recover tool arguments — using empty dict")
         return _done({}, "ok")
     if isinstance(decoded, dict):
+        if strict is not None:
+            strict.append(True)
         return _done(decoded, "ok")
     return _done({}, "invalid")
 
@@ -1200,20 +1812,277 @@ def _describe_llm_error(exc: BaseException) -> str:
     return f"{text} - {detail}"
 
 
+class _UiKeys:
+    """The keys a chat's tool items are shown under, unique in the session (R9c).
+
+    The chat view keeps one item per key for the whole chat, so a provider id that a later
+    response repeats (native Ollama restarts its ids on every request), or a placeholder
+    (``idx_N``, ``dummy_N``), must not become a key twice. A provider id that is non-empty, not a
+    placeholder and not used before is its own key; any other call gets ``<id or "call">#<n>``,
+    where ``n`` counts up on this object and skips every key already used, literal or generated.
+    """
+
+    _PLACEHOLDERS = ("idx_", "dummy_")
+
+    def __init__(self) -> None:
+        self._used: set[str] = set()
+        self._counter = 0
+
+    def take(self, provider_id: str) -> str:
+        """The key for a call that arrives with ``provider_id``; it is never handed out again."""
+        key = provider_id
+        if not key or key.startswith(self._PLACEHOLDERS) or key in self._used:
+            base = provider_id or "call"
+            while True:
+                self._counter += 1
+                key = f"{base}#{self._counter}"
+                if key not in self._used:
+                    break
+        self._used.add(key)
+        return key
+
+
+class _ToolCallAssembler:
+    """Builds one response's tool calls from the provider's streamed deltas (seam A, R9).
+
+    A delta carries an optional stream index, an id, a name and an argument fragment. With an
+    index it addresses that slot; without one it continues the most recent call with the same id,
+    unless it names a different tool, which opens a new call. A name that arrives after the id
+    still names the call, a placeholder ``idx_`` id gives way to the real one, and a slot that was
+    padded to reach a later index takes the id and name of the first delta that fills it. A slot no
+    delta fills is absent. Arguments accumulate in a parts list, joined once per call.
+
+    A fragment with no key at all (no index, id or name; GLM and Qwen drop the index) continues the
+    most recent call only while every earlier call is sealed, that is, its arguments are non-empty
+    text that decodes to a JSON object. A call is judged once, when the next call opens, so a long
+    argument stream is never decoded per fragment. Any other fragment is refused (R9b, D6): it joins
+    one shared nameless call, which is refused for its missing name, and every call that is not
+    sealed at that point is marked, so that it does not run.
+
+    Each call also gets its UI key when it opens (R9c), from the chat's ``_UiKeys``. The key stays
+    with the call when a real id replaces a placeholder one; a split call's first child inherits its
+    parent's key (R9d), and the other children take keys of their own.
+    """
+
+    def __init__(self, keys: _UiKeys) -> None:
+        self._keys = keys
+        # Each slot: {"id", "name", "parts", "signature", "filled", "sealed", "unattributed", "key"}.
+        self._slots: list[dict] = []
+        self._latest: dict | None = None  # the call opened last
+        self._earlier_unsealed = False  # a call was judged unsealed when the next one opened
+        # The nameless call that collects refused fragments. It is not a slot: the provider's indices
+        # address ``_slots`` only, so an indexed delta can neither name nor extend it. It sits in
+        # the call order after the first ``_refused_at`` slots.
+        self._refused: dict | None = None
+        self._refused_at = 0
+        self._refused_count = 0
+        self._refused_chars = 0
+
+    def add(self, tc: Any) -> tuple[str, str] | None:
+        """Apply one delta. Returns ``(key, name)`` when the call is now announced by name."""
+        slots = self._slots
+        index = getattr(tc, "_stream_index", None)
+        if index is None and not tc.id and not tc.name:
+            self._keyless(tc)
+            return None
+        call = None
+        if index is not None:
+            if index < len(slots):
+                call = slots[index]
+        else:
+            for candidate in reversed(slots):
+                if candidate["filled"] and candidate["id"] == tc.id:
+                    call = candidate
+                    break
+            # An id reused by a different tool is a new call, not a continuation.
+            if call is not None and tc.name and call["name"] and tc.name != call["name"]:
+                call = None
+
+        if call is None or not call["filled"]:
+            signature = getattr(tc, "thought_signature", None)
+            fields = {
+                "id": tc.id,
+                "name": tc.name,
+                "parts": [tc.arguments] if tc.arguments else [],
+                "signature": signature or None,
+                "filled": True,
+                "sealed": None,
+                "unattributed": False,
+                "key": self._keys.take(tc.id),
+            }
+            self._supersede_latest()
+            if call is not None:  # a padded slot that this delta fills
+                call.update(fields)
+            else:
+                call = fields
+                while index is not None and len(slots) < index:
+                    slots.append(
+                        {"id": None, "name": "", "parts": [], "signature": None, "filled": False,
+                         "key": None}
+                    )
+                slots.append(call)
+            self._latest = call
+            return (call["key"], tc.name) if tc.name else None
+
+        # A placeholder id gives way to the real one.
+        if tc.id and not tc.id.startswith("idx_") and call["id"].startswith("idx_"):
+            call["id"] = tc.id
+        started = None
+        # Some providers send the name only on a later delta.
+        if tc.name and not call["name"]:
+            call["name"] = tc.name
+            started = (call["key"], tc.name)
+        if tc.arguments:
+            call["parts"].append(tc.arguments)
+        return started
+
+    @staticmethod
+    def _judge(slot: dict) -> bool:
+        """Whether the call is sealed: non-empty arguments that decode to a JSON object. Cached."""
+        if slot["sealed"] is None:
+            try:
+                slot["sealed"] = isinstance(json.loads("".join(slot["parts"])), dict)
+            except ValueError:  # includes the empty string and every truncated text
+                slot["sealed"] = False
+        return slot["sealed"]
+
+    def _supersede_latest(self) -> None:
+        """A call opens: the one before it is judged, once."""
+        if self._latest is not None and not self._judge(self._latest):
+            self._earlier_unsealed = True
+
+    def _keyless(self, tc: Any) -> None:
+        """A fragment with no key: it continues the latest call, or it is refused."""
+        latest = self._latest
+        if self._refused is None and latest is not None and not self._earlier_unsealed:
+            if tc.arguments:
+                latest["parts"].append(tc.arguments)
+            return
+        if self._refused is None:
+            self._refused = {
+                "id": "", "name": "", "parts": [], "signature": None, "filled": True,
+                "sealed": False, "unattributed": False, "key": self._keys.take(""),
+            }
+            self._refused_at = len(self._slots)
+        self._refused_count += 1
+        self._refused_chars += len(tc.arguments)
+        if tc.arguments:
+            self._refused["parts"].append(tc.arguments)
+        # The calls that are not sealed at this point do not run. Each call is judged once, and
+        # one that was sealed here stays sealed.
+        for slot in self._slots:
+            if slot["filled"] and not self._judge(slot):
+                slot["unattributed"] = True
+
+    def calls(self) -> list[dict]:
+        """The assembled calls in the history's own shape; unfilled slots are absent.
+
+        Each call carries its UI key as ``_key``, and a call that must not run carries
+        ``_unattributed``; ``ui_keys`` and ``refusals`` take those marks off. The one call that
+        collects refused fragments carries ``_refused`` and is never split (R9b).
+        """
+        calls = []
+        for position, slot in enumerate(self._slots):
+            if self._refused is not None and position == self._refused_at:
+                calls.append(self._as_call(self._refused))
+            if slot["filled"]:
+                calls.append(self._as_call(slot))
+        if self._refused is not None and self._refused_at >= len(self._slots):
+            calls.append(self._as_call(self._refused))
+        return calls
+
+    def _as_call(self, slot: dict) -> dict:
+        call = {
+            "id": slot["id"],
+            "type": "function",
+            "function": {"name": slot["name"], "arguments": "".join(slot["parts"])},
+        }
+        # Gemini needs its thought_signature replayed with the call.
+        if slot["signature"]:
+            call["thought_signature"] = slot["signature"]
+        if slot["unattributed"]:
+            call["_unattributed"] = True
+        if slot is self._refused:
+            call["_refused"] = True
+        call["_key"] = slot["key"]
+        return call
+
+    def ui_keys(self, calls: list[dict]) -> dict[str, str]:
+        """Take the keys off the settled calls; returns ``{call id: UI key}``.
+
+        A call the split produced after the first child has no key yet and takes one now.
+        """
+        keys = {}
+        for call in calls:
+            key = call.pop("_key", None)
+            keys[call["id"]] = key if key is not None else self._keys.take(call["id"])
+        return keys
+
+    def refusals(self, calls: list[dict]) -> set[str]:
+        """Take the marks off the settled calls; returns the ids of those that must not run.
+
+        Logs the refused fragments once for the response, as counts only.
+        """
+        if self._refused_count:
+            tool_log.warning(
+                "Refused {} unattributable tool-call fragment(s) ({} chars)",
+                self._refused_count,
+                self._refused_chars,
+            )
+        ids = set()
+        for call in calls:
+            call.pop("_refused", None)
+            if call.pop("_unattributed", False):
+                ids.add(call["id"])
+        return ids
+
+    @staticmethod
+    def settle_ids(calls: list[dict]) -> None:
+        """Give every call a non-empty id that no other call of the response uses (R9a).
+
+        First occurrences keep their ids. A missing id becomes ``call_<position>``, and the k-th
+        occurrence (k >= 2) of an id ``X`` becomes ``X_<k>``; both skip ids the response already
+        uses. Each id generated is logged once, with metadata only.
+        """
+        used = {call["id"] for call in calls if call["id"]}
+        occurrences: dict[str, int] = {}
+        for position, call in enumerate(calls):
+            current = call["id"]
+            if not current:
+                reason, base, k = "missing", f"call_{position}", 1
+            else:
+                k = occurrences.get(current, 0) + 1
+                occurrences[current] = k
+                if k == 1:
+                    continue
+                reason, base = "repeated", current
+            candidate = base if reason == "missing" else f"{base}_{k}"
+            while candidate in used:
+                k += 1
+                candidate = f"{base}_{k}"
+            used.add(candidate)
+            call["id"] = candidate
+            name = call["function"]["name"]
+            tool_log.warning("Tool call id {} in one response; generated a new id for '{}'", reason, name)
+
+
 def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
     """Split tool calls whose arguments contain multiple concatenated JSON objects.
 
     Some models emit all parallel tool calls as a single native tool call with
     arguments like '{...}{...}{...}' instead of separate tool call entries.
     Uses json.JSONDecoder.raw_decode to extract each object without loading the
-    whole string at once.
+    whole string at once. A child's id is ``<parent id>_split_<i>``, and never an id
+    another call of the response already has: every literal provider id is reserved
+    before the first child is named, so a provider's own ``p_split_0`` keeps it.
     """
     result = []
     decoder = json.JSONDecoder()
+    used = {call["id"] for call in raw_tool_calls if call["id"]}
     for raw_tc in raw_tool_calls:
         args_str = raw_tc["function"].get("arguments", "")
-        if not isinstance(args_str, str):
-            result.append(raw_tc)
+        if not isinstance(args_str, str) or raw_tc.get("_unattributed") or raw_tc.get("_refused"):
+            result.append(raw_tc)  # a call that must not run, and the refusal, are never split
             continue
         objects: list[str] = []
         pos = 0
@@ -1240,10 +2109,18 @@ def _expand_concatenated_tool_calls(raw_tool_calls: list[dict]) -> list[dict]:
                 len(objects),
             )
             for i, args in enumerate(objects):
+                child_id = f"{raw_tc['id']}_split_{i}"
+                attempt = 1
+                while child_id in used:
+                    attempt += 1
+                    child_id = f"{raw_tc['id']}_split_{i}_{attempt}"
+                used.add(child_id)
                 result.append({
-                    "id": f"{raw_tc['id']}_split_{i}",
+                    "id": child_id,
                     "type": "function",
                     "function": {"name": raw_tc["function"]["name"], "arguments": args},
+                    # The parent's item becomes the first child's (R9d); the rest open their own.
+                    "_key": raw_tc.get("_key") if i == 0 else None,
                 })
         else:
             result.append(raw_tc)

@@ -47,4 +47,27 @@ class ToolError(str):
         return f"ToolError({super().__repr__()}, category={self.category!r})"
 
 
+class ToolResultText(str):
+    """A tool result's text with the status the chat loop knows for it (R4a).
+
+    ``status`` is ``ok``, ``error``, ``denied``, ``skipped``, ``not_run`` or ``interrupted``. The
+    loop hands it to ``on_tool_complete`` so a receiver can show the real status instead of
+    guessing it from the text; history keeps the plain text.
+    """
+
+    _status: str
+
+    def __new__(cls, value: str, status: str):
+        instance = super().__new__(cls, value)
+        instance._status = status
+        return instance
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    def __repr__(self) -> str:
+        return f"ToolResultText({super().__repr__()}, status={self._status!r})"
+
+
 ToolResult = Union[ToolSuccess, ToolError]

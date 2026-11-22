@@ -297,6 +297,17 @@ def _one_line(
     return Content.assemble(head, tail)
 
 
+# The label and colour of each status the loop reports for a tool call (R4a).
+_TOOL_STATES: dict[str, tuple[str, str]] = {
+    "ok": ("✓ ok", "$success"),
+    "error": ("✗ error", "$error"),
+    "denied": ("✗ denied", "$warning"),
+    "skipped": ("○ skipped", "dim"),
+    "not_run": ("○ not run", "dim"),
+    "interrupted": ("✗ interrupted", "$error"),
+}
+
+
 class ToolBox(_Expandable):
     """One tool call, mounted when the call starts and updated in place."""
 
@@ -305,6 +316,7 @@ class ToolBox(_Expandable):
         self.tool_name = name
         self.arguments = arguments
         self.result: str | None = None
+        self.status: str | None = None  # the loop's status for the call, when it reported one
 
     def update_call(self, name: str, arguments: dict) -> None:
         # The loop announces a call by name first and again once the arguments are in.
@@ -312,16 +324,26 @@ class ToolBox(_Expandable):
         self.arguments = arguments or self.arguments
         self.refresh_item()
 
-    def finish(self, result: str) -> None:
+    def finish(self, result: str, status: str | None = None) -> None:
+        """Show the result. A ``status`` the loop reported decides the label; with none, the
+        text rule applies (a result that begins with "Error" is an error). The first terminal
+        state is kept: a later finish for the same box changes nothing (R4b)."""
+        if self.result is not None:
+            return
         self.result = result
+        self.status = status
         self.remove_class("running")
-        if result.lstrip().startswith("Error"):
+        if status in ("error", "interrupted") or (
+            status is None and result.lstrip().startswith("Error")
+        ):
             self.add_class("-error")
         self.refresh_item()
 
     def _build(self, width: int) -> Content:
         if self.result is None:
             state = ("… running", "$warning")
+        elif self.status is not None:
+            state = _TOOL_STATES[self.status]
         elif self.has_class("-error"):
             state = ("✗ error", "$error")
         else:
@@ -375,7 +397,7 @@ class AgentBox(_Expandable):
         self.status = status
         self.result = result or ""
         self.remove_class("running")
-        if status not in ("done", "completed"):
+        if status not in ("done", "completed", "cancelled"):
             self.add_class("-error")
         self.refresh_item()
 
@@ -387,6 +409,8 @@ class AgentBox(_Expandable):
             state = (f"running {secs}", "$warning")
         elif self.status in ("done", "completed"):
             state = (f"✓ done {secs}", "$success")
+        elif self.status == "cancelled":
+            state = (f"○ cancelled {secs}", "$warning")
         else:
             state = (f"✗ failed {secs}", "$error")
         label = f"— {self.assignment}" if self.assignment else ""
@@ -604,7 +628,9 @@ class ChatView(VerticalScroll):
     def tool_completed(self, call_id: str, result: str) -> None:
         box = self._tool_boxes.get(call_id)
         if box is not None:
-            box.finish(str(result))
+            # Read the status first: str() would drop the carrier that holds it.
+            status = getattr(result, "status", None)
+            box.finish(str(result), status)
 
     def _agent_box(self, run_id: int, name: str) -> AgentBox:
         box = self._agent_boxes.get(run_id)

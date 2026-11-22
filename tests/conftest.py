@@ -8,8 +8,11 @@ bound with `ayder_cli.log.get_logger`.
 from __future__ import annotations
 
 import contextlib
+import functools
 import pathlib
+import signal
 import sys
+import threading
 
 import pytest
 from loguru import logger
@@ -101,6 +104,126 @@ def capture_loguru():
     ModuleNotFoundError from any subdirectory.
     """
     return loguru_capture
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "allows_internal_turn_failure: the test expects a chat turn to end "
+        "failed/internal (the R2 fixture would otherwise fail it)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _turn_integrity(request, monkeypatch):
+    """R2: every chat turn publishes an outcome, and none ends ``failed``/``internal``.
+
+    Wraps ``ChatLoop.run`` and records the outcome of every turn the test
+    enters, reused loops included. A turn that ends ``failed``/``internal``
+    means the loop's own code broke, so it fails the test unless the test
+    carries ``@pytest.mark.allows_internal_turn_failure``. A turn that ends
+    with no outcome fails it too: the outer ``finally`` publishes one.
+    """
+    from ayder_cli.loops.chat_loop import ChatLoop
+
+    original = ChatLoop.run
+    outcomes: list = []
+
+    @functools.wraps(original)
+    async def run(self, *args, **kwargs):
+        try:
+            return await original(self, *args, **kwargs)
+        finally:
+            outcomes.append(self.outcome)
+
+    monkeypatch.setattr(ChatLoop, "run", run)
+    yield
+    problems = []
+    if any(outcome is None for outcome in outcomes):
+        problems.append("a chat turn ended with no outcome")
+    internal = [o for o in outcomes if o is not None and o.status == "failed" and o.stage == "internal"]
+    if internal and request.node.get_closest_marker("allows_internal_turn_failure") is None:
+        problems.append(f"a chat turn ended failed/internal: {internal[0].message}")
+    if problems:
+        pytest.fail("; ".join(problems), pytrace=False)
+
+
+@pytest.fixture
+def probe_tool():
+    """Register temporary tools through the tables the loop and its policy read.
+
+    ``probe_tool(name, parallel_safe=True, max_result_chars=None)`` registers a read-only tool with
+    no required arguments and returns its name; every tool it registered is removed afterwards.
+    """
+    from ayder_cli.tools.definition import (
+        TOOL_DEFINITIONS_BY_NAME,
+        ToolDefinition,
+        register_dynamic_definition,
+    )
+    from ayder_cli.tools.schemas import TOOL_PERMISSIONS
+
+    added: list[str] = []
+
+    def make(name, *, parallel_safe=True, max_result_chars=None):
+        register_dynamic_definition(
+            ToolDefinition(
+                name=name,
+                description="test tool",
+                func_ref="tests.conftest:_unused_tool",
+                parameters={"type": "object", "properties": {}, "required": []},
+                permission="r",
+                parallel_safe=parallel_safe,
+                max_result_chars=max_result_chars,
+            )
+        )
+        TOOL_PERMISSIONS[name] = "r"
+        added.append(name)
+        return name
+
+    yield make
+    for name in added:
+        TOOL_DEFINITIONS_BY_NAME.pop(name, None)
+        TOOL_PERMISSIONS.pop(name, None)
+
+
+def _unused_tool(**kwargs):  # pragma: no cover - func_ref target, never imported
+    return "unused"
+
+
+@pytest.fixture
+def default_sigint_handler():
+    """Python's default SIGINT handler, with everything a signal test could leave behind restored.
+
+    ``asyncio.run`` installs its own handler over the default one, which cancels the main task on
+    the first SIGINT. Restores ``sys.excepthook``, the SIGINT and SIGTERM handlers and the
+    diagnostics flags afterwards.
+    """
+    from ayder_cli import diagnostics
+
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("a signal can only be handled in the main thread")
+    saved_hook = sys.excepthook
+    saved_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    saved_flags = (diagnostics._hooks_installed, diagnostics._signals_installed)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        sys.excepthook = saved_hook
+        for sig, handler in saved_handlers.items():
+            signal.signal(sig, handler)
+        diagnostics._hooks_installed, diagnostics._signals_installed = saved_flags
+
+
+@pytest.fixture
+def diagnostics_sigint_handler(default_sigint_handler):
+    """SIGINT as the CLI runs with it: diagnostics' handler chained over Python's default."""
+    from ayder_cli import diagnostics
+
+    diagnostics._hooks_installed = False
+    diagnostics._signals_installed = False
+    diagnostics.install_exception_hooks()
+    yield
 
 
 @pytest.fixture(autouse=True)
