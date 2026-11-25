@@ -627,6 +627,10 @@ The tool system:
 | **Environment** | `manage_environment_vars` |
 | **Web** | `fetch_web` |
 
+By default, `fetch_web` uses the Chrome profile via `curl_cffi` and accepts `impersonate=none` to opt out.
+HTML is returned as text by default, with `parse=false` for the raw body and `links=true` to include link URLs.
+Pages rendered by JavaScript require a browser MCP server.
+
 When agents are configured, the `agent` tool is also registered so the main LLM can dispatch them (see [Multi-Agent System](#multi-agent-system)).
 
 **Plugin tools** — `python_editor`, `dbs_tool`, virtualenv tools, and MCP integrations ship as optional plugins in the [ayder/ayder-plugins](https://github.com/ayder/ayder-plugins) repo (see [Plugins](#plugins)). Once installed they are auto-discovered exactly like built-ins.
