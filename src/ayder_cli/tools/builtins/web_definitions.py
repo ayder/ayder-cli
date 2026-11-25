@@ -60,6 +60,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "boolean",
                     "description": "Extract readable text from HTML (default: true).",
                 },
+                "links": {
+                    "type": "boolean",
+                    "description": "Include link URLs in extracted text (default: false).",
+                },
             },
             "required": ["url"],
         },

@@ -9,6 +9,7 @@ from html.parser import HTMLParser
 from http import HTTPStatus
 from threading import Lock
 from typing import cast
+from urllib.parse import urljoin
 
 from curl_cffi.requests import Cookies, Session
 from curl_cffi.requests.exceptions import RequestException
@@ -37,15 +38,41 @@ _BLOCK_HTML_TAGS = {
 class _HTMLTextParser(HTMLParser):
     """Collect the title and visible text from an HTML response."""
 
-    def __init__(self) -> None:
+    def __init__(self, base_url: str, links: bool) -> None:
         super().__init__(convert_charrefs=True)
+        self._base_url = base_url
+        self._links = links
         self._hidden_tags: list[str] = []
         self._in_title = False
         self._title_parts: list[str] = []
         self._line_parts: list[str] = []
         self._lines: list[str] = []
+        self._link_url: str | None = None
+        self._link_parts: list[str] = []
+
+    def _start_link(self, attrs: list[tuple[str, str | None]]) -> None:
+        self._finish_link()
+        attributes = dict(attrs)
+        if "href" not in attributes:
+            return
+        try:
+            self._link_url = urljoin(self._base_url, attributes["href"] or "")
+        except ValueError:
+            # A malformed URL leaves the anchor text in the output.
+            pass
+
+    def _finish_link(self) -> None:
+        if self._link_url is None:
+            return
+        text = " ".join("".join(self._link_parts).split())
+        self._line_parts.append(f"[{text}]({self._link_url})")
+        self._link_parts.clear()
+        self._link_url = None
 
     def _finish_line(self, *, keep_empty: bool = False) -> None:
+        if self._link_url is not None:
+            self._link_parts.append(" ")
+            return
         line = " ".join("".join(self._line_parts).split())
         self._line_parts.clear()
         if line or (keep_empty and self._lines and self._lines[-1]):
@@ -59,7 +86,9 @@ class _HTMLTextParser(HTMLParser):
         elif tag == "title":
             self._in_title = True
         elif not self._in_title:
-            if tag == "br":
+            if tag == "a" and self._links:
+                self._start_link(attrs)
+            elif tag == "br":
                 self._finish_line(keep_empty=True)
             elif tag in _BLOCK_HTML_TAGS:
                 self._finish_line()
@@ -71,15 +100,23 @@ class _HTMLTextParser(HTMLParser):
                     pass
         elif tag == "title":
             self._in_title = False
+        elif tag == "a":
+            self._finish_link()
         elif tag in _BLOCK_HTML_TAGS and not self._in_title:
             self._finish_line()
 
     def handle_data(self, data: str) -> None:
-        if not self._hidden_tags:
-            parts = self._title_parts if self._in_title else self._line_parts
-            parts.append(data)
+        if self._hidden_tags:
+            return
+        if self._in_title:
+            self._title_parts.append(data)
+        elif self._link_url is not None:
+            self._link_parts.append(data)
+        else:
+            self._line_parts.append(data)
 
     def get_text(self) -> str:
+        self._finish_link()
         self._finish_line()
         title = " ".join("".join(self._title_parts).split())
         body = "\n".join(self._lines).rstrip("\n")
@@ -87,8 +124,7 @@ class _HTMLTextParser(HTMLParser):
 
 
 def _html_to_text(html: str, base_url: str, links: bool) -> str:
-    # The URL and link setting are reserved for link rendering.
-    parser = _HTMLTextParser()
+    parser = _HTMLTextParser(base_url, links)
     try:
         parser.feed(html)
         parser.close()
@@ -132,6 +168,7 @@ def fetch_web(
     follow_redirects: bool = True,
     impersonate: str = "chrome",
     parse: bool = True,
+    links: bool = False,
 ) -> str:
     """Fetch a URL with an HTTP request and return a text summary for the LLM."""
     try:
@@ -207,7 +244,7 @@ def fetch_web(
             media_type = content_type.partition(";")[0].strip().lower()
             if parse and media_type in _HTML_MEDIA_TYPES:
                 raw_length = len(content)
-                content = _html_to_text(content, response.url, links=False)
+                content = _html_to_text(content, response.url, links=links)
                 extraction_note = f", text extracted from {raw_length} chars of HTML"
 
             truncated = content[:max_content_chars]

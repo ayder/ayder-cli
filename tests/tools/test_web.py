@@ -229,6 +229,48 @@ def test_fetch_web_definition_declares_parse():
     assert properties["parse"]["type"] == "boolean"
 
 
+@pytest.fixture
+def linked_web_response(web_response):
+    web_response.url = "https://shop.example/list/page2"
+    web_response.text = (
+        '<a href="p/1">Item one</a> <a href="https://other.example/x">Ext</a>'
+    )
+    return web_response
+
+
+def test_fetch_web_renders_links_relative_to_final_url(linked_web_response):
+    result = fetch_web("https://shop.example/go/start", links=True)
+
+    body = "\n".join(_body_lines(result)[1:])
+    assert "[Item one](https://shop.example/list/p/1)" in body
+    assert "[Ext](https://other.example/x)" in body
+
+
+def test_fetch_web_keeps_link_text_when_links_are_disabled(linked_web_response):
+    result = fetch_web("https://shop.example/go/start", links=False)
+
+    body = "\n".join(_body_lines(result)[1:])
+    assert "Item one" in body
+    assert "p/1" not in body
+
+
+def test_fetch_web_keeps_plain_text_for_anchor_without_href(web_response):
+    web_response.text = '<a name="top">Top</a>'
+
+    result = fetch_web("https://example.com", links=True)
+
+    body = "\n".join(_body_lines(result)[1:])
+    assert "Top" in body
+    assert "[" not in body
+
+
+def test_fetch_web_definition_declares_links():
+    properties = TOOL_DEFINITIONS_BY_NAME["fetch_web"].parameters["properties"]
+
+    assert "links" in properties
+    assert properties["links"]["type"] == "boolean"
+
+
 def test_fetch_web_defaults_to_get():
     response = Mock(
         status_code=200,
