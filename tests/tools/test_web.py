@@ -181,7 +181,10 @@ def test_fetch_web_preserves_text_recovered_before_parser_error(web_response, in
     result = fetch_web("https://example.com")
 
     assert isinstance(result, ToolSuccess)
-    assert _body_lines(result)[1:] == ["before"]
+    # The oversized reference stops every parser after "before". The unknown marked
+    # section stops Python 3.12.9's; newer patch releases (3.12.16, 3.13, 3.14) step
+    # over it and also return "after".
+    assert _body_lines(result)[1:] in (["before"], ["before", "after"])
 
 
 def test_fetch_web_truncates_after_html_extraction(web_response):
