@@ -209,6 +209,17 @@ class TestManageEnvironmentVarsGenerate:
         assert env_path.exists()
         assert "NEW_SECRET=" in env_path.read_text()
 
+    def test_generate_failed_write_leaves_no_env_file(self, project_context, tmp_path):
+        """A write that fails removes the .env this call created."""
+        result = impl.manage_environment_vars(
+            project_context,
+            mode="generate",
+            variable_name="BAD_\ud800",  # a lone surrogate cannot be written as UTF-8
+        )
+
+        assert isinstance(result, ToolError)
+        assert not (tmp_path / ".env").exists()
+
 
 class TestManageEnvironmentVarsSet:
     """Test set mode of manage_environment_vars."""
@@ -273,6 +284,32 @@ class TestManageEnvironmentVarsSet:
         
         assert isinstance(result, ToolError)
         assert "value is required" in result
+
+    def test_set_failed_write_leaves_no_env_file(self, project_context, tmp_path):
+        """A write that fails removes the .env this call created."""
+        result = impl.manage_environment_vars(
+            project_context,
+            mode="set",
+            variable_name="NEW_VAR",
+            value="\ud800",  # a lone surrogate cannot be written as UTF-8
+        )
+
+        assert isinstance(result, ToolError)
+        assert not (tmp_path / ".env").exists()
+
+    def test_set_failed_write_keeps_existing_env_file(self, project_context, sample_env_file):
+        """A write that fails leaves a .env that was already there as it was."""
+        before = sample_env_file.read_text()
+
+        result = impl.manage_environment_vars(
+            project_context,
+            mode="set",
+            variable_name="NEW_VAR",
+            value="\ud800",
+        )
+
+        assert isinstance(result, ToolError)
+        assert sample_env_file.read_text() == before
 
     def test_set_empty_value(self, project_context, tmp_path):
         """Test setting a variable to empty string."""
