@@ -300,7 +300,7 @@ drivers, the registry, or `OllamaProvider` are required.
 | `tools/builtins/task_tool.py` | `task` tool (`action`: create / list / show / status / update_status / update / update_dependencies) | `task()` |
 | `tools/builtins/tasks.py` | Task file helpers used by the `task` tool and `TaskRunner` | `create_task()`, `list_tasks()`, `show_task()`, `resolve_task_path()` |
 | `tools/builtins/skill.py` | Skill tool impl | `skill()`, `discover_skills()` |
-| `tools/builtins/web.py` | HTTP fetch tool | `fetch_web()` |
+| `tools/builtins/web.py` | HTTP fetch tool using `curl_cffi` with Chrome impersonation and HTML text extraction | `fetch_web()` |
 | `tools/builtins/utils_tools.py` | Misc utility tools | `manage_environment_vars()` |
 | `tools/builtins/*_definitions.py` | Per-domain tool definitions (10 files) | `TOOL_DEFINITIONS` tuples auto-discovered at import |
 

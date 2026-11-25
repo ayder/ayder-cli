@@ -13,7 +13,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
         name="fetch_web",
         description=(
             "Fetch a URL over HTTP(S) and return response details and text content. "
-            "Session cookies are persisted across fetch_web calls within the same process."
+            "HTML is returned as extracted text; parse=false returns the raw body "
+            "and links=true keeps link URLs. impersonate=chrome sends a Chrome "
+            "browser identity, impersonate=none a plain client identity. Cookies "
+            "persist across fetch_web calls within the same process."
         ),
         description_template="Web URL '{url}' will be fetched with method '{method}'",
         tags=("http",),
@@ -50,6 +53,19 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                 "follow_redirects": {
                     "type": "boolean",
                     "description": "Whether to follow HTTP redirects (default: true)",
+                },
+                "impersonate": {
+                    "type": "string",
+                    "enum": ["chrome", "none"],
+                    "description": "Chrome profile or no profile (default: chrome).",
+                },
+                "parse": {
+                    "type": "boolean",
+                    "description": "Extract readable text from HTML (default: true).",
+                },
+                "links": {
+                    "type": "boolean",
+                    "description": "Include link URLs in extracted text (default: false).",
                 },
             },
             "required": ["url"],

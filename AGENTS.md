@@ -19,7 +19,8 @@ This document provides coding standards, tool configurations, and workflows for 
 | **openai** | OpenAI-compatible API client for LLM calls | latest |
 | **ollama** | Native Ollama API client (Ollama provider) | >=0.6.2 |
 | **loguru** | Logging backend (channel loggers, masking sinks) | >=0.7,<0.8 |
-| **httpx** | HTTP client for `fetch_web` | latest |
+| **httpx** | Config wizard URL-error handling, Ollama retry classification, library log filtering, and mock transports and HTTP errors in tests | latest |
+| **curl_cffi** | HTTP client for `fetch_web` | >=0.17,<1 |
 | **mcp** | Model Context Protocol client (built-in MCP) | >=1.19,<2 |
 | **rich** | Rich text and beautiful formatting | >=13.0.0 |
 | **textual** | Terminal User Interface (TUI) framework | ==8.2.8 |
