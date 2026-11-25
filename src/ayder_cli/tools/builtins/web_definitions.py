@@ -51,6 +51,11 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "type": "boolean",
                     "description": "Whether to follow HTTP redirects (default: true)",
                 },
+                "impersonate": {
+                    "type": "string",
+                    "enum": ["chrome", "none"],
+                    "description": "Chrome profile or no profile (default: chrome).",
+                },
             },
             "required": ["url"],
         },

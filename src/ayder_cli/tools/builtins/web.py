@@ -15,6 +15,7 @@ from curl_cffi.requests.session import HttpMethod
 
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.log import get_logger
+from ayder_cli.version import __version__
 
 logger = get_logger("tool")
 
@@ -55,6 +56,7 @@ def fetch_web(
     timeout_seconds: int = 30,
     max_content_chars: int = 20000,
     follow_redirects: bool = True,
+    impersonate: str = "chrome",
 ) -> str:
     """Fetch a URL with an HTTP request and return a text summary for the LLM."""
     try:
@@ -78,8 +80,17 @@ def fetch_web(
             return ToolError(
                 "Error: max_content_chars must be at least 1", "validation"
             )
+        if impersonate not in ("chrome", "none"):
+            return ToolError(
+                "Error: impersonate must be one of chrome, none", "validation"
+            )
 
         normalized_headers = _normalize_headers(headers)
+        if impersonate == "none":
+            normalized_headers = normalized_headers or {}
+            if not any(name.lower() == "user-agent" for name in normalized_headers):
+                normalized_headers["User-Agent"] = f"ayder-cli/{__version__}"
+
         with Session(cookies=_snapshot_cookies()) as session:
             response = session.request(
                 cast(HttpMethod, normalized_method),
@@ -88,6 +99,7 @@ def fetch_web(
                 data=body or None,
                 timeout=timeout_seconds,
                 allow_redirects=follow_redirects,
+                impersonate=None if impersonate == "none" else impersonate,
             )
             _merge_cookies(session.cookies)
 
@@ -107,6 +119,7 @@ def fetch_web(
             f"Final URL: {response.url}",
             f"Status: {status}",
             f"Content-Type: {response.headers.get('content-type', 'unknown')}",
+            f"Impersonate: {impersonate}",
             "",
         ]
 

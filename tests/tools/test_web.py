@@ -9,6 +9,8 @@ from curl_cffi.requests.exceptions import RequestException
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.tools.builtins import web
 from ayder_cli.tools.builtins.web import fetch_web
+from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
+from ayder_cli.version import __version__
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +29,62 @@ def _mock_session(
     session.request.return_value = response
     session.request.side_effect = side_effect
     return session
+
+
+@pytest.fixture
+def impersonation_session_factory():
+    response = Mock(
+        status_code=200,
+        reason="OK",
+        url="https://example.com",
+        headers={"content-type": "text/plain"},
+        text="hello world",
+        cookies=Cookies(),
+    )
+    session = _mock_session(response=response)
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session) as factory:
+        yield factory
+
+
+def test_fetch_web_impersonates_chrome_by_default(impersonation_session_factory):
+    result = fetch_web("https://example.com")
+
+    request_kwargs = impersonation_session_factory.return_value.request.call_args.kwargs
+    assert request_kwargs.get("impersonate") == "chrome"
+    assert "Impersonate: chrome" in result.splitlines()
+
+
+def test_fetch_web_can_disable_impersonation(impersonation_session_factory):
+    result = fetch_web("https://example.com", impersonate="none")
+
+    request_kwargs = impersonation_session_factory.return_value.request.call_args.kwargs
+    assert "impersonate" in request_kwargs
+    assert request_kwargs["impersonate"] is None
+    assert request_kwargs["headers"] == {"User-Agent": f"ayder-cli/{__version__}"}
+    assert "Impersonate: none" in result.splitlines()
+
+
+def test_fetch_web_preserves_caller_user_agent(impersonation_session_factory):
+    fetch_web("https://example.com", impersonate="none", headers={"user-agent": "probe/1"})
+
+    request_kwargs = impersonation_session_factory.return_value.request.call_args.kwargs
+    assert request_kwargs["headers"] == {"user-agent": "probe/1"}
+
+
+def test_fetch_web_rejects_unknown_impersonation(impersonation_session_factory):
+    result = fetch_web("https://example.com", impersonate="firefox")
+
+    assert isinstance(result, ToolError)
+    assert result.category == "validation"
+    assert "chrome" in result and "none" in result
+    impersonation_session_factory.assert_not_called()
+
+
+def test_fetch_web_definition_declares_impersonation():
+    properties = TOOL_DEFINITIONS_BY_NAME["fetch_web"].parameters["properties"]
+
+    assert "impersonate" in properties
+    assert properties["impersonate"]["enum"] == ["chrome", "none"]
 
 
 def test_fetch_web_defaults_to_get():
@@ -54,6 +112,7 @@ def test_fetch_web_defaults_to_get():
         data=None,
         timeout=30,
         allow_redirects=True,
+        impersonate="chrome",
     )
 
 
@@ -120,6 +179,7 @@ def test_fetch_web_supports_post_with_body_and_headers():
         data='{"name":"ayder"}',
         timeout=30,
         allow_redirects=True,
+        impersonate="chrome",
     )
 
 
