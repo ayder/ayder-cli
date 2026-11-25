@@ -232,6 +232,7 @@ class AyderApp(App):
         provider: str | None = None,
         initial_messages: list[dict] | None = None,
         resume_session_id: str | None = None,
+        resume_scratch_dir: str | None = None,
         log_settings=None,
         first_run: bool = False,
         **kwargs,
@@ -326,6 +327,7 @@ class AyderApp(App):
             prompt_tier="AGENTIC" if agent_mode else None,
             model_name=None if model == "default" else model,
             system_prompt_override=system_prompt_override,
+            resume_scratch_dir=resume_scratch_dir,
         )
         self.config = rt.config
         self._environment_prompt = rt.environment_prompt

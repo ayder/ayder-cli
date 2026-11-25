@@ -187,3 +187,28 @@ def test_legacy_session_has_no_provider(tmp_path):
     data.pop("provider", None)
     path.write_text(json.dumps(data), encoding="utf-8")
     assert load_session(sid, root=tmp_path).provider is None
+
+
+def test_scratch_dir_roundtrip(tmp_path):
+    """Baseline regression (live session): a resumed session got a new scratch directory,
+    and the file tools refused the one its history kept using."""
+    scratch = tmp_path / "scratch" / "20261125-151818-271ec0"
+    sid = save_session(_msgs(), root=tmp_path, scratch_dir=scratch)
+    assert load_session(sid, root=tmp_path).scratch_dir == str(scratch)
+
+
+def test_persist_and_announce_saves_the_scratch_dir(tmp_path):
+    """Baseline regression: the exit-time save is what a resume reads."""
+    scratch = tmp_path / "scratch" / "20261125-151818-271ec0"
+    sid = persist_and_announce(_msgs(), root=tmp_path, scratch_dir=scratch, out=lambda *_: None)
+    assert load_session(sid, root=tmp_path).scratch_dir == str(scratch)
+
+
+def test_legacy_session_has_no_scratch_dir(tmp_path):
+    """Preservation: files saved before the field load with None."""
+    sid = save_session(_msgs(), root=tmp_path)
+    path = sessions_dir(tmp_path) / f"{sid}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("scratch_dir", None)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert load_session(sid, root=tmp_path).scratch_dir is None

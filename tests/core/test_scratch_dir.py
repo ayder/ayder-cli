@@ -113,3 +113,97 @@ class TestSandbox:
         result = file_editor(ctx, str(target), "write", content="print(1)\n")
         assert "Error" not in str(result)
         assert target.read_text(encoding="utf-8") == "print(1)\n"
+
+
+class TestReuseOnResume:
+    """A resumed session keeps the scratch directory its history refers to.
+
+    Kind: baseline regression unless a docstring says preservation. Live session
+    (2026-11-25): after ``ayder --resume`` the file tools refused the directory the
+    restored conversation had used all along, while bash still wrote there. The
+    saved path comes from a session file, so only a directory ayder itself would
+    have created for this project is taken back.
+    """
+
+    def test_this_projects_session_dir_is_reused(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        saved = new_scratch_dir(project)
+
+        reused = context.reusable_scratch_dir(project, str(saved.resolve()))
+
+        assert reused is not None
+        assert reused.resolve() == saved.resolve()
+
+    def test_another_projects_dir_is_not_reused(self, tmp_path):
+        """Preservation: the saved path must belong to this project."""
+        project, other = tmp_path / "proj", tmp_path / "other"
+        project.mkdir()
+        other.mkdir()
+
+        assert context.reusable_scratch_dir(project, new_scratch_dir(other)) is None
+
+    def test_a_dir_outside_the_scratch_base_is_not_reused(self, tmp_path):
+        """Preservation: a session file cannot add an arbitrary directory to the sandbox."""
+        project, elsewhere = tmp_path / "proj", tmp_path / "elsewhere"
+        project.mkdir()
+        elsewhere.mkdir()
+
+        assert context.reusable_scratch_dir(project, elsewhere) is None
+
+    def test_a_symlink_in_the_project_folder_is_not_reused(self, tmp_path):
+        """Preservation: the saved entry must be a real directory, not a link out."""
+        project, elsewhere = tmp_path / "proj", tmp_path / "elsewhere"
+        project.mkdir()
+        elsewhere.mkdir()
+        link = new_scratch_dir(project).parent / "20261125-000000-linked"
+        link.symlink_to(elsewhere)
+
+        assert context.reusable_scratch_dir(project, link) is None
+
+    def test_a_missing_dir_is_not_reused(self, tmp_path):
+        """Preservation: /tmp may have been cleared since the session was saved."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        gone = new_scratch_dir(project)
+        gone.rmdir()
+
+        assert context.reusable_scratch_dir(project, gone) is None
+
+
+def _runtime(tmp_path, monkeypatch, **kwargs):
+    from unittest.mock import MagicMock
+
+    from ayder_cli.application import runtime_factory
+    from ayder_cli.core.config import Config
+
+    monkeypatch.setattr(runtime_factory.provider_orchestrator, "create", lambda c: MagicMock())
+    return runtime_factory.create_runtime(config=Config(), project_root=str(tmp_path), **kwargs)
+
+
+def test_a_resumed_runtime_writes_into_the_saved_scratch_dir(tmp_path, monkeypatch):
+    """Baseline regression: file_editor answered "outside project root" for this path."""
+    saved = _runtime(tmp_path, monkeypatch).project_ctx.scratch_dir
+
+    resumed = _runtime(tmp_path, monkeypatch, resume_scratch_dir=str(saved))
+
+    assert resumed.project_ctx.scratch_dir == saved
+    assert f"Scratch directory: {saved}" in resumed.system_prompt
+    result = resumed.tool_registry.execute(
+        "file_editor",
+        {"file_path": str(saved / "notes.txt"), "operation": "write", "content": "kept"},
+    )
+    assert "Successfully wrote" in result
+    assert (saved / "notes.txt").read_text() == "kept"
+
+
+def test_a_resume_whose_scratch_dir_is_gone_gets_a_new_one(tmp_path, monkeypatch):
+    """Preservation: without a usable saved directory the session starts one, as before."""
+    gone = _runtime(tmp_path, monkeypatch).project_ctx.scratch_dir
+    gone.rmdir()
+
+    resumed = _runtime(tmp_path, monkeypatch, resume_scratch_dir=str(gone))
+
+    assert resumed.project_ctx.scratch_dir is not None
+    assert resumed.project_ctx.scratch_dir != gone
+    assert resumed.project_ctx.scratch_dir.is_dir()
