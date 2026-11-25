@@ -233,15 +233,19 @@ def manage_environment_vars(
             if not file_exists:
                 env_path.touch()
 
-            # Set the key using python-dotenv (handles updates and creates if needed)
-            success = set_key(
-                str(env_path), variable_name, generated_value, quote_mode="never"
-            )
+            # Set the key using python-dotenv (handles updates and creates if needed).
+            # set_key returns (status, key, value) and raises when the write fails,
+            # so a file this call created is removed on either way out.
+            written = False
+            try:
+                written = bool(
+                    set_key(str(env_path), variable_name, generated_value, quote_mode="never")[0]
+                )
+            finally:
+                if not written and not file_exists:
+                    env_path.unlink(missing_ok=True)
 
-            if not success:
-                # Rollback if failed
-                if not file_exists:
-                    env_path.unlink()
+            if not written:
                 return ToolError(
                     f"Error: Failed to set variable '{variable_name}' in .env",
                     "execution",
@@ -274,13 +278,17 @@ def manage_environment_vars(
             if not file_exists:
                 env_path.touch()
 
-            # Set the key using python-dotenv
-            success = set_key(str(env_path), variable_name, value, quote_mode="never")
+            # Set the key using python-dotenv; the same rollback as in generate mode.
+            written = False
+            try:
+                written = bool(
+                    set_key(str(env_path), variable_name, value, quote_mode="never")[0]
+                )
+            finally:
+                if not written and not file_exists:
+                    env_path.unlink(missing_ok=True)
 
-            if not success:
-                # Rollback if failed
-                if not file_exists:
-                    env_path.unlink()
+            if not written:
                 return ToolError(
                     f"Error: Failed to set variable '{variable_name}' in .env",
                     "execution",
