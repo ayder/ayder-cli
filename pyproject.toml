@@ -26,6 +26,7 @@ dependencies = [
     # Message / StreamSink shapes (§F5-R6), guarded by `_shape_guard()`.
     "loguru>=0.7,<0.8",
     "httpx",
+    "curl_cffi>=0.17,<1",
     "mcp>=1.19,<2",
     "rich>=13.0.0",
     # Pinned exactly to match the runtime: 8.2.5+ replaced the single
