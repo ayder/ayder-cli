@@ -168,6 +168,22 @@ def test_fetch_web_recovers_malformed_html(web_response):
     assert "<" not in "\n".join(body_lines)
 
 
+@pytest.mark.parametrize(
+    "invalid_html",
+    [
+        pytest.param("<![foo [x]]>", id="unknown-marked-section"),
+        pytest.param("&#" + "9" * 5000 + ";", id="oversized-decimal-reference"),
+    ],
+)
+def test_fetch_web_preserves_text_recovered_before_parser_error(web_response, invalid_html):
+    web_response.text = f"<p>before</p>{invalid_html}<p>after</p>"
+
+    result = fetch_web("https://example.com")
+
+    assert isinstance(result, ToolSuccess)
+    assert _body_lines(result)[1:] == ["before"]
+
+
 def test_fetch_web_truncates_after_html_extraction(web_response):
     text = "a" * 300
     web_response.text = f"<script>{'x' * 5000}</script><p>{text}</p>"
