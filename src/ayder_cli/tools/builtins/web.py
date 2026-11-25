@@ -4,12 +4,13 @@ Web fetching tools for ayder-cli.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from threading import Lock
-from typing import Any
+from typing import cast
 
-import httpx
+from curl_cffi.requests import Cookies, Session
+from curl_cffi.requests.exceptions import RequestException
+from curl_cffi.requests.session import HttpMethod
 
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.log import get_logger
@@ -17,7 +18,7 @@ from ayder_cli.log import get_logger
 logger = get_logger("tool")
 
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-_COOKIE_JAR = httpx.Cookies()
+_COOKIE_JAR = Cookies()
 _COOKIE_LOCK = Lock()
 
 
@@ -29,22 +30,12 @@ def _normalize_headers(headers: Mapping[str, str] | None) -> dict[str, str] | No
     return {str(k): str(v) for k, v in headers.items()}
 
 
-def _snapshot_cookies() -> httpx.Cookies:
+def _snapshot_cookies() -> Cookies:
     with _COOKIE_LOCK:
-        return httpx.Cookies(_COOKIE_JAR)
+        return Cookies(_COOKIE_JAR)
 
 
-def _merge_cookies(source: Any) -> None:
-    if source is None:
-        return
-    if isinstance(source, httpx.Cookies):
-        cookies: Any = source
-    elif isinstance(source, Mapping):
-        cookies = {str(k): str(v) for k, v in source.items()}
-    elif hasattr(source, "items"):
-        cookies = {str(k): str(v) for k, v in source.items()}
-    else:
-        return
+def _merge_cookies(cookies: Cookies) -> None:
     with _COOKIE_LOCK:
         _COOKIE_JAR.update(cookies)
 
@@ -53,28 +44,6 @@ def _reset_cookie_jar_for_tests() -> None:
     """Reset persisted cookie jar. Test-only helper."""
     with _COOKIE_LOCK:
         _COOKIE_JAR.clear()
-
-
-async def _fetch_web_async(
-    *,
-    url: str,
-    method: str,
-    headers: dict[str, str] | None,
-    body: str | None,
-    timeout_seconds: int,
-    follow_redirects: bool,
-) -> httpx.Response:
-    async with httpx.AsyncClient(
-        timeout=timeout_seconds,
-        follow_redirects=follow_redirects,
-        cookies=_snapshot_cookies(),
-    ) as client:
-        response = await client.request(
-            method=method, url=url, headers=headers, content=body or None
-        )
-        _merge_cookies(getattr(client, "cookies", None))
-        _merge_cookies(getattr(response, "cookies", None))
-        return response
 
 
 def fetch_web(
@@ -110,23 +79,23 @@ def fetch_web(
             )
 
         normalized_headers = _normalize_headers(headers)
-        response = asyncio.run(
-            _fetch_web_async(
-                url=url,
-                method=normalized_method,
+        with Session(cookies=_snapshot_cookies()) as session:
+            response = session.request(
+                cast(HttpMethod, normalized_method),
+                url,
                 headers=normalized_headers,
-                body=body,
-                timeout_seconds=timeout_seconds,
-                follow_redirects=follow_redirects,
+                data=body or None,
+                timeout=timeout_seconds,
+                allow_redirects=follow_redirects,
             )
-        )
+            _merge_cookies(session.cookies)
 
         lines = [
             "=== WEB FETCH RESULT ===",
             f"Method: {normalized_method}",
             f"URL: {url}",
             f"Final URL: {response.url}",
-            f"Status: {response.status_code} {response.reason_phrase}",
+            f"Status: {response.status_code} {response.reason}",
             f"Content-Type: {response.headers.get('content-type', 'unknown')}",
             "",
         ]
@@ -151,7 +120,7 @@ def fetch_web(
         return ToolSuccess("\n".join(lines))
     except ValueError as e:
         return ToolError(f"Error: {e}", "validation")
-    except httpx.RequestError as e:
+    except RequestException as e:
         return ToolError(f"Error fetching URL: {e}", "execution")
-    except Exception as e:  # noqa: BLE001 - tool boundary: residual after ValueError and httpx.RequestError; any fetch or parse failure becomes a ToolError
+    except Exception as e:  # noqa: BLE001 - tool boundary: residual after ValueError and RequestException; any fetch or parse failure becomes a ToolError
         return ToolError(f"Error during fetch_web: {e}", "execution")

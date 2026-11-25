@@ -1,9 +1,10 @@
 """Tests for web fetching tool."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-import httpx
 import pytest
+from curl_cffi.requests import Cookies
+from curl_cffi.requests.exceptions import RequestException
 
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.tools.builtins import web
@@ -17,58 +18,57 @@ def _reset_cookies():
     web._reset_cookie_jar_for_tests()
 
 
-def _mock_async_client(response: Mock | None = None, side_effect: Exception | None = None):
-    client = AsyncMock()
-    client.cookies = httpx.Cookies()
-    if side_effect is not None:
-        client.request.side_effect = side_effect
-    else:
-        client.request.return_value = response
-
-    context_manager = AsyncMock()
-    context_manager.__aenter__.return_value = client
-    context_manager.__aexit__.return_value = None
-    return context_manager, client
+def _mock_session(
+    response: Mock | None = None, side_effect: Exception | None = None
+) -> MagicMock:
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.cookies = Cookies()
+    session.request.return_value = response
+    session.request.side_effect = side_effect
+    return session
 
 
 def test_fetch_web_defaults_to_get():
     response = Mock(
         status_code=200,
-        reason_phrase="OK",
+        reason="OK",
         url="https://example.com",
         headers={"content-type": "text/plain"},
         text="hello world",
-        cookies=httpx.Cookies(),
+        cookies=Cookies(),
     )
-    cm, client = _mock_async_client(response=response)
+    session = _mock_session(response=response)
 
-    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
         result = fetch_web("https://example.com")
 
     assert isinstance(result, ToolSuccess)
     assert "Method: GET" in result
     assert "Status: 200 OK" in result
     assert "hello world" in result
-    client.request.assert_awaited_once_with(
-        method="GET",
-        url="https://example.com",
+    session.request.assert_called_once_with(
+        "GET",
+        "https://example.com",
         headers=None,
-        content=None,
+        data=None,
+        timeout=30,
+        allow_redirects=True,
     )
 
 
 def test_fetch_web_supports_post_with_body_and_headers():
     response = Mock(
         status_code=201,
-        reason_phrase="Created",
+        reason="Created",
         url="https://example.com/api",
         headers={"content-type": "application/json"},
         text='{"ok":true}',
-        cookies=httpx.Cookies(),
+        cookies=Cookies(),
     )
-    cm, client = _mock_async_client(response=response)
+    session = _mock_session(response=response)
 
-    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
         result = fetch_web(
             "https://example.com/api",
             method="post",
@@ -78,26 +78,28 @@ def test_fetch_web_supports_post_with_body_and_headers():
 
     assert isinstance(result, ToolSuccess)
     assert "Method: POST" in result
-    client.request.assert_awaited_once_with(
-        method="POST",
-        url="https://example.com/api",
+    session.request.assert_called_once_with(
+        "POST",
+        "https://example.com/api",
         headers={"Authorization": "Bearer token"},
-        content='{"name":"ayder"}',
+        data='{"name":"ayder"}',
+        timeout=30,
+        allow_redirects=True,
     )
 
 
 def test_fetch_web_head_omits_body():
     response = Mock(
         status_code=200,
-        reason_phrase="OK",
+        reason="OK",
         url="https://example.com",
         headers={"content-type": "text/html"},
         text="this should not appear",
-        cookies=httpx.Cookies(),
+        cookies=Cookies(),
     )
-    cm, _ = _mock_async_client(response=response)
+    session = _mock_session(response=response)
 
-    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
         result = fetch_web("https://example.com", method="HEAD")
 
     assert "Body: (omitted for HEAD request)" in result
@@ -112,11 +114,9 @@ def test_fetch_web_rejects_invalid_method():
 
 
 def test_fetch_web_handles_request_errors():
-    request = httpx.Request("GET", "https://example.com")
-    error = httpx.RequestError("network failure", request=request)
-    cm, _ = _mock_async_client(side_effect=error)
+    session = _mock_session(side_effect=RequestException("network failure"))
 
-    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", return_value=cm):
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
         result = fetch_web("https://example.com")
 
     assert isinstance(result, ToolError)
@@ -127,30 +127,33 @@ def test_fetch_web_handles_request_errors():
 def test_fetch_web_persists_session_cookies_across_calls():
     first_response = Mock(
         status_code=200,
-        reason_phrase="OK",
+        reason="OK",
         url="https://example.com/login",
         headers={"content-type": "text/plain"},
         text="logged in",
-        cookies=httpx.Cookies({"sessionid": "abc123"}),
+        cookies=Cookies({"sessionid": "abc123"}),
     )
     second_response = Mock(
         status_code=200,
-        reason_phrase="OK",
+        reason="OK",
         url="https://example.com/me",
         headers={"content-type": "text/plain"},
         text="profile",
-        cookies=httpx.Cookies(),
+        cookies=Cookies(),
     )
 
-    cm1, client1 = _mock_async_client(response=first_response)
-    cm2, _ = _mock_async_client(response=second_response)
-    client1.cookies = httpx.Cookies({"sessionid": "abc123"})
+    first_session = _mock_session(response=first_response)
+    second_session = _mock_session(response=second_response)
+    first_session.cookies = Cookies({"sessionid": "abc123"})
 
-    with patch("ayder_cli.tools.builtins.web.httpx.AsyncClient", side_effect=[cm1, cm2]) as mock_client:
+    with patch(
+        "ayder_cli.tools.builtins.web.Session",
+        side_effect=[first_session, second_session],
+    ) as session_factory:
         fetch_web("https://example.com/login")
         fetch_web("https://example.com/me")
 
-    second_call_kwargs = mock_client.call_args_list[1].kwargs
+    second_call_kwargs = session_factory.call_args_list[1].kwargs
     persisted_cookies = second_call_kwargs.get("cookies")
-    assert isinstance(persisted_cookies, httpx.Cookies)
+    assert isinstance(persisted_cookies, Cookies)
     assert persisted_cookies.get("sessionid") == "abc123"
