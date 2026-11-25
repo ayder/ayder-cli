@@ -57,6 +57,41 @@ def test_fetch_web_defaults_to_get():
     )
 
 
+def test_fetch_web_falls_back_to_standard_reason():
+    response = Mock(
+        status_code=200,
+        reason="",
+        url="https://example.com",
+        headers={"content-type": "text/plain"},
+        text="hello world",
+        cookies=Cookies(),
+    )
+    session = _mock_session(response=response)
+
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
+        result = fetch_web("https://example.com")
+
+    assert "Status: 200 OK" in result
+
+
+def test_fetch_web_omits_empty_reason_for_unknown_status():
+    response = Mock(
+        status_code=799,
+        reason="",
+        url="https://example.com",
+        headers={"content-type": "text/plain"},
+        text="hello world",
+        cookies=Cookies(),
+    )
+    session = _mock_session(response=response)
+
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
+        result = fetch_web("https://example.com")
+
+    status_line = next(line for line in result.splitlines() if line.startswith("Status:"))
+    assert status_line == "Status: 799"
+
+
 def test_fetch_web_supports_post_with_body_and_headers():
     response = Mock(
         status_code=201,

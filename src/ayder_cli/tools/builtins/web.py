@@ -5,6 +5,7 @@ Web fetching tools for ayder-cli.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from http import HTTPStatus
 from threading import Lock
 from typing import cast
 
@@ -90,12 +91,21 @@ def fetch_web(
             )
             _merge_cookies(session.cookies)
 
+        status_code = response.status_code
+        reason = response.reason
+        if not reason:
+            try:
+                reason = HTTPStatus(status_code).phrase
+            except ValueError:
+                pass
+        status = f"{status_code} {reason}" if reason else str(status_code)
+
         lines = [
             "=== WEB FETCH RESULT ===",
             f"Method: {normalized_method}",
             f"URL: {url}",
             f"Final URL: {response.url}",
-            f"Status: {response.status_code} {response.reason}",
+            f"Status: {status}",
             f"Content-Type: {response.headers.get('content-type', 'unknown')}",
             "",
         ]
