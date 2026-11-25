@@ -264,6 +264,16 @@ def test_fetch_web_keeps_plain_text_for_anchor_without_href(web_response):
     assert "[" not in body
 
 
+def test_fetch_web_keeps_text_after_malformed_link(web_response):
+    web_response.url = "https://shop.example/list/page2"
+    web_response.text = '<a href="http://[bad">Broken</a><p>after</p>'
+
+    result = fetch_web("https://shop.example/list/page2", links=True)
+
+    assert isinstance(result, ToolSuccess)
+    assert _body_lines(result)[1:] == ["Broken", "after"]
+
+
 def test_fetch_web_definition_declares_links():
     properties = TOOL_DEFINITIONS_BY_NAME["fetch_web"].parameters["properties"]
 
