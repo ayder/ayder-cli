@@ -208,11 +208,7 @@ class CLIPermissionScreen(ModalScreen[set | None]):
         self.selected_index = 0
         self._items = [
             ("r", "Read", "Auto-approve read tools (always enabled)"),
-            (
-                "w",
-                "Write",
-                "Auto-approve write tools (write_file, replace_string, ...)",
-            ),
+            ("w", "Write", "Auto-approve write tools"),
             ("x", "Execute", "Auto-approve execute tools (bash, ...)"),
             ("http", "HTTP", "Auto-approve web tools (fetch_web)"),
         ]
