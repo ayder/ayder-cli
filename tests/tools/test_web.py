@@ -12,6 +12,11 @@ from ayder_cli.tools.builtins.web import fetch_web
 from ayder_cli.tools.definition import TOOL_DEFINITIONS_BY_NAME
 from ayder_cli.version import __version__
 
+_HTML_PAGE = (
+    "<html><head><title>Shop</title><style>p{color:red}</style></head>"
+    "<body><script>var x=1</script><p>Hello</p><div>Second   line</div></body></html>"
+)
+
 
 @pytest.fixture(autouse=True)
 def _reset_cookies():
@@ -85,6 +90,127 @@ def test_fetch_web_definition_declares_impersonation():
 
     assert "impersonate" in properties
     assert properties["impersonate"]["enum"] == ["chrome", "none"]
+
+
+@pytest.fixture
+def web_response():
+    response = Mock(
+        status_code=200,
+        reason="OK",
+        url="https://example.com",
+        headers={"content-type": "text/html"},
+        cookies=Cookies(),
+    )
+    session = _mock_session(response=response)
+    with patch("ayder_cli.tools.builtins.web.Session", return_value=session):
+        yield response
+
+
+def _body_lines(result: str) -> list[str]:
+    return result.split("\n\n", 1)[1].splitlines()[:-1]
+
+
+def test_fetch_web_parses_html_by_default(web_response):
+    web_response.headers = {"content-type": "text/html; charset=utf-8"}
+    web_response.text = _HTML_PAGE
+
+    result = fetch_web("https://example.com")
+
+    body_heading, *body_lines = _body_lines(result)
+    assert body_lines[0] == "Shop"
+    assert "Hello" in body_lines
+    assert "Second line" in body_lines
+    body = "\n".join(body_lines)
+    assert "var x=1" not in body
+    assert "color:red" not in body
+    text_length = len("Shop\nHello\nSecond line")
+    assert body_heading == (
+        f"Body ({text_length} chars, text extracted from {len(_HTML_PAGE)} chars of HTML):"
+    )
+
+
+@pytest.mark.parametrize("tag", ["script", "style", "noscript", "template", "svg", "iframe"])
+def test_fetch_web_omits_hidden_html(web_response, tag):
+    web_response.text = f"<p>keep</p><{tag}>drop-me</{tag}>"
+
+    result = fetch_web("https://example.com")
+
+    body = "\n".join(_body_lines(result)[1:])
+    assert "keep" in body
+    assert "drop-me" not in body
+
+
+def test_fetch_web_parses_xhtml(web_response):
+    web_response.headers = {"content-type": "application/xhtml+xml"}
+    web_response.text = "<p>Hello</p>"
+
+    result = fetch_web("https://example.com")
+
+    assert "<p>" not in "\n".join(_body_lines(result)[1:])
+
+
+def test_fetch_web_decodes_html_references(web_response):
+    web_response.text = "<p>a &amp; b&nbsp;&#169;  c</p>"
+
+    result = fetch_web("https://example.com")
+
+    assert "a & b © c" in _body_lines(result)[1:]
+
+
+def test_fetch_web_recovers_malformed_html(web_response):
+    web_response.text = "<p>one<p>two<div>three</span>"
+
+    result = fetch_web("https://example.com")
+
+    assert isinstance(result, ToolSuccess)
+    body_lines = _body_lines(result)[1:]
+    assert body_lines == ["one", "two", "three"]
+    assert "<" not in "\n".join(body_lines)
+
+
+def test_fetch_web_truncates_after_html_extraction(web_response):
+    text = "a" * 300
+    web_response.text = f"<script>{'x' * 5000}</script><p>{text}</p>"
+
+    result = fetch_web("https://example.com", max_content_chars=100)
+
+    _, *body_and_note = _body_lines(result)
+    assert body_and_note[:-2] == [text[:100]]
+    assert body_and_note[-1] == "[Content truncated to 100 characters.]"
+
+
+def test_fetch_web_preserves_html_when_parse_is_false(web_response):
+    web_response.headers = {"content-type": "text/html; charset=utf-8"}
+    web_response.text = _HTML_PAGE
+
+    result = fetch_web("https://example.com", parse=False)
+
+    assert _body_lines(result) == [f"Body ({len(_HTML_PAGE)} chars):", _HTML_PAGE]
+
+
+def test_fetch_web_preserves_json(web_response):
+    web_response.headers = {"content-type": "application/json"}
+    web_response.text = '{"html": "<p>hi</p>"}'
+
+    result = fetch_web("https://example.com")
+
+    assert _body_lines(result)[1:] == [web_response.text]
+
+
+def test_fetch_web_preserves_body_without_content_type(web_response):
+    web_response.headers = {}
+    web_response.text = "<p>Hello</p>"
+
+    result = fetch_web("https://example.com")
+
+    assert _body_lines(result)[1:] == [web_response.text]
+
+
+def test_fetch_web_definition_declares_parse():
+    properties = TOOL_DEFINITIONS_BY_NAME["fetch_web"].parameters["properties"]
+
+    assert "parse" in properties
+    assert properties["parse"]["type"] == "boolean"
 
 
 def test_fetch_web_defaults_to_get():

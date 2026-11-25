@@ -56,6 +56,10 @@ TOOL_DEFINITIONS: Tuple[ToolDefinition, ...] = (
                     "enum": ["chrome", "none"],
                     "description": "Chrome profile or no profile (default: chrome).",
                 },
+                "parse": {
+                    "type": "boolean",
+                    "description": "Extract readable text from HTML (default: true).",
+                },
             },
             "required": ["url"],
         },
