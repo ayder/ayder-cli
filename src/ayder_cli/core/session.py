@@ -40,6 +40,7 @@ class SessionData:
     path: Path
     system_prompt_override: str | None = None
     provider: str | None = None
+    scratch_dir: str | None = None
 
 
 def sessions_dir(root: Path | None = None) -> Path:
@@ -77,6 +78,7 @@ def save_session(
     permissions: set[str] | None = None,
     system_prompt_override: str | None = None,
     provider: str | None = None,
+    scratch_dir: Path | str | None = None,
 ) -> str:
     """Write *messages* + settings to .ayder/sessions/<id>.json; return the id.
 
@@ -112,6 +114,7 @@ def save_session(
         "permissions": sorted(permissions) if permissions else [],
         "system_prompt_override": system_prompt_override,
         "cwd": str(base.resolve()),
+        "scratch_dir": str(scratch_dir) if scratch_dir else None,
         "message_count": len(messages),
         "messages": messages,
     }
@@ -162,6 +165,7 @@ def load_session(token: str, root: Path | None = None) -> SessionData:
         path=path,
         system_prompt_override=data.get("system_prompt_override"),
         provider=data.get("provider"),
+        scratch_dir=data.get("scratch_dir"),
     )
 
 
@@ -186,6 +190,7 @@ def persist_and_announce(
     permissions: set[str] | None = None,
     system_prompt_override: str | None = None,
     provider: str | None = None,
+    scratch_dir: Path | str | None = None,
     out=print,
 ) -> str | None:
     """Save the session on exit and print the resume hint.
@@ -207,6 +212,7 @@ def persist_and_announce(
         permissions=permissions,
         system_prompt_override=system_prompt_override,
         provider=provider,
+        scratch_dir=scratch_dir,
     )
     out(resume_hint(sid))
     return sid

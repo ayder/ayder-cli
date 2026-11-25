@@ -97,6 +97,7 @@ def run_tui(
     provider: str | None = None,
     initial_messages: list[dict] | None = None,
     resume_session_id: str | None = None,
+    resume_scratch_dir: str | None = None,
     session_name: str | None = None,
     log_settings=None,          # LoggingSettings | None
     first_run: bool = False,
@@ -118,6 +119,8 @@ def run_tui(
             saved system prompt) to seed the app with.
         resume_session_id: When resuming, the id of the session being continued
             so save-on-exit updates the same file.
+        resume_scratch_dir: When resuming, the scratch directory saved with the
+            session, so the paths in its history stay usable by the file tools.
         session_name: Handle peers address this session by on the messaging
             inbox. Defaults to the working directory's name.
         log_settings: Fully-resolved LoggingSettings from the CLI entry point.
@@ -136,6 +139,7 @@ def run_tui(
             model=model, safe_mode=safe_mode, permissions=permissions,
             agent_mode=agent_mode, system_prompt_override=system_prompt_override,
             provider=provider, initial_messages=initial_messages, resume_session_id=resume_session_id,
+            resume_scratch_dir=resume_scratch_dir,
             session_name=session_name, log_settings=log_settings, first_run=first_run,
         )
         built = True
@@ -175,6 +179,12 @@ def run_tui(
                 system_prompt_override=system_prompt_override,
                 # The live provider, so a /provider switch is what resumes.
                 provider=getattr(getattr(app, "config", None), "provider", None),
+                # What a resume takes back, so the history's scratch paths stay valid.
+                scratch_dir=getattr(
+                    getattr(getattr(app, "registry", None), "project_ctx", None),
+                    "scratch_dir",
+                    None,
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - exit-path boundary: never let a save failure mask the exit
             logger.opt(exception=True).warning("Session auto-save failed on exit")

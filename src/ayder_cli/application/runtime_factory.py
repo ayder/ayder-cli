@@ -18,7 +18,7 @@ from ayder_cli.core.context_manager_factory import context_manager_factory
 
 if TYPE_CHECKING:
     from ayder_cli.agents.config import AgentConfig
-from ayder_cli.core.context import ProjectContext, new_scratch_dir
+from ayder_cli.core.context import ProjectContext, new_scratch_dir, reusable_scratch_dir
 from ayder_cli.core.skills import build_scope
 from ayder_cli.providers import AIProvider, provider_orchestrator
 from ayder_cli.providers.retry import RetryConfig, RetryingProvider
@@ -73,6 +73,7 @@ def create_runtime(
     model_name: str | None = None,
     prompt_tier: str | None = None,
     system_prompt_override: str | None = None,
+    resume_scratch_dir: Path | str | None = None,
 ) -> RuntimeComponents:
     """Assemble and return all shared runtime components.
 
@@ -85,6 +86,9 @@ def create_runtime(
         system_prompt_override: When set, use this text as the system-prompt base
             instead of prompts.get_system_prompt (ayder --system-prompt FILE). Tool
             prompts are still appended.
+        resume_scratch_dir: The scratch directory saved with a resumed session;
+            reused when it still exists and belongs to this project (see
+            core.context.reusable_scratch_dir), otherwise a new one is made.
 
     Returns:
         RuntimeComponents with all dependencies wired.
@@ -99,7 +103,11 @@ def create_runtime(
 
     llm_provider: AIProvider = provider_orchestrator.create(cfg)
     project_ctx = ProjectContext(project_root)
-    scratch_dir = new_scratch_dir(project_ctx.root)
+    # A resumed session keeps the directory its history refers to; the file
+    # tools admit only this one, so a new directory would refuse those paths.
+    scratch_dir = reusable_scratch_dir(
+        project_ctx.root, resume_scratch_dir
+    ) or new_scratch_dir(project_ctx.root)
     if scratch_dir is not None:
         project_ctx.scratch_dir = scratch_dir.resolve()
     process_manager = ProcessManager(max_processes=cfg.max_background_processes)
