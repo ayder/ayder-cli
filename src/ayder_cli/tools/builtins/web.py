@@ -4,21 +4,134 @@ Web fetching tools for ayder-cli.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
+from html.parser import HTMLParser
+from http import HTTPStatus
 from threading import Lock
-from typing import Any
+from typing import cast
+from urllib.parse import urljoin
 
-import httpx
+from curl_cffi.requests import Cookies, Session
+from curl_cffi.requests.exceptions import RequestException
+from curl_cffi.requests.session import HttpMethod
 
 from ayder_cli.core.result import ToolError, ToolSuccess
 from ayder_cli.log import get_logger
+from ayder_cli.version import __version__
 
 logger = get_logger("tool")
 
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-_COOKIE_JAR = httpx.Cookies()
+_COOKIE_JAR = Cookies()
 _COOKIE_LOCK = Lock()
+_HTML_MEDIA_TYPES = {"text/html", "application/xhtml+xml"}
+_HIDDEN_HTML_TAGS = {"script", "style", "noscript", "template", "svg", "iframe"}
+_BLOCK_HTML_TAGS = {
+    "address", "article", "aside", "blockquote", "body", "caption", "dd", "details",
+    "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "li", "main", "menu",
+    "nav", "ol", "p", "pre", "search", "section", "summary", "table", "tbody", "td",
+    "tfoot", "th", "thead", "tr", "ul",
+}
+
+
+class _HTMLTextParser(HTMLParser):
+    """Collect the title and visible text from an HTML response."""
+
+    def __init__(self, base_url: str, links: bool) -> None:
+        super().__init__(convert_charrefs=True)
+        self._base_url = base_url
+        self._links = links
+        self._hidden_tags: list[str] = []
+        self._in_title = False
+        self._title_parts: list[str] = []
+        self._line_parts: list[str] = []
+        self._lines: list[str] = []
+        self._link_url: str | None = None
+        self._link_parts: list[str] = []
+
+    def _start_link(self, attrs: list[tuple[str, str | None]]) -> None:
+        self._finish_link()
+        attributes = dict(attrs)
+        if "href" not in attributes:
+            return
+        try:
+            self._link_url = urljoin(self._base_url, attributes["href"] or "")
+        except ValueError:
+            # A malformed URL leaves the anchor text in the output.
+            pass
+
+    def _finish_link(self) -> None:
+        if self._link_url is None:
+            return
+        text = " ".join("".join(self._link_parts).split())
+        self._line_parts.append(f"[{text}]({self._link_url})")
+        self._link_parts.clear()
+        self._link_url = None
+
+    def _finish_line(self, *, keep_empty: bool = False) -> None:
+        if self._link_url is not None:
+            self._link_parts.append(" ")
+            return
+        line = " ".join("".join(self._line_parts).split())
+        self._line_parts.clear()
+        if line or (keep_empty and self._lines and self._lines[-1]):
+            self._lines.append(line)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _HIDDEN_HTML_TAGS:
+            self._hidden_tags.append(tag)
+        elif self._hidden_tags:
+            return
+        elif tag == "title":
+            self._in_title = True
+        elif not self._in_title:
+            if tag == "a" and self._links:
+                self._start_link(attrs)
+            elif tag == "br":
+                self._finish_line(keep_empty=True)
+            elif tag in _BLOCK_HTML_TAGS:
+                self._finish_line()
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._hidden_tags:
+            if tag in _HIDDEN_HTML_TAGS and tag in self._hidden_tags:
+                while self._hidden_tags.pop() != tag:
+                    pass
+        elif tag == "title":
+            self._in_title = False
+        elif tag == "a":
+            self._finish_link()
+        elif tag in _BLOCK_HTML_TAGS and not self._in_title:
+            self._finish_line()
+
+    def handle_data(self, data: str) -> None:
+        if self._hidden_tags:
+            return
+        if self._in_title:
+            self._title_parts.append(data)
+        elif self._link_url is not None:
+            self._link_parts.append(data)
+        else:
+            self._line_parts.append(data)
+
+    def get_text(self) -> str:
+        self._finish_link()
+        self._finish_line()
+        title = " ".join("".join(self._title_parts).split())
+        body = "\n".join(self._lines).rstrip("\n")
+        return "\n".join(part for part in (title, body) if part)
+
+
+def _html_to_text(html: str, base_url: str, links: bool) -> str:
+    parser = _HTMLTextParser(base_url, links)
+    try:
+        parser.feed(html)
+        parser.close()
+    except (AssertionError, ValueError):
+        # Malformed declarations and character references can stop HTMLParser.
+        pass
+    return parser.get_text()
 
 
 def _normalize_headers(headers: Mapping[str, str] | None) -> dict[str, str] | None:
@@ -29,22 +142,12 @@ def _normalize_headers(headers: Mapping[str, str] | None) -> dict[str, str] | No
     return {str(k): str(v) for k, v in headers.items()}
 
 
-def _snapshot_cookies() -> httpx.Cookies:
+def _snapshot_cookies() -> Cookies:
     with _COOKIE_LOCK:
-        return httpx.Cookies(_COOKIE_JAR)
+        return Cookies(_COOKIE_JAR)
 
 
-def _merge_cookies(source: Any) -> None:
-    if source is None:
-        return
-    if isinstance(source, httpx.Cookies):
-        cookies: Any = source
-    elif isinstance(source, Mapping):
-        cookies = {str(k): str(v) for k, v in source.items()}
-    elif hasattr(source, "items"):
-        cookies = {str(k): str(v) for k, v in source.items()}
-    else:
-        return
+def _merge_cookies(cookies: Cookies) -> None:
     with _COOKIE_LOCK:
         _COOKIE_JAR.update(cookies)
 
@@ -55,28 +158,6 @@ def _reset_cookie_jar_for_tests() -> None:
         _COOKIE_JAR.clear()
 
 
-async def _fetch_web_async(
-    *,
-    url: str,
-    method: str,
-    headers: dict[str, str] | None,
-    body: str | None,
-    timeout_seconds: int,
-    follow_redirects: bool,
-) -> httpx.Response:
-    async with httpx.AsyncClient(
-        timeout=timeout_seconds,
-        follow_redirects=follow_redirects,
-        cookies=_snapshot_cookies(),
-    ) as client:
-        response = await client.request(
-            method=method, url=url, headers=headers, content=body or None
-        )
-        _merge_cookies(getattr(client, "cookies", None))
-        _merge_cookies(getattr(response, "cookies", None))
-        return response
-
-
 def fetch_web(
     url: str,
     method: str = "GET",
@@ -85,6 +166,9 @@ def fetch_web(
     timeout_seconds: int = 30,
     max_content_chars: int = 20000,
     follow_redirects: bool = True,
+    impersonate: str = "chrome",
+    parse: bool = True,
+    links: bool = False,
 ) -> str:
     """Fetch a URL with an HTTP request and return a text summary for the LLM."""
     try:
@@ -108,26 +192,47 @@ def fetch_web(
             return ToolError(
                 "Error: max_content_chars must be at least 1", "validation"
             )
+        if impersonate not in ("chrome", "none"):
+            return ToolError(
+                "Error: impersonate must be one of chrome, none", "validation"
+            )
 
         normalized_headers = _normalize_headers(headers)
-        response = asyncio.run(
-            _fetch_web_async(
-                url=url,
-                method=normalized_method,
-                headers=normalized_headers,
-                body=body,
-                timeout_seconds=timeout_seconds,
-                follow_redirects=follow_redirects,
-            )
-        )
+        if impersonate == "none":
+            normalized_headers = normalized_headers or {}
+            if not any(name.lower() == "user-agent" for name in normalized_headers):
+                normalized_headers["User-Agent"] = f"ayder-cli/{__version__}"
 
+        with Session(cookies=_snapshot_cookies()) as session:
+            response = session.request(
+                cast(HttpMethod, normalized_method),
+                url,
+                headers=normalized_headers,
+                data=body or None,
+                timeout=timeout_seconds,
+                allow_redirects=follow_redirects,
+                impersonate=None if impersonate == "none" else impersonate,
+            )
+            _merge_cookies(session.cookies)
+
+        status_code = response.status_code
+        reason = response.reason
+        if not reason:
+            try:
+                reason = HTTPStatus(status_code).phrase
+            except ValueError:
+                pass
+        status = f"{status_code} {reason}" if reason else str(status_code)
+
+        content_type = response.headers.get("content-type", "unknown")
         lines = [
             "=== WEB FETCH RESULT ===",
             f"Method: {normalized_method}",
             f"URL: {url}",
             f"Final URL: {response.url}",
-            f"Status: {response.status_code} {response.reason_phrase}",
-            f"Content-Type: {response.headers.get('content-type', 'unknown')}",
+            f"Status: {status}",
+            f"Content-Type: {content_type}",
+            f"Impersonate: {impersonate}",
             "",
         ]
 
@@ -135,10 +240,17 @@ def fetch_web(
             lines.append("Body: (omitted for HEAD request)")
         else:
             content = response.text or ""
+            extraction_note = ""
+            media_type = content_type.partition(";")[0].strip().lower()
+            if parse and media_type in _HTML_MEDIA_TYPES:
+                raw_length = len(content)
+                content = _html_to_text(content, response.url, links=links)
+                extraction_note = f", text extracted from {raw_length} chars of HTML"
+
             truncated = content[:max_content_chars]
             lines.extend(
                 [
-                    f"Body ({len(content)} chars):",
+                    f"Body ({len(content)} chars{extraction_note}):",
                     truncated,
                 ]
             )
@@ -151,7 +263,7 @@ def fetch_web(
         return ToolSuccess("\n".join(lines))
     except ValueError as e:
         return ToolError(f"Error: {e}", "validation")
-    except httpx.RequestError as e:
+    except RequestException as e:
         return ToolError(f"Error fetching URL: {e}", "execution")
-    except Exception as e:  # noqa: BLE001 - tool boundary: residual after ValueError and httpx.RequestError; any fetch or parse failure becomes a ToolError
+    except Exception as e:  # noqa: BLE001 - tool boundary: residual after ValueError and RequestException; any fetch or parse failure becomes a ToolError
         return ToolError(f"Error during fetch_web: {e}", "execution")

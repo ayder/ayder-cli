@@ -453,6 +453,7 @@ def main():
             system_prompt_override=sess.system_prompt_override,
             initial_messages=sess.messages,
             resume_session_id=sess.session_id,
+            resume_scratch_dir=sess.scratch_dir,
             session_name=getattr(args, "name", None),
             first_run=first_run,
             log_settings=log_settings,

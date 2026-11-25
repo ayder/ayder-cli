@@ -27,6 +27,13 @@ def _owned_private_dir(path: Path) -> bool:
     return not hasattr(os, "getuid") or st.st_uid == os.getuid()
 
 
+def _project_scratch_folder(project_root: Path | str) -> Path:
+    """``SCRATCH_BASE/<project>-<hash>``: the parent of one project's session directories."""
+    root = Path(project_root).resolve()
+    digest = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
+    return SCRATCH_BASE / f"{root.name}-{digest}"
+
+
 def new_scratch_dir(
     project_root: Path | str, parent: Path | None = None, label: str = "agent"
 ) -> Path | None:
@@ -44,9 +51,7 @@ def new_scratch_dir(
             if not _owned_private_dir(SCRATCH_BASE):
                 return None
             os.chmod(SCRATCH_BASE, 0o700)
-            root = Path(project_root).resolve()
-            digest = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
-            folder = SCRATCH_BASE / f"{root.name}-{digest}"
+            folder = _project_scratch_folder(project_root)
             folder.mkdir(mode=0o700, exist_ok=True)
             name = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
         else:
@@ -57,6 +62,33 @@ def new_scratch_dir(
         return path
     except OSError:
         return None
+
+
+def reusable_scratch_dir(project_root: Path | str, candidate: Path | str | None) -> Path | None:
+    """The scratch directory a saved session used, if a resumed session may take it back.
+
+    ``candidate`` comes from a session file, so it is trusted only when it is a
+    session directory ``new_scratch_dir`` would have made for this project: a
+    real directory (not a symlink) this user owns, directly inside
+    ``SCRATCH_BASE/<project>-<hash>``. Anything else, including a directory that
+    is gone, returns None and the session gets a new one.
+    """
+    if not candidate:
+        return None
+    path = Path(candidate)
+    folder = _project_scratch_folder(project_root)
+    try:
+        if not (
+            _owned_private_dir(SCRATCH_BASE)
+            and _owned_private_dir(folder)
+            and _owned_private_dir(path)
+        ):
+            return None
+        if path.resolve().parent != folder.resolve():
+            return None
+    except OSError:
+        return None
+    return path
 
 
 class PathOutsideSandboxError(ValueError):

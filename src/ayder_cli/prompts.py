@@ -361,7 +361,7 @@ COMPACT_COMMAND_PROMPT_TEMPLATE = """I am compacting our conversation. Please do
 
 1. SUMMARIZE this conversation:
 {conversation_text}
-2. SAVE the summary to `.ayder/current_memory.md` using write_file
+2. SAVE the summary to `.ayder/current_memory.md` using file_editor (operation "write")
 3. CONFIRM the conversation has been reset
 4. ACKNOWLEDGE the saved context so we can continue
 

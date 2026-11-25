@@ -1048,6 +1048,28 @@ class TestMainResume:
             main()
         assert mock_run_tui.call_args[1]['provider'] == "anthropic"
 
+    def test_resume_passes_saved_scratch_dir(self, tmp_path, monkeypatch):
+        """Baseline regression (live session): --resume started a new scratch directory,
+        and the file tools refused the one the restored history kept using."""
+        from ayder_cli.cli import main
+        from ayder_cli.core.config import Config
+        from ayder_cli.core.session import save_session
+
+        monkeypatch.chdir(tmp_path)
+        sid = save_session([{"role": "system", "content": "SYS"},
+                            {"role": "user", "content": "hi"}],
+                           scratch_dir="/tmp/ayder-1/proj-abc/20261125-151818-271ec0")
+        with patch.object(sys, 'argv', ['ayder', '--resume', sid]), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('ayder_cli.core.config.load_config', return_value=Config()), \
+             patch('ayder_cli.cli.setup_logging'), \
+             patch('ayder_cli.tui.run_tui') as mock_run_tui:
+            main()
+        assert (
+            mock_run_tui.call_args[1].get('resume_scratch_dir')
+            == "/tmp/ayder-1/proj-abc/20261125-151818-271ec0"
+        )
+
     def test_resume_unknown_provider_falls_back(self, tmp_path, monkeypatch, capsys):
         """New interface: a removed profile warns and uses the default provider."""
         from ayder_cli.cli import main

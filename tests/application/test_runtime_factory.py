@@ -205,6 +205,7 @@ class TestFactoryTUIIntegration:
                 prompt_tier=None,
                 model_name="saved-model",
                 system_prompt_override=None,
+                resume_scratch_dir=None,
             )
             assert app.model == "saved-model"
 
