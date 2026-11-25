@@ -12,7 +12,7 @@ Input: the candidate SHA.
    gates and the test suite, and stops at the first failing task.
 4. Copy the final pytest summary line (`=== N passed, M skipped in …s ===`) verbatim.
 
-Last measured: `3598 passed, 2 skipped` on `fix/chat-loop-turn-integrity` (2026-11-22, release 2.5.7).
+Last measured: `3644 passed, 2 skipped` on `dev/release-2.5.8` (2026-11-25, release 2.5.8).
 
 ## Report format
 

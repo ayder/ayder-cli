@@ -301,7 +301,7 @@ wheels = [
 
 [[package]]
 name = "ayder-cli"
-version = "2.5.7"
+version = "2.5.8"
 source = { editable = "." }
 dependencies = [
     { name = "curl-cffi" },
